@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import java.util.regex.Matcher;
@@ -398,6 +399,131 @@ public final class FieldPath
     }
 
     /**
+     * Whether some value reached by this path in a serialized (single-cell) value of the column satisfies the
+     * predicate, as {@link #collectValues(AbstractType, ByteBuffer, boolean, Consumer)} without unpacking the leaf
+     * would give them, but stopping at the first value satisfying the predicate, and without allocating anything but
+     * the buffers of the visited values: the fields are located by offsets in the serialized value.
+     *
+     * @param columnType the type of the column the path starts from
+     * @param value the serialized value of the column, possibly {@code null}
+     * @param context the first argument of the predicate
+     * @param predicate the predicate, called with the context and each value until it returns {@code true}; the
+     * {@code null} values (unset fields) are skipped
+     * @return whether the predicate returned {@code true} for some value
+     */
+    public <T> boolean anyValue(AbstractType<?> columnType, @Nullable ByteBuffer value, T context, BiPredicate<T, ByteBuffer> predicate)
+    {
+        if (value == null)
+            return false;
+        return anyValue(columnType.unwrap(), value, value.position(), value.limit(), 0, context, predicate);
+    }
+
+    /**
+     * As {@link #anyValue(AbstractType, ByteBuffer, Object, BiPredicate)}, for the cells of a multi-cell column (a
+     * non-frozen UDT or a non-frozen collection), as
+     * {@link #collectValues(AbstractType, ComplexColumnData, long, boolean, Consumer)} without unpacking the leaf
+     * would give the values.
+     */
+    public <T> boolean anyValue(AbstractType<?> columnType,
+                                @Nullable ComplexColumnData data,
+                                long nowInSec,
+                                T context,
+                                BiPredicate<T, ByteBuffer> predicate)
+    {
+        if (data == null)
+            return false;
+
+        AbstractType<?> type = columnType.unwrap();
+        assert type.isMultiCell() : "Not a multi-cell type: " + type.asCQL3Type();
+        Step first = steps.get(0);
+        AbstractType<?> next = first.apply(type);
+        if (type.isUDT())
+        {
+            assert first.kind == Step.Kind.FIELD;
+            Cell<?> cell = data.getCell(firstFieldCellPath);
+            if (cell == null || !cell.isLive(nowInSec))
+                return false;
+            ByteBuffer value = cell.buffer();
+            return anyValue(next, value, value.position(), value.limit(), 1, context, predicate);
+        }
+
+        assert type.isCollection() && first.kind == Step.Kind.ELEMENTS;
+        boolean isSet = ((CollectionType<?>) type).kind == CollectionType.Kind.SET;
+        for (Cell<?> cell : data)
+        {
+            if (cell == null || !cell.isLive(nowInSec))
+                continue;
+            // the elements of sets are the cell paths, those of lists and the values of maps are the cell values
+            ByteBuffer element = isSet ? cell.path().get(0) : cell.buffer();
+            if (element != null && anyValue(next, element, element.position(), element.limit(), 1, context, predicate))
+                return true;
+        }
+        return false;
+    }
+
+    /**
+     * @param type the type of the value between the absolute positions {@code start} and {@code end} of the buffer
+     * @param stepIndex the next step to apply to that value
+     */
+    private <T> boolean anyValue(AbstractType<?> type, ByteBuffer buffer, int start, int end, int stepIndex, T context, BiPredicate<T, ByteBuffer> predicate)
+    {
+        // the consecutive field steps only move the bounds in the buffer
+        while (stepIndex < steps.size() && steps.get(stepIndex).kind == Step.Kind.FIELD)
+        {
+            Step step = steps.get(stepIndex);
+            long bounds = locateComponent(buffer, start, end, step.position);
+            if (bounds < 0)
+                return false;
+            start = (int) (bounds >>> 32);
+            end = (int) bounds;
+            type = step.apply(type);
+            stepIndex++;
+        }
+
+        if (stepIndex == steps.size())
+        {
+            ByteBuffer value = buffer.duplicate();
+            value.position(start);
+            value.limit(end);
+            return predicate.test(context, value);
+        }
+
+        // the elements of a frozen collection: a count, then the sizes and bytes of each element (key and value for
+        // a map), a negative size for a null element
+        CollectionType<?> collection = (CollectionType<?>) type;
+        AbstractType<?> elementType = Step.ELEMENTS.apply(type);
+        boolean isMap = collection.kind == CollectionType.Kind.MAP;
+        int offset = start;
+        int count = readSize(buffer, offset, end);
+        offset += 4;
+        for (int i = 0; i < count; i++)
+        {
+            if (isMap)
+            {
+                int keySize = readSize(buffer, offset, end);
+                offset += 4 + Math.max(keySize, 0);
+            }
+            int size = readSize(buffer, offset, end);
+            offset += 4;
+            if (size < 0)
+                continue;
+            if (size > end - offset)
+                throw new MarshalException("Not enough bytes to read a collection element");
+            if (anyValue(elementType, buffer, offset, offset + size, stepIndex + 1, context, predicate))
+                return true;
+            offset += size;
+        }
+        return false;
+    }
+
+    private static int readSize(ByteBuffer buffer, int offset, int end)
+    {
+        if (end - offset < 4)
+            throw new MarshalException("Not enough bytes to read a collection size");
+        return buffer.getInt(offset);
+    }
+
+    /**
      * Extracts the value reached by a path without {@link #hasElements() elements} from a serialized (single-cell)
      * value of the column, as {@link #collectValues(AbstractType, ByteBuffer, boolean, Consumer)} does without
      * unpacking the leaf, but without any allocation other than that of the returned buffer.
@@ -555,14 +681,14 @@ public final class FieldPath
 
     /**
      * @param column the specification of the column the path starts from
-     * @return the specification of the value reached by this path, without {@link #hasElements() elements}: its type
-     * is the {@link #leafType leaf type} and its name is the dotted path in CQL form, the column name and the field
-     * names quoted when needed ({@code addr.loc.lat}, {@code "Addr"."City"}), so that the bind markers of a
-     * restriction on the field get the type and the name of the field
+     * @return the specification of the values reached by this path: its type is the {@link #leafType leaf type} (for
+     * a path through collections, the type of the field of each element) and its name is the dotted path in CQL form,
+     * the column name and the field names quoted when needed ({@code addr.loc.lat}, {@code "Addr"."City"},
+     * {@code addrs.city}), so that the bind markers of a restriction on the field get the type and the name of the
+     * field
      */
     public ColumnSpecification leafSpecification(ColumnSpecification column)
     {
-        assert !hasElements : "Multi-valued path " + this;
         return new ColumnSpecification(column.ksName,
                                        column.cfName,
                                        new ColumnIdentifier(column.name.toCQLString() + '.' + toCQLString(column.type), true),

@@ -631,7 +631,9 @@ public class IndexContext
         if (memtables.isEmpty())
             return KeyRangeIterator.empty();
 
-        Expression negExpression = expression.negated();
+        // an expression with exclusions (a NOT IN on a multi-valued field) excludes the keys matching any of its
+        // values, see Expression#negations
+        List<Expression> negations = expression.negations();
         KeyRangeIterator.Builder builder = KeyRangeUnionIterator.builder(memtables.size());
         try
         {
@@ -644,17 +646,19 @@ public class IndexContext
                     builder.add(allKeys);
                     continue;
                 }
-                KeyRangeIterator matchedKeys;
+                KeyRangeUnionIterator.Builder matched = KeyRangeUnionIterator.builder(negations.size());
                 try
                 {
-                    matchedKeys = searchMemtable(context, memtable, negExpression, keyRange);
+                    for (Expression negation : negations)
+                        matched.add(searchMemtable(context, memtable, negation, keyRange));
                 }
                 catch (Throwable t)
                 {
+                    FileUtils.closeQuietly(matched.ranges());
                     FileUtils.closeQuietly(allKeys);
                     throw t;
                 }
-                builder.add(KeyRangeAntiJoinIterator.create(allKeys, matchedKeys));
+                builder.add(KeyRangeAntiJoinIterator.create(allKeys, matched.build()));
             }
             return builder.build();
         }
@@ -1057,6 +1061,11 @@ public class IndexContext
             return true;
         if (operator == Expression.Op.RANGE)
             return !TypeUtil.isLiteral(validator) || supportsLiteralRangeQueries();
+        // A != on a field inside collection elements ("no element is equal") is served as NOT CONTAINS is on the
+        // collection columns, as all the keys minus the keys with an equal term (see getNonEqIterator), so it only
+        // needs equality, also on the EQ-only types; not with a tokenizing analyzer, whose terms aren't whole values.
+        if (operator == Expression.Op.NOT_EQ && hasFieldPath() && isMultiValued() && !unpacksLeafCollection)
+            return !hasCustomAnalyzer();
         // unwrapped, so that the reversed (DESC clustering) columns support the same operators as the others
         if (operator != Expression.Op.EQ && EQ_ONLY_TYPES.contains(validator.unwrap())) return false;
         return operator != null;

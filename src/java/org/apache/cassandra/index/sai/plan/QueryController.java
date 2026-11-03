@@ -663,6 +663,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
+     * @return whether the context is that of a field inside collection elements, or of a collection field indexed by
+     * its values: the indexes on fields that can have several values per row
+     */
+    private static boolean isMultiValuedField(IndexContext context)
+    {
+        return context.hasFieldPath() && context.isMultiValued();
+    }
+
+    /**
      * Build a {@link Plan} from the given list of expressions by applying given operation (OR/AND).
      * Building of such builder involves index search, results of which are persisted in the internal resources list
      *
@@ -693,7 +702,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 if (hints.excludes(expression.context.getIndexName()))
                     continue;
 
-                if (expression.getOp() == Expression.Op.NOT_EQ)
+                // A != on a multi-valued field index (a field inside collection elements) means that no value is
+                // equal: it's satisfied by the rows without any value, which the ranges around the value don't find.
+                // The index scan serves it as the NOT CONTAINS on collections, all the keys but those of the rows
+                // with an equal value (see IndexContext#searchMemtable and SSTableIndex#search).
+                if (expression.getOp() == Expression.Op.NOT_EQ && !isMultiValuedField(expression.context))
                     builder.add(buildInequalityPlan(expression));
                 else
                 {

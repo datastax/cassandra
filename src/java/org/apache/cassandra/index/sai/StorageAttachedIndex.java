@@ -113,6 +113,10 @@ import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K
 
 public class StorageAttachedIndex implements Index
 {
+    public static final String ANALYZER_INSIDE_COLLECTIONS_MESSAGE =
+        "index_analyzer and query_analyzer are not supported on indexes on fields inside collections (target %s): " +
+        "results would depend on which element holds each token; use case_sensitive, normalize or ascii";
+
     public static final String NAME = "sai";
     public static final String NGRAM_WITHOUT_QUERY_ANALYZER_WARNING =
     "Using an ngram analyzer without defining a query_analyzer. " +
@@ -328,6 +332,19 @@ public class StorageAttachedIndex implements Index
             if (target.hasFieldPath())
                 throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on field: %s", targetColumn));
             throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on column: %s", target.column));
+        }
+
+        // An index_analyzer / query_analyzer (possibly tokenizing) on a field inside collections would match each
+        // token of a query in some element, possibly a different one for each token, while the filtering (also the
+        // coordinator re-filtering of the replica filtering protection) requires all the tokens in one element: the
+        // results would depend on the consistency level. Only the non-tokenizing options (case_sensitive,
+        // normalize, ascii) are allowed.
+        if (target.hasFieldPath()
+            && target.fieldPath.hasElements()
+            && (options.containsKey(LuceneAnalyzer.INDEX_ANALYZER) || options.containsKey(LuceneAnalyzer.QUERY_ANALYZER)))
+        {
+            throw new InvalidRequestException(String.format(ANALYZER_INSIDE_COLLECTIONS_MESSAGE,
+                                                            target.column.name.toCQLString() + '.' + target.fieldPath.toCQLString(target.column.type)));
         }
 
         // Analyzer is not supported against PK columns

@@ -51,6 +51,7 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SSTableIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
@@ -207,6 +208,43 @@ public class UdtFieldIndexDDLTest extends SAITester
                              "CREATE INDEX ON %s(full(addr.tags)) USING 'sai' WITH OPTIONS = {'case_sensitive': 'false'}");
         // but not on its values
         createIndex("CREATE INDEX tags_idx ON %s(addr.tags) USING 'sai' WITH OPTIONS = {'case_sensitive': 'false'}");
+        // a tokenizing analyzer on a single field is allowed
+        createIndex("CREATE INDEX street_idx ON %s(addr.street) USING 'sai' WITH OPTIONS = {'index_analyzer': 'standard'}");
+    }
+
+    /**
+     * The tokenizing analyzers are refused on the fields inside collections: the index would match each token of a
+     * query in some element, possibly a different one for each token, while the filtering requires all the tokens
+     * in one element. The non-tokenizing options are allowed.
+     */
+    @Test
+    public void testTokenizingAnalyzerInsideCollections() throws Throwable
+    {
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, addrs list<frozen<" + address + ">>, " +
+                    "m map<text, frozen<" + address + ">>, t tuple<int, frozen<list<frozen<" + address + ">>>>)");
+        String[][] refused = {
+            { "addrs.city", "addrs.city" },
+            { "values(addrs).street", "addrs.street" },
+            { "addrs.tags", "addrs.tags" },
+            { "m.city", "m.city" },
+            { "t.field2.city", "t.field2.city" },
+        };
+        for (String[] target : refused)
+        {
+            String message = String.format(StorageAttachedIndex.ANALYZER_INSIDE_COLLECTIONS_MESSAGE, target[1]);
+            assertInvalidMessage(message, "CREATE INDEX ON %s(" + target[0] + ") USING 'sai' WITH OPTIONS = {'index_analyzer': 'standard'}");
+            assertInvalidMessage(message, "CREATE INDEX ON %s(" + target[0] + ") USING 'sai' WITH OPTIONS = {'index_analyzer': 'whitespace', 'query_analyzer': 'whitespace'}");
+            assertInvalidMessage(message, "CREATE INDEX ON %s(" + target[0] + ") USING 'sai' WITH OPTIONS = " +
+                                          "{'index_analyzer': '{\"tokenizer\": {\"name\": \"keyword\"}, \"filters\": [{\"name\": \"lowercase\"}]}'}");
+        }
+
+        // the non-tokenizing options
+        createIndex("CREATE INDEX city_idx ON %s(addrs.city) USING 'sai' WITH OPTIONS = {'case_sensitive': 'false'}");
+        createIndex("CREATE INDEX street_idx ON %s(addrs.street) USING 'sai' WITH OPTIONS = {'normalize': 'true', 'ascii': 'true'}");
+        createIndex("CREATE INDEX m_city_idx ON %s(m.city) USING 'sai' WITH OPTIONS = {'case_sensitive': 'false'}");
+        assertThat(getIndexContext("city_idx").isAnalyzed()).isTrue();
+        execute("INSERT INTO %s (id, addrs) VALUES (1, [{city: 'Rome'}, {city: 'Milan'}])");
+        assertIndexContent(() -> assertMatches("city_idx", "milan", 1));
     }
 
     @Test

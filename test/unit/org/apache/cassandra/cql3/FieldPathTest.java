@@ -138,6 +138,16 @@ public class FieldPathTest
     {
         List<ByteBuffer> values = new ArrayList<>();
         path.collectValues(type, value, unpackLeaf, values::add);
+        if (!unpackLeaf)
+        {
+            // the short-circuiting visit gives the same values, and stops at the first accepted one
+            List<ByteBuffer> visited = new ArrayList<>();
+            assertThat(path.anyValue(type, value, visited, (l, v) -> { l.add(v); return false; })).isFalse();
+            assertThat(visited).isEqualTo(values);
+            visited.clear();
+            assertThat(path.anyValue(type, value, visited, (l, v) -> l.add(v))).isEqualTo(!values.isEmpty());
+            assertThat(visited).hasSize(Math.min(1, values.size()));
+        }
         return values;
     }
 
@@ -146,6 +156,15 @@ public class FieldPathTest
         List<ByteBuffer> values = new ArrayList<>();
         ComplexColumnData data = row.getComplexColumnData(column);
         path.collectValues(column.type, data, nowInSec, unpackLeaf, values::add);
+        if (!unpackLeaf)
+        {
+            List<ByteBuffer> visited = new ArrayList<>();
+            assertThat(path.anyValue(column.type, data, nowInSec, visited, (l, v) -> { l.add(v); return false; })).isFalse();
+            assertThat(visited).isEqualTo(values);
+            visited.clear();
+            assertThat(path.anyValue(column.type, data, nowInSec, visited, (l, v) -> l.add(v))).isEqualTo(!values.isEmpty());
+            assertThat(visited).hasSize(Math.min(1, values.size()));
+        }
         return values;
     }
 
@@ -237,6 +256,10 @@ public class FieldPathTest
             assertThat(city.leafType(type)).isEqualTo(UTF8Type.instance);
             assertThat(city.toCQLString(type)).isEqualTo("city");
             assertThat(city.names(type)).isEqualTo(names("city"));
+            // the bind markers of a restriction on the field of the elements
+            ColumnSpecification spec = city.leafSpecification(new ColumnSpecification("ks", "t", new ColumnIdentifier("addrs", true), type));
+            assertThat(spec.name.toString()).isEqualTo("addrs.city");
+            assertThat(spec.type).isEqualTo(UTF8Type.instance);
         }
 
         // a collection inside a UDT inside a collection

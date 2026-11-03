@@ -419,10 +419,13 @@ public abstract class RestrictionSet implements Restrictions
         {
             List<ColumnMetadata> columnDefs = restriction.getColumnDefs();
 
-            if (isDisjunction)
+            if (isDisjunction || isOnMultiValuedPath(restriction))
             {
                 // If this restriction is part of a disjunction query then we don't want
-                // to merge the restrictions, we just add the new restriction
+                // to merge the restrictions, we just add the new restriction.
+                // The AND-ed restrictions on a field inside collection elements are independent: each of them is
+                // satisfied by some element (e.g. 'addrs.city = 'Rome' AND addrs.city = 'Milan'' selects the rows
+                // with an element in Rome and an element in Milan), so they aren't merged either.
                 addRestrictionForColumns(columnDefs, restriction, null);
             }
             else
@@ -448,6 +451,15 @@ public abstract class RestrictionSet implements Restrictions
                 // no existing restrictions that we should merge the new one with, add a new one
                 addRestrictionForColumns(columnDefs, restriction, null);
             }
+        }
+
+        /**
+         * @return whether the restriction is on a field inside the elements of a collection (see
+         * {@link org.apache.cassandra.cql3.FieldPath#hasElements()})
+         */
+        private static boolean isOnMultiValuedPath(SingleRestriction restriction)
+        {
+            return restriction.fieldPath() != null && restriction.fieldPath().hasElements();
         }
 
         private void addRestrictionForColumns(List<ColumnMetadata> columnDefs,

@@ -33,7 +33,6 @@ import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.cql3.ColumnSpecification;
-import org.apache.cassandra.cql3.SingleColumnRelation;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
@@ -1043,11 +1042,9 @@ public class UdtFieldQueryTest extends SAITester
         // wrong value type
         assertInvalidMessage("Invalid STRING constant (a) for",
                              "SELECT id FROM %s WHERE addr.zip = 'a' ALLOW FILTERING");
-        // fields inside collections are not supported yet
-        assertInvalidMessage(String.format(SingleColumnRelation.FIELDS_INSIDE_COLLECTIONS_UNSUPPORTED_MESSAGE, "addrs.city"),
-                             "SELECT id FROM %s WHERE addrs.city = 'Rome' ALLOW FILTERING");
-        assertInvalidMessage(String.format(SingleColumnRelation.FIELDS_INSIDE_COLLECTIONS_UNSUPPORTED_MESSAGE, "m.zip"),
-                             "SELECT id FROM %s WHERE m.zip > 1 ALLOW FILTERING");
+        // the fields inside collections (see UdtCollectionFieldQueryTest)
+        assertEmpty(execute("SELECT id FROM %s WHERE addrs.city = 'Rome' ALLOW FILTERING"));
+        assertEmpty(execute("SELECT id FROM %s WHERE m.zip > 1 ALLOW FILTERING"));
         // CONTAINS on a field that isn't a collection, and the map-key forms
         assertInvalidMessage("Cannot use CONTAINS on non-collection field addr.city",
                              "SELECT id FROM %s WHERE addr.city CONTAINS 'R' ALLOW FILTERING");

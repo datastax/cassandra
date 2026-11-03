@@ -21,13 +21,16 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -242,9 +245,15 @@ public class RowFilter
                     targets = new HashSet<>(exprs.size());
 
                 // the fields of a non-frozen (multi-cell) UDT are different cells, so each is a mutable target of its
-                // own; those of a frozen column are parts of a single cell, so they're the same target as the column
+                // own; those of a frozen column are parts of a single cell, so they're the same target as the column.
+                // Each expression on a field inside the elements of a non-frozen collection may be satisfied by a
+                // different element, that is, by a different cell, even if they are on the same field: each of them
+                // is a mutable target of its own (the same expression twice is the same condition).
                 boolean isCellTarget = e.fieldPath() != null && e.column.type.isMultiCell();
-                targets.add(isCellTarget ? List.of(e.column, e.fieldPath()) : e.column);
+                if (isCellTarget && e.fieldPath().hasElements() && e.column.type.isCollection())
+                    targets.add(e);
+                else
+                    targets.add(isCellTarget ? List.of(e.column, e.fieldPath()) : e.column);
                 if (targets.size() > 1)
                     return true;
             }
@@ -936,7 +945,9 @@ public class RowFilter
                 || !(upper.operator == Operator.LT || upper.operator == Operator.LTE)
                 || !lower.column.equals(upper.column)
                 // the bounds of the same target: the column, or the same field of it
-                || !java.util.Objects.equals(lower.fieldPath(), upper.fieldPath()))
+                || !java.util.Objects.equals(lower.fieldPath(), upper.fieldPath())
+                // the bounds on a field inside collection elements may be satisfied by different elements
+                || lower.fieldPath() != null && lower.fieldPath().hasElements())
                 return false;
 
             // an index can order the values differently than their type, e.g. SAI compares IPv4 addresses as
@@ -1695,23 +1706,19 @@ public class RowFilter
      */
     static final class AnalyzedValues
     {
-        private final List<Object> identities = new ArrayList<>(2);
-        private final List<ByteBuffer> values = new ArrayList<>(2);
-        private final List<List<ByteBuffer>> tokens = new ArrayList<>(2);
+        // the tokens of the values by analysis (identity) and value: a row may have many values, those of the
+        // elements of the collections, so the lookup is by hash
+        private final Map<Object, Map<ByteBuffer, List<ByteBuffer>>> tokens = new HashMap<>(2);
 
         List<ByteBuffer> indexedTokens(Index.Analyzer analyzer, ByteBuffer value)
         {
-            Object identity = analyzer.indexedTokensIdentity();
-            for (int i = 0; i < identities.size(); i++)
+            Map<ByteBuffer, List<ByteBuffer>> byValue = tokens.computeIfAbsent(analyzer.indexedTokensIdentity(), identity -> new HashMap<>(4));
+            List<ByteBuffer> analyzed = byValue.get(value);
+            if (analyzed == null)
             {
-                if (identities.get(i).equals(identity) && values.get(i).equals(value))
-                    return tokens.get(i);
+                analyzed = analyzer.indexedTokens(value);
+                byValue.put(value, analyzed);
             }
-
-            List<ByteBuffer> analyzed = analyzer.indexedTokens(value);
-            identities.add(identity);
-            values.add(value);
-            tokens.add(analyzed);
             return analyzed;
         }
     }
@@ -1991,14 +1998,22 @@ public class RowFilter
      * An expression on a field of a UDT or tuple column, of the form 'column.field.field' OPERATOR 'value' (see
      * {@link FieldPath}): the value is of the type of the field, and it is compared with the value of the field.
      * <p>
-     * Only the paths to a single value per row are supported, that is, the paths without
-     * {@link FieldPath#hasElements() elements}. A row where the field is unset (or the column is null) doesn't
-     * satisfy the expression, except for {@link Operator#NOT_CONTAINS}, as for {@link SimpleExpression}.
+     * A row where the field is unset (or the column is null) doesn't satisfy the expression, except for
+     * {@link Operator#NOT_CONTAINS}, as for {@link SimpleExpression}.
+     * <p>
+     * A path through collections ({@link FieldPath#hasElements() elements}: list or set elements, map values) reaches
+     * any number of values per row, the field of each element (the unset fields are skipped). The expression is then
+     * satisfied by the rows where <em>some</em> value satisfies it, but for the negative operators ({@code !=},
+     * {@code NOT IN}, {@code NOT CONTAINS}), satisfied by the rows where <em>no</em> value equals (contains) the value
+     * of the expression, which includes the rows without any value, as for {@code NOT CONTAINS} on a collection
+     * column. The SAI post-filter evaluates the multi-valued indexes the same way.
      */
     public static class FieldExpression extends SimpleExpression
     {
         private final FieldPath fieldPath;
         private final AbstractType<?> leafType;
+        // whether the path reaches any number of values per row
+        private final boolean isMultiValued;
 
         public FieldExpression(ColumnMetadata column,
                                FieldPath fieldPath,
@@ -2007,9 +2022,6 @@ public class RowFilter
                                @Nullable Index.Analyzer analyzer)
         {
             super(column, operator, value, analyzer, null);
-            if (fieldPath.hasElements())
-                throw new InvalidRequestException(String.format("Restrictions on fields inside collections are not yet supported: %s.%s",
-                                                                column.name.toCQLString(), fieldPath.toCQLString(column.type)));
             this.fieldPath = fieldPath;
             try
             {
@@ -2021,6 +2033,12 @@ public class RowFilter
                 throw new InvalidRequestException(String.format("Invalid field path %s for column %s of type %s: %s",
                                                                 fieldPath, column.name, column.type.asCQL3Type(), e.getMessage()));
             }
+            // the elements are only crossed to reach a field of them: a path never ends with them
+            List<FieldPath.Step> steps = fieldPath.steps();
+            if (steps.get(steps.size() - 1).kind != FieldPath.Step.Kind.FIELD)
+                throw new InvalidRequestException(String.format("Invalid field path %s for column %s of type %s: it doesn't end with a field",
+                                                                fieldPath, column.name, column.type.asCQL3Type()));
+            this.isMultiValued = fieldPath.hasElements();
         }
 
         @Override
@@ -2047,7 +2065,9 @@ public class RowFilter
         @Override
         public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
         {
-            return isSatisfiedByField(fieldValue(metadata, partitionKey, row, nowInSec));
+            if (!isMultiValued)
+                return isSatisfiedByField(fieldValue(metadata, partitionKey, row, nowInSec));
+            return isSatisfiedByFields(metadata, partitionKey, row, nowInSec, this, isNegativeOperator() ? VIOLATED_BY : SATISFIED_BY);
         }
 
         @Override
@@ -2060,13 +2080,48 @@ public class RowFilter
             if (analyzedValues == null || !isAnalyzedExclusion())
                 return isSatisfiedBy(metadata, partitionKey, row, nowInSec);
 
-            // as SimpleExpression does, on the value of the field
-            ByteBuffer fieldValue = fieldValue(metadata, partitionKey, row, nowInSec);
-            return fieldValue != null && isSatisfiedByAnalyzedExclusion(leafType, analyzedValues.indexedTokens(analyzer, fieldValue));
+            // as SimpleExpression does, on the value of the field (on the value of each element, none of which must
+            // be equal to the excluded value, for a path through collections)
+            if (!isMultiValued)
+            {
+                ByteBuffer fieldValue = fieldValue(metadata, partitionKey, row, nowInSec);
+                return fieldValue != null && isSatisfiedByAnalyzedExclusion(leafType, analyzedValues.indexedTokens(analyzer, fieldValue));
+            }
+            return isSatisfiedByFields(metadata, partitionKey, row, nowInSec, new AnalyzedEvaluation(this, analyzedValues), AnalyzedEvaluation.VIOLATED_BY);
         }
 
         /**
-         * @return the value of the field in the row, {@code null} if it's unset or the column is null
+         * The predicate of the values of a multi-valued path satisfying a positive expression: one is enough.
+         */
+        private static final BiPredicate<FieldExpression, ByteBuffer> SATISFIED_BY = FieldExpression::isSatisfiedByField;
+        /**
+         * The predicate of the values of a multi-valued path not satisfying a negative expression: one excludes the
+         * row.
+         */
+        private static final BiPredicate<FieldExpression, ByteBuffer> VIOLATED_BY = (e, v) -> !e.isSatisfiedByField(v);
+
+        /**
+         * The evaluation of an analyzed exclusion on the values of a multi-valued path, sharing the analysis of the
+         * values of a row.
+         */
+        private static final class AnalyzedEvaluation
+        {
+            private static final BiPredicate<AnalyzedEvaluation, ByteBuffer> VIOLATED_BY =
+                (a, v) -> !a.expression.isSatisfiedByAnalyzedExclusion(a.expression.leafType, a.analyzedValues.indexedTokens(a.expression.analyzer, v));
+
+            private final FieldExpression expression;
+            private final AnalyzedValues analyzedValues;
+
+            private AnalyzedEvaluation(FieldExpression expression, AnalyzedValues analyzedValues)
+            {
+                this.expression = expression;
+                this.analyzedValues = analyzedValues;
+            }
+        }
+
+        /**
+         * @return the value of the field in the row, {@code null} if it's unset or the column is null, for a path
+         * without elements
          */
         @Nullable
         private ByteBuffer fieldValue(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
@@ -2076,10 +2131,43 @@ public class RowFilter
                    : fieldPath.singleValue(getValue(metadata, partitionKey, row, nowInSec));
         }
 
+        /**
+         * @return whether the values of the field reached by a path through collections (the field of each element,
+         * the unset fields skipped) satisfy this expression: some value satisfies it, but for the negative operators,
+         * which every value must satisfy (no value is equal to, or contains, the value of the expression). The given
+         * predicate is the one deciding, the satisfaction for a positive operator and the violation for a negative
+         * one: the visit of the values stops at the first value it accepts.
+         */
+        private <T> boolean isSatisfiedByFields(TableMetadata metadata,
+                                                DecoratedKey partitionKey,
+                                                Row row,
+                                                long nowInSec,
+                                                T context,
+                                                BiPredicate<T, ByteBuffer> deciding)
+        {
+            boolean decided = column.isComplex()
+                              ? fieldPath.anyValue(column.type, row.getComplexColumnData(column), nowInSec, context, deciding)
+                              : fieldPath.anyValue(column.type, getValue(metadata, partitionKey, row, nowInSec), context, deciding);
+            return isNegativeOperator() != decided;
+        }
+
+        /**
+         * @return whether the operator of this expression excludes values: a value of a multi-valued path that
+         * doesn't satisfy it excludes the row
+         */
+        private boolean isNegativeOperator()
+        {
+            return operator == Operator.NEQ || operator == Operator.NOT_IN || operator == Operator.NOT_CONTAINS;
+        }
+
         @Override
         public boolean isSatisfiedByColumnValue(ByteBuffer columnValue)
         {
-            return isSatisfiedByField(fieldPath.singleValue(columnValue));
+            if (!isMultiValued)
+                return isSatisfiedByField(fieldPath.singleValue(columnValue));
+
+            boolean negative = isNegativeOperator();
+            return negative != fieldPath.anyValue(column.type, columnValue, this, negative ? VIOLATED_BY : SATISFIED_BY);
         }
 
         private boolean isSatisfiedByField(@Nullable ByteBuffer fieldValue)

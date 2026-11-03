@@ -45,6 +45,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
+import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
@@ -266,13 +267,18 @@ public class SSTableIndex implements Comparable<SSTableIndex>
             return allKeys;
         }
 
+        // a NOT IN on a multi-valued field excludes the keys matching any of its values (see Expression#negations)
+        List<Expression> negations = expression.negations();
+        KeyRangeUnionIterator.Builder matched = KeyRangeUnionIterator.builder(negations.size());
         try
         {
-            KeyRangeIterator matchedKeys = searchableIndex.search(expression.negated(), keyRange, context, defer);
-            return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
+            for (Expression negation : negations)
+                matched.add(searchableIndex.search(negation, keyRange, context, defer));
+            return KeyRangeAntiJoinIterator.create(allKeys, matched.build());
         }
         catch (Throwable t)
         {
+            FileUtils.closeQuietly(matched.ranges());
             FileUtils.closeQuietly(allKeys);
             throw t;
         }

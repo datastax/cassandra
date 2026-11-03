@@ -50,6 +50,7 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
@@ -63,6 +64,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.btree.BTree;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -507,14 +509,186 @@ public class RowFilterTest
         assertFieldExpressionRejected(metadata, version, addr, out -> out.writeUnsignedVInt32(0), "Invalid field path size 0");
         // an unknown step tag
         assertFieldExpressionRejected(metadata, version, addr, out -> { out.writeUnsignedVInt32(1); out.writeByte(7); }, "Unknown field path step 7");
-        // a multi-valued path (through the elements of a collection)
+        // a path ending with the elements of a collection (the elements are only crossed to reach a field of them)
         assertFieldExpressionRejected(metadata, version, addr,
                                       out -> { out.writeUnsignedVInt32(2); out.writeByte(0); out.writeUnsignedVInt32(3); out.writeByte(1); },
-                                      "Restrictions on fields inside collections are not yet supported");
+                                      "it doesn't end with a field");
+        // the elements of a column that isn't a collection
+        assertFieldExpressionRejected(metadata, version, addr,
+                                      out -> { out.writeUnsignedVInt32(2); out.writeByte(1); out.writeByte(0); out.writeUnsignedVInt32(0); },
+                                      "Invalid field path");
         // a field position out of the type
         assertFieldExpressionRejected(metadata, version, addr,
                                       out -> { out.writeUnsignedVInt32(1); out.writeByte(0); out.writeUnsignedVInt32(9); },
                                       "Invalid field path");
+    }
+
+    private static TableMetadata collectionFieldsTable()
+    {
+        return TableMetadata.builder("testks", "testcf")
+                            .addPartitionKeyColumn("pk", Int32Type.instance)
+                            .addClusteringColumn("cl", ListType.getInstance(TUPLE, false))
+                            .addRegularColumn("addrs", ListType.getInstance(ADDRESS.freeze(), true))
+                            .addRegularColumn("faddrs", ListType.getInstance(ADDRESS.freeze(), false))
+                            .build();
+    }
+
+    /**
+     * The expressions on the fields inside collections (multi-valued paths) survive a serialization round trip.
+     */
+    @Test
+    public void testMultiValuedFieldExpressionSerialization() throws IOException
+    {
+        TableMetadata metadata = collectionFieldsTable();
+        ColumnMetadata addrs = metadata.getColumn(new ColumnIdentifier("addrs", true));
+        ColumnMetadata faddrs = metadata.getColumn(new ColumnIdentifier("faddrs", true));
+        ColumnMetadata cl = metadata.getColumn(new ColumnIdentifier("cl", true));
+
+        RowFilter.Builder builder = RowFilter.builder(false);
+        builder.add(addrs, path(addrs.type, "city"), Operator.EQ, UTF8Type.instance.decompose("Rome"));
+        builder.add(addrs, path(addrs.type, "loc", "lat"), Operator.GTE, DoubleType.instance.decompose(2.0));
+        builder.add(addrs, path(addrs.type, "zip"), Operator.NEQ, Int32Type.instance.decompose(100));
+        builder.add(faddrs, path(faddrs.type, "tags"), Operator.CONTAINS, UTF8Type.instance.decompose("y"));
+        builder.add(faddrs, path(faddrs.type, "city"), Operator.IN, ListType.getInstance(UTF8Type.instance, false).decompose(Arrays.asList("a", "b")));
+        builder.add(cl, path(cl.type, "field2"), Operator.LT, Int32Type.instance.decompose(3));
+        RowFilter filter = builder.build();
+
+        int version = MessagingService.current_version;
+        for (RowFilter.Expression expression : filter.expressions())
+        {
+            assertThat(expression.fieldPath().hasElements()).isTrue();
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                RowFilter.Expression.serializer.serialize(expression, out, version);
+                assertThat(out.getLength()).isEqualTo(RowFilter.Expression.serializer.serializedSize(expression, version));
+                try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
+                {
+                    RowFilter.Expression deserialized = RowFilter.Expression.serializer.deserialize(in, version, metadata, IndexHints.NONE);
+                    assertThat(in.available()).isZero();
+                    assertThat(deserialized).isEqualTo(expression);
+                    assertThat(deserialized.fieldPath()).isEqualTo(expression.fieldPath());
+                    assertThat(deserialized.toString()).isEqualTo(expression.toString());
+                }
+            }
+        }
+
+        // the CQL forms name the fields, the elements are implicit
+        assertThat(filter.expressions().get(0).toString()).isEqualTo("addrs.city = 'Rome'");
+        assertThat(filter.expressions().get(1).toString()).isEqualTo("addrs.loc.lat >= 2.0");
+        assertThat(filter.expressions().get(3).toString()).isEqualTo("faddrs.tags CONTAINS 'y'");
+        assertThat(filter.expressions().get(5).toString()).isEqualTo("cl.field2 < 3");
+    }
+
+    private static Cell<?> listCell(ColumnMetadata column, ByteBuffer element)
+    {
+        return BufferCell.live(column, 1, element, CellPath.create(ByteBuffer.wrap(TimeUUID.Generator.nextTimeUUIDAsBytes())));
+    }
+
+    private static Row listRow(Clustering<?> clustering, ColumnMetadata column, ByteBuffer... elements)
+    {
+        Row.Builder builder = BTreeRow.sortedBuilder();
+        builder.newRow(clustering);
+        for (ByteBuffer element : elements)
+            builder.addCell(listCell(column, element));
+        return builder.build();
+    }
+
+    /**
+     * The filtering of the expressions on the fields inside collections: some element satisfies the positive
+     * operators, no element is equal to (contains) the value of the negative ones; the elements whose field is unset
+     * are skipped, and a row without elements satisfies only the negative operators.
+     */
+    @Test
+    public void testMultiValuedFieldExpressionIsSatisfiedBy()
+    {
+        TableMetadata metadata = collectionFieldsTable();
+        ColumnMetadata addrs = metadata.getColumn(new ColumnIdentifier("addrs", true));
+        ColumnMetadata faddrs = metadata.getColumn(new ColumnIdentifier("faddrs", true));
+        ColumnMetadata cl = metadata.getColumn(new ColumnIdentifier("cl", true));
+        DecoratedKey key = Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(1));
+        ByteBuffer clusteringValue = ListType.getInstance(TUPLE, false)
+                                             .decompose(Arrays.asList(TupleType.buildValue(new ByteBuffer[]{ UTF8Type.instance.decompose("a"), Int32Type.instance.decompose(1) }),
+                                                                      TupleType.buildValue(new ByteBuffer[]{ UTF8Type.instance.decompose("b"), null })));
+        Clustering<?> clustering = Clustering.make(clusteringValue);
+
+        ByteBuffer rome = address("Rome", 200, 1.0);
+        ByteBuffer milan = address("Milan", 100, 3.0);
+        ByteBuffer unset = address(null, null, null);
+        Row nonFrozen = listRow(clustering, addrs, rome, milan, unset);
+        Row empty = BTreeRow.emptyRow(clustering);
+        Row frozen = BTreeRow.create(clustering, LivenessInfo.EMPTY, Row.Deletion.LIVE,
+                                     BTree.singleton(new BufferCell(faddrs, 1, Cell.NO_TTL, Cell.NO_DELETION_TIME,
+                                                                    ListType.getInstance(ADDRESS.freeze(), false).decompose(Arrays.asList(rome, milan, unset)),
+                                                                    null)));
+
+        for (ColumnMetadata column : Arrays.asList(addrs, faddrs))
+        {
+            Row row = column == addrs ? nonFrozen : frozen;
+            // some element
+            assertTrue(expression(column, Operator.EQ, UTF8Type.instance.decompose("Rome"), "city").isSatisfiedBy(metadata, key, row, 1));
+            assertTrue(expression(column, Operator.EQ, UTF8Type.instance.decompose("Milan"), "city").isSatisfiedBy(metadata, key, row, 1));
+            assertFalse(expression(column, Operator.EQ, UTF8Type.instance.decompose("Turin"), "city").isSatisfiedBy(metadata, key, row, 1));
+            assertTrue(expression(column, Operator.GTE, Int32Type.instance.decompose(150), "zip").isSatisfiedBy(metadata, key, row, 1));
+            assertFalse(expression(column, Operator.GT, Int32Type.instance.decompose(200), "zip").isSatisfiedBy(metadata, key, row, 1));
+            assertTrue(expression(column, Operator.LT, DoubleType.instance.decompose(2.0), "loc", "lat").isSatisfiedBy(metadata, key, row, 1));
+            assertTrue(expression(column, Operator.IN, ListType.getInstance(UTF8Type.instance, false).decompose(Arrays.asList("Turin", "Milan")), "city")
+                       .isSatisfiedBy(metadata, key, row, 1));
+            assertTrue(expression(column, Operator.LIKE_PREFIX, UTF8Type.instance.decompose("Mi"), "city").isSatisfiedBy(metadata, key, row, 1));
+            assertTrue(expression(column, Operator.CONTAINS, UTF8Type.instance.decompose("y"), "tags").isSatisfiedBy(metadata, key, row, 1));
+            assertFalse(expression(column, Operator.CONTAINS, UTF8Type.instance.decompose("z"), "tags").isSatisfiedBy(metadata, key, row, 1));
+            // no element
+            assertFalse(expression(column, Operator.NEQ, UTF8Type.instance.decompose("Rome"), "city").isSatisfiedBy(metadata, key, row, 1));
+            assertTrue(expression(column, Operator.NEQ, UTF8Type.instance.decompose("Turin"), "city").isSatisfiedBy(metadata, key, row, 1));
+            assertFalse(expression(column, Operator.NOT_CONTAINS, UTF8Type.instance.decompose("y"), "tags").isSatisfiedBy(metadata, key, row, 1));
+            assertTrue(expression(column, Operator.NOT_CONTAINS, UTF8Type.instance.decompose("z"), "tags").isSatisfiedBy(metadata, key, row, 1));
+            // no elements: only the negative operators
+            assertFalse(expression(column, Operator.EQ, UTF8Type.instance.decompose("Rome"), "city").isSatisfiedBy(metadata, key, empty, 1));
+            assertTrue(expression(column, Operator.NEQ, UTF8Type.instance.decompose("Rome"), "city").isSatisfiedBy(metadata, key, empty, 1));
+            assertTrue(expression(column, Operator.NOT_CONTAINS, UTF8Type.instance.decompose("y"), "tags").isSatisfiedBy(metadata, key, empty, 1));
+        }
+
+        // a field inside the elements of a clustering column, also through the clustering-only check
+        RowFilter.Builder builder = RowFilter.builder(false);
+        builder.add(cl, path(cl.type, "field1"), Operator.EQ, UTF8Type.instance.decompose("b"));
+        assertTrue(builder.build().clusteringKeyRestrictionsAreSatisfiedBy(clustering));
+        builder = RowFilter.builder(false);
+        builder.add(cl, path(cl.type, "field2"), Operator.GT, Int32Type.instance.decompose(1));
+        assertFalse(builder.build().clusteringKeyRestrictionsAreSatisfiedBy(clustering));
+        builder = RowFilter.builder(false);
+        builder.add(cl, path(cl.type, "field2"), Operator.NEQ, Int32Type.instance.decompose(2));
+        assertTrue(builder.build().clusteringKeyRestrictionsAreSatisfiedBy(clustering));
+        assertTrue(new RowFilter.FieldExpression(cl, path(cl.type, "field1"), Operator.EQ, UTF8Type.instance.decompose("a"), null)
+                   .isSatisfiedBy(metadata, key, empty, 1));
+    }
+
+    private static RowFilter.Expression expression(ColumnMetadata column, Operator operator, ByteBuffer value, String... names)
+    {
+        return new RowFilter.FieldExpression(column, path(column.type, names), operator, value, null);
+    }
+
+    /**
+     * Each expression on a field inside the elements of a non-frozen collection is a mutable target of its own: the
+     * expressions may be satisfied by different elements, that is, by different cells. Inside a frozen collection,
+     * they're all on a single cell.
+     */
+    @Test
+    public void testMutableIntersectionsOnMultiValuedFields()
+    {
+        TableMetadata metadata = collectionFieldsTable();
+        ColumnMetadata addrs = metadata.getColumn(new ColumnIdentifier("addrs", true));
+        ColumnMetadata faddrs = metadata.getColumn(new ColumnIdentifier("faddrs", true));
+
+        RowFilter.Builder builder = RowFilter.builder(true);
+        builder.add(addrs, path(addrs.type, "city"), Operator.EQ, UTF8Type.instance.decompose("Rome"));
+        assertFalse(builder.build().isMutableIntersection());
+        builder.add(addrs, path(addrs.type, "city"), Operator.EQ, UTF8Type.instance.decompose("Milan"));
+        assertTrue(builder.build().isMutableIntersection());
+
+        builder = RowFilter.builder(true);
+        builder.add(faddrs, path(faddrs.type, "city"), Operator.EQ, UTF8Type.instance.decompose("Rome"));
+        builder.add(faddrs, path(faddrs.type, "city"), Operator.EQ, UTF8Type.instance.decompose("Milan"));
+        builder.add(faddrs, path(faddrs.type, "zip"), Operator.GT, Int32Type.instance.decompose(1));
+        assertFalse(builder.build().isMutableIntersection());
     }
 
     private interface PathWriter
