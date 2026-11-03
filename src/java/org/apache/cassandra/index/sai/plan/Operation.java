@@ -385,11 +385,30 @@ public class Operation
 
         static Node buildTree(QueryController controller, List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
         {
+            return buildTree(controller, expressions, children, isDisjunction, false);
+        }
+
+        /**
+         * @param underDisjunction whether an ancestor of the node is an OR: the keys of the node are then not
+         * necessarily those the query reads (they're united with other keys)
+         */
+        private static Node buildTree(QueryController controller,
+                                      List<RowFilter.Expression> expressions,
+                                      List<RowFilter.FilterElement> children,
+                                      boolean isDisjunction,
+                                      boolean underDisjunction)
+        {
+            boolean inDisjunction = underDisjunction || isDisjunction;
             OperatorNode node = isDisjunction ? new OrNode() : new AndNode();
             for (RowFilter.Expression expression : expressions)
-                node.add(buildExpression(controller, expression, isDisjunction));
+            {
+                if (expression instanceof RowFilter.ElementMatchExpression)
+                    node.add(new ElementNode(controller, (RowFilter.ElementMatchExpression) expression, !inDisjunction));
+                else
+                    node.add(buildExpression(controller, expression, isDisjunction));
+            }
             for (RowFilter.FilterElement child : children)
-                node.add(buildTree(controller, child));
+                node.add(buildTree(controller, child.expressions(), child.children(), child.isDisjunction(), inDisjunction));
             return node;
         }
 
@@ -400,6 +419,9 @@ public class Operation
 
         static Node buildExpression(QueryController controller, RowFilter.Expression expression, boolean isDisjunction)
         {
+            if (expression instanceof RowFilter.ElementMatchExpression)
+                return new ElementNode(controller, (RowFilter.ElementMatchExpression) expression, !isDisjunction);
+
             if (expression.operator() == Operator.IN)
             {
                 OperatorNode node = new OrNode();
@@ -600,6 +622,81 @@ public class Operation
         public String toString()
         {
             return "ExpressionNode{expression=" + expression + '}';
+        }
+    }
+
+    /**
+     * A {@code CONTAINS ELEMENT} group (see {@link RowFilter.ElementMatchExpression}): its keys are those of its
+     * candidates, the AND / OR of the expressions on the absolute paths of its positive conditions, a superset of
+     * the rows satisfying it (the whole table if there are no candidates, e.g. for {@code NOT CONTAINS ELEMENT}, which
+     * is never subtracted); its filter evaluates the group on each element (see {@link FilterTree.ElementFilter}).
+     */
+    public static class ElementNode extends Node
+    {
+        private final RowFilter.ElementMatchExpression expression;
+        // the plan of the candidates, null if they don't restrict the rows
+        @Nullable
+        private final Node candidates;
+        private final QueryController controller;
+        // whether the keys of the candidates are those the query reads: no OR above the group
+        private final boolean candidatesAreKeySource;
+
+        ElementNode(QueryController controller, RowFilter.ElementMatchExpression expression, boolean candidatesAreKeySource)
+        {
+            this.expression = expression;
+            this.controller = controller;
+            this.candidatesAreKeySource = candidatesAreKeySource;
+            RowFilter.FilterElement candidateElement = expression.candidates();
+            this.candidates = candidateElement == null ? null : buildTree(controller, candidateElement);
+        }
+
+        @Override
+        boolean canFilter()
+        {
+            return true;
+        }
+
+        @Override
+        List<Node> children()
+        {
+            return candidates == null ? Collections.emptyList() : Collections.singletonList(candidates);
+        }
+
+        @Override
+        RowFilter.Expression expression()
+        {
+            return expression;
+        }
+
+        @Override
+        void analyze(QueryController controller)
+        {
+            if (candidates != null)
+                candidates.analyze(controller);
+        }
+
+        @Override
+        FilterTree filterTree()
+        {
+            // the candidates' filter tree is kept for the indexes it references (the guardrail on the SSTable
+            // indexes per query), not evaluated: the element filter implies it
+            return new FilterTree.ElementFilter(expression,
+                                                controller.metadata(),
+                                                controller.queryContext(),
+                                                candidates != null && candidatesAreKeySource,
+                                                candidates == null ? null : candidates.filterTree());
+        }
+
+        @Override
+        Plan.KeysIteration plan(QueryController controller)
+        {
+            return candidates == null ? controller.planFactory.everything : candidates.plan(controller);
+        }
+
+        @Override
+        public String toString()
+        {
+            return "ElementNode{expression=" + expression + '}';
         }
     }
 

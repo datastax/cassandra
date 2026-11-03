@@ -223,6 +223,47 @@ public final class FieldPath
     }
 
     /**
+     * @param path the path to a collection of the column, {@code null} for the column itself
+     * @return the path to the elements of that collection (to the values of a map): the given path followed by an
+     * {@link Step#ELEMENTS elements} step, the prefix of the paths relative to the elements (see
+     * {@link #concat(FieldPath)})
+     */
+    public static FieldPath elementsOf(@Nullable FieldPath path)
+    {
+        if (path == null)
+            return new FieldPath(ImmutableList.of(Step.ELEMENTS));
+        return new FieldPath(ImmutableList.<Step>builder().addAll(path.steps).add(Step.ELEMENTS).build());
+    }
+
+    /**
+     * @param suffix a path relative to the value this path reaches
+     * @return the path made of the steps of this path followed by those of the suffix
+     */
+    public FieldPath concat(FieldPath suffix)
+    {
+        return new FieldPath(ImmutableList.<Step>builder().addAll(steps).addAll(suffix.steps).build());
+    }
+
+    /**
+     * @param prefix a path
+     * @return whether this path starts with all the steps of the prefix and has more steps
+     */
+    public boolean isStrictlyUnder(FieldPath prefix)
+    {
+        return steps.size() > prefix.steps.size() && steps.subList(0, prefix.steps.size()).equals(prefix.steps);
+    }
+
+    /**
+     * @param prefix a path that this path is {@link #isStrictlyUnder strictly under}
+     * @return the path relative to the values reached by the prefix: the steps of this path after those of the prefix
+     */
+    public FieldPath relativeTo(FieldPath prefix)
+    {
+        assert isStrictlyUnder(prefix) : this + " is not under " + prefix;
+        return new FieldPath(steps.subList(prefix.steps.size(), steps.size()));
+    }
+
+    /**
      * @return whether the path crosses a collection, and so reaches any number of values
      */
     public boolean hasElements()
@@ -259,6 +300,8 @@ public final class FieldPath
      */
     public List<FieldIdentifier> names(AbstractType<?> columnType)
     {
+        // the names are those of the field steps: a path to the elements of a collection (see #elementsOf) may have
+        // none
         List<FieldIdentifier> names = new ArrayList<>(steps.size());
         AbstractType<?> type = columnType.unwrap();
         for (Step step : steps)

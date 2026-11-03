@@ -216,6 +216,14 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return command.metadata();
     }
 
+    /**
+     * @return the context of the query, with its metrics
+     */
+    QueryContext queryContext()
+    {
+        return queryContext;
+    }
+
     public ReadCommand command()
     {
         return command;
@@ -1006,6 +1014,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         closeUnusedIterators();
         closeQueryViews();
+        if (queryContext.elementFilterCandidates() > 0)
+            Tracing.trace("CONTAINS ELEMENT: {} of {} rows evaluated by the same-element filter rejected",
+                          queryContext.elementFilterRejections(), queryContext.elementFilterCandidates());
         if (tableQueryMetrics != null)
             tableQueryMetrics.record(queryContext, command);
     }

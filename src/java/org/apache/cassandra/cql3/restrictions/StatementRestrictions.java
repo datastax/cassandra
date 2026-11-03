@@ -37,6 +37,7 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.ElementMatchRelation;
 import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.Ordering;
@@ -458,14 +459,19 @@ public class StatementRestrictions
              */
             for (Relation relation : element.relations())
             {
-                if ((relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey())
-                        && (type.isUpdate() || type.isDelete()))
+                // the CONTAINS ELEMENT groups restrict fields: they are field relations, whose operator isn't that of
+                // a relation on a column
+                boolean isElementMatch = relation instanceof ElementMatchRelation;
+                if (!isElementMatch
+                    && (relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey())
+                    && (type.isUpdate() || type.isDelete()))
                 {
                     throw invalidRequest("Cannot use %s with %s", type, relation.operator());
                 }
 
                 // the restrictions on the fields of UDT and tuple columns are served by indexes or filtering only
-                boolean isFieldRelation = relation instanceof SingleColumnRelation && ((SingleColumnRelation) relation).hasFieldPath();
+                boolean isFieldRelation = isElementMatch
+                                          || relation instanceof SingleColumnRelation && ((SingleColumnRelation) relation).hasFieldPath();
                 if (isFieldRelation)
                 {
                     if (forView)

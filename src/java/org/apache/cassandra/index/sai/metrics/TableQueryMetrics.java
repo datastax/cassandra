@@ -213,6 +213,14 @@ public class TableQueryMetrics
         public final Counter totalQueriesCompleted;
 
         /**
+         * Total number of rows evaluated and rejected by the same-element filter of {@code CONTAINS ELEMENT} groups
+         * whose index candidates are the source of the keys (no OR above the group): an approximation of the false
+         * positives of the candidates, the rows where each positive condition of a group is satisfied by some
+         * element, but no single element satisfies the whole group.
+         */
+        public final Counter totalElementFilterRejectedRows;
+
+        /**
          * Aggregated metrics about the query plans, {@code null} if not enbaled in
          * {@link CassandraRelevantProperties#SAI_QUERY_PLAN_METRICS_ENABLED}.
          */
@@ -238,6 +246,7 @@ public class TableQueryMetrics
             totalCellsFetched = Metrics.counter(createMetricName("TotalCellsFetched"));
             totalCellsReturned = Metrics.counter(createMetricName("TotalCellsReturned"));
             totalQueriesCompleted = Metrics.counter(createMetricName("TotalQueriesCompleted"));
+            totalElementFilterRejectedRows = Metrics.counter(createMetricName("TotalElementFilterRejectedRows"));
             totalQueryTimeouts = Metrics.counter(createMetricName("TotalQueryTimeouts"));
             queryPlanMetrics = (CassandraRelevantProperties.SAI_QUERY_PLAN_METRICS_ENABLED.getBoolean())
                                  ? new QueryPlanMetrics()
@@ -262,6 +271,7 @@ public class TableQueryMetrics
             totalRowTombstonesFetched.inc(snapshot.rowTombstonesFetched);
             totalCellsFetched.inc(snapshot.cellsFetched);
             totalCellsReturned.inc(snapshot.cellsReturned);
+            totalElementFilterRejectedRows.inc(snapshot.elementFilterRejections);
 
             QueryContext.PlanInfo queryPlanInfo = snapshot.queryPlanInfo;
             if (queryPlanInfo != null && queryPlanMetrics != null)

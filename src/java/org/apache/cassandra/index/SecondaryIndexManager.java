@@ -1416,6 +1416,17 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     {
         for (RowFilter.Expression expression : rowFilter.expressions())
         {
+            // the operator of a CONTAINS ELEMENT group is CONTAINS, but its index restrictions are its candidates
+            if (expression instanceof RowFilter.ElementMatchExpression)
+            {
+                for (RowFilter.Expression candidate : ((RowFilter.ElementMatchExpression) expression).candidateExpressions())
+                    if (candidate.isAnyContains())
+                        for (Index index : plan.getIndexes())
+                            if (index.supportsExpression(candidate) && index.isAnalyzed())
+                                return true;
+                continue;
+            }
+
             if (expression.isAnyContains())
             {
                 for (Index index : plan.getIndexes())

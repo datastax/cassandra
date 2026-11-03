@@ -1847,7 +1847,13 @@ relation[WhereClause.Builder clauses]
         { $clauses.add(SingleColumnRelation.createInRelation($name.id, p, inValues)); }
     | name=cident p=indexFieldPath? K_NOT K_IN inValues=singleColumnInValues
             { $clauses.add(SingleColumnRelation.createNotInRelation($name.id, p, inValues)); }
-    | name=cident p=indexFieldPath? rt=containsOperator t=term { $clauses.add(SingleColumnRelation.create(name, p, rt, t)); }
+    | name=cident p=indexFieldPath?
+      ( (K_CONTAINS K_ELEMENT elementMatchGroup)=> K_CONTAINS K_ELEMENT g=elementMatchGroup
+            { $clauses.add(ElementMatchRelation.create(name, p, false, g)); }
+      | (K_NOT K_CONTAINS K_ELEMENT elementMatchGroup)=> K_NOT K_CONTAINS K_ELEMENT g=elementMatchGroup
+            { $clauses.add(ElementMatchRelation.create(name, p, true, g)); }
+      | rt=containsOperator t=term { $clauses.add(SingleColumnRelation.create(name, p, rt, t)); }
+      )
     | name=cident '[' key=term ']' type=relationType t=term { $clauses.add(new SingleColumnRelation(name, key, type, t)); }
     | ids=tupleOfIdentifiers
       ( K_IN
@@ -1879,6 +1885,17 @@ relation[WhereClause.Builder clauses]
       | type=relationType tupleMarker=markerForTuple /* (a, b, c) >= ? */
           { $clauses.add(MultiColumnRelation.createNonInRelation(ids, type, tupleMarker)); }
       )
+    ;
+
+/**
+ * The conditions on one element of a collection of UDTs or tuples, for example the '(city = 'Rome' AND zip = 100)' of
+ * 'WHERE addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100)': a WHERE expression whose names are paths relative
+ * to the element. The syntactic predicates of the relation keep 'CONTAINS element(x)' a call to a function named
+ * 'element', as no term is a WHERE expression.
+ */
+elementMatchGroup returns [WhereClause clause]
+    @init { WhereClause.Builder builder = new WhereClause.Builder(); }
+    : '(' expression[builder] ')' { $clause = builder.build(); }
     ;
 
 containsOperator returns [Operator o]
@@ -2121,6 +2138,7 @@ basic_unreserved_keyword returns [String str]
         | K_RECORD
         | K_ANN
         | K_BM25
+        | K_ELEMENT
         | K_OFFSET
         | K_DETERMINISTIC
         | K_MONOTONIC
