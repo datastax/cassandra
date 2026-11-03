@@ -183,7 +183,7 @@ public class TermsReader implements Closeable
      */
     public TermsIterator rangeTerms(Expression filter, boolean ascending)
     {
-        assert filter.isLiteralTermRange() && !filter.isEmptyLiteralTermRange() : "Not a non-empty literal term range: " + filter;
+        assert filter.isLiteralTermRange() : "Not a literal term range: " + filter;
         byte[] lower = filter.lower == null ? null : ByteBufferUtil.getArray(filter.lower.value.encoded);
         byte[] upper = filter.upper == null ? null : ByteBufferUtil.getArray(filter.upper.value.encoded);
         boolean lowerInclusive = lower == null || filter.lower.inclusive;

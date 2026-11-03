@@ -125,7 +125,6 @@ public class ExpressionTest
     {
         Expression range = range("ab", true, "b", false);
         assertTrue(range.isLiteralTermRange());
-        assertFalse(range.isEmptyLiteralTermRange());
         assertTrue(range.isSatisfiedBy(UTF8Type.instance.decompose("ab")));
         assertTrue(range.isSatisfiedBy(UTF8Type.instance.decompose("abc")));
         assertFalse(range.isSatisfiedBy(UTF8Type.instance.decompose("b")));
@@ -140,14 +139,6 @@ public class ExpressionTest
         assertFalse(range("b", false, null, false).isSatisfiedBy(UTF8Type.instance.decompose("b")));
         assertTrue(range(null, false, "b", true).isSatisfiedBy(UTF8Type.instance.decompose("b")));
         assertTrue(range(null, false, "b", true).isSatisfiedBy(UTF8Type.instance.decompose("")));
-
-        // empty ranges
-        assertFalse(range("a", true, "b", true).isEmptyLiteralTermRange());
-        assertFalse(range("b", true, "b", true).isEmptyLiteralTermRange());
-        assertTrue(range("b", true, "a", true).isEmptyLiteralTermRange());
-        assertTrue(range("b", false, "b", true).isEmptyLiteralTermRange());
-        assertTrue(range("b", true, "b", false).isEmptyLiteralTermRange());
-        assertFalse(range("b", false, null, false).isEmptyLiteralTermRange());
 
         // equalities and non-literal ranges are not literal term ranges
         assertFalse(makeExpression(Operator.EQ, "a").isLiteralTermRange());

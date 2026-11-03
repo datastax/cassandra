@@ -1020,11 +1020,8 @@ public class TrieMemoryIndex extends MemoryIndex
     }
 
     /**
-     * The terms of the given range, a {@code null} bound being unbounded.
-     * <p>
-     * The trie slices require ordered bounds, not both exclusive if equal. Any other range (e.g. x > 5 AND x < 3, or
-     * x > 5 AND x < 5) is empty: the bounds of a query are not checked when it is prepared, as they may be bind
-     * markers.
+     * The terms of the given range, a {@code null} bound being unbounded. The bounds must be ordered, and not both
+     * exclusive if equal: the coordinator doesn't query the empty ranges (see {@code RowFilter#withoutUnsatisfiable}).
      */
     private Trie<PrimaryKeys> slice(@Nullable ByteComparable lower, boolean lowerInclusive,
                                     @Nullable ByteComparable upper, boolean upperInclusive)
@@ -1034,14 +1031,6 @@ public class TrieMemoryIndex extends MemoryIndex
             // inclusive, so that the empty term of an indexed empty string value, if any, is part of the range
             lower = ByteComparable.EMPTY;
             lowerInclusive = true;
-        }
-
-        if (upper != null)
-        {
-            ByteComparable.Version byteComparableVersion = TypeUtil.byteComparableVersionForTermsData(indexContext.version());
-            int cmp = ByteComparable.compare(lower, upper, byteComparableVersion);
-            if (cmp > 0 || cmp == 0 && !(lowerInclusive && upperInclusive))
-                return Trie.empty(byteComparableVersion);
         }
 
         return data.slice(lower, lowerInclusive, upper, upperInclusive);

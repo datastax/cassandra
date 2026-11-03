@@ -158,8 +158,6 @@ public class InvertedIndexSearcher extends IndexSearcher
         }
         else if (exp.isLiteralTermRange())
         {
-            if (exp.isEmptyLiteralTermRange())
-                return PostingList.EMPTY;
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             var lower = exp.getEncodedLowerBoundByteComparable(version);
             var upper = exp.getEncodedUpperBoundByteComparable(version);
@@ -243,11 +241,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             if (slice != null && (slice.getOp() == Expression.Op.PREFIX || slice.getOp() == Expression.Op.AUTOMATON))
                 terms = reader.patternTerms(slice, orderer.isAscending());
             else if (slice != null && slice.isLiteralTermRange())
-            {
-                if (slice.isEmptyLiteralTermRange())
-                    return CloseableIterator.emptyIterator();
                 terms = reader.rangeTerms(slice, orderer.isAscending());
-            }
             else
                 terms = reader.allTerms(orderer.isAscending());
             var iter = new RowIdWithTermsIterator(terms);

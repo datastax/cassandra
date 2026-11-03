@@ -593,6 +593,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (restrictions.isKeyRange() && restrictions.usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
             Guardrails.nonPartitionRestrictedIndexQueryEnabled.ensureEnabled(state);
 
+        // the empty ranges, e.g. x > 5 AND x < 3, aren't sent to the replicas
+        rowFilter = rowFilter.withoutUnsatisfiable();
+        if (rowFilter == null)
+            return ReadQuery.empty(table);
+
         ReadQuery query = restrictions.isKeyRange()
                         ? getRangeCommand(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry)
                         : getSliceCommands(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry);

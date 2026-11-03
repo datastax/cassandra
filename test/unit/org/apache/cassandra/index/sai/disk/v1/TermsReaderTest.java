@@ -321,7 +321,9 @@ public class TermsReaderTest extends SaiRandomizedTest
                     expression.add(lowerInclusive ? Operator.GTE : Operator.GT, ByteBuffer.wrap(lower));
                 if (upper != null)
                     expression.add(upperInclusive ? Operator.LTE : Operator.LT, ByteBuffer.wrap(upper));
-                if (!expression.isLiteralTermRange() || expression.isEmptyLiteralTermRange())
+                // the coordinator doesn't query the empty ranges
+                boolean empty = lower != null && upper != null && (compare(lower, upper) > 0 || compare(lower, upper) == 0 && !(lowerInclusive && upperInclusive));
+                if (!expression.isLiteralTermRange() || empty)
                     continue;
                 assertEquals(range, toStrings(expectedTerms), scannedTerms(reader.rangeTerms(expression, true)));
                 Collections.reverse(expectedTerms);

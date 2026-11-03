@@ -233,19 +233,6 @@ public class Expression
         return operation == Op.RANGE && TypeUtil.isLiteral(validator) && !TypeUtil.isComposite(validator);
     }
 
-    /**
-     * Whether this {@link #isLiteralTermRange() literal term range} is empty (e.g. {@code v > 'b' AND v < 'a'}),
-     * which the trie scans, requiring ordered bounds, can't be given.
-     */
-    public boolean isEmptyLiteralTermRange()
-    {
-        assert isLiteralTermRange() : "Not a literal term range: " + this;
-        if (lower == null || upper == null)
-            return false;
-        int cmp = ByteBufferUtil.compareUnsigned(lower.value.encoded, upper.value.encoded);
-        return cmp > 0 || cmp == 0 && !(lower.inclusive && upper.inclusive);
-    }
-
     public Expression add(Operator op, ByteBuffer value)
     {
         boolean lowerInclusive, upperInclusive;
