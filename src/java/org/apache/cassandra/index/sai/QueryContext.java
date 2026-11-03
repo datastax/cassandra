@@ -29,6 +29,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
 
 import static java.lang.Math.max;
@@ -49,6 +50,12 @@ public class QueryContext
 
     /** How long the coordinator waits for SAI queries, in nanoseconds */
     private final long executionQuotaNano;
+
+    /**
+     * The time of the query, in seconds: that of the read command, for the liveness of the data (e.g. whether the
+     * terms of expiring cells may be expired, see {@code IndexContext#subtractsEqualKeys}).
+     */
+    private final long nowInSec;
 
     /**
      * Whether the query has timed out, checked at {@link #checkpoint()}.
@@ -135,8 +142,26 @@ public class QueryContext
 
     public QueryContext(long executionQuotaMs)
     {
+        this(executionQuotaMs, FBUtilities.nowInSeconds());
+    }
+
+    /**
+     * @param executionQuotaMs how long the coordinator waits for the query, in milliseconds
+     * @param nowInSec the time of the query (of its read command), in seconds
+     */
+    public QueryContext(long executionQuotaMs, long nowInSec)
+    {
         this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
         this.queryStartTimeNanos = MonotonicClock.Global.approxTime.now();
+        this.nowInSec = nowInSec;
+    }
+
+    /**
+     * @return the time of the query, in seconds
+     */
+    public long nowInSec()
+    {
+        return nowInSec;
     }
 
     public long totalQueryTimeNs()

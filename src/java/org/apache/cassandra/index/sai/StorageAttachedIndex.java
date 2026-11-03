@@ -929,18 +929,22 @@ public class StorageAttachedIndex implements Index
             indexContext.update(key, oldRow, newRow, mt, CassandraWriteContext.fromContext(writeContext).getGroup());
         }
 
+        // A partition deletion or a range tombstone doesn't remove the terms of the rows it shadows from the memtable
+        // index: a non-equality can't subtract the keys with an equal term (see IndexContext#hasShadowingDeletions).
+        // The row deletions are updates of their rows (updateRow), whose shadowed cells are not in the new row.
+
         @Override
         public void partitionDelete(DeletionTime deletionTime)
         {
             // Initialize the memtable index to ensure proper SAI views of the data
-            indexContext.initializeMemtableIndex(mt);
+            indexContext.initializeMemtableIndex(mt).markShadowingDeletion();
         }
 
         @Override
         public void rangeTombstone(RangeTombstone tombstone)
         {
             // Initialize the memtable index to ensure proper SAI views of the data
-            indexContext.initializeMemtableIndex(mt);
+            indexContext.initializeMemtableIndex(mt).markShadowingDeletion();
         }
 
         @Override

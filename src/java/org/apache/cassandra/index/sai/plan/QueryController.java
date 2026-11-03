@@ -1106,12 +1106,29 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         assert indexFeatureSet.hasTermsHistogram();
         var queryView = getQueryView(predicate.context);
 
+        // A non-equality is searched as all the keys of a source minus those with an equal term, but the keys are not
+        // subtracted if a deletion may shadow terms, nor in the sources that may have expired terms (see
+        // IndexContext#hasShadowingDeletions): those sources give all their rows.
+        long nowInSec = queryContext.nowInSec();
+        boolean isNonEquality = predicate.getOp().isNonEquality();
+        boolean subtracts = isNonEquality && !IndexContext.hasShadowingDeletions(queryView.memtableIndexes, queryView.sstableIndexes, nowInSec);
+
         long rowCount = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate);
+        {
+            if (isNonEquality && (!subtracts || index.mayHaveExpiredTerms(nowInSec)))
+                rowCount += Memtable.estimateRowCount(index.getMemtable());
+            else
+                rowCount += index.estimateMatchingRowsCount(predicate);
+        }
 
         for (SSTableIndex index : queryView.sstableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate);
+        {
+            if (isNonEquality && (!subtracts || IndexContext.mayHaveExpiredTerms(index.getSSTable(), nowInSec)))
+                rowCount += index.getSSTable().getTotalRows();
+            else
+                rowCount += index.estimateMatchingRowsCount(predicate);
+        }
 
         return rowCount;
     }

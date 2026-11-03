@@ -25,8 +25,10 @@ import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.Set;
+import java.util.function.LongConsumer;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import javax.annotation.Nullable;
 
 import com.googlecode.concurrenttrees.radix.ConcurrentRadixTree;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -333,11 +335,31 @@ public class TypeUtil
                                                           IndexTarget.Type indexType,
                                                           long nowInSecs)
     {
+        return collectionIterator(validator, cellData, columnMetadata, indexType, nowInSecs, null);
+    }
+
+    /**
+     * As {@link #collectionIterator(AbstractType, ComplexColumnData, ColumnMetadata, IndexTarget.Type, long)}, also
+     * giving the local expiration time of each live expiring cell (with a TTL) to the given consumer, if not
+     * {@code null}, as the values are iterated.
+     */
+    public static Iterator<ByteBuffer> collectionIterator(AbstractType<?> validator,
+                                                          ComplexColumnData cellData,
+                                                          ColumnMetadata columnMetadata,
+                                                          IndexTarget.Type indexType,
+                                                          long nowInSecs,
+                                                          @Nullable LongConsumer expiringCells)
+    {
         if (cellData == null)
             return null;
 
-        Stream<ByteBuffer> stream = StreamSupport.stream(cellData.spliterator(), false).filter(cell -> cell != null && cell.isLive(nowInSecs))
-                                                 .map(cell -> cellValue(columnMetadata, indexType, cell));
+        Stream<ByteBuffer> stream = StreamSupport.stream(cellData.spliterator(), false).filter(cell -> {
+            if (cell == null || !cell.isLive(nowInSecs))
+                return false;
+            if (expiringCells != null && cell.isExpiring())
+                expiringCells.accept(cell.localDeletionTime());
+            return true;
+        }).map(cell -> cellValue(columnMetadata, indexType, cell));
 
         if (isInetAddress(validator))
             stream = stream.sorted((c1, c2) -> compareInet(encodeInetAddress(c1), encodeInetAddress(c2)));

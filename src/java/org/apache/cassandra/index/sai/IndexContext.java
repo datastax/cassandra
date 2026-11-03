@@ -28,10 +28,12 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.LongConsumer;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableSet;
 
@@ -302,7 +304,8 @@ public class IndexContext
 
         if (isNonFrozenCollection())
         {
-            Iterator<ByteBuffer> bufferIterator = getValuesOf(row, FBUtilities.nowInSeconds());
+            long now = FBUtilities.nowInSeconds();
+            Iterator<ByteBuffer> bufferIterator = getValuesOf(row, now, expiringCellsObserver(target, now));
             if (bufferIterator != null)
             {
                 while (bufferIterator.hasNext())
@@ -443,8 +446,9 @@ public class IndexContext
         // TTL.
         if (isNonFrozenCollection())
         {
+            long now = FBUtilities.nowInSeconds();
             Iterator<ByteBuffer> oldValues = getValuesOf(oldRow, 0);
-            Iterator<ByteBuffer> newValues = getValuesOf(newRow, FBUtilities.nowInSeconds());
+            Iterator<ByteBuffer> newValues = getValuesOf(newRow, now, expiringCellsObserver(target, now));
             target.update(key, oldRow.clustering(), oldValues, newValues, memtable, opGroup);
         }
         else
@@ -453,6 +457,85 @@ public class IndexContext
             ByteBuffer newValue = getValueOf(key, newRow, FBUtilities.nowInSeconds());
             target.update(key, oldRow.clustering(), oldValue, newValue, memtable, opGroup);
         }
+    }
+
+    /**
+     * @return the consumer recording the expiration of the indexed expiring cells (with a TTL) in the memtable index,
+     * which keeps the terms of the expired cells (see {@link #subtractsEqualKeys}), or {@code null} if the index may
+     * have expired terms already (it can't become fresh again, as the time passes)
+     */
+    @Nullable
+    private static LongConsumer expiringCellsObserver(MemtableIndex target, long nowInSec)
+    {
+        return target.mayHaveExpiredTerms(nowInSec) ? null : target::markExpiringTerm;
+    }
+
+    /**
+     * Whether a partition deletion or a range tombstone in the given memtable or SSTable indexes may shadow the indexed
+     * terms of any source, at the given time, so that a non-equality ({@code NOT CONTAINS}, {@code NOT CONTAINS KEY})
+     * can't be searched as "all the keys minus the keys with an equal term" in any source (see
+     * {@link #subtractsEqualKeys}).
+     * <p>
+     * Such a deletion doesn't remove the terms of the rows it shadows: from the memtable index (nor, depending on the
+     * memtable implementation, the rows from the memtable, so a re-inserted row keeps the old cells in its reconciled
+     * row, or gets new terms on top of the stale ones), nor from the SSTable index written by the flush, which has the
+     * terms of the memtable index for the rows written. The source of the deletion has no row for the key, so it
+     * doesn't include it, and it can shadow the terms of another source (e.g. a write older than a deletion flushed
+     * before it). The other deletions (of cells, collections and rows) are in a row of their source, which includes the
+     * key.
+     * <p>
+     * The memtables record their partition deletions and range tombstones
+     * ({@link MemtableIndex#markShadowingDeletion()}); the SSTables record their partition deletions, but not their
+     * range tombstones apart from the other tombstones: an SSTable of a table with clustering columns may have range
+     * tombstones if its minimum local deletion time isn't after the query time.
+     *
+     * @param nowInSec the time of the query, in seconds
+     * @return whether a deletion may shadow terms
+     */
+    public static boolean hasShadowingDeletions(Collection<MemtableIndex> memtables, Collection<SSTableIndex> sstables, long nowInSec)
+    {
+        for (MemtableIndex memtable : memtables)
+            if (memtable.hasShadowingDeletions())
+                return true;
+        for (SSTableIndex index : sstables)
+        {
+            SSTableReader sstable = index.getSSTable();
+            if (sstable.getSSTableMetadata().hasPartitionLevelDeletions)
+                return true;
+            if (!sstable.metadata().clusteringColumns().isEmpty() && sstable.getMinLocalDeletionTime() <= nowInSec)
+                return true;
+        }
+        return false;
+    }
+
+    /**
+     * @param nowInSec the time of the query, in seconds
+     * @return whether the SSTable may have an expiring cell expired at the given time: its index has no expiration, so
+     * it keeps the terms of the expired cells (its minimum local deletion time is that of its tombstones and expiring
+     * cells)
+     */
+    public static boolean mayHaveExpiredTerms(SSTableReader sstable, long nowInSec)
+    {
+        return sstable.getMaxTTL() > 0 && sstable.getMinLocalDeletionTime() <= nowInSec;
+    }
+
+    /**
+     * @return whether the current memtable and SSTable indexes of this index may have deletions shadowing indexed terms
+     * (see {@link #hasShadowingDeletions(Collection, Collection, long)})
+     */
+    @VisibleForTesting
+    public boolean hasShadowingDeletions(long nowInSec)
+    {
+        return hasShadowingDeletions(liveMemtables.values(), getView().getIndexes(), nowInSec);
+    }
+
+    /**
+     * @return the live memtable indexes of this index
+     */
+    @VisibleForTesting
+    public Collection<MemtableIndex> getLiveMemtableIndexes()
+    {
+        return liveMemtables.values();
     }
 
     public void renewMemtable(Memtable renewed)
@@ -488,26 +571,84 @@ public class IndexContext
     // but they are not a problem as post-filtering would get rid of them.
     // The keys matched in other indexes cannot be safely subtracted
     // as indexes may contain false positives caused by deletes and updates.
-    private KeyRangeIterator getNonEqIterator(QueryContext context, Collection<MemtableIndex> memtables, Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    //
+    // The subtraction is done memtable by memtable (the keys of each memtable minus the keys matching in that same
+    // memtable): during a flush, the old and the new memtables are both live, and the new one may have a key without
+    // the term that the old one has (e.g. an element removed). It's done only if the caller found no deletion that may
+    // shadow terms (see hasShadowingDeletions), and only for the memtable indexes without expired terms (see
+    // MemtableIndex#mayHaveExpiredTerms): otherwise the keys of the memtable are all included, and the post-filter
+    // decides.
+    private KeyRangeIterator getNonEqIterator(QueryContext context,
+                                              Collection<MemtableIndex> memtables,
+                                              Expression expression,
+                                              AbstractBounds<PartitionPosition> keyRange,
+                                              boolean subtractEqualKeys)
     {
-        KeyRangeIterator allKeys = scanMemtable(keyRange, memtables);
-        if (TypeUtil.supportsRounding(expression.validator) || !version.onDiskFormat().indexFeatureSet().isRowAware())
+        if (!subtractEqualKeys || TypeUtil.supportsRounding(expression.validator) || !version.onDiskFormat().indexFeatureSet().isRowAware())
+            return scanMemtable(keyRange, memtables);
+
+        if (memtables.isEmpty())
+            return KeyRangeIterator.empty();
+
+        Expression negExpression = expression.negated();
+        KeyRangeIterator.Builder builder = KeyRangeUnionIterator.builder(memtables.size());
+        try
         {
-            return allKeys;
+            for (MemtableIndex memtableIndex : memtables)
+            {
+                Collection<MemtableIndex> memtable = Collections.singletonList(memtableIndex);
+                KeyRangeIterator allKeys = scanMemtable(keyRange, memtable);
+                if (memtableIndex.mayHaveExpiredTerms(context.nowInSec()))
+                {
+                    builder.add(allKeys);
+                    continue;
+                }
+                KeyRangeIterator matchedKeys;
+                try
+                {
+                    matchedKeys = searchMemtable(context, memtable, negExpression, keyRange);
+                }
+                catch (Throwable t)
+                {
+                    FileUtils.closeQuietly(allKeys);
+                    throw t;
+                }
+                builder.add(KeyRangeAntiJoinIterator.create(allKeys, matchedKeys));
+            }
+            return builder.build();
         }
-        else
+        catch (Throwable t)
         {
-            Expression negExpression = expression.negated();
-            KeyRangeIterator matchedKeys = searchMemtable(context, memtables, negExpression, keyRange);
-            return KeyRangeAntiJoinIterator.create(allKeys, matchedKeys);
+            FileUtils.closeQuietly(builder.ranges());
+            throw t;
         }
     }
 
+    /**
+     * As {@link #searchMemtable(QueryContext, Collection, Expression, AbstractBounds, boolean)}, never subtracting the
+     * keys with an equal term for a non-equality: the SSTables of the query, whose deletions may shadow the terms of the
+     * memtables, are not known.
+     */
     public KeyRangeIterator searchMemtable(QueryContext context, Collection<MemtableIndex> memtables, Expression expression, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return searchMemtable(context, memtables, expression, keyRange, false);
+    }
+
+    /**
+     * @param subtractEqualKeys for a non-equality, whether the keys with an equal term may be subtracted from all the
+     * keys: no deletion of the query's memtables and SSTables may shadow terms (see
+     * {@link #hasShadowingDeletions(Collection, Collection, long)}); the memtable indexes that may have expired terms
+     * don't subtract them anyway
+     */
+    public KeyRangeIterator searchMemtable(QueryContext context,
+                                           Collection<MemtableIndex> memtables,
+                                           Expression expression,
+                                           AbstractBounds<PartitionPosition> keyRange,
+                                           boolean subtractEqualKeys)
     {
         if (expression.getOp().isNonEquality())
         {
-            return getNonEqIterator(context, memtables, expression, keyRange);
+            return getNonEqIterator(context, memtables, expression, keyRange, subtractEqualKeys);
         }
 
         if (memtables.isEmpty())
@@ -872,6 +1013,15 @@ public class IndexContext
 
     public Iterator<ByteBuffer> getValuesOf(Row row, long nowInSecs)
     {
+        return getValuesOf(row, nowInSecs, null);
+    }
+
+    /**
+     * As {@link #getValuesOf(Row, long)}, also giving the local expiration time of each live expiring cell (with a TTL)
+     * to the given consumer, if not {@code null}, as the values are iterated.
+     */
+    private Iterator<ByteBuffer> getValuesOf(Row row, long nowInSecs, @Nullable LongConsumer expiringCells)
+    {
         if (row == null)
             return null;
 
@@ -883,7 +1033,7 @@ public class IndexContext
                 if (!row.isStatic())
                     return null;
             case REGULAR:
-                return TypeUtil.collectionIterator(validator, row.getComplexColumnData(column), column, indexType, nowInSecs);
+                return TypeUtil.collectionIterator(validator, row.getComplexColumnData(column), column, indexType, nowInSecs, expiringCells);
 
             default:
                 return null;
