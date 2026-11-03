@@ -1932,6 +1932,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 }
                 else
                 {
+                    // the fields of UDT and tuple columns (GROUP BY addr.city), also of primary key columns, and the
+                    // other selectors (m['k'], CAST, ...) aren't columns
+                    checkFalse(selectable instanceof Selectable.WithFieldSelection,
+                               "Group by is not supported on the fields of columns, got %s", selectable);
+                    checkTrue(selectable instanceof ColumnMetadata,
+                              "Group by is currently only supported on the columns of the PRIMARY KEY, got %s", selectable);
                     def = (ColumnMetadata) selectable;
                     checkTrue(def.isPartitionKey() || def.isClusteringColumn(),
                               "Group by is currently only supported on the columns of the PRIMARY KEY, got %s", def.name);

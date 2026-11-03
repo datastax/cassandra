@@ -15,9 +15,9 @@ Every review finding is listed here until it is fixed or explicitly closed by th
 | 7 | minor | field index changes the error for whole-column restrictions | fixed in the P1 commit |
 | 8 | nit | per-row allocations in IndexContext.getValueOf / isMultiValued | fixed in the P1 commit |
 | 9 | nit | FieldPath offset + size overflow | fixed in the P1 commit |
-| 10 | nit | gate is point-in-time (late 110 joiner / downgrade) | closed: no version change (owner decision) — no gate |
-| 11 | nit | system views show only the column name for a field index | parked → decide in P6 |
-| 12 | nit | default current version 111 also for CNDB embedders | closed: no version change (owner decision) — no 111 |
+| 10 | nit | gate is point-in-time (late 110 joiner / downgrade) | closed in P6: not applicable, there is no version change and no gate (owner decision) |
+| 11 | nit | system views show only the column name for a field index | fixed in P6: new columns `field_path` (raw names, `city`, `loc.lat`; null for whole-column indexes) and `target` (canonical target, tells `full()` from `values()`) in `system_views.indexes` and `system_views.sai_column_indexes`, `column_name` unchanged; `IndexesSystemViewTest.testFieldIndexes` (quoted names) |
+| 12 | nit | default current version 111 also for CNDB embedders | closed in P6: not applicable, there is no messaging version 111 (owner decision) |
 
 Note on 3: `testMultiValuedRowsInSmallSegments` now forces the memory-limit trigger (Byteman injections on `NamedMemoryLimiter.usageExceedsLimit` and `SegmentBuilder.hasReachedMinimumFlushSize`); it fails with the old per-term flush decision (terms lost) and passes with the per-row decision.
 
@@ -52,7 +52,7 @@ Note on 3: `testMultiValuedRowsInSmallSegments` now forces the memory-limit trig
 | n2 | nit | `compareFieldPaths` built strings | fixed: step by step |
 | n3 | nit | whole-column and field CONTAINS counted together for `maskHasMultipleContains` | comment (conservative) |
 | gaps | — | static UDT field (frozen and non-frozen), paging (page sizes 1/2/5, LIMIT) with key-column fields, whole + field restriction on the same column both indexed | tests added (`testStaticUdtColumn`, `testPaging`; the last one is `testWholeColumnAndFieldIndexes`) |
-| D1 | major | deletion of a whole non-frozen column flushed into its own SSTable comes back | open, not HCD-653: the default `TrieMemtable` of the tests doesn't write a row whose only content is the complex deletion (the flushed SSTable is empty and discarded, 1 live SSTable instead of 2); also with ALLOW FILTERING on a table without index and on primary key reads; `SkipListMemtable`, `TrieMemtableStage1/2/3` are fine; reproduced on 63868f5d74; `ComplexDeletionAcrossSSTablesTest` (ignored) |
+| D1 | major | deletion of a whole non-frozen column flushed into its own SSTable comes back | open, not HCD-653: the default `TrieMemtable` of the tests doesn't write a row whose only content is the complex deletion (the flushed SSTable is empty and discarded, 1 live SSTable instead of 2); also with ALLOW FILTERING on a table without index and on primary key reads; `SkipListMemtable`, `TrieMemtableStage1/2/3` are fine; reproduced on 63868f5d74; tracked by issue eolivelli/cassandra#106 (fix proposed in PR #107); the ignored `ComplexDeletionAcrossSSTablesTest` is no longer in the branch (dropped from the P2 commit; the reproduction is in the issue and the PR) |
 
 ## Rebase onto 4d212a9d57 (HCD-642 revised)
 
@@ -124,7 +124,7 @@ Clean: no defects. Test notes, all applied:
 | F5 | minor (perf) | `candidates()` / `candidateExpressions()` rebuilt the expressions on every call | fixed: computed once in the constructor |
 | F6 | minor | the element filter used `FBUtilities.nowInSeconds()`, the filtering and the coordinator the command's `nowInSec` | fixed: `QueryContext.nowInSec()`; `FilterTree.localSatisfiedBy` has the same pattern (pre-existing), not trivial to align (the time would be passed to every `FilterTree`): noted, follow-up |
 | note | — | `x CONTAINS ELEMENT ()` reported "Unknown function ELEMENT called" | fixed: hint "(CONTAINS ELEMENT needs at least one condition)" for an unknown `element()` without arguments (`FunctionCall.Raw.prepare`) |
-| note | — | cqlsh completion doesn't know `CONTAINS ELEMENT` | parked → P6 `NEWS.txt` |
+| note | — | cqlsh completion doesn't know `CONTAINS ELEMENT` | fixed in P6: `cql3handling.py` completes field paths (index targets, relations), `IS NOT NULL` on fields and `[NOT] CONTAINS ELEMENT (...)`; offline test `test_cql_parsing.test_complete_udt_field_paths`; the remaining lag (LIKE, OR, `!=` on columns, pre-existing) is in `NEWS.txt` |
 
 ## P5 review (7603691a21, fixes amended into the P5 commit; the P4 delta was clean)
 
@@ -135,3 +135,35 @@ Clean: no defects. Test notes, all applied:
 | m2 | minor | dead `ElementMatchExpression` branch in `Operation.Node.buildExpression` (with the local `isDisjunction` only) | fixed: an assertion, the groups are built by `buildTree` |
 | m3 | cosmetic (P4) | the CONTAINS ELEMENT hint of an unknown `element()` showed outside WHERE clauses too | fixed: softened wording "(in a WHERE clause, CONTAINS ELEMENT needs at least one condition)"; no cheap signal of the WHERE context in `FunctionCall.Raw.prepare` |
 | gaps | — | unindexed IS NOT NULL post-filtered next to an indexed restriction; the leaf-collection `IS NOT NULL ALLOW FILTERING` check ran on an empty table; the P2-P4 refusal replacements only asserted acceptance; the P4 metric assertion was a range (2 or 3) | tests added / fixed: `addr.city = 'Rome' AND addr.loc IS NOT NULL ALLOW FILTERING` and others vs the twin; `testInvalidQueries` with rows and a twin; the three replacements assert rows; the metric case uses an OR whose every scan selects the same rows, so the count is exactly 2 whatever the plan |
+
+## P6 (DSE Search compatibility tests and docs)
+
+| # | item | status |
+|---|---|---|
+| 10, 12 | version-gate items | closed: not applicable (no version change) |
+| 11 | system views | fixed: `field_path` column |
+| D1 | `ComplexDeletionAcrossSSTablesTest` | removed from P2 (where it was added, history rewritten); issue eolivelli/cassandra#106, PR #107 |
+| pre-existing | `GROUP BY addr.city` (a field selector in GROUP BY) failed with a `ClassCastException` (server error) in `SelectStatement.getAggregationSpecFactory` | fixed: "Group by is currently only supported on the columns of the PRIMARY KEY, got addr.city"; `DseSearchUdtCompatibilityTest` (the DSE facet refusal) |
+| mixed versions | "an older replica rejects the new kinds" | not testable in-JVM without a second code version; documented in `NEWS.txt` (Upgrading) |
+
+## P6 review (f2a4b20cc7, fixes amended into the P6 commit)
+
+| # | sev | finding | status |
+|---|---|---|---|
+| F1 | blocking | the field-path / CONTAINS ELEMENT alternatives were added to the shared cqlsh `<relation>`, used by UPDATE and DELETE: their completions changed (`.`, `NOT`) and the live completion tests broke | fixed: SELECT-only `selectWhereClause` / `selectRelation`, `relation` restored; offline test checks UPDATE / DELETE choices unchanged; live `test_cqlsh_completion` (43 tests, with the new `test_complete_udt_fields_in_select`) passes against a local node |
+| F2 | blocking | the docs mapped DSE `(x:* AND -x:23)` on fields inside collections to `addrs.x != 23` (no element equal), but DSE evaluates it per element | fixed: the row is for single fields; new row `addrs CONTAINS ELEMENT (x != 23)` / `(x NOT IN (23, 45))`; `testNegationsOnFieldsInsideCollections` (`[23, 45]` matches the group and not the `!=`, the rows without elements the reverse) |
+| F3 | — | runtime of `DseSearchUdtCompatibilityTest` | measured: 81 s locally (52 runs, 8 skipped; about 170 s at the CI factor of 2.1, under the 480 s fork limit): not split |
+| F4 | — | replica filtering only asserted at ALL; class Javadoc | fixed: `testReplicaFilteringProtectionAtQuorum` (newer values on nodes 2 and 3), paged queries (page sizes 1, 2) over inconsistent replicas at ALL and QUORUM; Javadoc lists what is asserted |
+| F5 | — | upgrade notes: the client doesn't see "Unknown index expression kind"; DDL in mixed clusters isn't enforced; downgrade | fixed (NEWS, docs page): ERROR log on the replica, read failure `UNKNOWN` to the client, "Unable to parse targets for index ..." on old nodes for an index created too early, drop the field indexes before a downgrade |
+| F6 | — | docs examples without the indexes they need, `p.home.names` not in the page schema | fixed: the page lists the extra indexes; `person` has `names`, example `p.names CONTAINS ELEMENT (...)` |
+| F7 | — | DESCRIBE shows the canonical target; ranges wording | fixed |
+| F8 | — | `direc.mapfield CONTAINS 'dynVal2'` matches any key | fixed: says it returns more rows than DSE and the application checks the key |
+| F9 | — | cqlsh: `!=`, `NOT IN`, `IS NOT NULL`, OR inside groups; dotted targets quoted as one name; table columns inside groups | fixed: group grammar with the field operators, AND / OR / parentheses; target columns split from the path (`_index_target_column`); element fields offered inside groups and after `col.`; the rest listed in NEWS |
+| F10 | — | `field_path` quoted while `column_name` isn't; `full()` vs `values()` indistinguishable | fixed: raw names in `field_path`, new `target` column; quoted-names test; virtual tables doc and sample output |
+| F11 | — | GROUP BY guard cases and message for fields of clustering columns | fixed: "Group by is not supported on the fields of columns, got ..." for fields (also of primary key columns); `SelectGroupByTest.testGroupByOnSelectorsThatAreNotColumns` (UDT and tuple fields, a clustering column field, `m['k']`, CAST) |
+| F12 | — | missing cheap DSE scenarios | added: unparenthesized `{!tuple}a AND {!tuple}b`, `addr.city:Rome` without the parser (comment), sort on `addrs.zip`, SELECT JSON, quoted mixed-case projection and aliases, null fields, UDT added then changed, row delete, TTL (frozen value and non-frozen field), whole-value equality with collections and nesting (more than DSE), LIKE `'%x'` / `'%x%'`; "every" dropped |
+| F13 | — | schema deviations incomplete | fixed: body / date / title and `tuplewithtuplecollectionwithcollection` listed |
+| F14 | — | the twin oracle was always read from SSTables | fixed: a first pass with both tables in the memtables, then twin flushed, then both, then compacted; Javadoc |
+| F15 | — | NEWS placement; ELEMENT keyword table | fixed: drivers / cqlsh notes in New features, the empty-string fix in CHANGES.txt (with the other HCD-653 entries), `ELEMENT` in `appendices.adoc` |
+| F16 | — | `ComplexDeletionAcrossSSTablesTest` added in P2 and removed in P6 | fixed: removed from the P2 commit (history rewritten, tree identical), DESIGN name of the distributed test fixed |
+

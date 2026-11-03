@@ -31,6 +31,7 @@ VIRTUAL TABLE system_views.indexes (
     analyzer text,
     cell_count bigint,
     column_name text,
+    field_path text,
     indexed_sstable_count int,
     is_building boolean,
     is_queryable boolean,
@@ -38,6 +39,7 @@ VIRTUAL TABLE system_views.indexes (
     per_column_disk_size bigint,
     per_table_disk_size bigint,
     table_name text,
+    target text,
     PRIMARY KEY (keyspace_name, index_name)
 ) WITH CLUSTERING ORDER BY (index_name ASC)
     AND comment = 'Storage-attached column index metadata';
@@ -53,14 +55,15 @@ SELECT * FROM system_views.indexes;
 
 [source,results]
 ----
- keyspace_name | index_name           | analyzer                                                    | cell_count | column_name  | indexed_sstable_count | is_building | is_queryable | is_string | per_column_disk_size | per_table_disk_size | table_name
----------------+----------------------+-------------------------------------------------------------+------------+--------------+-----------------------+-------------+--------------+-----------+----------------------+---------------------+------------------
-       cycling |          age_sai_idx |                                              NoOpAnalyzer{} |          0 |          age |                     0 |       False |         True |     False |                    0 |                   0 | cyclist_semi_pro
-       cycling |      country_sai_idx | NonTokenizingAnalyzer{caseSensitive=false, normalized=true} |          0 |      country |                     0 |       False |         True |      True |                    0 |                   0 | cyclist_semi_pro
-       cycling |     lastname_sai_idx | NonTokenizingAnalyzer{caseSensitive=false, normalized=true} |          0 |     lastname |                     0 |       False |         True |      True |                    0 |                   0 | cyclist_semi_pro
-       cycling | registration_sai_idx |                                              NoOpAnalyzer{} |          0 | registration |                     0 |       False |         True |     False |                    0 |                   0 | cyclist_semi_pro
+ keyspace_name | index_name           | analyzer                                                    | cell_count | column_name  | field_path | indexed_sstable_count | is_building | is_queryable | is_string | per_column_disk_size | per_table_disk_size | table_name       | target
+---------------+----------------------+-------------------------------------------------------------+------------+--------------+------------+-----------------------+-------------+--------------+-----------+----------------------+---------------------+------------------+--------------
+       cycling |          age_sai_idx |                                              NoOpAnalyzer{} |          0 |          age |       null |                     0 |       False |         True |     False |                    0 |                   0 | cyclist_semi_pro |          age
+       cycling |      country_sai_idx | NonTokenizingAnalyzer{caseSensitive=false, normalized=true} |          0 |      country |       null |                     0 |       False |         True |      True |                    0 |                   0 | cyclist_semi_pro |      country
+       cycling |     lastname_sai_idx | NonTokenizingAnalyzer{caseSensitive=false, normalized=true} |          0 |     lastname |       null |                     0 |       False |         True |      True |                    0 |                   0 | cyclist_semi_pro |     lastname
+       cycling | registration_sai_idx |                                              NoOpAnalyzer{} |          0 | registration |       null |                     0 |       False |         True |     False |                    0 |                   0 | cyclist_semi_pro | registration
+       cycling |    team_city_sai_idx |                                              NoOpAnalyzer{} |          0 |         team |       city |                     0 |       False |         True |      True |                    0 |                   0 | cyclist_semi_pro |    team.city
 
-(4 rows)
+(5 rows)
 ----
 
 .system_views.indexes metadata
@@ -88,6 +91,13 @@ This is the sum of the number of index entries in each SSTable.
 | `column_name`
 | `text`
 | The name of the indexed column.
+
+| `field_path`
+| `text`
+| For an index on a field of a UDT or tuple column, the path to the field after the column name, for example `city` for an index on `addr.city` or `loc.lat` for an index on `addr.loc.lat`.
+The names are not quoted, as in `column_name`.
+`null` for an index on a whole column.
+See xref:cassandra:developing/cql/indexing/sai/udt-tuple-fields.adoc[Indexes on UDT and tuple fields].
 
 | `indexed_sstable_count`
 | `int`
@@ -118,6 +128,10 @@ It won't be possible if the initial task build hasn't finished yet.
 | `table_name`
 | `text`
 | The name of the table to which the indexed column belongs.
+
+| `target`
+| `text`
+| The index target in canonical CQL form, quoted when needed: for example `age`, `values(tags)`, `addr.city`, `values(addr.tags)` (the values of a collection field) or `full(addr.tags)` (the whole frozen collection field).
 |===
 
 == system_views.sstable_indexes

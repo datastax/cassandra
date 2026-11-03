@@ -207,6 +207,21 @@ See the following topics:
 
 include::cassandra:partial$sai/collections-note.adoc[]
 
+[[saiUdtFieldFaq]]
+== Can SAI index the fields of a UDT or tuple column?
+
+Yes -- an SAI index can be created on a single field of a user-defined type (UDT) or tuple column, at any nesting depth, including the fields of the elements of lists, sets and maps of UDTs or tuples:
+
+[source,language-cql]
+----
+CREATE INDEX ON users (addr.city) USING 'sai';
+CREATE INDEX ON users (addrs.zip) USING 'sai';
+SELECT * FROM users WHERE addr.city = 'Rome';
+SELECT * FROM users WHERE addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100);
+----
+
+See xref:cassandra:developing/cql/indexing/sai/udt-tuple-fields.adoc[Indexes on UDT and tuple fields], which also maps the DSE Search tuple queries (`{!tuple}addr.city:Rome`) to CQL.
+
 == What are the supported query operators?
 
 For queries on tables with SAI indexes:

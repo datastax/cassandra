@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.StringJoiner;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
@@ -43,6 +44,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -836,6 +838,35 @@ public class IndexContext
     public String getColumnName()
     {
         return column.name.toString();
+    }
+
+    /**
+     * @return the names of the fields on the path to the indexed field, separated by dots and not quoted (as
+     * {@link #getColumnName()}), without the column name: for example {@code city} or {@code loc.lat} for the indexes
+     * on {@code addr.city} and {@code addr.loc.lat}; {@code null} for an index on a whole column. For the SAI system
+     * views.
+     */
+    @Nullable
+    public String getFieldPathName()
+    {
+        if (fieldPath == null)
+            return null;
+        StringJoiner joiner = new StringJoiner(".");
+        for (FieldIdentifier name : fieldPath.names(column.type))
+            joiner.add(name.toString());
+        return joiner.toString();
+    }
+
+    /**
+     * @return the target of the index as stored in the schema, in canonical CQL form (quoted when needed): for
+     * example {@code v}, {@code values(m)}, {@code addr.city}, {@code addrs.city} (also for {@code values(addrs).city}),
+     * {@code values(addr.tags)} or {@code full(addr.tags)}; {@code null} without index metadata. For the SAI system
+     * views.
+     */
+    @Nullable
+    public String getIndexTarget()
+    {
+        return config == null ? null : config.options.get(IndexTarget.TARGET_OPTION_NAME);
     }
 
     /**
