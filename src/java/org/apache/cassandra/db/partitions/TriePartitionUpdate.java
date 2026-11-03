@@ -79,6 +79,12 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
     private static EnumSet<TrieTombstoneMarker.Kind> ROW_DELETION_KINDS =
         EnumSet.of(TrieTombstoneMarker.Kind.ROW, TrieTombstoneMarker.Kind.RANGE, TrieTombstoneMarker.Kind.PARTITION);
 
+    /// Deletion kinds counted as tombstones in memtable partitions. Column deletions are included: a row whose only
+    /// content is a whole complex column deletion is otherwise counted as neither a row nor a tombstone, the memtable
+    /// partition looks empty and the flush skips it, losing the deletion.
+    private static EnumSet<TrieTombstoneMarker.Kind> MEMTABLE_COUNTED_DELETION_KINDS =
+        EnumSet.of(TrieTombstoneMarker.Kind.ROW, TrieTombstoneMarker.Kind.RANGE, TrieTombstoneMarker.Kind.PARTITION, TrieTombstoneMarker.Kind.COLUMN);
+
     final int dataSize;
 
     private TriePartitionUpdate(TableMetadata metadata,
@@ -455,6 +461,17 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             return false;
 
         return ROW_DELETION_KINDS.contains(side.deletionKind());
+    }
+
+    /// Returns true iff the given marker has a row-level or column deletion on its right side. Used for the tombstone
+    /// counts of memtable partitions, see [#MEMTABLE_COUNTED_DELETION_KINDS].
+    static boolean startsCountedMemtableDeletion(TrieTombstoneMarker update)
+    {
+        TrieTombstoneMarker.Covering side = update.rightDeletion();
+        if (side == null)
+            return false;
+
+        return MEMTABLE_COUNTED_DELETION_KINDS.contains(side.deletionKind());
     }
 
     /**

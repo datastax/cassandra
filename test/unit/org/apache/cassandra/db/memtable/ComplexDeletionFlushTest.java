@@ -21,8 +21,6 @@ package org.apache.cassandra.db.memtable;
 import java.util.Arrays;
 import java.util.Collection;
 
-import org.junit.Assume;
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
@@ -39,43 +37,21 @@ import static org.junit.Assert.assertTrue;
  * complex column deletion: no cells, no row deletion and, for an UPDATE-written row, no primary key liveness.
  * Such a deletion must survive a memtable flush, otherwise the data in older SSTables is resurrected.
  * <p>
- * The default memtable ({@link TrieMemtable}) loses the deletion: the flush writes an empty sstable, which is
- * discarded, and the old value comes back. For a static column the deletion is not even visible in the memtable
- * before the flush. The configurations affected by the bug are skipped unless
- * {@code -Dcassandra.test.trie_complex_deletion_repro=true} is given; the others (in particular
- * {@code trie_stage2}, the memtable HCD 2.0 is pinned to) must pass.
+ * The default memtable ({@link TrieMemtable}) used to lose the deletion: the partition was counted as having no rows
+ * and no tombstones, the flush skipped it and the old value came back. For a static column the deletion was not even
+ * visible in the memtable before the flush.
  */
 @RunWith(Parameterized.class)
 public class ComplexDeletionFlushTest extends CQLTester
 {
-    private static final boolean RUN_KNOWN_FAILURES = Boolean.getBoolean("cassandra.test.trie_complex_deletion_repro");
-
-    @Parameterized.Parameter(0)
+    @Parameterized.Parameter
     public String memtable;
 
-    @Parameterized.Parameter(1)
-    public boolean knownBroken;
-
     @Parameterized.Parameters(name = "{0}")
-    public static Collection<Object[]> parameters()
+    public static Collection<Object> parameters()
     {
         // "default" means no memtable option on the table, i.e. TrieMemtable
-        return Arrays.asList(new Object[][]{
-            { "default", true },
-            { "trie", true },
-            { "trie_stage1", false },
-            { "trie_stage2", false },
-            { "trie_stage3", false },
-            { "skiplist", false },
-        });
-    }
-
-    @Before
-    public void skipKnownFailures()
-    {
-        Assume.assumeTrue("TrieMemtable loses whole complex column deletions on flush (known bug, " +
-                          "run with -Dcassandra.test.trie_complex_deletion_repro=true)",
-                          RUN_KNOWN_FAILURES || !knownBroken);
+        return Arrays.asList("default", "trie", "trie_stage1", "trie_stage2", "trie_stage3", "skiplist");
     }
 
     private String withMemtable(String createTable)
