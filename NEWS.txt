@@ -103,6 +103,11 @@ New features
 
 Upgrading
 ---------
+    - SAI NOT CONTAINS and NOT CONTAINS KEY on non-frozen collection columns no longer subtract the rows of the index
+      terms that may be stale, which returned too few rows: when a source (memtable or SSTable) may hold expired cells
+      (TTL), it doesn't subtract its keys, and when the table has partition deletions or range tombstones (or, for the
+      SSTables of tables with clustering columns, any tombstone), the restriction is evaluated by scanning the keys and
+      filtering the rows. Such queries may be slower on tables with deletions or TTLs.
     - Breaking change in CQL LIKE patterns: every '%' is now a wildcard wherever it appears (previously only the
       leading and trailing ones), '_' is now a single-character wildcard (previously a literal character), and a
       pattern without wildcards matches only equal values. Queries whose pattern contains '_' or an inner '%' may
