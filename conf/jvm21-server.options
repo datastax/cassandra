@@ -19,7 +19,7 @@
 ###########################################################################
 #                         jvm21-server.options                            #
 #                                                                         #
-# See jvm-server.options. This file is specific for Java 21 and newer.    #
+# See jvm-server.options. This file is specific for Java 21.              #
 ###########################################################################
 
 -XX:ThreadPriorityPolicy=1
@@ -124,7 +124,15 @@
 # inferior performance and risks exceeding MaxDirectMemory
 -Dio.netty.tryReflectionSetAccessible=true
 
-# enable vector incubator feature (simd support)
+# Revert changes in defaults introduced in https://netty.io/news/2022/03/10/4-1-75-Final.html
+-Dio.netty.allocator.useCacheForAllThreads=true
+-Dio.netty.allocator.maxOrder=11
+### Enable vector incubator feature (simd support)
+
 --add-modules jdk.incubator.vector
+
+### Compatibility Options
+--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens java.base/java.io=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED
+-Djava.security.manager=allow
 
 # The newline in the end of file is intentional

@@ -19,7 +19,7 @@
 ###########################################################################
 #                         jvm21-clients.options                           #
 #                                                                         #
-# See jvm-clients.options. This file is specific for Java 21 and newer.   #
+# See jvm-clients.options. This file is specific for Java 21.             #
 ###########################################################################
 
 ###################
