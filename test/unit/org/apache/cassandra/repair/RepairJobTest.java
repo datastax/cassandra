@@ -301,30 +301,27 @@ public class RepairJobTest
         // SyncTasks themselves should not contain significant memory
         SyncTaskListAssert.assertThat(syncTasks).hasSizeLessThan(0.2 * singleTreeSize);
 
-        // Remember the size of the session before we've executed any tasks
-        long sizeBeforeExecution = ObjectSizes.measureDeep(session);
-
-        // block syncComplete execution until test has verified session still retains the trees
+        // block syncComplete execution until the test has observed the in-flight state
         CompletableFuture<?> future = new CompletableFuture<>();
         session.registerSyncCompleteCallback(future::get);
         ListenableFuture<List<SyncStat>> syncResults = job.executeTasks(syncTasks);
 
-        // Immediately following execution the internal execution queue should still retain the trees
-        long sizeDuringExecution = ObjectSizes.measureDeep(session);
-        assertThat(sizeDuringExecution).isGreaterThan(sizeBeforeExecution + (syncTasks.size() * singleTreeSize));
-        // unblock syncComplete callback, session should remove trees
+        // NOTE: we intentionally do not assert that the session is larger than N trees while tasks are in flight.
+        // The session never references the trees directly; on JDK < 19 measureDeep() could reach them only
+        // incidentally through executor Thread/ThreadGroup internals, which no longer hold those references on JDK 19+.
+
+        // unblock syncComplete callback
         future.complete(null);
 
-        // The session retains memory in the contained executor until the threads expire, so we wait for the threads
-        // that ran the Tree -> SyncTask conversions to die and release the memory
+        // The session may retain memory in the contained executor until its threads expire (JDK < 19), so wait
+        // until the session is clearly smaller than a single Merkle tree.
         long millisUntilFreed;
         for (millisUntilFreed = 0; millisUntilFreed < TEST_TIMEOUT_S * 1000; millisUntilFreed += THREAD_TIMEOUT_MILLIS)
         {
-            TimeUnit.MILLISECONDS.sleep(THREAD_TIMEOUT_MILLIS);
-            if (ObjectSizes.measureDeep(session) < (sizeDuringExecution - (syncTasks.size() * singleTreeSize)))
+            if (ObjectSizes.measureDeep(session) < Math.round(0.2 * singleTreeSize))
                 break;
+            TimeUnit.MILLISECONDS.sleep(THREAD_TIMEOUT_MILLIS);
         }
-
         assertThat(millisUntilFreed).isLessThan(TEST_TIMEOUT_S * 1000);
 
         List<SyncStat> results = syncResults.get(TEST_TIMEOUT_S, TimeUnit.SECONDS);
