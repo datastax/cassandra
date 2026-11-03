@@ -57,7 +57,7 @@ RUN sh -c '\
     arm64) JDK21_ARCH=aarch64 ; JDK21_SHA=$JDK21_SHA_arm64 ;; \
     *) echo "Unsupported architecture for Temurin 21" ; exit 1 ;; \
   esac ;\
-  until curl -fsSL -o /tmp/jdk21.tar.gz "https://github.com/adoptium/temurin21-binaries/releases/download/${JDK21_TAG}/OpenJDK21U-jdk_${JDK21_ARCH}_linux_hotspot_${JDK21_VERSION}.tar.gz" ; do echo "download failed… trying again in 10s… " ; sleep 10 ; done ;\
+  curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 --max-time 180 -o /tmp/jdk21.tar.gz "https://github.com/adoptium/temurin21-binaries/releases/download/${JDK21_TAG}/OpenJDK21U-jdk_${JDK21_ARCH}_linux_hotspot_${JDK21_VERSION}.tar.gz" ;\
   echo "${JDK21_SHA}  /tmp/jdk21.tar.gz" | sha256sum -c - ;\
   mkdir -p /usr/lib/jvm/temurin-21 ;\
   tar -xzf /tmp/jdk21.tar.gz -C /usr/lib/jvm/temurin-21 --strip-components=1 ;\
@@ -83,7 +83,7 @@ RUN sh -c '\
   [ $(uname -m) = "aarch64" ] && GO_PLATFORM=arm64 ;\
   GO_TAR="go${GO_VERSION}.${GO_OS}-${GO_PLATFORM}.tar.gz" ;\
   curl -L --fail --silent --retry 2 --retry-delay 5 --max-time 30 https://go.dev/dl/$GO_TAR -o $GO_TAR ;\
-  GO_SHA="$(sha256sum $GO_TAR | cut -d" " -f2)" ;\
+  GO_SHA="$(sha256sum $GO_TAR | cut -d" " -f1)" ;\
   echo "$GO_VERSION_SHAS" | sed "s/ /\n/g" | grep -q "$GO_SHA" || { echo "SHA256 mismatch for $GO_TAR $GO_SHA"; exit 1; } ;\
   tar -C /usr/local -xzf $GO_TAR ;\
   rm $GO_TAR'
