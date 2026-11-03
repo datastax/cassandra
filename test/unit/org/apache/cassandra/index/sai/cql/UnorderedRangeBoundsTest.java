@@ -126,6 +126,28 @@ public class UnorderedRangeBoundsTest extends SAITester
     }
 
     @Test
+    public void testInet() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v inet)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s (pk, v) VALUES (1, '240.0.0.1')");
+        execute("INSERT INTO %s (pk, v) VALUES (2, '7ea::1')");
+
+        // the bytes of the bounds are in reverse order, but SAI compares IPv4 addresses as IPv4-mapped IPv6 ones;
+        // the coordinator filters inet values by their bytes (CNDB-12978), so execute the query internally
+        disableCoordinatorExecution();
+        try
+        {
+            beforeAndAfterFlush(() -> assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v > '239.0.0.1' AND v <= '7ea::1'"),
+                                                              row(1), row(2)));
+        }
+        finally
+        {
+            enableCoordinatorExecution();
+        }
+    }
+
+    @Test
     public void testText() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");

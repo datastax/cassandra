@@ -59,6 +59,7 @@ import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
@@ -904,6 +905,11 @@ public class RowFilter
                 || !(lower.operator == Operator.GT || lower.operator == Operator.GTE)
                 || !(upper.operator == Operator.LT || upper.operator == Operator.LTE)
                 || !lower.column.equals(upper.column))
+                return false;
+
+            // an index can order the values differently than their type, e.g. SAI compares IPv4 addresses as
+            // IPv4-mapped IPv6 ones, so the type order can't tell that the range is empty
+            if (lower.column.type.unwrap() instanceof InetAddressType)
                 return false;
 
             ByteBuffer lowerValue = normalized(lower);
