@@ -1026,9 +1026,11 @@ public class UdtCollectionFieldQueryTest extends SAITester
         // the paths through the keys of a map
         assertInvalidMessage("field paths through the keys of a map are not supported",
                              "SELECT id FROM %s WHERE mk.lat = 1.0 ALLOW FILTERING");
-        // IS NOT NULL (P5)
-        assertInvalidMessage("IS NOT NULL restrictions on fields are not yet supported",
-                             "SELECT id FROM %s WHERE addrs.city IS NOT NULL ALLOW FILTERING");
+        // IS NOT NULL (P5, see UdtFieldIsNotNullTest), served by the index on the field
+        execute("INSERT INTO %s (id, addrs) VALUES (1, [{city: 'Rome'}, {zip: 1}])");
+        execute("INSERT INTO %s (id, addrs) VALUES (2, [{zip: 1}])");
+        assertRows(execute("SELECT id FROM %s WHERE addrs.city IS NOT NULL"), row(1));
+        execute("DELETE FROM %s WHERE id IN (1, 2)");
         // the same element: CONTAINS ELEMENT (P4, see UdtElementMatchQueryTest)
         assertEmpty(execute("SELECT id FROM %s WHERE addrs CONTAINS ELEMENT (city = 'Rome')"));
         // only in SELECT

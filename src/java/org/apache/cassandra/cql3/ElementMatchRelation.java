@@ -219,9 +219,6 @@ public final class ElementMatchRelation extends Relation
 
         SingleColumnRelation absolute = ((SingleColumnRelation) relation).withColumnPrefix(entity, collectionNames);
         Operator operator = relation.operator();
-        if (operator == Operator.IS_NOT)
-            throw invalidRequest("IS NOT NULL restrictions on fields are not yet supported: %s", absolute);
-
         Restriction restriction = absolute.toRestriction(table, boundNames, indexHints);
         assert restriction instanceof SingleColumnRestriction
                && ((SingleColumnRestriction) restriction).fieldPath() != null
@@ -236,8 +233,8 @@ public final class ElementMatchRelation extends Relation
     }
 
     /**
-     * @return whether the relation selects the rows where some element satisfies it, a superset of the rows where
-     * an element satisfies the group; the negative relations ({@code !=}, {@code NOT IN}, {@code NOT CONTAINS})
+     * @return whether the relation selects the rows where some element satisfies it (for IS NOT NULL, has the
+     * field set), a superset of the rows where an element satisfies the group; the negative relations ({@code !=}, {@code NOT IN}, {@code NOT CONTAINS})
      * select nothing on their own
      */
     private static boolean isPositive(Relation relation)
@@ -252,6 +249,7 @@ public final class ElementMatchRelation extends Relation
             case GTE:
             case CONTAINS:
             case ANALYZER_MATCHES:
+            case IS_NOT:
                 return true;
             default:
                 return relation.isLIKE();

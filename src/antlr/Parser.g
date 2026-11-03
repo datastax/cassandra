@@ -1835,6 +1835,8 @@ relation[WhereClause.Builder clauses]
     : name=cident p=indexFieldPath? type=relationType t=term { $clauses.add(SingleColumnRelation.create(name, p, type, t)); }
     | name=cident p=indexFieldPath? K_LIKE t=term (K_ESCAPE e=likeEscape)? { $clauses.add(SingleColumnRelation.createLikeRelation(name, p, t, e)); }
     | name=cident p=indexFieldPath? K_IS K_NOT K_NULL { $clauses.add(SingleColumnRelation.create(name, p, Operator.IS_NOT, Constants.NULL_LITERAL)); }
+    | name=cident p=indexFieldPath? K_IS K_NULL
+        { addRecognitionError("IS NULL restrictions are not supported: only IS NOT NULL, on the fields of UDT and tuple columns (and in materialized views)"); }
     | K_TOKEN l=tupleOfIdentifiers type=relationType t=term
         { $clauses.add(new TokenRelation(l, type, t)); }
     | K_GEO_DISTANCE '(' name=cident ',' point=term ')' type=relationType distance=term

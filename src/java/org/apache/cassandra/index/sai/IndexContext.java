@@ -1009,6 +1009,14 @@ public class IndexContext
 
     public boolean supports(Operator op)
     {
+        // IS NOT NULL on a field: an index on the field has a term exactly when the field is set (null and unset
+        // values are not indexed, empty values only for the literal types, as RowFilter.FieldExpression#isSet), so
+        // the scan of all its terms serves it, whatever the order of the terms. Not when it indexes the values of a
+        // leaf collection (an empty collection is set but has no term) nor with a tokenizing analyzer (a value
+        // may have no token). Never on whole columns, for which IS NOT NULL is only a materialized view restriction.
+        if (op == Operator.IS_NOT)
+            return fieldPath != null && !unpacksLeafCollection && !hasCustomAnalyzer();
+
         if (op.isLike())
             return supportsLikeQueries();
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.

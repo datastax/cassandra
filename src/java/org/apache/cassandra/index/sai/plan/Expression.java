@@ -193,6 +193,13 @@ public class Expression
 
     final List<ByteBuffer> exclusions = new ArrayList<>();
 
+    /**
+     * Whether this is an {@code IS NOT NULL} on a field (see {@code Operator#IS_NOT}): a {@link Op#RANGE} without
+     * bounds, matching every term of the index (it has a term exactly when the field is set), satisfied by the
+     * values that are set.
+     */
+    private boolean isNotNull;
+
     public Expression(IndexContext indexContext)
     {
         this(indexContext, indexContext);
@@ -333,6 +340,16 @@ public class Expression
                 searchRadiusMeters = FloatType.instance.compose(upper.value.raw);
                 boundedAnnEuclideanDistanceThreshold = GeoUtil.amplifiedEuclideanSimilarityThreshold(lower.value.vector, searchRadiusMeters);
                 break;
+            case IS_NOT:
+                // IS NOT NULL on a field: all the terms. Combined with another expression on the same field (the
+                // expressions are sorted by the priority of their operators, IS_NOT last), it keeps that
+                // expression's operation and bounds, which select a subset of the terms, but it still requires the
+                // value to be set: e.g. an empty int satisfies 'i != 5' and the bounds of the index scans that
+                // another index drives, but it isn't set (see #isSatisfiedBy)
+                if (operation == null)
+                    operation = Op.RANGE;
+                isNotNull = true;
+                break;
             case ANN:
             case BM25:
             case ORDER_BY_ASC:
@@ -355,6 +372,12 @@ public class Expression
     public boolean isSatisfiedBy(ByteBuffer columnValue)
     {
         if (columnValue == null)
+            return false;
+
+        // IS NOT NULL: only the values the index indexes (see RowFilter.FieldExpression#isSet), then the other
+        // conditions of the expression it was combined with, if any (an unbounded RANGE without exclusions is
+        // satisfied by any value)
+        if (isNotNull && !columnValue.hasRemaining() && TypeUtil.skipsEmptyValue(validator))
             return false;
 
         // ORDER_BY is not indepently verifiable, so we always return true
@@ -750,9 +773,10 @@ public class Expression
 
     public String toString(boolean redact)
     {
-        return String.format("Expression{name: %s, op: %s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
+        return String.format("Expression{name: %s, op: %s%s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
                              context.hasFieldPath() ? context.getTargetName() : context.getColumnName(),
                              patternOperator == null ? operation : operation + " " + patternOperator,
+                             isNotNull ? " IS NOT NULL" : "",
                              lower == null ? "null" : validator.getString(lower.value.raw, redact ? Redaction.REDACT : Redaction.NONE),
                              lower != null && lower.inclusive,
                              upper == null ? "null" : validator.getString(upper.value.raw, redact ? Redaction.REDACT : Redaction.NONE),
@@ -793,7 +817,8 @@ public class Expression
                 && patternOperator == o.patternOperator
                 && Objects.equals(lower, o.lower)
                 && Objects.equals(upper, o.upper)
-                && exclusions.equals(o.exclusions);
+                && exclusions.equals(o.exclusions)
+                && isNotNull == o.isNotNull;
     }
 
     /**

@@ -164,7 +164,7 @@ public class FunctionCall extends Term.NonTerminal
             {
                 // 'x CONTAINS ELEMENT ()' parses as a call to a function named element without arguments
                 if (terms.isEmpty() && !name.hasKeyspace() && name.name.equalsIgnoreCase("element"))
-                    throw invalidRequest("Unknown function %s called (CONTAINS ELEMENT needs at least one condition)", name);
+                    throw invalidRequest("Unknown function %s called (in a WHERE clause, CONTAINS ELEMENT needs at least one condition)", name);
                 throw invalidRequest("Unknown function %s called", name);
             }
             if (fun.isAggregate())

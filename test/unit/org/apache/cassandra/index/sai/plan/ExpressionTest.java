@@ -157,6 +157,39 @@ public class ExpressionTest
         return expression;
     }
 
+    /**
+     * IS NOT NULL on a field: alone, a range without bounds satisfied by the set values; combined with another
+     * expression on the same field (it's added last), it keeps that expression's bounds and still rejects the empty
+     * values of the non-literal types, which satisfy the other expression.
+     */
+    @Test
+    public void testIsNotNull()
+    {
+        ByteBuffer empty = ByteBuffer.allocate(0);
+        Expression alone = new Expression(SAITester.createIndexContext("col", Int32Type.instance)).add(Operator.IS_NOT, empty);
+        assertThat(alone.getOp()).isEqualTo(Expression.Op.RANGE);
+        assertTrue(alone.isSatisfiedBy(Int32Type.instance.decompose(1)));
+        assertFalse(alone.isSatisfiedBy(empty));
+        assertFalse(alone.isSatisfiedBy((ByteBuffer) null));
+
+        for (Operator op : new Operator[]{ Operator.NEQ, Operator.LT, Operator.GT })
+        {
+            Expression combined = new Expression(SAITester.createIndexContext("col", Int32Type.instance))
+                                  .add(op, Int32Type.instance.decompose(5))
+                                  .add(Operator.IS_NOT, empty);
+            assertFalse(op.toString(), combined.isSatisfiedBy(empty));
+            assertTrue(op.toString(), combined.isSatisfiedBy(Int32Type.instance.decompose(op == Operator.GT ? 6 : 1)));
+            assertFalse(op.toString(), combined.isSatisfiedBy(Int32Type.instance.decompose(5)));
+        }
+
+        // the empty strings are set
+        Expression text = new Expression(SAITester.createIndexContext("col", UTF8Type.instance))
+                          .add(Operator.NEQ, UTF8Type.instance.decompose("x"))
+                          .add(Operator.IS_NOT, empty);
+        assertTrue(text.isSatisfiedBy(empty));
+        assertFalse(text.isSatisfiedBy(UTF8Type.instance.decompose("x")));
+    }
+
     private static Expression makeExpression(Operator op)
     {
         return makeExpression(op, "sensitive");
