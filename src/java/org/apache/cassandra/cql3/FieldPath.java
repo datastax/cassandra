@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.cql3;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +32,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableList;
 
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.CollectionType;
@@ -44,6 +46,8 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.serializers.CollectionSerializer;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -69,6 +73,11 @@ public final class FieldPath
 {
     private static final Pattern TUPLE_FIELD_NAME = Pattern.compile("field([1-9][0-9]*)");
     private static final String TUPLE_FIELD_PREFIX = "field";
+    /**
+     * The maximum number of steps of a deserialized path: far more than the nesting of any type, it guards against
+     * corrupted or malicious sizes.
+     */
+    private static final int MAX_SERIALIZED_STEPS = 64;
 
     private final ImmutableList<Step> steps;
     private final boolean hasElements;
@@ -525,9 +534,9 @@ public final class FieldPath
 
     /**
      * Calls the consumer with the elements of a serialized frozen list or set, or with the values of a serialized
-     * frozen map.
+     * frozen map; the {@code null} elements are skipped.
      */
-    private static void forEachElement(CollectionType<?> type, ByteBuffer value, Consumer<ByteBuffer> consumer)
+    public static void forEachElement(CollectionType<?> type, ByteBuffer value, Consumer<ByteBuffer> consumer)
     {
         ValueAccessor<ByteBuffer> accessor = ByteBufferAccessor.instance;
         int count = CollectionSerializer.readCollectionSize(value, accessor);
@@ -542,6 +551,83 @@ public final class FieldPath
             if (element != null)
                 consumer.accept(element);
         }
+    }
+
+    /**
+     * @param column the specification of the column the path starts from
+     * @return the specification of the value reached by this path, without {@link #hasElements() elements}: its type
+     * is the {@link #leafType leaf type} and its name is the dotted path in CQL form, the column name and the field
+     * names quoted when needed ({@code addr.loc.lat}, {@code "Addr"."City"}), so that the bind markers of a
+     * restriction on the field get the type and the name of the field
+     */
+    public ColumnSpecification leafSpecification(ColumnSpecification column)
+    {
+        assert !hasElements : "Multi-valued path " + this;
+        return new ColumnSpecification(column.ksName,
+                                       column.cfName,
+                                       new ColumnIdentifier(column.name.toCQLString() + '.' + toCQLString(column.type), true),
+                                       leafType(column.type));
+    }
+
+    /**
+     * Writes this path: the number of steps (unsigned vint), then for each step a tag byte ({@code 0} for a
+     * {@link Step.Kind#FIELD field}, {@code 1} for {@link Step.Kind#ELEMENTS elements}), followed, for a field, by its
+     * position (unsigned vint).
+     */
+    public void serialize(DataOutputPlus out) throws IOException
+    {
+        out.writeUnsignedVInt32(steps.size());
+        for (Step step : steps)
+        {
+            out.writeByte(step.kind.tag);
+            if (step.kind == Step.Kind.FIELD)
+                out.writeUnsignedVInt32(step.position);
+        }
+    }
+
+    /**
+     * Reads a path written by {@link #serialize(DataOutputPlus)}.
+     */
+    public static FieldPath deserialize(DataInputPlus in) throws IOException
+    {
+        int size = in.readUnsignedVInt32();
+        if (size <= 0 || size > MAX_SERIALIZED_STEPS)
+            throw new IOException("Invalid field path size " + Integer.toUnsignedString(size));
+        List<Step> steps = new ArrayList<>(size);
+        for (int i = 0; i < size; i++)
+        {
+            byte tag = in.readByte();
+            Step.Kind kind = Step.Kind.fromTag(tag);
+            if (kind == null)
+                throw new IOException("Unknown field path step " + tag);
+            if (kind == Step.Kind.FIELD)
+            {
+                int position = in.readUnsignedVInt32();
+                if (position < 0)
+                    throw new IOException("Invalid field position " + Integer.toUnsignedString(position));
+                steps.add(Step.field(position));
+            }
+            else
+            {
+                steps.add(Step.ELEMENTS);
+            }
+        }
+        return of(steps);
+    }
+
+    /**
+     * @return the size of this path as written by {@link #serialize(DataOutputPlus)}
+     */
+    public long serializedSize()
+    {
+        long size = TypeSizes.sizeofUnsignedVInt(steps.size());
+        for (Step step : steps)
+        {
+            size += 1;
+            if (step.kind == Step.Kind.FIELD)
+                size += TypeSizes.sizeofUnsignedVInt(step.position);
+        }
+        return size;
     }
 
     @Override
@@ -574,9 +660,29 @@ public final class FieldPath
         public enum Kind
         {
             /** The field of a UDT or the component of a tuple at a position. */
-            FIELD,
+            FIELD(0),
             /** The elements of a list or a set, or the values of a map. */
-            ELEMENTS
+            ELEMENTS(1);
+
+            /** The tag of the steps of this kind in the serialized paths, see {@link #serialize}. Never change it. */
+            public final int tag;
+
+            Kind(int tag)
+            {
+                this.tag = tag;
+            }
+
+            /**
+             * @return the kind with the given serialization tag, {@code null} if there is none
+             */
+            @Nullable
+            public static Kind fromTag(int tag)
+            {
+                for (Kind kind : values())
+                    if (kind.tag == tag)
+                        return kind;
+                return null;
+            }
         }
 
         public static final Step ELEMENTS = new Step(Kind.ELEMENTS, -1);

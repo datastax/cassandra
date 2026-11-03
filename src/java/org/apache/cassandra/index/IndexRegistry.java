@@ -33,6 +33,7 @@ import java.util.function.Supplier;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.IndexHints;
@@ -384,6 +385,19 @@ public interface IndexRegistry
         return getBestIndexFor(column, operator, hints).flatMap(i -> i.getAnalyzer(value));
     }
 
+    /**
+     * As {@link #getAnalyzerFor(ColumnMetadata, Operator, ByteBuffer, IndexHints)}, for a restriction on a field of
+     * the column if the path isn't {@code null}: the analyzer of the index on that field.
+     */
+    default Optional<Index.Analyzer> getAnalyzerFor(ColumnMetadata column,
+                                                    @Nullable FieldPath fieldPath,
+                                                    Operator operator,
+                                                    ByteBuffer value,
+                                                    IndexHints hints)
+    {
+        return getBestIndexFor(column, fieldPath, operator, hints).flatMap(i -> i.getAnalyzer(value));
+    }
+
     Optional<Index> getBestIndexFor(ColumnMetadata column, Operator operator);
 
     default Optional<Index> getBestIndexFor(RowFilter.Expression expression)
@@ -395,7 +409,18 @@ public interface IndexRegistry
 
     default Optional<Index> getBestIndexFor(RowFilter.Expression expression, IndexHints hints)
     {
-        return getBestIndexFor(expression.column(), expression.operator(), hints);
+        return getBestIndexFor(expression.column(), expression.fieldPath(), expression.operator(), hints);
+    }
+
+    /**
+     * As {@link #getBestIndexFor(ColumnMetadata, Operator, IndexHints)}, for a restriction on a field of the column if
+     * the path isn't {@code null} (see {@link Index#supportsExpression(ColumnMetadata, FieldPath, Operator)}).
+     */
+    default Optional<Index> getBestIndexFor(ColumnMetadata column, @Nullable FieldPath fieldPath, Operator operator, IndexHints hints)
+    {
+        if (fieldPath == null)
+            return getBestIndexFor(column, operator, hints);
+        return hints.getBestIndexFor(listIndexes(), i -> i.supportsExpression(column, fieldPath, operator), operator.isAnyContains());
     }
     /**
      * Called at write time to ensure that values present in the update
@@ -469,13 +494,22 @@ public interface IndexRegistry
      */
     default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm, IndexHints hints)
     {
+        return getEqBehavior(cm, null, hints);
+    }
+
+    /**
+     * As {@link #getEqBehavior(ColumnMetadata, IndexHints)}, for an EQ restriction on a field of the column if the
+     * path isn't {@code null}: only the indexes on that field are considered.
+     */
+    default EqBehaviorIndexes getEqBehavior(ColumnMetadata cm, @Nullable FieldPath fieldPath, IndexHints hints)
+    {
         Set<Index> eqOnlyIndexes = new HashSet<>();
         Set<Index> eqAndMatchIndexes = new HashSet<>();
 
         for (Index index : listNotExcludedIndexes(hints))
         {
-            boolean supportsEq = index.supportsExpression(cm, Operator.EQ);
-            boolean supportsMatches = index.supportsExpression(cm, Operator.ANALYZER_MATCHES);
+            boolean supportsEq = index.supportsExpression(cm, fieldPath, Operator.EQ);
+            boolean supportsMatches = index.supportsExpression(cm, fieldPath, Operator.ANALYZER_MATCHES);
             // This is an edge case due to the NON_DAEMON IndexRegistry, which doesn't have index metadata and
             // which uses regular equality by convention.
             boolean hasIndexMetadata = index.getIndexMetadata() != null;

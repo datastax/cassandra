@@ -1863,7 +1863,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                       StatementRestrictions restrictions)
                                                       throws InvalidRequestException
         {
+            // the restrictions on the fields of clustering columns select rows, as those on the clustering columns
             checkFalse(restrictions.hasClusteringColumnsRestrictions() ||
+                       restrictions.hasFieldRestrictionsOnClusteringColumns() ||
                        (restrictions.hasNonPrimaryKeyRestrictions() && !restrictions.nonPKRestrictedColumns(true).stream().allMatch(ColumnMetadata::isStatic)),
                        "SELECT DISTINCT with WHERE clause only supports restriction by partition key and/or static columns.");
 

@@ -36,6 +36,7 @@ import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.CassandraWriteContext;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -483,6 +484,19 @@ public interface Index
     }
 
     /**
+     * Whether this index is on the given field of the given column (see {@link FieldPath}), whatever the operators it
+     * supports on it. It's used for the error messages of the restrictions on that field.
+     *
+     * @param column the column of the field
+     * @param fieldPath the path to the field
+     * @return {@code true} if the index is on that field of that column
+     */
+    default boolean isOnField(ColumnMetadata column, FieldPath fieldPath)
+    {
+        return false;
+    }
+
+    /**
      * Called to determine whether this index can provide a searcher to execute a query on the
      * supplied expression. This forms part of the query validation done before a CQL select
      * statement is executed.
@@ -492,7 +506,29 @@ public interface Index
      */
     default boolean supportsExpression(RowFilter.Expression expression)
     {
+        // an expression on a field of a column (see RowFilter.FieldExpression) is only served by the indexes that
+        // say so: never by those that only know about columns (whole-column indexes, legacy and custom indexes)
+        if (expression.fieldPath() != null)
+            return supportsExpression(expression.column(), expression.fieldPath(), expression.operator());
         return supportsExpression(expression.column(), expression.operator());
+    }
+
+    /**
+     * Called to determine whether this index can serve a restriction on a field of a UDT or tuple column (see
+     * {@link org.apache.cassandra.cql3.FieldPath}), using the specified operator.
+     * <p>
+     * By default, the indexes don't serve the restrictions on fields: an index on the whole column doesn't index the
+     * values of its fields.
+     *
+     * @param column the column of the restricted field
+     * @param fieldPath the path to the restricted field of the column, or {@code null} for a restriction on the
+     * whole column, in which case this is {@link #supportsExpression(ColumnMetadata, Operator)}
+     * @param operator the operator of the restriction
+     * @return true if this index is capable of supporting such restrictions, false otherwise
+     */
+    default boolean supportsExpression(ColumnMetadata column, @Nullable FieldPath fieldPath, Operator operator)
+    {
+        return fieldPath == null && supportsExpression(column, operator);
     }
 
     /**

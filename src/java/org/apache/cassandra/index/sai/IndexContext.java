@@ -1281,7 +1281,8 @@ public class IndexContext
         // Only iterate over the top level expressions because that is where the ANN and BM25 expressions are located.
         for (RowFilter.Expression expression : rowFilter.root.expressions())
         {
-            if (!expression.column().equals(column))
+            // the expressions on this index's target only: its column or, for an index on a field, that field
+            if (!expression.column().equals(column) || !Objects.equals(expression.fieldPath(), fieldPath))
                 continue;
 
             Operator operator = expression.operator();
