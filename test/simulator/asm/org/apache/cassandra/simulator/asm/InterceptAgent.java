@@ -286,9 +286,16 @@ public class InterceptAgent
                     if (unsafeFieldName == null)
                     {
                         String version = System.getProperty("java.version");
-                        if (version.startsWith("11.")) { unsafeFieldName = "U"; unsafeDescriptor = "Ljdk/internal/misc/Unsafe;"; }
-                        else if (version.startsWith("1.8")) { unsafeFieldName = "UNSAFE"; unsafeDescriptor = "Lsun/misc/Unsafe;"; }
-                        else throw new AssertionError("Unsupported Java Version");
+                        if (version.startsWith("1.8"))
+                        {
+                            unsafeFieldName = "UNSAFE";
+                            unsafeDescriptor = "Lsun/misc/Unsafe;";
+                        }
+                        else
+                        {
+                            unsafeFieldName = "U";
+                            unsafeDescriptor = "Ljdk/internal/misc/Unsafe;";
+                        }
                     }
 
                     MethodVisitor visitor = super.visitMethod(access, name, descriptor, signature, exceptions);
