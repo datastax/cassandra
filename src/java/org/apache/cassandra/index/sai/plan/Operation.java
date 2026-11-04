@@ -84,9 +84,12 @@ public class Operation
         for (final RowFilter.Expression e : expressions)
         {
             IndexContext indexContext = controller.getContext(e);
+            // the context analyzing the operand, and the values the expression is evaluated on: the index context,
+            // but for the != that no index serves, analyzed by the index serving ranges, as the range bounds are
+            IndexContext analysisContext = controller.getAnalysisContext(e, indexContext);
             List<Expression> perColumn = analyzed.get(e.column());
 
-            AbstractAnalyzer.AnalyzerFactory analyzerFactory = indexContext.getQueryAnalyzerFactory();
+            AbstractAnalyzer.AnalyzerFactory analyzerFactory = analysisContext.getQueryAnalyzerFactory();
             AbstractAnalyzer analyzer = analyzerFactory.create();
             try
             {
@@ -135,13 +138,13 @@ public class Operation
                 {
                     // the analyzer normalizes the literals of the pattern, not its wildcards and escapes
                     ByteBuffer pattern = LikePatterns.normalizeLiterals(e.getIndexValue(), literal -> analyzeLiteral(analyzerFactory, literal));
-                    perColumn.add(new Expression(indexContext).add(e.operator(), pattern));
+                    perColumn.add(new Expression(indexContext, analysisContext).add(e.operator(), pattern));
                 }
                 else if (isMultiExpression)
                 {
                     if (!analyzer.hasNext())
                     {
-                        perColumn.add(new Expression(indexContext).add(e.operator(), ByteBuffer.allocate(0)));
+                        perColumn.add(new Expression(indexContext, analysisContext).add(e.operator(), ByteBuffer.allocate(0)));
                     }
                     else
                     {
@@ -149,7 +152,7 @@ public class Operation
                         do
                         {
                             final ByteBuffer token = analyzer.next();
-                            perColumn.add(new Expression(indexContext).add(e.operator(), token.duplicate()));
+                            perColumn.add(new Expression(indexContext, analysisContext).add(e.operator(), token.duplicate()));
                         }
                         while (analyzer.hasNext());
                     }
@@ -157,7 +160,7 @@ public class Operation
                 else if (e instanceof RowFilter.GeoDistanceExpression)
                 {
                     RowFilter.GeoDistanceExpression distance = ((RowFilter.GeoDistanceExpression) e);
-                    Expression expression = new Expression(indexContext)
+                    Expression expression = new Expression(indexContext, analysisContext)
                                      .add(distance.getDistanceOperator(), distance.getDistance().duplicate())
                                      .add(Operator.BOUNDED_ANN, e.getIndexValue().duplicate());
                     perColumn.add(expression);
@@ -168,9 +171,16 @@ public class Operation
                 // not-equals is combined with the range iff operator is AND.
                 {
                     Expression range;
-                    if (perColumn.size() == 0 || op != OperationType.AND || e instanceof RowFilter.MapComparisonExpression)
+                    // An expression is combined with the previous one only if that one analyzes the values with the
+                    // analyzer its operand was analyzed for: the context of the previous one is its analysis context.
+                    // So a NEQ that no index serves joins the range served by the analyzed index normalizing its
+                    // excluded value, but not e.g. a range of another context, analyzing the values otherwise.
+                    if (perColumn.size() == 0
+                        || op != OperationType.AND
+                        || e instanceof RowFilter.MapComparisonExpression
+                        || !Iterables.getLast(perColumn).context.equals(analysisContext))
                     {
-                        range = new Expression(indexContext);
+                        range = new Expression(indexContext, analysisContext);
                         perColumn.add(range);
                     }
                     else

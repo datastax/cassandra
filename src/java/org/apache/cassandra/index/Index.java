@@ -568,6 +568,18 @@ public interface Index
         List<ByteBuffer> indexedTokens(ByteBuffer indexedValue);
 
         List<ByteBuffer> queriedTokens();
+
+        /**
+         * Returns the identity of the analysis of {@link #indexedTokens(ByteBuffer)}: analyzers with equal identities
+         * make the same tokens of the same value, which can therefore be analyzed once for all of them (e.g. for the
+         * {@code !=} restrictions of a {@code NOT IN}, see {@code RowFilter.AnalyzedValues}).
+         *
+         * @return the identity of the analysis of the indexed values, this analyzer itself by default
+         */
+        default Object indexedTokensIdentity()
+        {
+            return this;
+        }
     }
 
     /**

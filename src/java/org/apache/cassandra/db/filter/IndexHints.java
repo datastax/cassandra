@@ -27,7 +27,6 @@ import java.util.function.Predicate;
 
 import javax.annotation.Nullable;
 
-import com.google.common.collect.Iterables;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -261,36 +260,38 @@ public class IndexHints
     }
 
     /**
+     * The order of preference of the indexes by selectivity: the lowest {@link Index#getEstimatedResultRows()} first,
+     * then, as SAI indexes all return the same value, the not analyzed ones (comparing the values as CQL does), then
+     * by name. The ties are so broken the same way on every replica, so that they all use the same index, and so
+     * normalize the restricted values alike.
+     */
+    private static final Comparator<Index> SELECTIVITY_ORDER = Comparator.comparingLong(Index::getEstimatedResultRows)
+                                                                          .thenComparing(Index::isAnalyzed)
+                                                                          .thenComparing(IndexHints::indexName);
+
+    /**
      * Returns the index with the best selectivity from the specified collection of indexes.
      * </p>
      * The selectivity is determined by the {@link Index#getEstimatedResultRows()} method. Please note that SAI indexes
      * will always return -1 for that method, to force their selection. They will later use their own internal planning
      * when queried. The index selectivity will still be used for legacy indexes, and potentially for 3rd party
-     * implementations.
+     * implementations. Ties are broken deterministically, see {@link #SELECTIVITY_ORDER}.
      *
      * @param indexes a collection of indexes
      * @return the index with the best selectivity, according to {@link Index#getEstimatedResultRows()}
      */
     private static <T extends Index> Optional<T> bestSelectivityIndex(Collection<T> indexes)
     {
-        if (indexes.isEmpty())
-            return Optional.empty();
+        if (indexes.size() <= 1)
+            return indexes.stream().findFirst();
 
-        if (indexes.size() == 1)
-            return Optional.of(Iterables.getOnlyElement(indexes));
+        return indexes.stream().min(SELECTIVITY_ORDER);
+    }
 
-        T bestIndex = null;
-        long bestCardinality = Long.MAX_VALUE;
-        for (T index : indexes)
-        {
-            long cardinality = index.getEstimatedResultRows();
-            if (bestIndex == null || cardinality < bestCardinality)
-            {
-                bestIndex = index;
-                bestCardinality = cardinality;
-            }
-        }
-        return Optional.of(bestIndex);
+    private static String indexName(Index index)
+    {
+        IndexMetadata metadata = index.getIndexMetadata();
+        return metadata == null ? "" : metadata.name;
     }
 
     /**

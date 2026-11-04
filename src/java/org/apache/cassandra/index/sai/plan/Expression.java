@@ -195,14 +195,42 @@ public class Expression
 
     public Expression(IndexContext indexContext)
     {
+        this(indexContext, indexContext);
+    }
+
+    /**
+     * @param indexContext the context of the expression, indexed if an index serves it
+     * @param analysisContext the context whose (index) analyzer analyzes the values the expression is evaluated on,
+     * that of the expression but for the exclusions no index serves (see {@link QueryController#getAnalysisContext})
+     */
+    public Expression(IndexContext indexContext, IndexContext analysisContext)
+    {
         this.context = indexContext;
-        this.analyzerFactory = indexContext.getAnalyzerFactory();
+        this.analyzerFactory = analysisContext.getAnalyzerFactory();
         this.validator = indexContext.getValidator();
     }
 
     public boolean isLiteral()
     {
         return context.isLiteral();
+    }
+
+    /**
+     * Whether the terms are in the reverse order of the values: those of reversed (DESC clustering) columns, but
+     * literal terms, which are the raw value bytes.
+     */
+    private boolean isReversedTerms()
+    {
+        return context.getDefinition().isReversedType() && !TypeUtil.isLiteral(validator);
+    }
+
+    /**
+     * Whether this is a range over the terms of a non-composite literal index, which are the raw value bytes at
+     * every index version: the raw bounds delimit exactly the terms of the range.
+     */
+    public boolean isLiteralTermRange()
+    {
+        return operation == Op.RANGE && TypeUtil.isLiteral(validator) && !TypeUtil.isComposite(validator);
     }
 
     public Expression add(Operator op, ByteBuffer value)
@@ -261,7 +289,7 @@ public class Expression
                 break;
 
             case LTE:
-                if (context.getDefinition().isReversedType())
+                if (isReversedTerms())
                 {
                     this.lowerInclusive = true;
                     lowerInclusive = true;
@@ -273,14 +301,14 @@ public class Expression
                 }
             case LT:
                 operation = Op.RANGE;
-                if (context.getDefinition().isReversedType())
+                if (isReversedTerms())
                     lower = new Bound(value, validator, lowerInclusive);
                 else
                     upper = new Bound(value, validator, upperInclusive);
                 break;
 
             case GTE:
-                if (context.getDefinition().isReversedType())
+                if (isReversedTerms())
                 {
                     this.upperInclusive = true;
                     upperInclusive = true;
@@ -292,7 +320,7 @@ public class Expression
                 }
             case GT:
                 operation = Op.RANGE;
-                if (context.getDefinition().isReversedType())
+                if (isReversedTerms())
                     upper = new Bound(value, validator,  upperInclusive);
                 else
                     lower = new Bound(value, validator, lowerInclusive);
@@ -390,13 +418,28 @@ public class Expression
 
         // as a last step let's check exclusions for the given field,
         // this covers EQ/RANGE with exclusions.
-        for (ByteBuffer term : exclusions)
+        if (exclusions.isEmpty())
+            return true;
+
+        if (TypeUtil.isLiteral(validator))
         {
-            if (TypeUtil.isLiteral(validator) && validateStringValue(value.raw, term) ||
-                TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
-                return false;
+            // a literal is excluded if one of its (analyzed) terms is an excluded one: not through
+            // validateStringValue, which applies the operation of the expression (a RANGE matches any term in it).
+            // The value is analyzed once for all the exclusions (e.g. those of a NOT IN).
+            List<ByteBuffer> terms = analyze(value.raw);
+            for (ByteBuffer term : exclusions)
+            {
+                if (hasTerm(terms, term))
+                    return false;
+            }
+            return true;
         }
 
+        for (ByteBuffer term : exclusions)
+        {
+            if (TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
+                return false;
+        }
         return true;
     }
 
@@ -613,6 +656,40 @@ public class Expression
         }
     }
 
+    /**
+     * @return the terms of the given literal value, analyzed as the indexed values are
+     */
+    private List<ByteBuffer> analyze(ByteBuffer columnValue)
+    {
+        List<ByteBuffer> terms = new ArrayList<>(1);
+        AbstractAnalyzer analyzer = analyzerFactory.create();
+        analyzer.reset(columnValue);
+        try
+        {
+            while (analyzer.hasNext())
+                terms.add(analyzer.next());
+            return terms;
+        }
+        finally
+        {
+            analyzer.end();
+        }
+    }
+
+    /**
+     * @return whether the given analyzed terms of a value include the given term; none does if the value has no
+     * terms (one the analyzer can't read), which is then not excluded
+     */
+    private boolean hasTerm(List<ByteBuffer> terms, ByteBuffer term)
+    {
+        for (ByteBuffer t : terms)
+        {
+            if (validator.compare(t, term) == 0)
+                return true;
+        }
+        return false;
+    }
+
     public Op getOp()
     {
         return operation;
@@ -633,7 +710,7 @@ public class Expression
         if (!hasLower())
             return true;
 
-        int cmp = validator.compare(value, lower.value.raw);
+        int cmp = compareLiteral(value, lower.value.raw);
         return cmp > 0 || cmp == 0 && lower.inclusive;
     }
 
@@ -642,8 +719,16 @@ public class Expression
         if (!hasUpper())
             return true;
 
-        int cmp = validator.compare(value, upper.value.raw);
+        int cmp = compareLiteral(value, upper.value.raw);
         return cmp < 0 || cmp == 0 && upper.inclusive;
+    }
+
+    /**
+     * Compares two literal terms in the order of the index: that of the raw bytes, but for composite terms.
+     */
+    private int compareLiteral(ByteBuffer left, ByteBuffer right)
+    {
+        return TypeUtil.isComposite(validator) ? validator.compare(left, right) : ByteBufferUtil.compareUnsigned(left, right);
     }
 
     public float getEuclideanSearchThreshold()

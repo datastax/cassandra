@@ -525,7 +525,7 @@ public class StatementRestrictions
             }
 
             PartitionKeyRestrictions partitionKeyRestrictions = partitionKeyRestrictionSet.build(indexRegistry);
-            ClusteringColumnRestrictions clusteringColumnsRestrictions = clusteringColumnsRestrictionSet.build();
+            ClusteringColumnRestrictions clusteringColumnsRestrictions = clusteringColumnsRestrictionSet.build(allowUseOfSecondaryIndices && !partitionKeyRestrictions.hasIN());
             RestrictionSet nonPrimaryKeyRestrictions = nonPrimaryKeyRestrictionSet.build();
             ImmutableSet<ColumnMetadata> notNullColumns = notNullColumnsBuilder.build();
             boolean hasRegularColumnsRestrictions = nonPrimaryKeyRestrictions.hasRestrictionFor(ColumnMetadata.Kind.REGULAR);
@@ -672,7 +672,11 @@ public class StatementRestrictions
             if (orderings.stream().anyMatch(o -> o.expression.hasNonClusteredOrdering()))
                 usesSecondaryIndexing = true;
 
-            if (usesSecondaryIndexing || clusteringColumnsRestrictions.needFiltering())
+            // The != whose slices exclude the raw values are also evaluated by filtering the normalized values, as
+            // for the other columns, but where that would need the ALLOW FILTERING an indexed query has not.
+            if (usesSecondaryIndexing
+                || clusteringColumnsRestrictions.needFiltering()
+                || clusteringColumnsRestrictions.hasNormalizedExclusions() && (allowFiltering || !hasQueryableIndex))
                 filterRestrictionsBuilder.add(clusteringColumnsRestrictions);
 
             // Even if usesSecondaryIndexing is false at this point, we'll still have to use one if
@@ -1355,7 +1359,8 @@ public class StatementRestrictions
         int numberOfClusteringColumns = table.isStaticCompactTable() ? 0 : table.clusteringColumns().size();
         // it is a range query if it has at least one the column alias for which no relation is defined or is not EQ or IN.
         return clusteringColumnsRestrictions.size() < numberOfClusteringColumns
-            || !clusteringColumnsRestrictions.hasOnlyEqualityRestrictions();
+            || !clusteringColumnsRestrictions.hasOnlyEqualityRestrictions()
+            || clusteringColumnsRestrictions.hasRestrictionsNormalizedByIndex();
     }
 
     /**

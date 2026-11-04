@@ -269,6 +269,27 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
+     * Returns the context whose analyzers normalize the operand of the given expression and the values it's evaluated
+     * on: the given context of the expression, but for a {@code !=} (also from a {@code NOT IN}) that no index serves,
+     * as on literal columns, which is normalized by the analyzed index serving the ranges on the column, if any, as
+     * the range bounds are (see {@code RowFilter#analyzerFor}, doing the same when the query doesn't use SAI).
+     * Tokenizing indexes serve no ranges, so a {@code !=} on their columns still compares the raw values.
+     *
+     * @param expression the expression
+     * @param context the context of the expression, see {@link #getContext(RowFilter.Expression)}
+     */
+    public IndexContext getAnalysisContext(RowFilter.Expression expression, IndexContext context)
+    {
+        // only the simple expressions, as for the filters (not e.g. the != on map entries)
+        if (expression.operator() != Operator.NEQ || context.isIndexed() || !(expression instanceof RowFilter.SimpleExpression))
+            return context;
+
+        RowFilter.Expression range = new RowFilter.SimpleExpression(expression.column(), Operator.GTE, expression.getIndexValue(), null, null);
+        StorageAttachedIndex index = getBestIndexFor(range);
+        return index != null && index.getIndexContext().isAnalyzed() ? index.getIndexContext() : context;
+    }
+
+    /**
      * Determines the {@link IndexTarget.Type} for the expression. In this case we are only interested in map types and
      * the operator being used in the expression.
      */

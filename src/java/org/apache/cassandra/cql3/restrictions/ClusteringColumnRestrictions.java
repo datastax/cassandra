@@ -19,6 +19,7 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.util.*;
 
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.*;
@@ -27,6 +28,7 @@ import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -46,11 +48,45 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
      */
     private final ClusteringComparator comparator;
 
+    /**
+     * The restrictions served by an index normalizing the values (e.g. a case-insensitive SAI index), which are
+     * applied by the index, on the normalized values, rather than as clustering slices or names, on the raw values.
+     */
+    private final Set<SingleRestriction> normalizedByIndex;
+
+    /**
+     * The {@code !=} restrictions that no index serves but whose excluded values are normalized like those of an index
+     * on the column (see {@link RowFilter#analyzerFor}). Their slices exclude the raw values, which are among the
+     * normalized ones, and they're also added to the row filter, if any, to exclude the normalized values.
+     */
+    private final Set<SingleRestriction> normalizedExclusions;
+
     private ClusteringColumnRestrictions(ClusteringComparator comparator,
-                                         RestrictionSet restrictionSet)
+                                         RestrictionSet restrictionSet,
+                                         Set<SingleRestriction> normalizedByIndex,
+                                         Set<SingleRestriction> normalizedExclusions)
     {
         super(restrictionSet);
         this.comparator = comparator;
+        this.normalizedByIndex = normalizedByIndex;
+        this.normalizedExclusions = normalizedExclusions;
+    }
+
+    /**
+     * @return whether some restrictions are applied by an index normalizing the values rather than as clustering
+     * slices or names
+     */
+    public boolean hasRestrictionsNormalizedByIndex()
+    {
+        return !normalizedByIndex.isEmpty();
+    }
+
+    /**
+     * @return whether some {@code !=} restrictions exclude normalized values when they're added to the row filter
+     */
+    public boolean hasNormalizedExclusions()
+    {
+        return !normalizedExclusions.isEmpty();
     }
 
     public NavigableSet<Clustering<?>> valuesAsClustering(QueryOptions options, ClientState state) throws InvalidRequestException
@@ -128,7 +164,9 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
         for (SingleRestriction restriction : restrictions())
         {
             // We ignore all the clustering columns that can be handled by slices.
-            if (handleInFilter(restriction, position) || restriction.hasSupportingIndex(indexRegistry, indexHints))
+            if (handleInFilter(restriction, position)
+                || restriction.hasSupportingIndex(indexRegistry, indexHints)
+                || normalizedExclusions.contains(restriction))
             {
                 restriction.addToRowFilter(filter, indexRegistry, options, annOptions, indexHints);
             }
@@ -141,7 +179,10 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
 
     private boolean handleInFilter(SingleRestriction restriction, int index)
     {
-        return restriction.isContains() || restriction.isLIKE() || index != restriction.getFirstColumn().position();
+        return restriction.isContains()
+               || restriction.isLIKE()
+               || index != restriction.getFirstColumn().position()
+               || normalizedByIndex.contains(restriction);
     }
 
     public static ClusteringColumnRestrictions.Builder builder(TableMetadata table, boolean allowFiltering)
@@ -211,7 +252,35 @@ final class ClusteringColumnRestrictions extends RestrictionSetWrapper
 
         public ClusteringColumnRestrictions build()
         {
-            return new ClusteringColumnRestrictions(table.comparator, restrictions.build());
+            return build(false);
+        }
+
+        /**
+         * @param useIndexes whether the restrictions can be served by the indexes (as in {@code SELECT} statements),
+         * and so be applied as the indexes normalizing the values do
+         */
+        public ClusteringColumnRestrictions build(boolean useIndexes)
+        {
+            RestrictionSet restrictionSet = restrictions.build();
+            Set<SingleRestriction> normalizedByIndex = Collections.newSetFromMap(new IdentityHashMap<>());
+            Set<SingleRestriction> normalizedExclusions = Collections.newSetFromMap(new IdentityHashMap<>());
+            if (useIndexes && indexRegistry != null)
+            {
+                for (SingleRestriction restriction : restrictionSet.restrictions())
+                {
+                    if (!(restriction instanceof SingleColumnRestriction))
+                        continue;
+
+                    Index index = ((SingleColumnRestriction) restriction).findSupportingIndex(indexRegistry, indexHints);
+                    if (index != null && index.isAnalyzed())
+                        normalizedByIndex.add(restriction);
+                    else if (index == null
+                             && restriction.isSlice()
+                             && RowFilter.analyzerFor(indexRegistry, restriction.getFirstColumn(), Operator.NEQ, null, indexHints) != null)
+                        normalizedExclusions.add(restriction);
+                }
+            }
+            return new ClusteringColumnRestrictions(table.comparator, restrictionSet, normalizedByIndex, normalizedExclusions);
         }
     }
 }

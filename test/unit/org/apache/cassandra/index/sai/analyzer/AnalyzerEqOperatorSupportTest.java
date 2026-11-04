@@ -437,9 +437,8 @@ public class AnalyzerEqOperatorSupportTest extends SAITester
 
             // EQ gets interpreted as a match query here
             assertRows(execute("SELECT x FROM %s WHERE x = 'a'"), row("A"), row("a"));
-            // This only gets 1 row instead of 2 because the index is on a clustering column and that applies post
-            // filtering in surprising and problematic way.
-            assertRows(execute("SELECT x FROM %s WHERE z = 'c'"), row("a"));
+            // The index on the clustering column normalizes the restriction, as on regular columns
+            assertRows(execute("SELECT x FROM %s WHERE z = 'c'"), row("A"), row("a"));
 
             // Index based query for x, z, and a
             assertRows(execute("SELECT x FROM %s WHERE x : 'a'"), row("A"), row("a"));
