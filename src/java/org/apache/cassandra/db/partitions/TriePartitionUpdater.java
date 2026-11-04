@@ -116,7 +116,10 @@ public class TriePartitionUpdater
     {
         if (existing == null)
         {
-            if (TriePartitionUpdate.startsCountedMemtableDeletion(update))
+            // We are adding a new tombstone. We are counting tombstones on the row level, so ones that introduce
+            // or close column deletions should not count.
+            // We will only count one of the sides as we want to increase the count by one for each pair.
+            if (TriePartitionUpdate.startsRowDeletion(update))
                 currentPartition.markAddedTombstones(1);
 
             dataSize += dataSizeOfMarker(update);
@@ -124,12 +127,9 @@ public class TriePartitionUpdater
         }
         else
         {
-            // We are adding a new tombstone. We count row-level tombstones and also column deletions, as a row with
-            // only a complex column deletion has no other content that marks the partition as non-empty.
-            // We will only count one of the sides as we want to increase the count by one for each pair.
             TrieTombstoneMarker merged = update.mergeWith(existing);
-            int hadTombstone = existing.isBoundary() && TriePartitionUpdate.startsCountedMemtableDeletion(existing) ? 1 : 0;
-            int hasTombstone = merged != null && merged.isBoundary() && TriePartitionUpdate.startsCountedMemtableDeletion(merged) ? 1 : 0;
+            int hadTombstone = existing.isBoundary() && TriePartitionUpdate.startsRowDeletion(existing) ? 1 : 0;
+            int hasTombstone = merged != null && merged.isBoundary() && TriePartitionUpdate.startsRowDeletion(merged) ? 1 : 0;
             currentPartition.markAddedTombstones(hasTombstone - hadTombstone);
             dataSize -= dataSizeOfMarker(existing);
             dataSize += dataSizeOfMarker(update);
@@ -188,7 +188,7 @@ public class TriePartitionUpdater
             currentPartition.markInsertedRows(-1);
         if (o instanceof TrieTombstoneMarker && ((TrieTombstoneMarker) o).rightDeletion() != null)
         {
-            currentPartition.markAddedTombstones(-1);
+            // Dropping ineffective row level markers does not change tombstoneCount.
             dataSize -= dataSizeOfMarker((TrieTombstoneMarker) o);
         }
     }
