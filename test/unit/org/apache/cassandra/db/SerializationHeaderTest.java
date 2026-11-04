@@ -36,6 +36,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -63,12 +64,14 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 
 public class SerializationHeaderTest
@@ -321,4 +324,116 @@ public class SerializationHeaderTest
         }
     }
 
+    /**
+     * A LIVE deletion time sent to a pre-4.0 peer (a DSE 6 node, in DSE 6 compatibility mode) is written with the local
+     * deletion time delta that a 32-bit reader, as DSE 6 and Cassandra 3.x have, decodes to {@code Integer.MAX_VALUE},
+     * and is sized so. At the other versions, in sstables and without the mode, LIVE is written as without a version;
+     * other deletion times are written as without a version at every version.
+     */
+    @Test
+    public void testLiveDeletionTimeForPre40Peers() throws IOException
+    {
+        long minLocalDeletionTime = System.currentTimeMillis() / 1000;
+        EncodingStats stats = new EncodingStats(System.currentTimeMillis() * 1000, minLocalDeletionTime, 0);
+        TableMetadata metadata = TableMetadata.builder("ks", "tab")
+                                              .addPartitionKeyColumn("k", Int32Type.instance)
+                                              .addRegularColumn("v", Int32Type.instance)
+                                              .build();
+        RegularAndStaticColumns columns = metadata.regularAndStaticColumns();
+        SerializationHeader forMessaging = new SerializationHeader(false, metadata, columns, stats);
+        SerializationHeader forSSTable = new SerializationHeader(true, metadata, columns, stats);
+        DeletionTime deletion = DeletionTime.build(stats.minTimestamp + 10, minLocalDeletionTime + 10);
+        int[] pre40 = { MessagingService.VERSION_30, MessagingService.VERSION_3014 };
+
+        InternodeCompatibilityMode previous = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+            for (int version : pre40)
+            {
+                byte[] live = written(forMessaging, DeletionTime.LIVE, version);
+                try (DataInputBuffer in = new DataInputBuffer(live))
+                {
+                    assertThat(forMessaging.readTimestamp(in)).isEqualTo(Long.MIN_VALUE);
+                    assertThat((int) in.readUnsignedVInt() + (int) minLocalDeletionTime).isEqualTo(Integer.MAX_VALUE);
+                    assertThat(in.available()).isZero();
+                }
+                // and this software reads it back as LIVE
+                try (DataInputBuffer in = new DataInputBuffer(live))
+                {
+                    assertThat(forMessaging.readDeletionTime(in)).isEqualTo(DeletionTime.LIVE);
+                }
+                assertThat(live).isNotEqualTo(written(forMessaging, DeletionTime.LIVE));
+            }
+            for (MessagingService.Version version : MessagingService.Version.values())
+            {
+                for (SerializationHeader header : new SerializationHeader[]{ forMessaging, forSSTable })
+                {
+                    if (header == forMessaging && version.value < MessagingService.VERSION_40)
+                        continue;
+                    assertThat(written(header, DeletionTime.LIVE, version.value))
+                        .isEqualTo(written(header, DeletionTime.LIVE));
+                }
+            }
+            for (MessagingService.Version version : MessagingService.Version.values())
+            {
+                for (SerializationHeader header : new SerializationHeader[]{ forMessaging, forSSTable })
+                    assertThat(written(header, deletion, version.value)).isEqualTo(written(header, deletion));
+            }
+
+            // a header minimum past 2038 cannot be encoded for a 32-bit reader: refused, as such a deletion time is
+            long past2038 = Integer.MAX_VALUE + 1000L;
+            EncodingStats pastCap = new EncodingStats(stats.minTimestamp, past2038, 0);
+            SerializationHeader pastCapForMessaging = new SerializationHeader(false, metadata, columns, pastCap);
+            SerializationHeader pastCapForSSTable = new SerializationHeader(true, metadata, columns, pastCap);
+            String refusal = "DSE 6 compatibility mode: local deletion time " + past2038 +
+                             " is past 2038 and cannot be sent at messaging version %d," +
+                             " whose deletion times are 32-bit";
+            for (int version : pre40)
+            {
+                try (DataOutputBuffer out = new DataOutputBuffer())
+                {
+                    assertThatThrownBy(() -> pastCapForMessaging.writeDeletionTime(DeletionTime.LIVE, out, version))
+                        .isInstanceOf(IllegalStateException.class)
+                        .hasMessage(String.format(refusal, version));
+                }
+                assertThatThrownBy(() -> pastCapForMessaging.deletionTimeSerializedSize(DeletionTime.LIVE, version))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage(String.format(refusal, version));
+                assertThat(written(pastCapForSSTable, DeletionTime.LIVE, version))
+                    .isEqualTo(written(pastCapForSSTable, DeletionTime.LIVE));
+            }
+            assertThat(written(pastCapForMessaging, DeletionTime.LIVE, MessagingService.VERSION_40))
+                .isEqualTo(written(pastCapForMessaging, DeletionTime.LIVE));
+
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            for (int version : pre40)
+                assertThat(written(forMessaging, DeletionTime.LIVE, version))
+                    .isEqualTo(written(forMessaging, DeletionTime.LIVE));
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(previous);
+        }
+    }
+
+    private static byte[] written(SerializationHeader header, DeletionTime deletionTime, int version) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            header.writeDeletionTime(deletionTime, out, version);
+            assertThat(header.deletionTimeSerializedSize(deletionTime, version)).isEqualTo(out.getLength());
+            return out.toByteArray();
+        }
+    }
+
+    private static byte[] written(SerializationHeader header, DeletionTime deletionTime) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            header.writeDeletionTime(deletionTime, out);
+            assertThat(header.deletionTimeSerializedSize(deletionTime)).isEqualTo(out.getLength());
+            return out.toByteArray();
+        }
+    }
 }

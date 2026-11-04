@@ -144,7 +144,7 @@ public class UnfilteredRowIteratorSerializer
         {
             if (DseCompat.isPre40Layout(version))
                 UnfilteredSerializer.checkPre40DeletionTime(partitionDeletion.localDeletionTime(), version);
-            header.writeDeletionTime(partitionDeletion, out);
+            header.writeDeletionTime(partitionDeletion, out, version);
         }
 
         if (hasStatic)
@@ -184,7 +184,7 @@ public class UnfilteredRowIteratorSerializer
         size += SerializationHeader.serializer.serializedSizeForMessaging(header, selection, hasStatic);
 
         if (!partitionDeletion.isLive())
-            size += header.deletionTimeSerializedSize(partitionDeletion);
+            size += header.deletionTimeSerializedSize(partitionDeletion, version);
 
         if (hasStatic)
             size += UnfilteredSerializer.serializer.serializedSize(staticRow, helper, version);
