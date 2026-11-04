@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.net;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -52,6 +53,7 @@ import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadResponse;
+import org.apache.cassandra.db.RepairedDataInfo;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.Slice;
@@ -67,13 +69,19 @@ import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.SingletonUnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.SerializationHelper;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredRowIteratorSerializer;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.distributed.shared.WithProperties;
@@ -81,10 +89,12 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.hints.Hint;
 import org.apache.cassandra.hints.HintMessages;
 import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.BallotGenerator;
@@ -929,6 +939,27 @@ public class V11SerializationAuditTest extends CQLTester
             assertEquals("DSE 6 compatibility mode: local deletion time " + past2038 + " is past 2038 and cannot be sent at messaging version " +
                          VERSION_3014 + ", whose deletion times are 32-bit", refused.getMessage());
         }
+        // the data of a read response is serialized again at 11 for a DSE 6 coordinator, and refused there too
+        long nowInSec = FBUtilities.nowInSeconds();
+        SinglePartitionReadCommand read = SinglePartitionReadCommand.fullPartitionRead(metadata, nowInSec, key);
+        PartitionUpdate tombstone = pastCap.get("cell tombstone").getPartitionUpdate(metadata);
+        UnfilteredPartitionIterator tombstoneData =
+            new SingletonUnfilteredPartitionIterator(tombstone.unfilteredIterator());
+        ReadResponse pastCapResponse = ReadResponse.createDataResponse(tombstoneData, read,
+                                                                       RepairedDataInfo.NO_OP_REPAIRED_DATA_INFO);
+        IllegalStateException refusedResponse =
+            assertThrows(IllegalStateException.class,
+                         () -> ReadResponse.serializer.serializedSize(pastCapResponse, VERSION_3014));
+        assertEquals("DSE 6 compatibility mode: local deletion time " + past2038 +
+                     " is past 2038 and cannot be sent at messaging version " + VERSION_3014 +
+                     ", whose deletion times are 32-bit",
+                     refusedResponse.getMessage());
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            assertThrows(IllegalStateException.class,
+                         () -> ReadResponse.serializer.serialize(pastCapResponse, out, VERSION_3014));
+        }
+        serialize(pastCapResponse, MessagingService.current_version);
         // the last 32-bit deletion time is still sent
         Mutation within = new Mutation(PartitionUpdate.singleRowUpdate(metadata, key, BTreeRow.singleCellRow(clustering, BufferCell.tombstone(v, 1000, CellData.MAX_DELETION_TIME_2038_LEGACY_CAP))));
         roundTrip(Message.out(Verb.MUTATION_REQ, within), Verb.MUTATION_REQ.id);
@@ -938,6 +969,176 @@ public class V11SerializationAuditTest extends CQLTester
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             Mutation.serializer.serialize(pastCap.get("cell tombstone"), out, VERSION_3014);
+        }
+    }
+
+    /**
+     * A row that assigns one collection and appends to another ({@code SET l1 = [1], l2 = l2 + [2]}) has a complex
+     * deletion for the first and none (LIVE) for the second, and the row layout then writes a deletion time for every
+     * collection of the row. DSE 6 reads a deletion time as a timestamp and a 32-bit local deletion time, and takes it
+     * for LIVE only when that time is {@code Integer.MAX_VALUE}: at 10 and 11 the LIVE one is encoded as Cassandra 3.0
+     * encodes it, so that a DSE 6 replica stores no deletion for the appended collection. From 4.0 on, in sstables and
+     * with the mode off the bytes are unchanged: the local deletion time of LIVE is written as the header's minimum.
+     */
+    @Test
+    public void liveComplexDeletionIsLiveForA32BitReader() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, l1 list<int>, l2 list<int>, PRIMARY KEY (k, c))");
+        TableMetadata metadata = currentTableMetadata();
+        ColumnMetadata l1 = metadata.getColumn(ColumnIdentifier.getInterned("l1", false));
+        ColumnMetadata l2 = metadata.getColumn(ColumnIdentifier.getInterned("l2", false));
+        long nowInSec = FBUtilities.nowInSeconds();
+        PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, 1)
+                                                               .timestamp(1000)
+                                                               .nowInSec(nowInSec);
+        builder.row(1)
+               .noPrimaryKeyLivenessInfo()
+               .add("l1", Collections.singletonList(1))
+               .appendAll("l2", Collections.singletonList(2));
+        PartitionUpdate update = builder.build();
+        Row row = update.getRow(Clustering.make(Int32Type.instance.decompose(1)));
+        DeletionTime assigned = row.getComplexColumnData(l1).complexDeletion();
+        assertEquals(DeletionTime.build(999, nowInSec), assigned);
+        assertTrue(row.getComplexColumnData(l2).complexDeletion().isLive());
+        assertTrue(row.hasComplexDeletion());
+        long minLocalDeletionTime = update.stats().minLocalDeletionTime;
+        assertEquals(nowInSec, minLocalDeletionTime);
+        SerializationHeader forMessaging = new SerializationHeader(false, metadata, update.columns(), update.stats());
+
+        for (int version : new int[]{ MessagingService.VERSION_30, VERSION_3014 })
+        {
+            Dse6DeletionTimeReader dse6 = new Dse6DeletionTimeReader(forMessaging, metadata);
+            Row read = writeAndRead(row, forMessaging, dse6, metadata, version);
+            // the deletion times in column order: l1's, then l2's
+            assertEquals(version + ": " + dse6.localDeletionTimes,
+                         Arrays.asList((int) nowInSec, Integer.MAX_VALUE), dse6.localDeletionTimes);
+            assertEquals(Integer.MAX_VALUE - minLocalDeletionTime, (long) dse6.deltas.get(1));
+            assertEquals(assigned, read.getComplexColumnData(l1).complexDeletion());
+            assertTrue(version + ": LIVE for DSE 6", read.getComplexColumnData(l2).complexDeletion().isLive());
+            // and this software reads it back as it was
+            assertEquals(row, writeAndRead(row, forMessaging, forMessaging, metadata, version));
+        }
+
+        // a mutation carries the same row: sized as written, and LIVE for DSE 6 too
+        Mutation mutation = new Mutation(update);
+        for (int version : new int[]{ MessagingService.VERSION_30, VERSION_3014 })
+        {
+            byte[] mutationBytes;
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                Mutation.serializer.serialize(mutation, out, version);
+                assertEquals(mutation.serializedSize(version), out.getLength());
+                mutationBytes = out.toByteArray();
+            }
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                PartitionUpdate.serializer.serialize(update, out, version);
+                // the mutation is the count of its partition updates (one, a one-byte vint) and that update: those
+                // are the bytes on the wire
+                byte[] updateBytes = out.toByteArray();
+                assertEquals(1 + updateBytes.length, mutationBytes.length);
+                assertEquals(1, mutationBytes[0]);
+                assertArrayEquals(updateBytes, Arrays.copyOfRange(mutationBytes, 1, mutationBytes.length));
+                try (DataInputBuffer in = new DataInputBuffer(updateBytes))
+                {
+                    TableId.deserialize(in);
+                    DeserializationHelper.Flag flag = DeserializationHelper.Flag.FROM_REMOTE;
+                    UnfilteredRowIteratorSerializer.Header partition =
+                        UnfilteredRowIteratorSerializer.serializer.deserializeHeader(metadata, null, in, version, flag);
+                    Dse6DeletionTimeReader dse6 = new Dse6DeletionTimeReader(partition.sHeader, metadata);
+                    DeserializationHelper helper = new DeserializationHelper(metadata, version, flag);
+                    Row read = (Row) UnfilteredSerializer.serializer.deserialize(in, dse6, helper,
+                                                                                 BTreeRow.sortedBuilder());
+                    assertEquals(version + ": " + dse6.localDeletionTimes,
+                                 Arrays.asList((int) nowInSec, Integer.MAX_VALUE), dse6.localDeletionTimes);
+                    assertTrue(version + ": LIVE for DSE 6", read.getComplexColumnData(l2).complexDeletion().isLive());
+                }
+            }
+        }
+        roundTrip(Message.out(Verb.MUTATION_REQ, mutation), Verb.MUTATION_REQ.id);
+
+        // from 4.0 on the local deletion time of LIVE is the header's minimum (a zero delta), as before
+        for (MessagingService.Version version : MessagingService.Version.values())
+        {
+            if (version.value < MessagingService.VERSION_40)
+                continue;
+            Dse6DeletionTimeReader dse6 = new Dse6DeletionTimeReader(forMessaging, metadata);
+            assertEquals(row, writeAndRead(row, forMessaging, dse6, metadata, version.value));
+            assertEquals(version + ": " + dse6.deltas, Arrays.asList(0L, 0L), dse6.deltas);
+        }
+        // in sstables too, at the versions of the nb (VERSION_30) and oa/bti (VERSION_50) formats
+        SerializationHeader forSSTable = new SerializationHeader(true, metadata, update.columns(), update.stats());
+        for (int version : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_50 })
+        {
+            Dse6DeletionTimeReader dse6 = new Dse6DeletionTimeReader(forSSTable, metadata);
+            assertEquals(row, writeAndRead(row, forSSTable, dse6, metadata, version));
+            assertEquals(version + ": " + dse6.deltas, Arrays.asList(0L, 0L), dse6.deltas);
+        }
+
+        // a read response carries the data at 10 and 11 as serialized at that version, and from 4.0 on as built
+        SinglePartitionReadCommand command = SinglePartitionReadCommand.fullPartitionRead(metadata, nowInSec,
+                                                                                         update.partitionKey());
+        UnfilteredPartitionIterator built = new SingletonUnfilteredPartitionIterator(update.unfilteredIterator());
+        ReadResponse response = ReadResponse.createDataResponse(built, command,
+                                                                RepairedDataInfo.NO_OP_REPAIRED_DATA_INFO);
+        byte[] asBuilt = partitionData(update, command.columnFilter(), MessagingService.current_version);
+        for (int version : new int[]{ MessagingService.VERSION_30, VERSION_3014 })
+        {
+            byte[] data = partitionData(update, command.columnFilter(), version);
+            assertFalse(version + ": the LIVE deletion time differs", Arrays.equals(asBuilt, data));
+            try (DataOutputBuffer expected = new DataOutputBuffer())
+            {
+                ByteBufferUtil.writeWithVIntLength(ByteBufferUtil.EMPTY_BYTE_BUFFER, expected);
+                ByteBufferUtil.writeWithVIntLength(ByteBuffer.wrap(data), expected);
+                assertArrayEquals(expected.toByteArray(), serialize(response, version));
+                // the same for a response built from the column filter alone
+                UnfilteredPartitionIterator simple =
+                    new SingletonUnfilteredPartitionIterator(update.unfilteredIterator());
+                ReadResponse simpleResponse = ReadResponse.createSimpleDataResponse(simple, command.columnFilter());
+                assertArrayEquals(expected.toByteArray(), serialize(simpleResponse, version));
+            }
+            ReadResponse received;
+            try (DataInputBuffer in = new DataInputBuffer(serialize(response, version)))
+            {
+                received = ReadResponse.serializer.deserialize(in, version);
+            }
+            try (UnfilteredPartitionIterator partitions = received.makeIterator(command);
+                 UnfilteredRowIterator partition = partitions.next())
+            {
+                assertEquals(row, partition.next());
+                assertFalse(partition.hasNext());
+                assertFalse(partitions.hasNext());
+            }
+        }
+        for (int version : new int[]{ MessagingService.VERSION_40, MessagingService.current_version })
+        {
+            try (DataOutputBuffer expected = new DataOutputBuffer())
+            {
+                ByteBufferUtil.writeWithVIntLength(ByteBufferUtil.EMPTY_BYTE_BUFFER, expected);
+                ByteBufferUtil.writeWithVIntLength(response.repairedDataDigest(), expected);
+                expected.writeBoolean(response.isRepairedDigestConclusive());
+                ByteBufferUtil.writeWithVIntLength(ByteBuffer.wrap(asBuilt), expected);
+                assertArrayEquals(expected.toByteArray(), serialize(response, version));
+            }
+        }
+
+        // with the mode off nothing changes at 10 and 11 either, and a read response is not sent there, as before
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        UnfilteredPartitionIterator withoutMode = new SingletonUnfilteredPartitionIterator(update.unfilteredIterator());
+        ReadResponse responseWithoutMode = ReadResponse.createDataResponse(withoutMode, command,
+                                                                           RepairedDataInfo.NO_OP_REPAIRED_DATA_INFO);
+        for (int version : new int[]{ MessagingService.VERSION_30, VERSION_3014 })
+        {
+            Dse6DeletionTimeReader dse6 = new Dse6DeletionTimeReader(forMessaging, metadata);
+            writeAndRead(row, forMessaging, dse6, metadata, version);
+            assertEquals(version + ": " + dse6.deltas, Arrays.asList(0L, 0L), dse6.deltas);
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                assertThrows(AssertionError.class,
+                             () -> ReadResponse.serializer.serializedSize(responseWithoutMode, version));
+                assertThrows(AssertionError.class,
+                             () -> ReadResponse.serializer.serialize(responseWithoutMode, out, version));
+            }
         }
     }
 
@@ -1110,12 +1311,84 @@ public class V11SerializationAuditTest extends CQLTester
 
     private static byte[] serialize(ReadResponse response, int version) throws Exception
     {
+        // sized first, as a message is
+        long size = ReadResponse.serializer.serializedSize(response, version);
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             ReadResponse.serializer.serialize(response, out, version);
             byte[] bytes = out.toByteArray();
-            assertEquals(ReadResponse.serializer.serializedSize(response, version), bytes.length);
+            assertEquals(size, bytes.length);
             return bytes;
+        }
+    }
+
+    /**
+     * Writes {@code row} with {@code writer} at {@code version}, checks the size of a row for messaging, and reads it
+     * back with {@code reader}, a header with the same columns and stats.
+     */
+    private static Row writeAndRead(Row row,
+                                    SerializationHeader writer,
+                                    SerializationHeader reader,
+                                    TableMetadata metadata,
+                                    int version) throws IOException
+    {
+        SerializationHelper helper = new SerializationHelper(writer);
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            UnfilteredSerializer.serializer.serialize(row, helper, out, 0, version);
+            if (!writer.isForSSTable())
+                assertEquals(UnfilteredSerializer.serializer.serializedSize(row, helper, version), out.getLength());
+            DeserializationHelper.Flag flag = writer.isForSSTable() ? DeserializationHelper.Flag.LOCAL
+                                                                    : DeserializationHelper.Flag.FROM_REMOTE;
+            try (DataInputBuffer in = new DataInputBuffer(out.toByteArray()))
+            {
+                DeserializationHelper deserialization = new DeserializationHelper(metadata, version, flag);
+                Row read = (Row) UnfilteredSerializer.serializer.deserialize(in, reader, deserialization,
+                                                                             BTreeRow.sortedBuilder());
+                assertEquals("unread bytes", 0, in.available());
+                return read;
+            }
+        }
+    }
+
+    /** The partition of {@code update} as a data response carries it, serialized at {@code version}. */
+    private static byte[] partitionData(PartitionUpdate update, ColumnFilter selection, int version) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer();
+             UnfilteredPartitionIterator partitions =
+                 new SingletonUnfilteredPartitionIterator(update.unfilteredIterator()))
+        {
+            UnfilteredPartitionIterators.serializerForIntraNode().serialize(partitions, selection, out, version);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * Reads deletion times as DSE 6 and Cassandra 3.x do: the local deletion time is 32-bit, its delta added to the
+     * 32-bit minimum of the header, and a deletion time is LIVE only with the timestamp {@code Long.MIN_VALUE} and the
+     * local deletion time {@code Integer.MAX_VALUE}. Records the deltas and the local deletion times it reads.
+     */
+    private static class Dse6DeletionTimeReader extends SerializationHeader
+    {
+        final List<Long> deltas = new ArrayList<>();
+        final List<Integer> localDeletionTimes = new ArrayList<>();
+
+        Dse6DeletionTimeReader(SerializationHeader header, TableMetadata metadata)
+        {
+            super(header.isForSSTable(), metadata, header.columns(), header.stats());
+        }
+
+        @Override
+        public DeletionTime readDeletionTime(DataInputPlus in) throws IOException
+        {
+            long markedForDeleteAt = readTimestamp(in);
+            long delta = in.readUnsignedVInt();
+            int localDeletionTime = (int) delta + (int) stats().minLocalDeletionTime;
+            deltas.add(delta);
+            localDeletionTimes.add(localDeletionTime);
+            return markedForDeleteAt == Long.MIN_VALUE && localDeletionTime == Integer.MAX_VALUE
+                   ? DeletionTime.LIVE
+                   : DeletionTime.build(markedForDeleteAt, localDeletionTime);
         }
     }
 

@@ -206,7 +206,7 @@ public class UnfilteredSerializer
         {
             try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
             {
-                serializeRowBody(row, flags, helper, dob);
+                serializeRowBody(row, flags, helper, dob, version);
 
                 out.writeUnsignedVInt(dob.position() + TypeSizes.sizeofUnsignedVInt(previousUnfilteredSize));
                 // We write the size of the previous unfiltered to make reverse queries more efficient (and simpler).
@@ -217,12 +217,12 @@ public class UnfilteredSerializer
         }
         else
         {
-            serializeRowBody(row, flags, helper, out);
+            serializeRowBody(row, flags, helper, out, version);
         }
     }
 
     @Inline
-    private void serializeRowBody(Row row, int flags, SerializationHelper helper, DataOutputPlus out)
+    private void serializeRowBody(Row row, int flags, SerializationHelper helper, DataOutputPlus out, int version)
     throws IOException
     {
         boolean isStatic = row.isStatic();
@@ -240,7 +240,7 @@ public class UnfilteredSerializer
             header.writeLocalDeletionTime(pkLiveness.localExpirationTime(), out);
         }
         if ((flags & HAS_DELETION) != 0)
-            header.writeDeletionTime(deletion.time(), out);
+            header.writeDeletionTime(deletion.time(), out, version);
 
         if ((flags & HAS_ALL_COLUMNS) == 0)
             Columns.serializer.serializeSubset(row.columns(), headerColumns, out);
@@ -263,7 +263,8 @@ public class UnfilteredSerializer
                     if (cd.column.isSimple())
                         Cell.serializer.serialize((Cell<?>) cd, column, out, pkLiveness, header);
                     else
-                        writeComplexColumn((ComplexColumnData) cd, column, (flags & HAS_COMPLEX_DELETION) != 0, pkLiveness, header, out);
+                        writeComplexColumn((ComplexColumnData) cd, column, (flags & HAS_COMPLEX_DELETION) != 0,
+                                           pkLiveness, header, out, version);
                 }
                 catch (IOException e)
                 {
@@ -280,11 +281,17 @@ public class UnfilteredSerializer
         }
     }
 
-    private void writeComplexColumn(ComplexColumnData data, ColumnMetadata column, boolean hasComplexDeletion, LivenessInfo rowLiveness, SerializationHeader header, DataOutputPlus out)
+    private void writeComplexColumn(ComplexColumnData data,
+                                    ColumnMetadata column,
+                                    boolean hasComplexDeletion,
+                                    LivenessInfo rowLiveness,
+                                    SerializationHeader header,
+                                    DataOutputPlus out,
+                                    int version)
     throws IOException
     {
         if (hasComplexDeletion)
-            header.writeDeletionTime(data.complexDeletion(), out);
+            header.writeDeletionTime(data.complexDeletion(), out, version);
 
         out.writeUnsignedVInt32(data.cellsCount());
         for (Cell<?> cell : data)
@@ -319,12 +326,12 @@ public class UnfilteredSerializer
         if (marker.isBoundary())
         {
             RangeTombstoneBoundaryMarker bm = (RangeTombstoneBoundaryMarker)marker;
-            header.writeDeletionTime(bm.endDeletionTime(), out);
-            header.writeDeletionTime(bm.startDeletionTime(), out);
+            header.writeDeletionTime(bm.endDeletionTime(), out, version);
+            header.writeDeletionTime(bm.startDeletionTime(), out, version);
         }
         else
         {
-            header.writeDeletionTime(((RangeTombstoneBoundMarker)marker).deletionTime(), out);
+            header.writeDeletionTime(((RangeTombstoneBoundMarker)marker).deletionTime(), out, version);
         }
     }
 
@@ -333,10 +340,10 @@ public class UnfilteredSerializer
      * DSE 6 peer would read a later one as a negative, invalid, time. The mode requires the {@code HCD_1} storage
      * compatibility mode, under which no deletion time goes past that cap, so this never fires; it fails fast, before
      * anything is written, if one ever does. {@link Cell#NO_DELETION_TIME} (live) is never written as a deletion time.
-     * It covers what is serialized at the peer's version (mutations, hints, batches, Paxos commits); the data of a read
-     * response is serialized once, at the current version, when the replica builds it, and is sent as is.
+     * It covers what is serialized at the peer's version: mutations, hints, batches, Paxos commits, and the data of a
+     * read response, which the replica builds at the current version and serializes again at the peer's.
      */
-    static void checkPre40DeletionTime(long localDeletionTime, int version)
+    public static void checkPre40DeletionTime(long localDeletionTime, int version)
     {
         if (localDeletionTime > CellData.MAX_DELETION_TIME_2038_LEGACY_CAP && localDeletionTime != Cell.NO_DELETION_TIME)
             throw new IllegalStateException("DSE 6 compatibility mode: local deletion time " + localDeletionTime + " is past 2038 and cannot be sent at messaging version " +
@@ -421,7 +428,7 @@ public class UnfilteredSerializer
             size += header.localDeletionTimeSerializedSize(pkLiveness.localExpirationTime());
         }
         if (!deletion.isLive())
-            size += header.deletionTimeSerializedSize(deletion.time());
+            size += header.deletionTimeSerializedSize(deletion.time(), version);
 
         if (!hasAllColumns)
             size += Columns.serializer.serializedSubsetSize(row.columns(), header.columns(isStatic));
@@ -434,16 +441,22 @@ public class UnfilteredSerializer
             if (data.column.isSimple())
                 return v + Cell.serializer.serializedSize((Cell<?>) data, column, pkLiveness, header);
             else
-                return v + sizeOfComplexColumn((ComplexColumnData) data, column, hasComplexDeletion, pkLiveness, header);
+                return v + sizeOfComplexColumn((ComplexColumnData) data, column, hasComplexDeletion, pkLiveness, header,
+                                               version);
         }, size);
     }
 
-    private long sizeOfComplexColumn(ComplexColumnData data, ColumnMetadata column, boolean hasComplexDeletion, LivenessInfo rowLiveness, SerializationHeader header)
+    private long sizeOfComplexColumn(ComplexColumnData data,
+                                     ColumnMetadata column,
+                                     boolean hasComplexDeletion,
+                                     LivenessInfo rowLiveness,
+                                     SerializationHeader header,
+                                     int version)
     {
         long size = 0;
 
         if (hasComplexDeletion)
-            size += header.deletionTimeSerializedSize(data.complexDeletion());
+            size += header.deletionTimeSerializedSize(data.complexDeletion(), version);
 
         size += TypeSizes.sizeofUnsignedVInt(data.cellsCount());
         for (Cell<?> cell : data)
@@ -469,12 +482,12 @@ public class UnfilteredSerializer
         if (marker.isBoundary())
         {
             RangeTombstoneBoundaryMarker bm = (RangeTombstoneBoundaryMarker)marker;
-            size += header.deletionTimeSerializedSize(bm.endDeletionTime());
-            size += header.deletionTimeSerializedSize(bm.startDeletionTime());
+            size += header.deletionTimeSerializedSize(bm.endDeletionTime(), version);
+            size += header.deletionTimeSerializedSize(bm.startDeletionTime(), version);
         }
         else
         {
-           size += header.deletionTimeSerializedSize(((RangeTombstoneBoundMarker)marker).deletionTime());
+           size += header.deletionTimeSerializedSize(((RangeTombstoneBoundMarker)marker).deletionTime(), version);
         }
         return size;
     }
