@@ -156,6 +156,12 @@
     <property name="jacoco.partials.dir" value="${jacoco.export.dir}/partials" />
     <property name="jacoco.partialexecfile" value="${jacoco.partials.dir}/partial.exec" />
     <property name="jacoco.finalexecfile" value="${jacoco.export.dir}/jacoco.exec" />
+    <!-- Classes the JaCoCo agent instruments (agent "includes" option, ':'-separated, wildcards allowed).
+         Reports only cover ${build.classes.main}, so instrumenting dependencies such as jvector only slows
+         tests down: it made the SAI vector tests run several times slower under jacoco-run.
+         PreparedStatementHelper is the one class in src/java outside org.apache.cassandra; it is named exactly
+         because com.datastax.driver.core.* would also match the whole Java driver. -->
+    <property name="jacoco.agent.includes" value="org.apache.cassandra.*:com.datastax.driver.core.PreparedStatementHelper" />
 
     <condition property="isMac" value="true">
         <os family="mac"/>
@@ -1421,7 +1427,7 @@
           <isset property="repetition"/>
       </condition>
       <condition property="additionalagent"
-                 value="-javaagent:${build.dir.lib}/jars/jacocoagent.jar=destfile=${jacoco.partials.dir}/partial-${tag}-@{testname}.exec"
+                 value="-javaagent:${build.dir.lib}/jars/jacocoagent.jar=destfile=${jacoco.partials.dir}/partial-${tag}-@{testname}.exec,includes=${jacoco.agent.includes}"
                  else="">
         <istrue value="${usejacoco}"/>
       </condition>
