@@ -2462,6 +2462,11 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
             logger.info("Announcing shutdown");
             addLocalApplicationState(ApplicationState.STATUS_WITH_PORT, StorageService.instance.valueFactory.shutdown(true));
             addLocalApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.shutdown(true));
+            // Stop answering gossip syns before announcing and while we wait for the announcement to be delivered.
+            // Otherwise, older peers that do not treat SHUTDOWN as a dead state can process our ack, call markAlive()
+            // and leave a stale inflight ECHO_REQ that makes them ignore our restart (CNDB-19931).
+            if (scheduledGossipTask != null)
+                scheduledGossipTask.cancel(false);
             // clone endpointstate to avoid it changing between serializedSize and serialize calls
             EndpointState clone = new EndpointState(mystate);
             Message<GossipShutdown> message = Message.out(Verb.GOSSIP_SHUTDOWN, new GossipShutdown(clone));
