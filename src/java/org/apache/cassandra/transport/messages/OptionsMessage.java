@@ -30,6 +30,7 @@ import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.cql3.QueryProcessor;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Compressor;
 import org.apache.cassandra.transport.Dispatcher;
@@ -99,7 +100,7 @@ public class OptionsMessage extends Message.Request
     }
 
     @Override
-    public String toString()
+    public String toString(Redaction redaction)
     {
         return "OPTIONS";
     }

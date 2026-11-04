@@ -25,6 +25,7 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import com.datastax.driver.core.BatchStatement;
 import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.QueryTrace;
 import com.datastax.driver.core.Session;
@@ -33,14 +34,13 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
-import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.tracing.TraceStateImpl;
 import org.assertj.core.api.Assertions;
+import org.slf4j.Logger;
 
 import static java.util.regex.Pattern.quote;
 import static org.apache.cassandra.config.DataStorageSpec.DataStorageUnit.KIBIBYTES;
@@ -73,13 +73,11 @@ public class RedactionTest extends TestBaseImpl
         driverCluster = com.datastax.driver.core.Cluster.builder().addContactPoints(address).build();
         driverSession = driverCluster.connect(KEYSPACE);
 
-        // set max log level in the tested classes
+        // set max log level everywhere, so we can verify that no sensitive data is logged at any level
         node.runOnInstance(() -> {
             try
             {
-                StorageService.instance.setLoggingLevel(QueryProcessor.class.getName(), "ALL");
-                StorageService.instance.setLoggingLevel(SelectStatement.class.getName(), "ALL");
-                StorageService.instance.setLoggingLevel(TraceStateImpl.class.getName(), "ALL");
+                StorageService.instance.setLoggingLevel(Logger.ROOT_LOGGER_NAME, "ALL");
             }
             catch (Exception e)
             {
@@ -203,6 +201,45 @@ public class RedactionTest extends TestBaseImpl
         long mark = node.logs().mark();
         driverSession.execute(cql);
         assertLogsContain(mark, "Process " + quote(redactedCQL) + " @CL");
+    }
+
+    /// Verify that the trace-level log messages about received requests use redaction.
+    @Test
+    public void testReceivedMessages()
+    {
+        table = "received_messages";
+
+        long mark = node.logs().mark();
+        driverSession.execute(format("CREATE TABLE %s.%s (k text PRIMARY KEY, v text)"));
+        assertLogsContain(mark, quote("Received: QUERY CREATE TABLE ..."));
+
+        // insert
+        mark = node.logs().mark();
+        driverSession.execute(format("INSERT INTO %s.%s (k, v) VALUES ('secret_k', 'secret_v')"));
+        assertLogsContain(mark, quote("Received: QUERY INSERT INTO ... [pageSize = 5000 rows]"));
+
+        // select
+        mark = node.logs().mark();
+        driverSession.execute(format("SELECT * FROM %s.%s WHERE k = 'secret_k' AND v = 'secret_v' ALLOW FILTERING"));
+        assertLogsContain(mark, quote("Received: QUERY SELECT ... [pageSize = 5000 rows]"));
+
+        // prepare
+        mark = node.logs().mark();
+        PreparedStatement prepared = driverSession.prepare(format("INSERT INTO %s.%s (k, v) VALUES ('secret_k', 'secret_v')"));
+        assertLogsContain(mark, quote("Received: PREPARE INSERT INTO ..."));
+
+        // execute
+        mark = node.logs().mark();
+        driverSession.execute(prepared.bind());
+        assertLogsContain(mark, "Received: EXECUTE");
+
+        // batch
+        mark = node.logs().mark();
+        BatchStatement batch = new BatchStatement();
+        batch.add(new SimpleStatement(format("INSERT INTO %s.%s (k, v) VALUES ('secret_k1', 'secret_v1')")));
+        batch.add(new SimpleStatement(format("UPDATE %s.%s SET v = 'secret_v2' WHERE k = 'secret_k2'")));
+        driverSession.execute(batch);
+        assertLogsContain(mark, quote("Received: BATCH of [INSERT INTO ... with 0 values, UPDATE ... with 0 values]"));
     }
 
     /// Verify that client `Tracing` don't use redaction, since it's meant to be consumed by the client.

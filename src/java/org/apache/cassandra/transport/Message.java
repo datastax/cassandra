@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.service.StorageService;
@@ -226,6 +227,31 @@ public abstract class Message
         }
 
         /**
+         * @return the string representation of this request, without redacting any sensitive data
+         */
+        @Override
+        public final String toString()
+        {
+            return toString(Redaction.NONE);
+        }
+
+        /**
+         * Returns a string representation of this request. Requests that can contain sensitive data, such as the
+         * values in a CQL query, should redact it when asked to do so. Redaction should be applied when the
+         * representation is written to logs, and it shouldn't be applied when it is meant for authorized users.
+         *
+         * @param redaction whether the sensitive data in the request should be redacted
+         * @return the string representation of this request
+         */
+        public String toString(Redaction redaction)
+        {
+            return "Request{" +
+                   "tracingRequested=" + tracingRequested +
+                   ", createdAtNanos=" + createdAtNanos +
+                   '}';
+        }
+
+        /**
          * @return true if the execution of this {@link Request} should be recorded in a tracing session
          */
         protected boolean isTraceable()
@@ -318,15 +344,6 @@ public abstract class Message
         boolean isTracingRequested()
         {
             return tracingRequested;
-        }
-
-        @Override
-        public String toString()
-        {
-            return "Request{" +
-                   "tracingRequested=" + tracingRequested +
-                   ", createdAtNanos=" + createdAtNanos +
-                   '}';
         }
     }
 

@@ -233,7 +233,8 @@ public abstract class ResultMessage<T extends ResultMessage<T>> extends Message.
         @Override
         public String toString()
         {
-            return "ROWS " + result;
+            // the values are not included because the string representation of messages is written to logs
+            return "ROWS " + result.metadata + " (" + result.size() + " rows)";
         }
 
         @Override
