@@ -193,6 +193,13 @@ public class Expression
 
     final List<ByteBuffer> exclusions = new ArrayList<>();
 
+    /**
+     * Whether this is an {@code IS NOT NULL} on a field (see {@code Operator#IS_NOT}): a {@link Op#RANGE} without
+     * bounds, matching every term of the index (it has a term exactly when the field is set), satisfied by the
+     * values that are set.
+     */
+    private boolean isNotNull;
+
     public Expression(IndexContext indexContext)
     {
         this(indexContext, indexContext);
@@ -221,7 +228,8 @@ public class Expression
      */
     private boolean isReversedTerms()
     {
-        return context.getDefinition().isReversedType() && !TypeUtil.isLiteral(validator);
+        // the values of a field of a reversed column are not reversed
+        return context.getDefinition().isReversedType() && !context.hasFieldPath() && !TypeUtil.isLiteral(validator);
     }
 
     /**
@@ -332,6 +340,16 @@ public class Expression
                 searchRadiusMeters = FloatType.instance.compose(upper.value.raw);
                 boundedAnnEuclideanDistanceThreshold = GeoUtil.amplifiedEuclideanSimilarityThreshold(lower.value.vector, searchRadiusMeters);
                 break;
+            case IS_NOT:
+                // IS NOT NULL on a field: all the terms. Combined with another expression on the same field (the
+                // expressions are sorted by the priority of their operators, IS_NOT last), it keeps that
+                // expression's operation and bounds, which select a subset of the terms, but it still requires the
+                // value to be set: e.g. an empty int satisfies 'i != 5' and the bounds of the index scans that
+                // another index drives, but it isn't set (see #isSatisfiedBy)
+                if (operation == null)
+                    operation = Op.RANGE;
+                isNotNull = true;
+                break;
             case ANN:
             case BM25:
             case ORDER_BY_ASC:
@@ -354,6 +372,12 @@ public class Expression
     public boolean isSatisfiedBy(ByteBuffer columnValue)
     {
         if (columnValue == null)
+            return false;
+
+        // IS NOT NULL: only the values the index indexes (see RowFilter.FieldExpression#isSet), then the other
+        // conditions of the expression it was combined with, if any (an unbounded RANGE without exclusions is
+        // satisfied by any value)
+        if (isNotNull && !columnValue.hasRemaining() && TypeUtil.skipsEmptyValue(validator))
             return false;
 
         // ORDER_BY is not indepently verifiable, so we always return true
@@ -392,10 +416,15 @@ public class Expression
                     return cmp == 0;
 
                 if (operation == Op.NOT_EQ || operation == Op.NOT_CONTAINS_KEY || operation == Op.NOT_CONTAINS_VALUE)
-                    return cmp != 0;
-
-                if (cmp > 0 || (cmp == 0 && !lowerInclusive))
+                {
+                    // the other excluded values of a NOT_EQ with exclusions (see #negations) are checked below
+                    if (cmp == 0)
+                        return false;
+                }
+                else if (cmp > 0 || (cmp == 0 && !lowerInclusive))
+                {
                     return false;
+                }
             }
         }
 
@@ -744,9 +773,10 @@ public class Expression
 
     public String toString(boolean redact)
     {
-        return String.format("Expression{name: %s, op: %s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
-                             context.getColumnName(),
+        return String.format("Expression{name: %s, op: %s%s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
+                             context.hasFieldPath() ? context.getTargetName() : context.getColumnName(),
                              patternOperator == null ? operation : operation + " " + patternOperator,
+                             isNotNull ? " IS NOT NULL" : "",
                              lower == null ? "null" : validator.getString(lower.value.raw, redact ? Redaction.REDACT : Redaction.NONE),
                              lower != null && lower.inclusive,
                              upper == null ? "null" : validator.getString(upper.value.raw, redact ? Redaction.REDACT : Redaction.NONE),
@@ -762,6 +792,7 @@ public class Expression
     public int hashCode()
     {
         return new HashCodeBuilder().append(context.getColumnName())
+                                    .append(context.getFieldPath())
                                     .append(operation)
                                     .append(patternOperator)
                                     .append(validator)
@@ -780,12 +811,39 @@ public class Expression
         Expression o = (Expression) other;
 
         return Objects.equals(context.getColumnName(), o.context.getColumnName())
+                && Objects.equals(context.getFieldPath(), o.context.getFieldPath())
                 && validator.equals(o.validator)
                 && operation == o.operation
                 && patternOperator == o.patternOperator
                 && Objects.equals(lower, o.lower)
                 && Objects.equals(upper, o.upper)
-                && exclusions.equals(o.exclusions);
+                && exclusions.equals(o.exclusions)
+                && isNotNull == o.isNotNull;
+    }
+
+    /**
+     * Returns the expressions matching the keys that a non-equality excludes, whose union is the complement of this
+     * expression: the {@link #negated() negated} expression, followed, for a {@link Op#NOT_EQ} with exclusions (a
+     * {@code NOT IN} on a multi-valued field, see {@code Operation#analyzeGroup}), by an equality on each excluded
+     * value.
+     */
+    public List<Expression> negations()
+    {
+        if (exclusions.isEmpty())
+            return Collections.singletonList(negated());
+
+        assert operation == Op.NOT_EQ : "Exclusions on a " + operation + " non-equality";
+        List<Expression> negations = new ArrayList<>(1 + exclusions.size());
+        negations.add(negated());
+        for (ByteBuffer exclusion : exclusions)
+        {
+            Expression equality = new Expression(context);
+            equality.operation = Op.EQ;
+            equality.lower = new Bound(exclusion, validator, true);
+            equality.upper = equality.lower;
+            negations.add(equality);
+        }
+        return negations;
     }
 
     /**

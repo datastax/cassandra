@@ -25,15 +25,20 @@ import java.util.List;
 import java.util.ListIterator;
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
-import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.ColumnMetadata.Kind;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.index.sai.plan.Operation.OperationType;
@@ -106,9 +111,9 @@ public class FilterTree
             {
                 Expression filter = filterIterator.previous();
 
-                if (TypeUtil.isNonFrozenCollection(column.type))
+                if (filter.context.isMultiValued())
                 {
-                    Iterator<ByteBuffer> valueIterator = filter.context.getValuesOf(row, now);
+                    Iterator<ByteBuffer> valueIterator = filter.context.getValuesOf(key, row, now);
                     result = op.apply(result, filter.isSatisfiedBy(valueIterator));
                 }
                 else
@@ -144,11 +149,83 @@ public class FilterTree
         return referencedIndexes.size();
     }
 
-    private void sstableIndexes(Set<SSTableIndex> indexes)
+    protected void sstableIndexes(Set<SSTableIndex> indexes)
     {
         for (Expression expression : expressions.values())
             indexes.addAll(expression.context.getView().getIndexes());
         for (FilterTree child : children)
             child.sstableIndexes(indexes);
+    }
+
+    /**
+     * The filter of a {@code CONTAINS ELEMENT} group: it evaluates the conditions of the group on each element of
+     * the collection, as {@link RowFilter.ElementMatchExpression} does (the same evaluation as the filtering without
+     * index and as the coordinator's, so that the results are the same). The indexes only select its candidate rows
+     * (see {@link Operation.ElementNode}): the rows where each positive condition is satisfied by some element, which
+     * this filter rejects when no single element satisfies the group. The rows it evaluates and rejects are counted in
+     * the {@link QueryContext} when the group's candidates are the source of the keys (no OR above the group): they
+     * approximate the false positives of the candidates (the planner may still read other keys, e.g. if it drops the
+     * candidates' index scans from an intersection, and the rows of a partition are all evaluated, the key being the
+     * partition in AA). The filter of the candidates is kept only for the indexes it references (see
+     * {@link #numSSTableIndexes()}).
+     */
+    static class ElementFilter extends FilterTree
+    {
+        private final RowFilter.ElementMatchExpression expression;
+        private final TableMetadata metadata;
+        // the context of the query: its time, and the counters of the rows evaluated and rejected by the filter
+        private final QueryContext queryContext;
+        // whether to count the rows: when the group's candidates are the source of the keys of the query
+        private final boolean counts;
+        // the filter tree of the candidates, never evaluated, for the indexes it references
+        @Nullable
+        private final FilterTree candidates;
+
+        ElementFilter(RowFilter.ElementMatchExpression expression,
+                      TableMetadata metadata,
+                      QueryContext queryContext,
+                      boolean counts,
+                      @Nullable FilterTree candidates)
+        {
+            super(OperationType.AND, ArrayListMultimap.create());
+            this.expression = expression;
+            this.metadata = metadata;
+            this.queryContext = queryContext;
+            this.counts = counts;
+            this.candidates = candidates;
+        }
+
+        @Override
+        protected void sstableIndexes(Set<SSTableIndex> indexes)
+        {
+            if (candidates != null)
+                candidates.sstableIndexes(indexes);
+        }
+
+        @Override
+        public boolean isSatisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow)
+        {
+            if (currentCluster == null || !currentCluster.isRow())
+                return false;
+
+            // the static row alone (the check of a partition without matching rows) has no clustering nor regular
+            // values: it never satisfies a group on them, not even a NOT CONTAINS ELEMENT
+            ColumnMetadata column = expression.column();
+            boolean isStaticRowCheck = ((Row) currentCluster).isStatic();
+            if (isStaticRowCheck && !column.isStatic() && !column.isPartitionKey())
+                return false;
+
+            // the time of the read command, as the filtering without index and the coordinator use
+            Row row = column.isStatic() ? staticRow : (Row) currentCluster;
+            boolean satisfied = expression.isSatisfiedBy(metadata, key, row, queryContext.nowInSec());
+            // the rows, not the check of the static row of a partition without matching rows
+            if (counts && !isStaticRowCheck)
+            {
+                queryContext.addElementFilterCandidates(1);
+                if (!satisfied)
+                    queryContext.addElementFilterRejections(1);
+            }
+            return satisfied;
+        }
     }
 }

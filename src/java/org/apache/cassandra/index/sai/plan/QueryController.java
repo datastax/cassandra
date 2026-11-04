@@ -216,6 +216,14 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         return command.metadata();
     }
 
+    /**
+     * @return the context of the query, with its metrics
+     */
+    QueryContext queryContext()
+    {
+        return queryContext;
+    }
+
     public ReadCommand command()
     {
         return command;
@@ -257,6 +265,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         if (index != null)
             return index.getIndexContext();
 
+        // a non-indexed context to filter the column or, for an expression on a field, the field
         return new IndexContext(cfs.metadata().keyspace,
                                 cfs.metadata().name,
                                 cfs.metadata().id,
@@ -264,6 +273,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                 cfs.metadata().comparator,
                                 expression.column(),
                                 determineIndexTargetType(expression),
+                                expression.fieldPath(),
                                 null,
                                 cfs);
     }
@@ -271,8 +281,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Returns the context whose analyzers normalize the operand of the given expression and the values it's evaluated
      * on: the given context of the expression, but for a {@code !=} (also from a {@code NOT IN}) that no index serves,
-     * as on literal columns, which is normalized by the analyzed index serving the ranges on the column, if any, as
-     * the range bounds are (see {@code RowFilter#analyzerFor}, doing the same when the query doesn't use SAI).
+     * as on literal columns, which is normalized by the analyzed index serving the ranges on the column (or, for a
+     * {@code !=} on a field, on that field), if any, as the range bounds are (see {@code RowFilter#analyzerFor}, doing the same when the query doesn't use SAI).
      * Tokenizing indexes serve no ranges, so a {@code !=} on their columns still compares the raw values.
      *
      * @param expression the expression
@@ -284,7 +294,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         if (expression.operator() != Operator.NEQ || context.isIndexed() || !(expression instanceof RowFilter.SimpleExpression))
             return context;
 
-        RowFilter.Expression range = new RowFilter.SimpleExpression(expression.column(), Operator.GTE, expression.getIndexValue(), null, null);
+        // the index serving the ranges on the same target: for a != on a field, the index on that exact field
+        // (never an index on the whole column), for a != on a column, an index on the column (never one on a field)
+        RowFilter.Expression range = expression.fieldPath() == null
+                                     ? new RowFilter.SimpleExpression(expression.column(), Operator.GTE, expression.getIndexValue(), null, null)
+                                     : new RowFilter.FieldExpression(expression.column(), expression.fieldPath(), Operator.GTE, expression.getIndexValue(), null);
         StorageAttachedIndex index = getBestIndexFor(range);
         return index != null && index.getIndexContext().isAnalyzed() ? index.getIndexContext() : context;
     }
@@ -295,6 +309,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     public static IndexTarget.Type determineIndexTargetType(RowFilter.Expression expression)
     {
+        // for an expression on a field, it's the type of the field that matters
+        if (expression.fieldPath() != null)
+        {
+            // the fields are frozen: CONTAINS reads the elements of a collection field, as an index on its values
+            // does, the other operators read the whole value
+            AbstractType<?> leafType = expression.fieldPath().leafType(expression.column().type);
+            Operator operator = expression.operator();
+            return leafType.isCollection() && (operator == Operator.CONTAINS || operator == Operator.NOT_CONTAINS)
+                   ? IndexTarget.Type.VALUES
+                   : IndexTarget.Type.SIMPLE;
+        }
+
         AbstractType<?> type  = expression.column().type;
         IndexTarget.Type indexTargetType = IndexTarget.Type.SIMPLE;
         if (type.isCollection() && type.isMultiCell())
@@ -645,6 +671,15 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
+     * @return whether the context is that of a field inside collection elements, or of a collection field indexed by
+     * its values: the indexes on fields that can have several values per row
+     */
+    private static boolean isMultiValuedField(IndexContext context)
+    {
+        return context.hasFieldPath() && context.isMultiValued();
+    }
+
+    /**
      * Build a {@link Plan} from the given list of expressions by applying given operation (OR/AND).
      * Building of such builder involves index search, results of which are persisted in the internal resources list
      *
@@ -675,7 +710,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 if (hints.excludes(expression.context.getIndexName()))
                     continue;
 
-                if (expression.getOp() == Expression.Op.NOT_EQ)
+                // A != on a multi-valued field index (a field inside collection elements) means that no value is
+                // equal: it's satisfied by the rows without any value, which the ranges around the value don't find.
+                // The index scan serves it as the NOT CONTAINS on collections, all the keys but those of the rows
+                // with an equal value (see IndexContext#searchMemtable and SSTableIndex#search).
+                if (expression.getOp() == Expression.Op.NOT_EQ && !isMultiValuedField(expression.context))
                     builder.add(buildInequalityPlan(expression));
                 else
                 {
@@ -975,6 +1014,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         closeUnusedIterators();
         closeQueryViews();
+        if (queryContext.elementFilterCandidates() > 0)
+            Tracing.trace("CONTAINS ELEMENT: {} of {} rows evaluated by the same-element filter rejected",
+                          queryContext.elementFilterRejections(), queryContext.elementFilterCandidates());
         if (tableQueryMetrics != null)
             tableQueryMetrics.record(queryContext, command);
     }
@@ -1106,12 +1148,29 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         assert indexFeatureSet.hasTermsHistogram();
         var queryView = getQueryView(predicate.context);
 
+        // A non-equality is searched as all the keys of a source minus those with an equal term, but the keys are not
+        // subtracted if a deletion may shadow terms, nor in the sources that may have expired terms (see
+        // IndexContext#hasShadowingDeletions): those sources give all their rows.
+        long nowInSec = queryContext.nowInSec();
+        boolean isNonEquality = predicate.getOp().isNonEquality();
+        boolean subtracts = isNonEquality && !IndexContext.hasShadowingDeletions(queryView.memtableIndexes, queryView.sstableIndexes, nowInSec);
+
         long rowCount = 0;
         for (MemtableIndex index : queryView.memtableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate);
+        {
+            if (isNonEquality && (!subtracts || index.mayHaveExpiredTerms(nowInSec)))
+                rowCount += Memtable.estimateRowCount(index.getMemtable());
+            else
+                rowCount += index.estimateMatchingRowsCount(predicate);
+        }
 
         for (SSTableIndex index : queryView.sstableIndexes)
-            rowCount += index.estimateMatchingRowsCount(predicate);
+        {
+            if (isNonEquality && (!subtracts || IndexContext.mayHaveExpiredTerms(index.getSSTable(), nowInSec)))
+                rowCount += index.getSSTable().getTotalRows();
+            else
+                rowCount += index.estimateMatchingRowsCount(predicate);
+        }
 
         return rowCount;
     }

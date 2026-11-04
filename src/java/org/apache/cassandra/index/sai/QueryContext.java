@@ -29,6 +29,7 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
 
 import static java.lang.Math.max;
@@ -49,6 +50,12 @@ public class QueryContext
 
     /** How long the coordinator waits for SAI queries, in nanoseconds */
     private final long executionQuotaNano;
+
+    /**
+     * The time of the query, in seconds: that of the read command, for the liveness of the data (e.g. whether the
+     * terms of expiring cells may be expired, see {@code IndexContext#subtractsEqualKeys}).
+     */
+    private final long nowInSec;
 
     /**
      * Whether the query has timed out, checked at {@link #checkpoint()}.
@@ -120,6 +127,15 @@ public class QueryContext
 
     private long postFilteringReadLatency = 0;
 
+    /**
+     * Number of rows evaluated by the same-element filter of the {@code CONTAINS ELEMENT} groups whose index candidates
+     * are the source of the keys (no OR above the group).
+     */
+    private long elementFilterCandidates = 0;
+
+    /** Number of those rows rejected by that filter: an approximation of the false positives of the candidates. */
+    private long elementFilterRejections = 0;
+
     // Determines the order of using indexes for filtering and sorting.
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
@@ -135,8 +151,26 @@ public class QueryContext
 
     public QueryContext(long executionQuotaMs)
     {
+        this(executionQuotaMs, FBUtilities.nowInSeconds());
+    }
+
+    /**
+     * @param executionQuotaMs how long the coordinator waits for the query, in milliseconds
+     * @param nowInSec the time of the query (of its read command), in seconds
+     */
+    public QueryContext(long executionQuotaMs, long nowInSec)
+    {
         this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
         this.queryStartTimeNanos = MonotonicClock.Global.approxTime.now();
+        this.nowInSec = nowInSec;
+    }
+
+    /**
+     * @return the time of the query, in seconds
+     */
+    public long nowInSec()
+    {
+        return nowInSec;
     }
 
     public long totalQueryTimeNs()
@@ -265,6 +299,38 @@ public class QueryContext
         postFilteringReadLatency += val;
     }
 
+    public void addElementFilterCandidates(long val)
+    {
+        checkThreadOwnership();
+        elementFilterCandidates += val;
+    }
+
+    public void addElementFilterRejections(long val)
+    {
+        checkThreadOwnership();
+        elementFilterRejections += val;
+    }
+
+    /**
+     * @return the number of index candidate rows evaluated by the same-element filter of {@code CONTAINS ELEMENT}
+     * groups
+     */
+    public long elementFilterCandidates()
+    {
+        checkThreadOwnership();
+        return elementFilterCandidates;
+    }
+
+    /**
+     * @return the number of index candidate rows rejected by the same-element filter of {@code CONTAINS ELEMENT}
+     * groups: no single element satisfies the group
+     */
+    public long elementFilterRejections()
+    {
+        checkThreadOwnership();
+        return elementFilterRejections;
+    }
+
     /**
      * Checks if the query has exceeded its execution quota and aborts it if it has timed out.
      *
@@ -374,6 +440,8 @@ public class QueryContext
         public final boolean queryTimedOut;
         public final long annGraphSearchLatency;
         public final long postFilteringReadLatency;
+        public final long elementFilterCandidates;
+        public final long elementFilterRejections;
         public final FilterSortOrder filterSortOrder;
 
         @Nullable
@@ -408,6 +476,8 @@ public class QueryContext
             queryTimedOut = context.queryTimedOut;
             annGraphSearchLatency = context.annGraphSearchLatency;
             postFilteringReadLatency = context.postFilteringReadLatency;
+            elementFilterCandidates = context.elementFilterCandidates;
+            elementFilterRejections = context.elementFilterRejections;
             filterSortOrder = context.filterSortOrder;
             queryPlanInfo = context.queryPlanInfo;
         }

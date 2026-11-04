@@ -1,0 +1,310 @@
+= Indexes on UDT and tuple fields
+:description: Index and query the fields of user-defined type (UDT) and tuple columns with SAI, including the fields of the elements of collections.
+
+SAI can index a single field of a user-defined type (UDT) or tuple column, at any nesting depth, including the fields of the elements of lists, sets and maps of UDTs or tuples.
+Queries restrict the fields directly in the `WHERE` clause.
+An index on a field is an ordinary SAI index on the values of that field: it has its own name, options and analyzer, and the same on-disk format as an index on a column.
+
+The examples on this page use the following schema:
+
+[source,language-cql]
+----
+CREATE TYPE geo (lat double, lon double);
+CREATE TYPE address (street text, city text, zip int, loc frozen<geo>, tags set<text>);
+CREATE TYPE fullname (first text, last text);
+CREATE TYPE person (name text, age int, home frozen<address>, names frozen<list<frozen<fullname>>>);
+
+CREATE TABLE users (
+    id int PRIMARY KEY,
+    addr frozen<address>,                  -- frozen UDT
+    p person,                              -- non-frozen UDT
+    t tuple<text, int, double>,            -- tuple
+    addrs list<frozen<address>>,           -- list of UDTs (also set<...>, map<text, ...>)
+    ts list<frozen<tuple<text, int>>>      -- list of tuples
+);
+----
+
+== Creating an index on a field
+
+The index target is the column name followed by the path to the field, with the field names separated by dots:
+
+[source,language-cql]
+----
+CREATE INDEX ON users (addr.city) USING 'sai';          -- a field of a frozen UDT
+CREATE INDEX ON users (p.age) USING 'sai';              -- a field of a non-frozen UDT
+CREATE INDEX ON users (p.home.loc.lat) USING 'sai';     -- a nested field, any depth
+CREATE INDEX ON users (t.field2) USING 'sai';           -- a tuple component
+CREATE INDEX ON users (addrs.city) USING 'sai';         -- a field of the elements of a list or set
+CREATE INDEX ON users (values(addrs).city) USING 'sai'; -- the same index, explicit form (also for maps)
+CREATE INDEX ON users (addr.tags) USING 'sai';          -- a collection field: its values (CONTAINS)
+CREATE INDEX ON users (full(addr.tags)) USING 'sai';    -- a frozen collection field as a whole (=)
+CREATE INDEX ON users (addr.street) USING 'sai'
+    WITH OPTIONS = {'case_sensitive': 'false'};         -- the usual SAI options
+----
+
+The queries of this page also use these indexes:
+
+[source,language-cql]
+----
+CREATE INDEX ON users (addr.zip) USING 'sai';
+CREATE INDEX ON users (addr.loc.lat) USING 'sai';
+CREATE INDEX ON users (addrs.zip) USING 'sai';
+CREATE INDEX ON users (p.names.first) USING 'sai';      -- a field of the elements of a collection inside a UDT
+CREATE INDEX ON users (ts.field1) USING 'sai';
+CREATE INDEX ON users (ts.field2) USING 'sai';
+----
+
+* The components of a tuple have no names: they are `field1`, `field2`, ... (1-based), as in DSE Search.
+* A path crosses the elements of a list or set, and the values of a map, implicitly: `addrs.city` indexes the `city` of every element of `addrs`.
+The explicit form `values(addrs).city` is the same index.
+* Names that need quotes are quoted on each step: `"Addr"."City"`.
+* The default index name is built from the table, the column and the path: `users_addr_city_idx`.
+* `DESCRIBE` shows the target in canonical form: `values(addrs).city` is shown as `addrs.city`, and `addr.tags` (the values of a collection field) as `values(addr.tags)`.
+Drivers show the target as the column name in their index metadata.
+* The SAI system views `system_views.indexes` and `system_views.sai_column_indexes` show the column in `column_name`, the path in `field_path` (`city`, `loc.lat`; raw names, as `column_name`) and the canonical target in `target` (`addr.city`, `values(addr.tags)`, `full(addr.tags)`).
+
+Each field to search needs its own index: there is no shorthand to index all the fields of a column at once.
+Each index costs about as much as an index on a column; see the `sai_indexes_per_table` guardrails.
+
+These targets are refused:
+
+* a field of a vector or `duration` type;
+* a path through the keys of a map, and `keys()` or `entries()` on a field;
+* a field target with a legacy secondary index or a custom index class: only SAI indexes fields;
+* `index_analyzer` and `query_analyzer` on a field inside a collection (for example `addrs.city`).
+A tokenized query could match each token in a different element of the collection in the index, but only in a single element when the rows are filtered, so the results would depend on the consistency level.
+The normalizing options `case_sensitive`, `normalize` and `ascii` are allowed there, and analyzers are allowed on the fields of single UDTs and tuples.
+
+`ALTER TYPE ... ADD` is supported (the values written before have no value for the new field).
+`ALTER TYPE ... RENAME` of a field used by an index target is refused: drop the index first, rename the field, and create the index again.
+
+== Querying fields
+
+A field is restricted like a column:
+
+[source,language-cql]
+----
+SELECT * FROM users WHERE addr.city = 'Rome';
+SELECT * FROM users WHERE p.home.loc.lat >= 1.0 AND p.home.loc.lat < 2;
+SELECT * FROM users WHERE t.field2 IN (1, 2);
+SELECT * FROM users WHERE addr.zip != 100;
+SELECT * FROM users WHERE addr.street LIKE 'b%';
+SELECT * FROM users WHERE addr.tags CONTAINS 'y';
+SELECT * FROM users WHERE addr.loc.lat IS NOT NULL;
+SELECT * FROM users WHERE addr.city = 'Rome' OR p.age > 40;
+----
+
+The supported operators are `=`, `!=`, `<`, `<=`, `>`, `>=`, `IN`, `NOT IN`, `LIKE`, `:` (with an analyzer), `CONTAINS` and `NOT CONTAINS` (on collection fields), and `IS NOT NULL`.
+They follow the rules of the same operators on columns: an index serves ranges on text fields only without a tokenizing analyzer (ranges also work with `ALLOW FILTERING`, without an index), and `LIKE` and `:` need an index on the field.
+A restriction that no index serves needs `ALLOW FILTERING`, which gives the same results as the index.
+The restrictions on the fields of partition key, clustering and static columns are supported too.
+
+`IS NOT NULL` selects the rows where the field has a value.
+An empty text value is a value; an empty value of a non-text type (for example from `blobAsInt(0x)`) is not.
+
+Bind markers take the type of the field:
+
+[source,language-cql]
+----
+SELECT * FROM users WHERE addr.city = ? AND p.age > ?;
+----
+
+Field restrictions are only accepted in `SELECT` statements: not in the `WHERE` clauses of `UPDATE`, `DELETE` and materialized views.
+
+=== Fields inside collections
+
+On a field inside a collection of UDTs or tuples, a restriction is satisfied when *some element* satisfies it, and `!=`, `NOT IN` and `NOT CONTAINS` when *no element* does (so they include the rows without elements):
+
+[source,language-cql]
+----
+SELECT * FROM users WHERE addrs.city = 'Rome';    -- some element is in Rome
+SELECT * FROM users WHERE addrs.city != 'Rome';   -- no element is in Rome
+SELECT * FROM users WHERE ts.field2 > 1;          -- some tuple has a second component > 1
+----
+
+AND-ed restrictions on the fields of a collection are independent: each may be satisfied by a different element.
+`addrs.city = 'Rome' AND addrs.zip = 100` selects a row with an element in Rome and an element (the same or another one) with zip 100.
+
+=== Conditions on the same element: CONTAINS ELEMENT
+
+To require that a single element satisfies several conditions, group them with `CONTAINS ELEMENT`:
+
+[source,language-cql]
+----
+-- an element in Rome with zip 100
+SELECT * FROM users WHERE addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100);
+
+-- OR, negations and nested fields inside the group
+SELECT * FROM users WHERE addrs CONTAINS ELEMENT (city = 'Rome' AND (zip >= 150 OR loc.lat < 2) AND zip != 100);
+
+-- no element in Rome with zip 100 (including the rows without elements)
+SELECT * FROM users WHERE addrs NOT CONTAINS ELEMENT (city = 'Rome' AND zip = 100) ALLOW FILTERING;
+
+-- a collection inside a UDT, and tuples
+SELECT * FROM users WHERE p.names CONTAINS ELEMENT (first = 'Bilbo' AND last = 'Baggins');
+SELECT * FROM users WHERE ts CONTAINS ELEMENT (field1 = 'foo' AND field2 = 2);
+----
+
+* The names inside the group are relative to the element, at any depth (`loc.lat`): conditions on fields of different nesting levels can be combined.
+* A group accepts the operators of the field restrictions, combined with `AND` and `OR`; groups can't be nested.
+* Inside a group, a field without a value satisfies no condition, `!=` included, except `NOT CONTAINS`.
+* Groups are independent from each other and from the restrictions outside them.
+* The indexes on the fields serve a group through its positive conditions (`=`, `IN`, ranges, `LIKE`, `CONTAINS`, `IS NOT NULL`); the rows they find are then checked element by element.
+A group doesn't need `ALLOW FILTERING` when the indexes serve one of the positive conditions of its top-level `AND` (or all the conditions of an `OR`), even if its other conditions aren't indexed.
+* `NOT CONTAINS ELEMENT` needs `ALLOW FILTERING`, except with a single equality: `addrs NOT CONTAINS ELEMENT (city = 'Rome')` is `addrs.city != 'Rome'`, served by the index.
+* The per-table metric `TotalElementFilterRejectedRows` counts (approximately) the rows that the indexes returned for a group and that no element satisfied.
+
+== Limitations
+
+* `IS NULL` is not supported (on fields or columns).
+On the fields inside collections, `NOT CONTAINS ELEMENT (field IS NOT NULL)` selects the rows where no element has the field.
+* No map-entry restriction on a field (`addr.m['k'] = 'v'`), no `CONTAINS KEY` on a field, no index on the keys or entries of a map field: the values of a map field can be searched with `CONTAINS`.
+* No `ORDER BY` (including ANN and BM25) and no `GROUP BY` on fields.
+* No vector or `duration` fields.
+* A query returns whole rows, not the matching elements.
+* During a rolling upgrade, create field indexes and use field restrictions only once all the nodes are upgraded.
+Schema changes during a rolling upgrade are discouraged but not prevented between 5.0.x versions: a field index created too early makes the nodes that aren't upgraded fail to load it ("Unable to parse targets for index ...").
+A query with a field restriction that reaches a replica that isn't upgraded fails: the replica logs "Unknown index expression kind" at `ERROR` and answers with a failure, and the client receives a read failure (`... failures: UNKNOWN from ...`), never wrong results.
+* Before downgrading to a version without this feature, drop the indexes on fields.
+
+[[dse-search-migration]]
+== Migrating from DSE Search
+
+DSE Search indexes every field of a UDT or tuple column as a search field named by its dotted path (`addr.city`, `t.field1`, `addrs.city`), and queries them with the tuple query parser (`{!tuple}`) in `solr_query`.
+The following table gives the CQL counterpart of each form.
+For `CREATE SEARCH INDEX ... WITH COLUMNS p.age`, create one SAI index per field the queries use: `CREATE INDEX ON t (p.age) USING 'sai'`.
+
+[%header, cols="2,2,1"]
+|===
+| DSE Search `solr_query` | CQL with SAI | Notes
+
+| `{!tuple}addr.city:Rome`
+| `WHERE addr.city = 'Rome'`
+|
+
+| `{!tuple}addr.loc.lat:1.0`, `{!tuple}p.home.city:Rome`, `{!tuple}nestedtuple.field3.field1:6`
+| `WHERE addr.loc.lat = 1.0`, `p.home.city = 'Rome'`, `nestedtuple.field3.field1 = 6`
+| nested fields
+
+| `{!tuple}t.field1:foo`, `{!tuple}t.field2:[2 TO *]`
+| `WHERE t.field1 = 'foo'`, `t.field2 >= 2`
+| tuple components
+
+| `{!tuple}p.age:41` after `UPDATE ... SET p.age = 41`
+| `WHERE p.age = 41`
+| single-field updates of non-frozen UDTs are indexed
+
+| `{!tuple}addr.street:b*`; `*x`, `/.*x.*/`
+| `WHERE addr.street LIKE 'b%'`; `LIKE '%x'`, `LIKE '%x%'`
+| needs an index on the field
+
+| `{!tuple}addr.city:rome` (no match: case-sensitive)
+| `WHERE addr.city = 'rome'` (no match); with `'case_sensitive': 'false'` on the index, a match
+| DSE `lowerCase` field types
+
+| `{!tuple}addr.city:[P TO S]`, `{!tuple}addr.zip:{100 TO *]`
+| `WHERE addr.city >= 'P' AND addr.city <= 'S'`, `addr.zip > 100`
+| ranges
+
+| `{!tuple}direc.name.firstname:(Bilbo OR Sam)`
+| `WHERE direc.name.firstname IN ('Bilbo', 'Sam')`
+|
+
+| `{!tuple}(x:* AND -x:23)`, `{!tuple}(x:* AND -x:(23 OR 45))` on a single field (not inside a collection)
+| `WHERE x != 23`, `x NOT IN (23, 45)`
+| as in DSE, a field without a value doesn't match
+
+| `{!tuple}(addrs.x:* AND -addrs.x:23)`, `{!tuple}(addrs.x:* AND -addrs.x:(23 OR 45))` (some element has `x`, and it isn't 23)
+| `WHERE addrs CONTAINS ELEMENT (x != 23) ALLOW FILTERING`, `addrs CONTAINS ELEMENT (x NOT IN (23, 45)) ALLOW FILTERING`
+| `addrs.x != 23` means "no element has `x` = 23" (it includes the rows without elements, and excludes `[23, 45]`)
+
+| `{!tuple}direc.time:"1970-01-17T15:17:11.014Z"`
+| `WHERE direc.time = '1970-01-17T15:17:11.014Z'`
+| dates
+
+| `{!tuple}addr.city:*`, `{!tuple}addrs.street:*`
+| `WHERE addr.city IS NOT NULL`, `addrs.street IS NOT NULL` (some element)
+| empty strings are values in SAI, not in DSE
+
+| `-direc.empty_field:[* TO *]`, `*:* AND NOT addr.loc.lat:*`
+| no `IS NULL`; `addrs NOT CONTAINS ELEMENT (street IS NOT NULL)` for collections
+| not supported on single fields
+
+| `{!tuple}direc.listfield:listval1`, `{!tuple}addr.tags:y`
+| `WHERE direc.listfield CONTAINS 'listval1'`, `addr.tags CONTAINS 'y'`
+| collections inside UDTs and tuples
+
+| `{!tuple}tuplewithcollection.field3:(text1 OR text3)`
+| `WHERE tuplewithcollection.field3 CONTAINS 'text1' OR tuplewithcollection.field3 CONTAINS 'text3'`
+|
+
+| `{!tuple}addrs.city:Rome`, `{!tuple}tuplecollection_list.field1:3`, `{!tuple}names.first:foo`
+| `WHERE addrs.city = 'Rome'`, `tuplecollection_list.field1 = 3`, `names.first = 'foo'`
+| some element
+
+| `{!tuple}direc.names.firstname:Bilbo`, `{!tuple}direc.names.hobbies:swim1`
+| `WHERE direc.names.firstname = 'Bilbo'`, `direc.names.hobbies CONTAINS 'swim1'`
+| collections at any level
+
+| `{!tuple}addrs.city:Rome AND addrs.zip:100`
+| `WHERE addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100)`
+| the same element
+
+| `{!tuple}addrs.city:Rome OR addrs.city:Milan`
+| `WHERE addrs.city IN ('Rome', 'Milan')`, or `addrs CONTAINS ELEMENT (city = 'Rome' OR city = 'Milan')`
+|
+
+| `{!tuple}addrs.city:Rome AND NOT addrs.zip:100`
+| `WHERE addrs CONTAINS ELEMENT (city = 'Rome' AND zip != 100)`
+| an element without zip doesn't satisfy `zip != 100` (it does in DSE)
+
+| `{!tuple}addrs.zip:[150 TO *]`, `{!tuple}addrs.loc.lat:[2 TO 6]`
+| `WHERE addrs.zip >= 150`, `addrs CONTAINS ELEMENT (loc.lat >= 2 AND loc.lat <= 6)`
+| AND-ed bounds outside a group may be satisfied by different elements
+
+| `{"q": "{!tuple}addrs.city:Rome", "fq": "{!tuple}addrs.zip:100"}`
+| `WHERE addrs.city = 'Rome' AND addrs.zip = 100`
+| independent elements
+
+| `-{!tuple}addrs.city:Rome AND addrs.zip:100`
+| `WHERE addrs NOT CONTAINS ELEMENT (city = 'Rome' AND zip = 100) ALLOW FILTERING`
+| includes the rows without elements
+
+| `{!tuple}addrs.zip:200 AND addrs.loc.lat:1.0` (no match in DSE: different nesting levels)
+| `WHERE addrs CONTAINS ELEMENT (zip = 200 AND loc.lat = 1.0)` (matches)
+| more than DSE
+
+| `id:1 AND {!tuple}addrs.city:Rome`, `({!tuple}a AND {!tuple}b)`, `({!tuple}a OR {!tuple}b)`
+| `WHERE id = 1 AND addrs.city = 'Rome'`, `a AND b`, `a OR b`
+| ordinary AND / OR across columns
+
+| `{!tuple}direc.mapfieldkey2:dynVal2` (map entries as dynamic fields)
+| `WHERE direc.mapfield CONTAINS 'dynVal2'`
+| matches the value under any key, so it can return more rows than DSE: the application must check the key (no map-entry restriction on fields)
+
+| `WHERE skill = {name: 'masonry', type: 'bricks'}`, `WHERE skill = ('masonry', 'bricks')`
+| the same, with an SAI index on the whole frozen column (`CREATE INDEX ON t (skill) USING 'sai'`)
+| whole values
+
+| sort or facet on a field (refused by DSE)
+| no `ORDER BY` or `GROUP BY` on a field
+| same as DSE
+
+| `map<text, frozen<udt>>` (refused by DSE)
+| `CREATE INDEX ON t (values(m).city) USING 'sai'`; `WHERE m.city = 'Rome'`
+| more than DSE
+
+| `+{docValues}+`, `copyField`
+| not needed: every indexed field is searchable; no copy fields
+|
+
+| phrase, fuzzy and regex queries
+| `:` with an analyzer on a single field (not inside collections); no fuzzy or regex
+| as on columns
+|===
+
+For more information, see:
+
+* xref:cassandra:developing/cql/indexing/sai/collections.adoc[SAI indexing with collections]
+* xref:cassandra:developing/cql/indexing/sai/sai-faq.adoc[SAI FAQ]
+* xref:cassandra:reference/sai-virtual-table-indexes.adoc[Virtual tables for SAI indexes and SSTables]

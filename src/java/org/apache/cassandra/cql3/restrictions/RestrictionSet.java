@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.NavigableSet;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -199,6 +200,8 @@ public abstract class RestrictionSet implements Restrictions
 
                 for (SingleRestriction singleRestriction : columnRestrictions)
                 {
+                    // the CONTAINS restrictions on different targets (a column and its fields) are counted
+                    // together: conservative, as several CONTAINS on the same target need filtering on some indexes
                     if (singleRestriction.isContains())
                     {
                         bitmap |= maskHasContains;
@@ -416,10 +419,13 @@ public abstract class RestrictionSet implements Restrictions
         {
             List<ColumnMetadata> columnDefs = restriction.getColumnDefs();
 
-            if (isDisjunction)
+            if (isDisjunction || isOnMultiValuedPath(restriction))
             {
                 // If this restriction is part of a disjunction query then we don't want
-                // to merge the restrictions, we just add the new restriction
+                // to merge the restrictions, we just add the new restriction.
+                // The AND-ed restrictions on a field inside collection elements are independent: each of them is
+                // satisfied by some element (e.g. 'addrs.city = 'Rome' AND addrs.city = 'Milan'' selects the rows
+                // with an element in Rome and an element in Milan), so they aren't merged either.
                 addRestrictionForColumns(columnDefs, restriction, null);
             }
             else
@@ -428,11 +434,13 @@ public abstract class RestrictionSet implements Restrictions
                 Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
 
                 // merge the new restriction into an existing one.  note that there is only ever a single
-                // restriction (per column), UNLESS one is ORDER BY BM25 and the other is MATCH.
+                // restriction (per column), UNLESS one is ORDER BY BM25 and the other is MATCH, or they are on
+                // different fields of the column (or one is on the whole column and the other on a field): there
+                // is a single restriction per column and field.
                 for (var existing : existingRestrictions)
                 {
                     // shouldMerge exists for the BM25/MATCH case
-                    if (existing.shouldMerge(restriction))
+                    if (Objects.equals(existing.fieldPath(), restriction.fieldPath()) && existing.shouldMerge(restriction) && restriction.shouldMerge(existing))
                     {
                         var merged = existing.mergeWith(restriction);
                         addRestrictionForColumns(merged.getColumnDefs(), merged, Set.of(existing));
@@ -443,6 +451,15 @@ public abstract class RestrictionSet implements Restrictions
                 // no existing restrictions that we should merge the new one with, add a new one
                 addRestrictionForColumns(columnDefs, restriction, null);
             }
+        }
+
+        /**
+         * @return whether the restriction is on a field inside the elements of a collection (see
+         * {@link org.apache.cassandra.cql3.FieldPath#hasElements()})
+         */
+        private static boolean isOnMultiValuedPath(SingleRestriction restriction)
+        {
+            return restriction.fieldPath() != null && restriction.fieldPath().hasElements();
         }
 
         private void addRestrictionForColumns(List<ColumnMetadata> columnDefs,
