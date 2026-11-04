@@ -405,7 +405,7 @@ public class VectorSiftSmallTest extends VectorTester.Versioned
     private void createIndex()
     {
         // we need a long timeout because we are adding many vectors
-        String index = createIndexAsync(vectorIndexDDL("%s", "val", Map.of("similarity_function", "euclidean")));
+        String index = createVectorIndexAsync("%s", "val", Map.of("similarity_function", "euclidean"));
         waitForIndexQueryable(KEYSPACE, index, 5, TimeUnit.MINUTES);
     }
 

@@ -140,7 +140,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     private void randomizedTest(int dimension)
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", dimension));
-        createIndex(vectorIndexDDL("%s", "val"));
+        createVectorIndex("%s", "val");
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
         List<Vector<Float>> vectors = IntStream.range(0, vectorCount).mapToObj(s -> randomVectorBoxed(dimension)).collect(Collectors.toList());
@@ -194,7 +194,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     public void multiSSTablesTest()
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
-        createIndex(vectorIndexDDL("%s", "val"));
+        createVectorIndex("%s", "val");
         disableCompaction(keyspace());
 
         int sstableCount = getRandom().nextIntBetween(3, 6);
@@ -234,7 +234,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
     public void rangeRestrictedTest() throws Throwable
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
-        createIndex(vectorIndexDDL("%s", "val"));
+        createVectorIndex("%s", "val");
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
 
@@ -321,7 +321,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
 
         // create index on existing sstable to produce multiple segments
         SegmentBuilder.updateLastValidSegmentRowId(50); // 50 rows per segment
-        createIndex(vectorIndexDDL("%s", "val"));
+        createVectorIndex("%s", "val");
         verifyChecksum();
 
         // query multiple on-disk indexes
@@ -381,7 +381,7 @@ public class VectorLocalTest extends VectorTester.VersionedWithChecksums
 
         // create indexes on existing sstable to produce multiple segments
         SegmentBuilder.updateLastValidSegmentRowId(50); // 50 rows per segment
-        createIndex(vectorIndexDDL("%s", "val"));
+        createVectorIndex("%s", "val");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
         flush();
         verifyChecksum();

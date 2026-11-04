@@ -85,7 +85,7 @@ public class VectorMetricsTest extends VectorTester
     public void testBasicColumnQueryMetricsVectorIndexMetrics()
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex(vectorIndexDDL("%s", "val", null, enableFused));
+        createVectorIndex("%s", "val", null, enableFused);
         disableCompaction();
 
         // Get the metrics

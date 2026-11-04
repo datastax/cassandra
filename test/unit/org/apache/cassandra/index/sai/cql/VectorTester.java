@@ -202,9 +202,9 @@ public class VectorTester extends SAITester
      * requires the hierarchical graph. The two features are inseparable in production and must
      * always be co-tested.
      *
-     * @param table           the table placeholder, typically {@code "%s"}
-     * @param column          the vector column name
-     * @param extraOptions    a map of additional index options, or {@code null} for none
+     * @param table the table placeholder, typically {@code "%s"}
+     * @param column the vector column name
+     * @param extraOptions a map of additional index options, or {@code null} for none
      * @param enableHierarchy whether to include {@code 'enable_hierarchy': 'true'} in the DDL
      */
     protected static String vectorIndexDDL(String table, String column, Map<String, String> extraOptions, boolean enableHierarchy)
@@ -224,6 +224,21 @@ public class VectorTester extends SAITester
         if (!options.isEmpty())
             builder.append(" WITH OPTIONS = ").append(options);
         return builder.toString();
+    }
+
+    /**
+     * Creates a vector index using {@link #vectorIndexDDL(String, String, Map, boolean)} and waits for it to become
+     * queryable.
+     *
+     * @param table the table placeholder, typically {@code "%s"}
+     * @param column the vector column name
+     * @param extraOptions a map of additional index options, or {@code null} for none
+     * @param enableHierarchy whether to include {@code 'enable_hierarchy': 'true'} in the DDL
+     * @return the name of the created index
+     */
+    protected String createVectorIndex(String table, String column, Map<String, String> extraOptions, boolean enableHierarchy)
+    {
+        return createIndex(vectorIndexDDL(table, column, extraOptions, enableHierarchy));
     }
 
     /**
@@ -291,33 +306,48 @@ public class VectorTester extends SAITester
         }
 
         /**
-         * Returns a CREATE CUSTOM INDEX DDL string for a vector column.
+         * Creates a vector index on the given column and waits for it to become queryable.
          * When {@link #ENABLE_FUSED} is true, {@code enable_hierarchy: true} is included so that
          * every FusedPQ run exercises the hierarchical graph code path — the two features must
          * always be tested together.
          *
          * @param table the table placeholder, typically {@code "%s"}
          * @param column the vector column name
+         * @return the name of the created index
          */
-        protected String vectorIndexDDL(String table, String column)
+        protected String createVectorIndex(String table, String column)
         {
-            return vectorIndexDDL(table, column, null);
+            return createVectorIndex(table, column, null);
         }
 
         /**
-         * Like {@link #vectorIndexDDL(String, String)} but merges additional index options.
+         * Like {@link #createVectorIndex(String, String)} but merges additional index options.
          *
          * <p>Hierarchy should always be enabled when FusedPQ is active, so the two must always be
          * co-tested.
          *
-         * @param table        the table placeholder, typically {@code "%s"}
-         * @param column       the vector column name
+         * @param table the table placeholder, typically {@code "%s"}
+         * @param column the vector column name
          * @param extraOptions a map of additional index options, or {@code null} for none
+         * @return the name of the created index
          */
-        protected String vectorIndexDDL(String table, String column, Map<String, String> extraOptions)
+        protected String createVectorIndex(String table, String column, Map<String, String> extraOptions)
         {
             // FusedPQ requires the hierarchical graph — always enable hierarchy together with fused.
-            return VectorTester.vectorIndexDDL(table, column, extraOptions, ENABLE_FUSED);
+            return createVectorIndex(table, column, extraOptions, ENABLE_FUSED);
+        }
+
+        /**
+         * Like {@link #createVectorIndex(String, String, Map)} but does not wait for the index to become queryable.
+         *
+         * @param table the table placeholder, typically {@code "%s"}
+         * @param column the vector column name
+         * @param extraOptions a map of additional index options, or {@code null} for none
+         * @return the name of the created index
+         */
+        protected String createVectorIndexAsync(String table, String column, Map<String, String> extraOptions)
+        {
+            return createIndexAsync(vectorIndexDDL(table, column, extraOptions, ENABLE_FUSED));
         }
     }
 

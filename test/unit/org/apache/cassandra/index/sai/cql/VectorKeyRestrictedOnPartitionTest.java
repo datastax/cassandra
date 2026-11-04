@@ -56,7 +56,7 @@ public class VectorKeyRestrictedOnPartitionTest extends VectorKeyRestrictedTeste
     public void partitionRestrictedTest()
     {
         createTable(String.format("CREATE TABLE %%s (pk int, str_val text, val vector<float, %d>, PRIMARY KEY(pk))", word2vec.dimension()));
-        createIndex(vectorIndexDDL("%s", "val"));
+        createVectorIndex("%s", "val");
 
         int vectorCount = getRandom().nextIntBetween(500, 1000);
 
@@ -117,7 +117,7 @@ public class VectorKeyRestrictedOnPartitionTest extends VectorKeyRestrictedTeste
     public void partitionRestrictedWidePartitionTest(int dimension, int minvectorCount, int maxvectorCount)
     {
         createTable(String.format("CREATE TABLE %%s (pk int, ck int, val vector<float, %d>, PRIMARY KEY(pk, ck))", dimension));
-        createIndex(vectorIndexDDL("%s", "val"));
+        createVectorIndex("%s", "val");
 
         int partitions = getRandom().nextIntBetween(20, 40);
         int vectorCountPerPartition = getRandom().nextIntBetween(50, 100);
@@ -185,7 +185,7 @@ public class VectorKeyRestrictedOnPartitionTest extends VectorKeyRestrictedTeste
         // The bug this test exposed happens when the last row(s) in a segment, based on PK order, are present
         // in a peer index for an sstable's search index but not its vector index.
         createTable("CREATE TABLE %s (partition int, i int, v vector<float, 2>, c int, PRIMARY KEY(partition, i))");
-        createIndex(vectorIndexDDL("%s", "v", Map.of("similarity_function", "euclidean")));
+        createVectorIndex("%s", "v", Map.of("similarity_function", "euclidean"));
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
 
         var partitionKeys = new ArrayList<Integer>();

@@ -548,7 +548,7 @@ abstract public class VectorCompactionTest extends VectorTester
     private String createTableAndReturnIndexName()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, " + dimension() + ">, PRIMARY KEY(pk))");
-        return createIndex(vectorIndexDDL("%s", "v", null, enableFused));
+        return createVectorIndex("%s", "v", null, enableFused);
     }
 
     private void validateQueries()
