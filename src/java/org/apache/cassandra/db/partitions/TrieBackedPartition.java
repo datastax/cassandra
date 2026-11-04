@@ -128,11 +128,16 @@ public class TrieBackedPartition implements Partition
         this.rowCountIncludingStatic = rowCountIncludingStatic;
         this.tombstoneCount = tombstoneCount;
         // A static row may have no live content, only deletions (e.g. a whole complex column deletion).
-        this.hasStaticRow = trie.get(STATIC_CLUSTERING_PATH) != null || trie.tailTrie(STATIC_CLUSTERING_PATH, false) != null;
+        this.hasStaticRow = trie.get(STATIC_CLUSTERING_PATH) != null || hasRowMarker(trie.applicableDeletion(STATIC_CLUSTERING_PATH));
         this.partitionLevelDeletion = TrieTombstoneMarker.applicableDeletionOrLiveAtRoot(trie);
         // There must always be a partition marker.
         assert trie.get(ByteComparable.EMPTY) != null;
         assert stats != null;
+    }
+
+    private static boolean hasRowMarker(TrieTombstoneMarker marker)
+    {
+        return marker != null && marker.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW);
     }
 
     public static TrieBackedPartition fromIterator(UnfilteredRowIterator iterator)
@@ -372,7 +377,9 @@ public class TrieBackedPartition implements Partition
     @Override
     public boolean isEmpty()
     {
-        return rowCountIncludingStatic + tombstoneCount == 0;
+        // We don't count row that only contain deleted columns in tombstoneCount. To account for these, check if the
+        // trie has a deletion branch.
+        return rowCountIncludingStatic + tombstoneCount == 0 && !trie.hasDeletionBranchAtRoot();
     }
 
     private boolean hasStaticRow()
