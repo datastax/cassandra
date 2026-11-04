@@ -993,7 +993,9 @@ public class QueryProcessor implements QueryHandler
     public static CQLStatement getStatement(String queryStr, ClientState clientState)
     throws RequestValidationException
     {
-        Tracing.trace("Parsing {}", queryStr);
+        if (Tracing.isTracing())
+            Tracing.traceSensitive("Parsing {}", queryStr, RedactionUtil.redactUnparsedCQL(queryStr));
+
         CQLStatement.Raw statement = parseStatement(queryStr);
 
         Tracing.trace("Preparing statement");

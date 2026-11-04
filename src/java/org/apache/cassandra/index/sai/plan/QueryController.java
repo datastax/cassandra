@@ -430,7 +430,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                               optimizerOptions.useTermStatistics(),
                               optimizerOptions.hybridSortOrder());
 
-            Tracing.trace("Query execution plan:\n" + plan.toStringRecursive(Redaction.NONE));
+            Tracing.traceSensitive("Query execution plan:\n{}",
+                                   plan.toStringRecursive(Redaction.NONE),
+                                   plan.toStringRecursive(Redaction.REDACT));
+
             List<Plan.IndexScan> origIndexScans = keysIterationPlan.nodesOfType(Plan.IndexScan.class);
             List<Plan.IndexScan> selectedIndexScans = plan.nodesOfType(Plan.IndexScan.class);
             Tracing.trace("Selecting {} {} of {} out of {} indexes",
