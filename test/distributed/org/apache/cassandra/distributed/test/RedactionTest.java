@@ -39,6 +39,7 @@ import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.tracing.TraceStateImpl;
 import org.assertj.core.api.Assertions;
 
 import static java.util.regex.Pattern.quote;
@@ -78,6 +79,7 @@ public class RedactionTest extends TestBaseImpl
             {
                 StorageService.instance.setLoggingLevel(QueryProcessor.class.getName(), "ALL");
                 StorageService.instance.setLoggingLevel(SelectStatement.class.getName(), "ALL");
+                StorageService.instance.setLoggingLevel(TraceStateImpl.class.getName(), "ALL");
             }
             catch (Exception e)
             {
@@ -231,7 +233,7 @@ public class RedactionTest extends TestBaseImpl
         Assertions.assertThat(descriptions).contains("Parsing " + cql);
         Assertions.assertThat(descriptions).anyMatch(description -> description.contains("secret_"));
 
-        // ... but no sensitive data should make it to the logs
+        // ... but no sensitive data should make it to the logs, where tracing messages are redacted
         assertNoSecretsInLogs(mark);
     }
 
