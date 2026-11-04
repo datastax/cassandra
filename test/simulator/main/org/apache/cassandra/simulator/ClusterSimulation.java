@@ -19,8 +19,6 @@
 package org.apache.cassandra.simulator;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
@@ -94,7 +92,6 @@ import org.apache.cassandra.simulator.utils.LongRange;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.memory.BufferPool;
@@ -899,21 +896,7 @@ public class ClusterSimulation<S extends Simulation> implements AutoCloseable
     public synchronized void close() throws IOException
     {
         // Re-enable time on shutdown
-        try
-        {
-            Field field = Clock.Global.class.getDeclaredField("instance");
-            field.setAccessible(true);
-
-            Field modifiersField = ReflectionUtils.getModifiersField();
-            modifiersField.setAccessible(true);
-            modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
-
-            field.set(null, new Clock.Default());
-        }
-        catch (NoSuchFieldException|IllegalAccessException e)
-        {
-            throw new RuntimeException(e);
-        }
+        Clock.Global.unsafeSet(new Clock.Default());
 
         threadLocalRandomCheck.stop();
         simulated.execution.forceStop();

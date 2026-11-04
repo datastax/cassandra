@@ -35,10 +35,6 @@ import org.apache.cassandra.io.util.File;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import net.bytebuddy.ByteBuddy;
-import net.bytebuddy.agent.ByteBuddyAgent;
-import net.bytebuddy.dynamic.loading.ClassReloadingStrategy;
-import net.bytebuddy.implementation.MethodDelegation;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -48,8 +44,6 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.Util;
 
-import static net.bytebuddy.matcher.ElementMatchers.named;
-import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -70,12 +64,6 @@ public class StreamSessionTest extends CQLTester
     public static void before() throws IOException
     {
         DatabaseDescriptor.daemonInitialization();
-        ByteBuddyAgent.install();
-        new ByteBuddy().redefine(ColumnFamilyStore.class)
-                       .method(named("getIfExists").and(takesArguments(TableId.class)))
-                       .intercept(MethodDelegation.to(BBKeyspaceHelper.class))
-                       .make()
-                       .load(ColumnFamilyStore.class.getClassLoader(), ClassReloadingStrategy.fromInstalledAgent());
         Path tmpDir = Files.createTempDirectory("StreamSessionTest");
         files = Lists.newArrayList(new File(tmpDir, "1"),
                                    new File(tmpDir, "2"),
@@ -105,10 +93,10 @@ public class StreamSessionTest extends CQLTester
             Thread.sleep(100);
         } while (!CompactionManager.instance.active.getTableOperations().isEmpty());
 
-        assertTrue(StreamSession.checkDiskSpace(perTableIdIncomingBytes, nextTimeUUID(), filestoreMapper));
+        assertTrue(StreamSession.checkDiskSpace(perTableIdIncomingBytes, nextTimeUUID(), filestoreMapper, StreamSessionTest::getIfExists));
 
         filestores.get(0).usableSpace = 332;
-        assertFalse(StreamSession.checkDiskSpace(perTableIdIncomingBytes, nextTimeUUID(), filestoreMapper));
+        assertFalse(StreamSession.checkDiskSpace(perTableIdIncomingBytes, nextTimeUUID(), filestoreMapper, StreamSessionTest::getIfExists));
 
     }
 
@@ -139,10 +127,10 @@ public class StreamSessionTest extends CQLTester
             Thread.sleep(100);
         } while (!CompactionManager.instance.active.getTableOperations().isEmpty());
 
-        assertTrue(StreamSession.checkDiskSpace(perTableIdIncomingBytes, nextTimeUUID(), filestoreMapper));
+        assertTrue(StreamSession.checkDiskSpace(perTableIdIncomingBytes, nextTimeUUID(), filestoreMapper, StreamSessionTest::getIfExists));
 
         filestores.get(1).usableSpace = 999;
-        assertFalse(StreamSession.checkDiskSpace(perTableIdIncomingBytes, nextTimeUUID(), filestoreMapper));
+        assertFalse(StreamSession.checkDiskSpace(perTableIdIncomingBytes, nextTimeUUID(), filestoreMapper, StreamSessionTest::getIfExists));
 
     }
 
@@ -163,15 +151,11 @@ public class StreamSessionTest extends CQLTester
         }
     }
 
-    // return our mocked tables:
-    public static class BBKeyspaceHelper
+    private static ColumnFamilyStore getIfExists(TableId id)
     {
-        public static ColumnFamilyStore getIfExists(TableId id)
-        {
-            if (id == cfs.metadata.id)
-                return cfs;
-            return cfs2;
-        }
+        if (id.equals(cfs.metadata.id))
+            return cfs;
+        return cfs2;
     }
 
     public static class FakeFileStore extends FileStore

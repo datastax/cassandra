@@ -903,13 +903,22 @@ public class StreamSession
                                   TimeUUID planId,
                                   Function<File, FileStore> fileStoreMapper)
     {
+        return checkDiskSpace(perTableIdIncomingBytes, planId, fileStoreMapper, ColumnFamilyStore::getIfExists);
+    }
+
+    @VisibleForTesting
+    static boolean checkDiskSpace(Map<TableId, Long> perTableIdIncomingBytes,
+                                  TimeUUID planId,
+                                  Function<File, FileStore> fileStoreMapper,
+                                  Function<TableId, ColumnFamilyStore> cfsGetter)
+    {
         Map<FileStore, Long> newStreamBytesToWritePerFileStore = new HashMap<>();
         Set<FileStore> allFileStores = new HashSet<>();
         // Sum up the incoming bytes per file store - we assume that the stream is evenly distributed over the writable
         // file stores for the table.
         for (Map.Entry<TableId, Long> entry : perTableIdIncomingBytes.entrySet())
         {
-            ColumnFamilyStore cfs = ColumnFamilyStore.getIfExists(entry.getKey());
+            ColumnFamilyStore cfs = cfsGetter.apply(entry.getKey());
             if (cfs == null || perTableIdIncomingBytes.get(entry.getKey()) == 0)
                 continue;
 
@@ -940,7 +949,7 @@ public class StreamSession
                          planId,
                          newStreamBytesToWritePerFileStore,
                          perTableIdIncomingBytes.keySet().stream()
-                                                .map(ColumnFamilyStore::getIfExists).filter(Objects::nonNull)
+                                                .map(cfsGetter).filter(Objects::nonNull)
                                                 .map(cfs -> cfs.getKeyspaceName() + '.' + cfs.name)
                                                 .collect(Collectors.joining(",")),
                          totalStreamRemaining,

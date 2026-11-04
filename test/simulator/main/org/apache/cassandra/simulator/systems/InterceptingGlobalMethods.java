@@ -197,12 +197,31 @@ public class InterceptingGlobalMethods extends InterceptingMonitors implements I
                 if (interceptibleThread.isIntercepting())
                     return;
             }
+            else if (isJdkSystemThread(thread))
+            {
+                return;
+            }
 
             if (NonInterceptible.isPermitted(isDeterminismCheckStrict ? OPTIONAL : REQUIRED))
                 return;
 
             if (!disabled)
                 throw failWithOOM();
+        }
+
+        private static boolean isJdkSystemThread(Thread thread)
+        {
+            // JDK 21+ internal threads (e.g. InnocuousThread "process reaper" in InnocuousThreadGroup)
+            // invoke ThreadLocalRandom.nextSecondarySeed() during thread pool spin waits in SynchronousQueue/LinkedTransferQueue.
+            String cls = thread.getClass().getName();
+            ThreadGroup group = thread.getThreadGroup();
+            if (group == null)
+                return false;
+            // InnocuousThread (e.g. process reaper, Common-Cleaner) in InnocuousThreadGroup
+            if (cls.equals("jdk.internal.misc.InnocuousThread") && "InnocuousThreadGroup".equals(group.getName()))
+                return true;
+            // ProcessHandleImpl's reaper when spawned as a plain Thread in the root "system" group
+            return cls.equals("java.lang.Thread") && group.getParent() == null && thread.getName().startsWith("process reaper");
         }
 
         public void stop()

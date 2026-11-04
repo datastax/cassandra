@@ -19,6 +19,7 @@ package org.apache.cassandra.utils;
 
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CLOCK_GLOBAL;
@@ -47,7 +48,17 @@ public interface Clock
          * implementation. Set <code>cassandra.clock</code> system property to a FQCN to use a
          * different implementation instead.
          */
-        private static final Clock instance;
+        // not final: the simulator resets it via unsafeSet (static finals cannot be written reflectively on JDK 12+)
+        private static Clock instance;
+
+        /**
+         * Test/simulator only. Not thread-safe with respect to concurrent readers.
+         */
+        @VisibleForTesting
+        public static void unsafeSet(Clock newClock)
+        {
+            instance = newClock;
+        }
 
         static
         {

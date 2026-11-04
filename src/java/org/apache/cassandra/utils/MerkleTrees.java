@@ -152,6 +152,16 @@ public class MerkleTrees implements Iterable<Map.Entry<Range<Token>, MerkleTree>
     }
 
     /**
+     * For purposes of our checking in test, either "nothing is or was ever here"
+     * or "what was here is now gone" suffice.
+     */
+    @VisibleForTesting
+    public synchronized boolean isReleased()
+    {
+        return merkleTrees.isEmpty() || merkleTrees.values().stream().allMatch(MerkleTree::isReleased);
+    }
+
+    /**
      * Init a selected MerkleTree with an even tree distribution.
      *
      * @param range

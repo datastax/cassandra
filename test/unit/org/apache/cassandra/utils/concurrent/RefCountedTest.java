@@ -454,7 +454,8 @@ public class RefCountedTest
                 @Override
                 public void run()
                 {
-                    System.out.println("aaa");
+                    // must reference the enclosing instance: since JDK 18 javac (JDK-8271623) drops this$0 from inner classes that don't use it
+                    System.out.println(a);
                 }
             };
         }

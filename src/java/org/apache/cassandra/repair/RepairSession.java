@@ -281,6 +281,12 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
     }
 
     @VisibleForTesting
+    public int syncingCount()
+    {
+        return syncingTasks.size();
+    }
+
+    @VisibleForTesting
     Map<Pair<RepairJobDesc, SyncNodePair>, CompletableRemoteSyncTask> getSyncingTasks()
     {
         return Collections.unmodifiableMap(syncingTasks);

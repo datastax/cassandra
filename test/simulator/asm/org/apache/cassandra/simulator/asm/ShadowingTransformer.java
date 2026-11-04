@@ -240,7 +240,33 @@ public class ShadowingTransformer extends ClassTransformer
     @Override
     public void visitInnerClass(String name, String outerName, String innerName, int access)
     {
-        super.visitInnerClass(name, toShadowType(outerName), innerName, access);
+        super.visitInnerClass(toShadowType(name), outerName != null ? toShadowType(outerName) : null, innerName, access);
+    }
+
+    @Override
+    public void visitOuterClass(String owner, String name, String descriptor)
+    {
+        super.visitOuterClass(toShadowType(owner), name, descriptor != null ? methodDescriptorToShadowTypes(descriptor) : null);
+    }
+
+    // toShadowType only renames types that match the originalRootType/originalOuterTypePrefix hierarchy.
+    // Nests and permitted subclasses in shadowed classes are shadowed together with the enclosing hierarchy.
+    @Override
+    public void visitNestHost(String nestHost)
+    {
+        super.visitNestHost(toShadowType(nestHost));
+    }
+
+    @Override
+    public void visitNestMember(String nestMember)
+    {
+        super.visitNestMember(toShadowType(nestMember));
+    }
+
+    @Override
+    public void visitPermittedSubclass(String permittedSubclass)
+    {
+        super.visitPermittedSubclass(toShadowType(permittedSubclass));
     }
 
     @Override
