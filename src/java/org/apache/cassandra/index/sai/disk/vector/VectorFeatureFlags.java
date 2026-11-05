@@ -30,15 +30,12 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 
 /**
- * Strict, fail-fast configuration surface for the recently-added vector feature switches.
+ * Configuration surface for the vector feature switches.
  *
- * <p>Every switch listed here is REQUIRED-EXPLICIT: it has no default, and a missing, empty, or
- * unrecognized value throws {@link ConfigurationException} naming the property and its accepted
- * values. In addition, {@link #validate()} scans the whole {@code cassandra.sai.vector} system
- * property namespace and rejects any key that is not a declared {@link CassandraRelevantProperties}
- * entry — so a typo'd property name (the historical
- * {@code cassandra.sai.vector.latest.version} silent no-op) fails the node loudly instead of
- * silently running some implicit mode and skewing a measurement.
+ * <p>Every switch has a default of {@code false}; override in {@code jvm-server.options}.
+ * {@link #validate()} scans the whole {@code cassandra.sai.vector} system-property namespace and
+ * rejects any key that is not a declared {@link CassandraRelevantProperties} entry — so a typo'd
+ * property name fails the node loudly instead of silently running some implicit mode.
  *
  * <p>Validation runs once (memoized) at the first access — wired into SAI index construction so a
  * misconfigured node fails at startup, not mid-benchmark on its first flush or merge.
@@ -56,32 +53,32 @@ public final class VectorFeatureFlags
     {
     }
 
-    /** Whether memtable graphs encode PQ codes incrementally during ingest. */
+    /** Whether memtable graphs encode PQ codes incrementally during ingest. Default: false. */
     public static boolean amortizePqEncoding()
     {
-        return requiredBoolean(CassandraRelevantProperties.SAI_VECTOR_AMORTIZE_PQ_ENCODING);
+        return CassandraRelevantProperties.SAI_VECTOR_AMORTIZE_PQ_ENCODING.getBoolean();
     }
 
-    /** Whether residual flush-time PQ work is serialized node-wide. */
+    /** Whether residual flush-time PQ work is serialized node-wide. Default: false. */
     public static boolean serializeFlushPq()
     {
-        return requiredBoolean(CassandraRelevantProperties.SAI_VECTOR_SERIALIZE_FLUSH_PQ);
+        return CassandraRelevantProperties.SAI_VECTOR_SERIALIZE_FLUSH_PQ.getBoolean();
     }
 
     /**
      * Whether flush/rebuild graph builders run cleanup()'s final improveConnections re-refinement
      * (a per-node beam re-search duplicating what insert-time construction already computed).
-     * false = flush index build is enforceDegree + serialization only.
+     * false = flush index build is enforceDegree + serialization only. Default: false.
      */
     public static boolean flushRefineFinalGraph()
     {
-        return requiredBoolean(CassandraRelevantProperties.SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH);
+        return CassandraRelevantProperties.SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH.getBoolean();
     }
 
     /**
-     * Validates the whole vector feature-flag surface: every required-explicit switch parses, and
-     * every {@code cassandra.sai.vector*} system property is a declared key. Memoized after the
-     * first successful pass; failures are not memoized (each caller re-throws the same clear error).
+     * Validates the whole vector feature-flag surface: reads each switch (applying defaults as
+     * needed) and rejects any {@code cassandra.sai.vector*} system property that is not a declared
+     * key. Memoized after the first successful pass.
      */
     public static void validate()
     {
@@ -105,39 +102,12 @@ public final class VectorFeatureFlags
                                              + " — not declared in CassandraRelevantProperties. A typo'd flag runs NOTHING; "
                                              + "fix the name or remove the setting.");
 
-        // Every required-explicit switch must be present and parseable.
         boolean amortize = amortizePqEncoding();
         boolean serialize = serializeFlushPq();
         boolean refineFlush = flushRefineFinalGraph();
 
-        logger.info("Vector feature flags (all explicit): amortize_pq_encoding={}, serialize_flush_pq={}, flush_refine_final_graph={}",
+        logger.info("Vector feature flags: amortize_pq_encoding={}, serialize_flush_pq={}, flush_refine_final_graph={}",
                     amortize, serialize, refineFlush);
         validated = true;
-    }
-
-    private static String requiredString(CassandraRelevantProperties property)
-    {
-        String raw = property.getString();
-        if (raw == null || raw.trim().isEmpty())
-            throw new ConfigurationException("Required vector feature flag -D" + property.getKey()
-                                             + " is not set. These switches have NO defaults: set it explicitly "
-                                             + "(jvm-server.options) so the run's configuration is unambiguous.");
-        return raw.trim();
-    }
-
-    private static boolean requiredBoolean(CassandraRelevantProperties property)
-    {
-        String raw = requiredString(property);
-        if (raw.equals("true"))
-            return true;
-        if (raw.equals("false"))
-            return false;
-        throw unrecognized(property, raw, "true, false");
-    }
-
-    private static ConfigurationException unrecognized(CassandraRelevantProperties property, String raw, String accepted)
-    {
-        return new ConfigurationException("Unrecognized value '" + raw + "' for -D" + property.getKey()
-                                          + "; accepted: " + accepted);
     }
 }

@@ -953,8 +953,8 @@ public enum CassandraRelevantProperties
      * Note: for indexes using version FA (jvector file format version 6), FusedPQ is always enabled regardless
      * of this property. For version FB and later, this property controls whether FusedPQ is used.
      */
-    // Encode PQ codes incrementally during ingest. REQUIRED-EXPLICIT (no default).
-    SAI_VECTOR_AMORTIZE_PQ_ENCODING("cassandra.sai.vector.amortize_pq_encoding"),
+    // Encode PQ codes incrementally during ingest. Default false.
+    SAI_VECTOR_AMORTIZE_PQ_ENCODING("cassandra.sai.vector.amortize_pq_encoding", "false"),
     // Worker-thread count for the shared jvector graph build/compaction pool. 0 derives from concurrent_compactors.
     SAI_VECTOR_COMPACTION_BUILD_THREADS("cassandra.sai.vector.compaction_build_threads", "0"),
     // Node-wide budget (in MiB) for vector-index insert work in flight. Set to 0 to disable the bound.
@@ -983,8 +983,8 @@ public enum CassandraRelevantProperties
     SAI_VECTOR_FLUSH_BUILD_PARALLEL("cassandra.sai.vector.flush_build_parallel", "false"),
     // Use non-positive value to disable it. Period in millis to trigger a flush for SAI vector memtable index.
     SAI_VECTOR_FLUSH_PERIOD_IN_MILLIS("cassandra.sai.vector_flush_period_in_millis", "-1"),
-    // Whether GraphIndexBuilder.cleanup() runs its final improveConnections refinement. REQUIRED-EXPLICIT (no default).
-    SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH("cassandra.sai.vector.flush_refine_final_graph"),
+    // Whether GraphIndexBuilder.cleanup() runs its final improveConnections refinement. Default false.
+    SAI_VECTOR_FLUSH_REFINE_FINAL_GRAPH("cassandra.sai.vector.flush_refine_final_graph", "false"),
     // Use non-positive value to disable it. When num of rows in SAI vector memtable index reaches the threshold, it triggers flush
     SAI_VECTOR_FLUSH_THRESHOLD_MAX_ROWS("cassandra.sai.vector_flush_threshold_max_rows", "-1"),
 
@@ -1016,8 +1016,8 @@ public enum CassandraRelevantProperties
     SAI_VECTOR_SEARCH_MAX_MATERIALIZE_KEYS("cassandra.sai.vector_search.max_materialized_keys", "16000"),
     /** Controls the maximum top-k limit for vector search */
     SAI_VECTOR_SEARCH_MAX_TOP_K("cassandra.sai.vector_search.max_top_k", "1000"),
-    // Serialize residual flush-time PQ compute node-wide. REQUIRED-EXPLICIT (no default).
-    SAI_VECTOR_SERIALIZE_FLUSH_PQ("cassandra.sai.vector.serialize_flush_pq"),
+    // Serialize residual flush-time PQ compute node-wide. Default false.
+    SAI_VECTOR_SERIALIZE_FLUSH_PQ("cassandra.sai.vector.serialize_flush_pq", "false"),
     SAI_VECTOR_USE_PRUNING_DEFAULT("cassandra.sai.jvector.use_pruning_default", "false"),
 
     /** The class to use for selecting the current version of the SAI on-disk index format on a per-keyspace basis. */
