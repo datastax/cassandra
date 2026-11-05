@@ -29,7 +29,7 @@ import org.apache.cassandra.index.sai.disk.format.Version;
  */
 public class VectorCompaction100dEdFaTest extends VectorCompaction100dTest
 {
-    @Parameterized.Parameters(name = "version={0} enableNVQ={1}")
+    @Parameterized.Parameters(name = "version={0} enableNVQ={1} enableFused={2}")
     public static Collection<Object[]> data()
     {
         return data(v -> v.onOrAfter(Version.ED) && !v.onOrAfter(Version.FB));
