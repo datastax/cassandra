@@ -30,6 +30,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.DefaultCompressionSelector;
@@ -137,25 +138,7 @@ public class Dse51ModeConfigTest
     public void dse51WithMatchingSettings()
     {
         DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
-        Logger ddLogger = (Logger) LoggerFactory.getLogger(DatabaseDescriptor.class);
-        ListAppender<ILoggingEvent> appender = new ListAppender<>();
-        appender.start();
-        ddLogger.addAppender(appender);
-        try
-        {
-            apply(dse51Config());
-        }
-        finally
-        {
-            ddLogger.detachAppender(appender);
-        }
-        // the mode is announced, with what it does not do yet
-        String announcement = "Running in internode_compatibility_mode DSE_5_1: the node writes big nb sstables with " +
-                              "numeric generations, which DSE 5.1 does not read, and requires paxos_variant v1; it " +
-                              "does not connect to DSE 5.1 nodes";
-        assertThat(appender.list).filteredOn(e -> e.getLevel() == Level.WARN &&
-                                                  e.getFormattedMessage().equals(announcement))
-                                 .hasSize(1);
+        apply(dse51Config());
         assertThat(mode()).isEqualTo(DSE_5_1);
         assertThat(DatabaseDescriptor.isDse51CompatibilityMode()).isTrue();
         assertThat(DatabaseDescriptor.isDseCompatibilityMode()).isTrue();
@@ -167,6 +150,43 @@ public class Dse51ModeConfigTest
         // and no pre-4.0 dialect: the gate of every pre-4.0 code path stays closed
         assertThat(DseCompat.enabled()).isFalse();
         assertThat(DseCompat.isPre40Layout(MessagingService.VERSION_3014)).isFalse();
+    }
+
+    /**
+     * The daemon announces the mode once the sstable formats are loaded, with the version written: big nb on a node
+     * (this JVM loaded its formats before the test, so the text names the format it loaded).
+     */
+    @Test
+    public void theModeIsAnnouncedWithTheVersionWritten()
+    {
+        Logger ddLogger = (Logger) LoggerFactory.getLogger(DatabaseDescriptor.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ddLogger.addAppender(appender);
+        try
+        {
+            for (InternodeCompatibilityMode silent : new InternodeCompatibilityMode[]{ NONE, DSE_6 })
+            {
+                DatabaseDescriptor.setInternodeCompatibilityMode(silent);
+                DatabaseDescriptor.announceDse51Mode();
+            }
+            assertThat(appender.list).isEmpty();
+
+            DatabaseDescriptor.setInternodeCompatibilityMode(DSE_5_1);
+            DatabaseDescriptor.announceDse51Mode();
+        }
+        finally
+        {
+            ddLogger.detachAppender(appender);
+        }
+        SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
+        String announcement = "Running in internode_compatibility_mode DSE_5_1: the node writes " + format.name() +
+                              ' ' + format.getLatestVersion().version + " sstables, which DSE 5.1 does not read, " +
+                              "with numeric generations, and requires paxos_variant v1; it does not connect to " +
+                              "DSE 5.1 nodes";
+        assertThat(appender.list).hasSize(1)
+                                 .allMatch(e -> e.getLevel() == Level.WARN &&
+                                                e.getFormattedMessage().equals(announcement));
     }
 
     @Test

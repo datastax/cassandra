@@ -71,8 +71,9 @@ public final class Dse51Compressors
 
     /**
      * Every table and view of {@code keyspaces} compressed with a compressor DSE 5.1 does not read, as
-     * {@code keyspace.table (Compressor)}, sorted; an encrypted table is not in it ({@link #encrypted}), and a table
-     * without compression is read by DSE 5.1.
+     * {@code keyspace.table (Compressor)}, sorted: the simple name for a compressor of
+     * {@code org.apache.cassandra.io.compress}, the full class name for any other. An encrypted table is not in it
+     * ({@link #encrypted}), and a table without compression is read by DSE 5.1.
      */
     @VisibleForTesting
     static List<String> unreadable(Iterable<KeyspaceMetadata> keyspaces)
