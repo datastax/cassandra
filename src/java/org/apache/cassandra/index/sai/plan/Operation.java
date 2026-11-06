@@ -168,7 +168,12 @@ public class Operation
                 // not-equals is combined with the range iff operator is AND.
                 {
                     Expression range;
-                    if (perColumn.size() == 0 || op != OperationType.AND || e instanceof RowFilter.MapComparisonExpression)
+                    // An expression is combined with the previous one only if they have the same context, so a NEQ
+                    // that no index serves doesn't turn a range served by an index into a non-indexed one, or vice versa.
+                    if (perColumn.size() == 0
+                        || op != OperationType.AND
+                        || e instanceof RowFilter.MapComparisonExpression
+                        || !Iterables.getLast(perColumn).context.equals(indexContext))
                     {
                         range = new Expression(indexContext);
                         perColumn.add(range);
