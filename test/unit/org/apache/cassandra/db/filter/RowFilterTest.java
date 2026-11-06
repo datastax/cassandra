@@ -691,6 +691,369 @@ public class RowFilterTest
         assertFalse(builder.build().isMutableIntersection());
     }
 
+    /**
+     * Builds the conditions of a CONTAINS ELEMENT group on the given column: city = 'Rome' AND zip != 100 AND
+     * (zip >= 150 OR loc.lat < 2), with the absolute paths, as the restrictions add them.
+     */
+    private static RowFilter.FilterElement romeConditions(RowFilter.Builder builder, ColumnMetadata column)
+    {
+        RowFilter.Builder conditions = builder.nestedBuilder(false);
+        conditions.add(column, path(column.type, "city"), Operator.EQ, UTF8Type.instance.decompose("Rome"));
+        conditions.add(column, path(column.type, "zip"), Operator.NEQ, Int32Type.instance.decompose(100));
+        RowFilter.Builder or = builder.nestedBuilder(true);
+        or.add(column, path(column.type, "zip"), Operator.GTE, Int32Type.instance.decompose(150));
+        or.add(column, path(column.type, "loc", "lat"), Operator.LT, DoubleType.instance.decompose(2.0));
+        conditions.addChild(or.buildElement());
+        return conditions.buildElement();
+    }
+
+    /**
+     * The CONTAINS ELEMENT groups (kind ELEMENT_MATCH) survive a serialization round trip, with conditions relative
+     * to the elements, and their serialized size is the number of bytes written.
+     */
+    @Test
+    public void testElementMatchSerialization() throws IOException
+    {
+        TableMetadata metadata = collectionFieldsTable();
+        ColumnMetadata addrs = metadata.getColumn(new ColumnIdentifier("addrs", true));
+        ColumnMetadata faddrs = metadata.getColumn(new ColumnIdentifier("faddrs", true));
+        ColumnMetadata cl = metadata.getColumn(new ColumnIdentifier("cl", true));
+
+        RowFilter.Builder builder = RowFilter.builder(false);
+        builder.addElementMatch(addrs, FieldPath.elementsOf(null), false, romeConditions(builder, addrs));
+        builder.addElementMatch(faddrs, FieldPath.elementsOf(null), true, romeConditions(builder, faddrs));
+        RowFilter.Builder tags = builder.nestedBuilder(false);
+        tags.add(faddrs, path(faddrs.type, "tags"), Operator.CONTAINS, UTF8Type.instance.decompose("y"));
+        tags.add(faddrs, path(faddrs.type, "city"), Operator.IN, ListType.getInstance(UTF8Type.instance, false).decompose(Arrays.asList("a", "b")));
+        builder.addElementMatch(faddrs, FieldPath.elementsOf(null), false, tags.buildElement());
+        RowFilter.Builder tuples = builder.nestedBuilder(false);
+        tuples.add(cl, path(cl.type, "field1"), Operator.EQ, UTF8Type.instance.decompose("a"));
+        tuples.add(cl, path(cl.type, "field2"), Operator.LT, Int32Type.instance.decompose(3));
+        builder.addElementMatch(cl, FieldPath.elementsOf(null), false, tuples.buildElement());
+        RowFilter filter = builder.build();
+        assertThat(filter.expressions()).hasSize(4);
+
+        int version = MessagingService.current_version;
+        for (RowFilter.Expression expression : filter.expressions())
+        {
+            assertThat(expression).isInstanceOf(RowFilter.ElementMatchExpression.class);
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                RowFilter.Expression.serializer.serialize(expression, out, version);
+                assertThat(out.getLength()).isEqualTo(RowFilter.Expression.serializer.serializedSize(expression, version));
+                assertThat(out.buffer().get(0)).isEqualTo((byte) 6);
+                try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
+                {
+                    RowFilter.Expression deserialized = RowFilter.Expression.serializer.deserialize(in, version, metadata, IndexHints.NONE);
+                    assertThat(in.available()).isZero();
+                    assertThat(deserialized).isEqualTo(expression);
+                    assertThat(deserialized.fieldPath()).isEqualTo(FieldPath.elementsOf(null));
+                    assertThat(deserialized.toString()).isEqualTo(expression.toString());
+                    RowFilter.ElementMatchExpression match = (RowFilter.ElementMatchExpression) deserialized;
+                    for (RowFilter.Expression condition : match.conditions().expressions())
+                        assertThat(((RowFilter.FieldExpression) condition).isRelative()).isTrue();
+                }
+            }
+        }
+
+        // the CQL forms, with the conditions relative to the elements
+        assertThat(filter.expressions().get(0).toString()).isEqualTo("addrs CONTAINS ELEMENT (city = 'Rome' AND zip != 100 AND (zip >= 150 OR loc.lat < 2.0))");
+        assertThat(filter.expressions().get(1).toString()).isEqualTo("faddrs NOT CONTAINS ELEMENT (city = 'Rome' AND zip != 100 AND (zip >= 150 OR loc.lat < 2.0))");
+        assertThat(filter.expressions().get(2).toString()).isEqualTo("faddrs CONTAINS ELEMENT (tags CONTAINS 'y' AND city IN ['a', ...)");
+        assertThat(filter.expressions().get(3).toString()).isEqualTo("cl CONTAINS ELEMENT (field1 = 'a' AND field2 < 3)");
+
+        // the relative paths: the field steps from the elements
+        RowFilter.ElementMatchExpression rome = (RowFilter.ElementMatchExpression) filter.expressions().get(0);
+        assertThat(rome.conditions().expressions().get(0).fieldPath()).isEqualTo(path(ADDRESS, "city"));
+        assertThat(rome.conditions().children().get(0).isDisjunction()).isTrue();
+        assertThat(rome.conditions().children().get(0).expressions().get(1).fieldPath()).isEqualTo(path(ADDRESS, "loc", "lat"));
+
+        // the groups differ by the polarity, the column and the conditions
+        assertThat(filter.expressions().get(0)).isNotEqualTo(filter.expressions().get(1));
+        RowFilter.Builder other = RowFilter.builder(false);
+        RowFilter.Builder otherConditions = other.nestedBuilder(false);
+        otherConditions.add(cl, path(cl.type, "field1"), Operator.EQ, UTF8Type.instance.decompose("a"));
+        other.addElementMatch(cl, FieldPath.elementsOf(null), false, otherConditions.buildElement());
+        assertThat(other.build().expressions().get(0)).isNotEqualTo(filter.expressions().get(3));
+
+        // a whole filter, with a group in a disjunction
+        RowFilter.Builder disjunction = RowFilter.builder(false);
+        RowFilter.Builder or = disjunction.nestedBuilder(true);
+        or.addElementMatch(addrs, FieldPath.elementsOf(null), false, romeConditions(disjunction, addrs));
+        or.add(addrs, path(addrs.type, "zip"), Operator.EQ, Int32Type.instance.decompose(300));
+        disjunction.addChild(or.buildElement());
+        RowFilter.FilterElement root = disjunction.build().root();
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            RowFilter.FilterElement.serializer.serialize(root, out, version);
+            assertThat(out.getLength()).isEqualTo(RowFilter.FilterElement.serializer.serializedSize(root, version));
+            try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
+            {
+                RowFilter.FilterElement deserialized = RowFilter.FilterElement.serializer.deserialize(in, version, metadata, IndexHints.NONE);
+                assertThat(deserialized.children().get(0).expressions()).isEqualTo(root.children().get(0).expressions());
+                assertThat(deserialized.toCQLString(org.apache.cassandra.db.marshal.Redaction.NONE)).isEqualTo(root.toCQLString(org.apache.cassandra.db.marshal.Redaction.NONE));
+            }
+        }
+    }
+
+    /**
+     * The candidates of a group: the positive conditions on the absolute paths, a superset of the rows satisfying
+     * the group; none for an OR with a negative condition, for a group of negative conditions only and for NOT
+     * CONTAINS ELEMENT.
+     */
+    @Test
+    public void testElementMatchCandidates()
+    {
+        TableMetadata metadata = collectionFieldsTable();
+        ColumnMetadata addrs = metadata.getColumn(new ColumnIdentifier("addrs", true));
+
+        RowFilter.Builder builder = RowFilter.builder(false);
+        builder.addElementMatch(addrs, FieldPath.elementsOf(null), false, romeConditions(builder, addrs));
+        RowFilter.ElementMatchExpression match = (RowFilter.ElementMatchExpression) builder.build().expressions().get(0);
+        assertThat(match.candidates().toCQLString(org.apache.cassandra.db.marshal.Redaction.NONE))
+            .isEqualTo("addrs.city = 'Rome' AND (addrs.zip >= 150 OR addrs.loc.lat < 2.0)");
+        assertThat(match.candidateExpressions()).hasSize(3);
+
+        builder = RowFilter.builder(false);
+        RowFilter.Builder or = builder.nestedBuilder(true);
+        or.add(addrs, path(addrs.type, "city"), Operator.EQ, UTF8Type.instance.decompose("Rome"));
+        or.add(addrs, path(addrs.type, "zip"), Operator.NEQ, Int32Type.instance.decompose(100));
+        builder.addElementMatch(addrs, FieldPath.elementsOf(null), false, or.buildElement());
+        RowFilter.Builder negative = builder.nestedBuilder(false);
+        negative.add(addrs, path(addrs.type, "zip"), Operator.NEQ, Int32Type.instance.decompose(100));
+        builder.addElementMatch(addrs, FieldPath.elementsOf(null), false, negative.buildElement());
+        RowFilter.Builder positive = builder.nestedBuilder(false);
+        positive.add(addrs, path(addrs.type, "zip"), Operator.EQ, Int32Type.instance.decompose(100));
+        builder.addElementMatch(addrs, FieldPath.elementsOf(null), true, positive.buildElement());
+        for (RowFilter.Expression expression : builder.build().expressions())
+        {
+            assertThat(((RowFilter.ElementMatchExpression) expression).candidates()).as(expression.toString()).isNull();
+            assertThat(((RowFilter.ElementMatchExpression) expression).candidateExpressions()).isEmpty();
+        }
+    }
+
+    /**
+     * The filtering of the groups: some element satisfies all the conditions (none for NOT CONTAINS ELEMENT, also
+     * satisfied by a row without elements), on non-frozen and frozen collections and on clustering columns.
+     */
+    @Test
+    public void testElementMatchIsSatisfiedBy()
+    {
+        TableMetadata metadata = collectionFieldsTable();
+        ColumnMetadata addrs = metadata.getColumn(new ColumnIdentifier("addrs", true));
+        ColumnMetadata faddrs = metadata.getColumn(new ColumnIdentifier("faddrs", true));
+        ColumnMetadata cl = metadata.getColumn(new ColumnIdentifier("cl", true));
+        DecoratedKey key = Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(1));
+        ByteBuffer clusteringValue = ListType.getInstance(TUPLE, false)
+                                             .decompose(Arrays.asList(TupleType.buildValue(new ByteBuffer[]{ UTF8Type.instance.decompose("a"), Int32Type.instance.decompose(1) }),
+                                                                      TupleType.buildValue(new ByteBuffer[]{ UTF8Type.instance.decompose("b"), Int32Type.instance.decompose(2) })));
+        Clustering<?> clustering = Clustering.make(clusteringValue);
+
+        ByteBuffer rome = address("Rome", 200, 1.0);
+        ByteBuffer milan = address("Milan", 100, 3.0);
+        ByteBuffer unset = address(null, null, null);
+        Row nonFrozen = listRow(clustering, addrs, rome, milan, unset);
+        Row empty = BTreeRow.emptyRow(clustering);
+        Row frozen = BTreeRow.create(clustering, LivenessInfo.EMPTY, Row.Deletion.LIVE,
+                                     BTree.singleton(new BufferCell(faddrs, 1, Cell.NO_TTL, Cell.NO_DELETION_TIME,
+                                                                    ListType.getInstance(ADDRESS.freeze(), false).decompose(Arrays.asList(rome, milan, unset)),
+                                                                    null)));
+
+        for (ColumnMetadata column : Arrays.asList(addrs, faddrs))
+        {
+            Row row = column == addrs ? nonFrozen : frozen;
+            assertTrue(group(column, false, "city", Operator.EQ, utf8("Rome"), "zip", Operator.EQ, int32(200)).isSatisfiedBy(metadata, key, row, 1));
+            assertFalse(group(column, false, "city", Operator.EQ, utf8("Rome"), "zip", Operator.EQ, int32(100)).isSatisfiedBy(metadata, key, row, 1));
+            assertTrue(group(column, false, "city", Operator.EQ, utf8("Milan"), "zip", Operator.LT, int32(150)).isSatisfiedBy(metadata, key, row, 1));
+            assertTrue(group(column, false, "city", Operator.EQ, utf8("Rome"), "zip", Operator.NEQ, int32(100)).isSatisfiedBy(metadata, key, row, 1));
+            assertFalse(group(column, false, "city", Operator.EQ, utf8("Rome"), "zip", Operator.NEQ, int32(200)).isSatisfiedBy(metadata, key, row, 1));
+            // the unset fields don't satisfy !=
+            assertFalse(group(column, false, "city", Operator.NEQ, utf8("Rome"), "zip", Operator.NEQ, int32(100)).isSatisfiedBy(metadata, key, row, 1));
+            // the OR of romeConditions: the Rome element, zip 200 >= 150
+            RowFilter.Builder builder = RowFilter.builder(false);
+            builder.addElementMatch(column, FieldPath.elementsOf(null), false, romeConditions(builder, column));
+            assertTrue(builder.build().expressions().get(0).isSatisfiedBy(metadata, key, row, 1));
+            // none
+            assertTrue(group(column, true, "city", Operator.EQ, utf8("Rome"), "zip", Operator.EQ, int32(100)).isSatisfiedBy(metadata, key, row, 1));
+            assertFalse(group(column, true, "city", Operator.EQ, utf8("Rome"), "zip", Operator.EQ, int32(200)).isSatisfiedBy(metadata, key, row, 1));
+            // no elements
+            assertFalse(group(column, false, "city", Operator.EQ, utf8("Rome"), "zip", Operator.EQ, int32(200)).isSatisfiedBy(metadata, key, empty, 1));
+            assertTrue(group(column, true, "city", Operator.EQ, utf8("Rome"), "zip", Operator.EQ, int32(200)).isSatisfiedBy(metadata, key, empty, 1));
+        }
+
+        // the elements of a clustering column, also through the clustering-only check
+        assertTrue(group(cl, false, "field1", Operator.EQ, utf8("b"), "field2", Operator.EQ, int32(2)).isSatisfiedBy(metadata, key, empty, 1));
+        assertFalse(group(cl, false, "field1", Operator.EQ, utf8("b"), "field2", Operator.EQ, int32(1)).isSatisfiedBy(metadata, key, empty, 1));
+        RowFilter.Builder builder = RowFilter.builder(false);
+        builder.add(group(cl, true, "field1", Operator.EQ, utf8("b"), "field2", Operator.EQ, int32(1)));
+        assertTrue(builder.build().clusteringKeyRestrictionsAreSatisfiedBy(clustering));
+        builder = RowFilter.builder(false);
+        builder.add(group(cl, false, "field1", Operator.EQ, utf8("a"), "field2", Operator.EQ, int32(2)));
+        assertFalse(builder.build().clusteringKeyRestrictionsAreSatisfiedBy(clustering));
+    }
+
+    private static ByteBuffer utf8(String value)
+    {
+        return UTF8Type.instance.decompose(value);
+    }
+
+    private static ByteBuffer int32(int value)
+    {
+        return Int32Type.instance.decompose(value);
+    }
+
+    /**
+     * @return the group of the AND of two conditions on the elements of the column
+     */
+    private static RowFilter.Expression group(ColumnMetadata column, boolean negated, String field1, Operator operator1, ByteBuffer value1, String field2, Operator operator2, ByteBuffer value2)
+    {
+        RowFilter.Builder builder = RowFilter.builder(false);
+        RowFilter.Builder conditions = builder.nestedBuilder(false);
+        conditions.add(column, path(column.type, field1), operator1, value1);
+        conditions.add(column, path(column.type, field2), operator2, value2);
+        builder.addElementMatch(column, FieldPath.elementsOf(null), negated, conditions.buildElement());
+        return builder.build().expressions().get(0);
+    }
+
+    /**
+     * Each group on a non-frozen collection is a mutable target of its own (it may be satisfied by an element, a
+     * cell, other than that satisfying another restriction); the conditions of a group are on one element.
+     */
+    @Test
+    public void testElementMatchMutableIntersections()
+    {
+        TableMetadata metadata = collectionFieldsTable();
+        ColumnMetadata addrs = metadata.getColumn(new ColumnIdentifier("addrs", true));
+        ColumnMetadata faddrs = metadata.getColumn(new ColumnIdentifier("faddrs", true));
+
+        RowFilter.Builder builder = RowFilter.builder(true);
+        builder.addElementMatch(addrs, FieldPath.elementsOf(null), false, romeConditions(builder, addrs));
+        assertFalse(builder.build().isMutableIntersection());
+        builder.add(addrs, path(addrs.type, "city"), Operator.EQ, utf8("Milan"));
+        assertTrue(builder.build().isMutableIntersection());
+
+        builder = RowFilter.builder(true);
+        builder.addElementMatch(faddrs, FieldPath.elementsOf(null), false, romeConditions(builder, faddrs));
+        builder.add(faddrs, path(faddrs.type, "city"), Operator.EQ, utf8("Milan"));
+        assertFalse(builder.build().isMutableIntersection());
+    }
+
+    /**
+     * The deserialization of the groups refuses the prefixes that don't reach the elements of a collection of UDTs or
+     * tuples, the conditions that aren't relative field expressions on the column of the group or whose relative
+     * paths don't match the elements, an empty group and an operator other than CONTAINS / NOT CONTAINS.
+     */
+    @Test
+    public void testElementMatchDeserializationErrors() throws IOException
+    {
+        TableMetadata metadata = collectionFieldsTable();
+        int version = MessagingService.current_version;
+        ColumnMetadata addrs = metadata.getColumn(new ColumnIdentifier("addrs", true));
+        ColumnMetadata faddrs = metadata.getColumn(new ColumnIdentifier("faddrs", true));
+        PathWriter elements = out -> { out.writeUnsignedVInt32(1); out.writeByte(1); };
+        PathWriter city = out -> { out.writeUnsignedVInt32(1); out.writeByte(0); out.writeUnsignedVInt32(0); };
+
+        // the prefix: a field of the elements, the elements of the elements
+        assertElementMatchRejected(metadata, version, addrs, Operator.CONTAINS,
+                                   out -> { out.writeUnsignedVInt32(2); out.writeByte(1); out.writeByte(0); out.writeUnsignedVInt32(0); },
+                                   out -> writeCondition(out, addrs, city), "it doesn't reach the elements of a collection of UDTs or tuples");
+        assertElementMatchRejected(metadata, version, addrs, Operator.CONTAINS,
+                                   out -> { out.writeUnsignedVInt32(2); out.writeByte(1); out.writeByte(1); },
+                                   out -> writeCondition(out, addrs, city), "Invalid CONTAINS ELEMENT path");
+        // the conditions: a whole-column expression, a condition on another column, a path out of the elements,
+        // a path ending with the elements, an empty group
+        assertElementMatchRejected(metadata, version, addrs, Operator.CONTAINS, elements,
+                                   out -> {
+                                       out.writeUnsignedVInt32(1);
+                                       out.writeByte(0);
+                                       ByteBufferUtil.writeWithShortLength(addrs.name.bytes, out);
+                                       Operator.EQ.writeTo(out);
+                                       ByteBufferUtil.writeWithShortLength(utf8("Rome"), out);
+                                       out.writeBoolean(false);
+                                       out.writeUnsignedVInt32(0);
+                                   }, "Invalid CONTAINS ELEMENT condition of kind SIMPLE");
+        assertElementMatchRejected(metadata, version, addrs, Operator.CONTAINS, elements,
+                                   out -> writeCondition(out, faddrs, city), "Invalid CONTAINS ELEMENT condition on column faddrs");
+        assertElementMatchRejected(metadata, version, addrs, Operator.CONTAINS, elements,
+                                   out -> writeCondition(out, addrs, o -> { o.writeUnsignedVInt32(1); o.writeByte(0); o.writeUnsignedVInt32(9); }),
+                                   "Invalid field path [9] for the elements of column addrs");
+        assertElementMatchRejected(metadata, version, addrs, Operator.CONTAINS, elements,
+                                   out -> writeCondition(out, addrs, o -> { o.writeUnsignedVInt32(2); o.writeByte(0); o.writeUnsignedVInt32(2); o.writeByte(1); }),
+                                   "Invalid field path");
+        assertElementMatchRejected(metadata, version, addrs, Operator.CONTAINS, elements,
+                                   out -> { out.writeUnsignedVInt32(0); out.writeBoolean(false); out.writeUnsignedVInt32(0); },
+                                   "Empty CONTAINS ELEMENT group");
+        // the operator
+        assertElementMatchRejected(metadata, version, addrs, Operator.EQ, elements,
+                                   out -> writeCondition(out, addrs, city), "Invalid CONTAINS ELEMENT operator");
+    }
+
+    /**
+     * A group without conditions (e.g. built from a NOT IN with an empty list, which the restriction refuses) would
+     * be satisfied by any element locally, but it doesn't survive a serialization round trip: the replicas refuse it.
+     */
+    @Test
+    public void testEmptyElementMatchRoundTrip() throws IOException
+    {
+        TableMetadata metadata = collectionFieldsTable();
+        ColumnMetadata addrs = metadata.getColumn(new ColumnIdentifier("addrs", true));
+        int version = MessagingService.current_version;
+
+        RowFilter.Builder builder = RowFilter.builder(false);
+        builder.addElementMatch(addrs, FieldPath.elementsOf(null), false, builder.nestedBuilder(false).buildElement());
+        RowFilter.Expression empty = builder.build().expressions().get(0);
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            RowFilter.Expression.serializer.serialize(empty, out, version);
+            assertThat(out.getLength()).isEqualTo(RowFilter.Expression.serializer.serializedSize(empty, version));
+            try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
+            {
+                assertThatThrownBy(() -> RowFilter.Expression.serializer.deserialize(in, version, metadata, IndexHints.NONE))
+                    .hasMessageContaining("Empty CONTAINS ELEMENT group on addrs");
+            }
+        }
+    }
+
+    /**
+     * Writes a filter element with one condition, a field expression city = 'Rome' (kind FIELD) on the given column
+     * with the given path.
+     */
+    private static void writeCondition(DataOutputBuffer out, ColumnMetadata column, PathWriter path) throws IOException
+    {
+        out.writeUnsignedVInt32(1);
+        out.writeByte(5);
+        ByteBufferUtil.writeWithShortLength(column.name.bytes, out);
+        Operator.EQ.writeTo(out);
+        path.write(out);
+        ByteBufferUtil.writeWithShortLength(utf8("Rome"), out);
+        out.writeBoolean(false);
+        out.writeUnsignedVInt32(0);
+    }
+
+    private static void assertElementMatchRejected(TableMetadata metadata,
+                                                   int version,
+                                                   ColumnMetadata column,
+                                                   Operator operator,
+                                                   PathWriter prefix,
+                                                   PathWriter conditions,
+                                                   String error) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            // the kind byte, the column name, the operator, the prefix and the conditions
+            out.writeByte(6);
+            ByteBufferUtil.writeWithShortLength(column.name.bytes, out);
+            operator.writeTo(out);
+            prefix.write(out);
+            conditions.write(out);
+            try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
+            {
+                assertThatThrownBy(() -> RowFilter.Expression.serializer.deserialize(in, version, metadata, IndexHints.NONE))
+                    .hasMessageContaining(error);
+            }
+        }
+    }
+
     private interface PathWriter
     {
         void write(DataOutputBuffer out) throws IOException;
