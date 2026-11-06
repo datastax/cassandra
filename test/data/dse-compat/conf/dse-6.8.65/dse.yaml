@@ -1,0 +1,128 @@
+async_bootstrap_reindex: false
+audit_logging_options:
+  cassandra_audit_writer_options:
+    batch_size: 50
+    flush_time: 250
+    mode: sync
+    queue_size: 30000
+    write_consistency: QUORUM
+  enabled: false
+  logger: SLF4JAuditWriter
+  retention_time: 0
+authentication_options:
+  default_scheme: internal
+  enabled: true
+  plain_text_without_ssl: warn
+authorization_options:
+  enabled: true
+cluster_summary_stats_options:
+  enabled: false
+  refresh_rate_ms: 10000
+config_encryption_active: false
+config_encryption_key_name: system_key
+cql_system_info_options:
+  enabled: false
+  refresh_rate_ms: 10000
+db_summary_stats_options:
+  enabled: false
+  refresh_rate_ms: 10000
+enable_health_based_routing: true
+graph_events:
+  ttl_seconds: 600
+histogram_data_options:
+  enabled: false
+  refresh_rate_ms: 10000
+  retention_count: 3
+internode_messaging_options:
+  port: 8609
+kerberos_options:
+  http_principal: HTTP/_HOST@REALM
+  keytab: resources/dse/conf/dse.keytab
+  qop: auth
+  service_principal: dse/_HOST@REALM
+lease_metrics_options:
+  enabled: false
+  ttl_seconds: 604800
+node_health_options:
+  dropped_mutation_window_minutes: 30
+  refresh_rate_ms: 60000
+  uptime_ramp_up_period_seconds: 10800
+resource_level_latency_tracking_options:
+  enabled: false
+  refresh_rate_ms: 10000
+role_management_options:
+  mode: internal
+shard_transport_options:
+  netty_client_request_timeout: 60000
+solr_cache_stats_options:
+  enabled: false
+  refresh_rate_ms: 60000
+  ttl_seconds: 604800
+solr_index_stats_options:
+  enabled: false
+  refresh_rate_ms: 60000
+  ttl_seconds: 604800
+solr_latency_snapshot_options:
+  enabled: false
+  refresh_rate_ms: 60000
+  ttl_seconds: 604800
+solr_request_handler_metrics_options:
+  enabled: false
+  refresh_rate_ms: 60000
+  ttl_seconds: 604800
+solr_resource_upload_limit_mb: 10
+solr_slow_sub_query_log_options:
+  async_writers: 1
+  enabled: false
+  threshold_ms: 3000
+  ttl_seconds: 604800
+solr_update_handler_metrics_options:
+  enabled: false
+  refresh_rate_ms: 60000
+  ttl_seconds: 604800
+spark_application_info_options:
+  driver:
+    connectorSource: false
+    jvmSource: false
+    sink: false
+    stateSource: false
+  enabled: false
+  executor:
+    connectorSource: false
+    jvmSource: false
+    sink: false
+  refresh_rate_ms: 10000
+spark_cluster_info_options:
+  enabled: false
+  refresh_rate_ms: 10000
+spark_process_runner:
+  run_as_runner_options:
+    user_slots:
+    - slot1
+    - slot2
+  runner_type: default
+spark_security_enabled: false
+spark_security_encryption_enabled: false
+spark_shared_secret_bit_length: 256
+spark_ui_options:
+  encryption: inherit
+  encryption_options:
+    enabled: false
+    keystore: resources/dse/conf/.ui-keystore
+    keystore_password: cassandra
+system_info_encryption:
+  chunk_length_kb: 64
+  cipher_algorithm: AES
+  enabled: false
+  secret_key_strength: 128
+system_key_directory: /etc/dse/conf
+ttl_index_rebuild_options:
+  fixed_rate_period: 300
+  initial_delay: 20
+  max_docs_per_batch: 4096
+  thread_pool_size: 1
+user_level_latency_tracking_options:
+  enabled: false
+  quantiles: false
+  refresh_rate_ms: 10000
+  top_stats_limit: 100
