@@ -542,6 +542,14 @@ public interface StorageServiceMBean extends NotificationEmitter
     public void move(String newToken) throws IOException;
 
     /**
+     * Keeps only the given tokens, a strict subset of the tokens of this node, streaming the ranges it gives up to
+     * their new replicas. Blocks until the operation completes.
+     *
+     * @param keptTokens the tokens to keep
+     */
+    public void shrinkTokens(List<String> keptTokens) throws IOException;
+
+    /**
      * removeToken removes token (and all data associated with
      * enpoint that had it) from the ring
      */
