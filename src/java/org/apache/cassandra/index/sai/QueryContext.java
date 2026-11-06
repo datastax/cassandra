@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.index.sai;
 
-import java.util.concurrent.TimeUnit;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -26,7 +25,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.index.sai.plan.Plan;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
 import org.apache.cassandra.utils.MonotonicClock;
@@ -41,14 +40,13 @@ public class QueryContext
 {
     public static final boolean DISABLE_TIMEOUT = Boolean.getBoolean("cassandra.sai.test.disable.timeout");
 
+    private final ReadCommand command;
+
     /** The thread ID that the query is running on, used to verify single-threaded access. */
     private final long owningThreadId = Thread.currentThread().getId();
 
     /** The query start time, in nanoseconds. Used to measure the query execution time. */
     private final long queryStartTimeNanos;
-
-    /** How long the coordinator waits for SAI queries, in nanoseconds */
-    private final long executionQuotaNano;
 
     /**
      * Whether the query has timed out, checked at {@link #checkpoint()}.
@@ -124,12 +122,12 @@ public class QueryContext
     @VisibleForTesting
     public QueryContext()
     {
-        this(DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
+        this(null);
     }
 
-    public QueryContext(long executionQuotaMs)
+    public QueryContext(ReadCommand command)
     {
-        this.executionQuotaNano = TimeUnit.MILLISECONDS.toNanos(executionQuotaMs);
+        this.command = command;
         this.queryStartTimeNanos = MonotonicClock.approxTime.now();
     }
 
@@ -262,10 +260,15 @@ public class QueryContext
     {
         checkThreadOwnership();
 
-        if (totalQueryTimeNs() >= executionQuotaNano && !DISABLE_TIMEOUT)
+        if (command != null && !DISABLE_TIMEOUT)
         {
-            queryTimedOut = true;
-            throw new AbortedOperationException();
+            command.check();
+
+            if (command.isAborted())
+            {
+                queryTimedOut = true;
+                throw new AbortedOperationException();
+            }
         }
     }
 

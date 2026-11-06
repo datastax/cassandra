@@ -16,12 +16,11 @@
 
 package org.apache.cassandra.index.sai.plan;
 
-import java.util.function.Supplier;
-
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.monitoring.Monitorable;
 import org.apache.cassandra.index.sai.QueryContext;
+
+import javax.annotation.Nullable;
 
 /**
  * {@link Monitorable.ExecutionInfo} implementation for SAI queries.
@@ -29,6 +28,8 @@ import org.apache.cassandra.index.sai.QueryContext;
  */
 public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
 {
+    public static final String UNKNOWN_PLAN = "not yet created";
+
     private final QueryContext.Snapshot metrics;
     private final String plan;
 
@@ -48,16 +49,13 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
      * Returns a supplier of {@link Monitorable.ExecutionInfo} for a query, to be used when logging slow queries.
      *
      * @param context the query context
-     * @param plan the query plan
+     * @param plan the query plan, which might be null if monitoring happens before it has been created
      * @return a supplier of {@link Monitorable.ExecutionInfo} for a query
      */
-    public static Supplier<Monitorable.ExecutionInfo> supplier(QueryContext context, Plan plan)
+    public static Monitorable.ExecutionInfo create(QueryContext context, @Nullable Plan plan)
     {
-        if (!CassandraRelevantProperties.SAI_MONITORING_EXECUTION_INFO_ENABLED.getBoolean())
-            return Monitorable.ExecutionInfo.EMPTY_SUPPLIER;
-
         String planAsString = toLogString(plan);
-        return () -> new QueryMonitorableExecutionInfo(context.snapshot(), planAsString);
+        return new QueryMonitorableExecutionInfo(context.snapshot(), planAsString);
     }
 
     @Override
@@ -94,8 +92,11 @@ public class QueryMonitorableExecutionInfo implements Monitorable.ExecutionInfo
         return sb.toString();
     }
 
-    private static String toLogString(Plan plan)
+    private static String toLogString(@Nullable Plan plan)
     {
+        if (plan == null)
+            return DOUBLE_INDENT + UNKNOWN_PLAN;
+
         String s = plan.toStringRecursive(Redaction.REDACT, DOUBLE_INDENT);
         return s.endsWith("\n") ? s.substring(0, s.length() - 1) : s;
     }
