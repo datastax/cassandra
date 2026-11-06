@@ -23,6 +23,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.cache.ChunkCacheLoadingTest;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
@@ -133,6 +134,15 @@ public class Dse51CompressorsTest extends CQLTester
         execute(String.format("DROP TABLE %s.%s", KEYSPACE, noop));
         execute(String.format("DROP TABLE %s.%s", KEYSPACE, adaptive));
         assertThatCode(Dse51Compressors::verifyAtStartup).doesNotThrowAnyException();
+    }
+
+    /** A compressor class of another package is named in full, so that it is not taken for one DSE 5.1 reads. */
+    @Test
+    public void aCompressorOfAnotherPackageIsNamedInFull() throws Throwable
+    {
+        String custom = ChunkCacheLoadingTest.ReadingNopCompressor.class.getName();
+        String table = createTableCompressedWith("{'class': '" + custom + "'}");
+        assertThat(unreadable()).containsExactly(KEYSPACE + '.' + table + " (" + custom + ')');
     }
 
     @Test

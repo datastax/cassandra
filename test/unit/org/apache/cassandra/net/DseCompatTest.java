@@ -228,7 +228,7 @@ public class DseCompatTest
         for (String dse51 : new String[]{ "5.1.51", "5.1.18", "5.1.0" })
             assertThat(DseCompat.isDse51DseVersion(dse51)).as(dse51).isTrue();
         for (String other : new String[]{ "6.8.1", "6.9.26", "5.0.15", "5.1", "5.1.51.0", "5.1.51-SNAPSHOT",
-                                          "5.1.051", "5.1.00", "3.11.3.5151", "", "none" })
+                                          "5.1.051", "5.1.00", "5.1.100", "3.11.3.5151", "", "none" })
             assertThat(DseCompat.isDse51DseVersion(other)).as(other).isFalse();
         assertThat(DseCompat.isDse51DseVersion(null)).isFalse();
     }
