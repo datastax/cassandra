@@ -140,32 +140,32 @@ threads) the Cassandra process lacks. For example:
 [source, bash]
 ----
 $ nodetool tpstats
-Pool Name                         Active   Pending      Completed   Blocked  All time blocked
-ReadStage                              2         0             12         0                 0
-MiscStage                              0         0              0         0                 0
-CompactionExecutor                     0         0           1940         0                 0
-MutationStage                          0         0              0         0                 0
-GossipStage                            0         0          10293         0                 0
-Repair-Task                            0         0              0         0                 0
-RequestResponseStage                   0         0             16         0                 0
-ReadRepairStage                        0         0              0         0                 0
-CounterMutationStage                   0         0              0         0                 0
-MemtablePostFlush                      0         0             83         0                 0
-ValidationExecutor                     0         0              0         0                 0
-MemtableFlushWriter                    0         0             30         0                 0
-ViewMutationStage                      0         0              0         0                 0
-CacheCleanupExecutor                   0         0              0         0                 0
-MemtableReclaimMemory                  0         0             30         0                 0
-PendingRangeCalculator                 0         0             11         0                 0
-SecondaryIndexManagement               0         0              0         0                 0
-HintsDispatcher                        0         0              0         0                 0
-Native-Transport-Requests              0         0            192         0                 0
-MigrationStage                         0         0             14         0                 0
-PerDiskMemtableFlushWriter_0           0         0             30         0                 0
-Sampler                                0         0              0         0                 0
-ViewBuildExecutor                      0         0              0         0                 0
-InternalResponseStage                  0         0              0         0                 0
-AntiEntropyStage                       0         0              0         0                 0
+Pool Name                         Active   Pending      Completed   Blocked  All time blocked  Oldest task queue (micros)  Longest running task (micros)
+ReadStage                              2         0             12         0                 0                           0                           3127
+MiscStage                              0         0              0         0                 0                           0                              0
+CompactionExecutor                     0         0           1940         0                 0                           0                              0
+MutationStage                          0         0              0         0                 0                           0                              0
+GossipStage                            0         0          10293         0                 0                           0                              0
+Repair-Task                            0         0              0         0                 0                           0                              0
+RequestResponseStage                   0         0             16         0                 0                           0                              0
+ReadRepairStage                        0         0              0         0                 0                           0                              0
+CounterMutationStage                   0         0              0         0                 0                           0                              0
+MemtablePostFlush                      0         0             83         0                 0                           0                              0
+ValidationExecutor                     0         0              0         0                 0                           0                              0
+MemtableFlushWriter                    0         0             30         0                 0                           0                              0
+ViewMutationStage                      0         0              0         0                 0                           0                              0
+CacheCleanupExecutor                   0         0              0         0                 0                           0                              0
+MemtableReclaimMemory                  0         0             30         0                 0                           0                              0
+PendingRangeCalculator                 0         0             11         0                 0                           0                              0
+SecondaryIndexManagement               0         0              0         0                 0                           0                              0
+HintsDispatcher                        0         0              0         0                 0                           0                              0
+Native-Transport-Requests              0         0            192         0                 0                           0                              0
+MigrationStage                         0         0             14         0                 0                           0                              0
+PerDiskMemtableFlushWriter_0           0         0             30         0                 0                           0                              0
+Sampler                                0         0              0         0                 0                           0                              0
+ViewBuildExecutor                      0         0              0         0                 0                           0                              0
+InternalResponseStage                  0         0              0         0                 0                           0                              0
+AntiEntropyStage                       0         0              0         0                 0                           0                              0
 
 Message type           Dropped                  Latency waiting in queue (micros)
                                              50%               95%               99%               Max
@@ -185,7 +185,11 @@ READ_REPAIR                  0               N/A               N/A              
 This command shows you all kinds of interesting statistics. The first
 section shows a detailed breakdown of threadpools for each Cassandra
 stage, including how many threads are current executing (Active) and how
-many are waiting to run (Pending). Typically if you see pending
+many are waiting to run (Pending). `Oldest task queue (micros)` is how
+long the task at the head of the queue has been waiting since it was
+queued and
+`Longest running task (micros)` is how long the oldest task currently
+executing has been running. Typically if you see pending
 executions in a particular threadpool that indicates a problem localized
 to that type of operation. For example if the `RequestResponseState`
 queue is backing up, that means that the coordinators are waiting on a

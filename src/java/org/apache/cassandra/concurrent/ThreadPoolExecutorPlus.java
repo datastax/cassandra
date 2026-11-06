@@ -23,6 +23,8 @@ import java.util.concurrent.RunnableFuture;
 import org.apache.cassandra.utils.WithResources;
 import org.apache.cassandra.utils.concurrent.Future;
 
+import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
+
 /**
  * This class inherits Executor best practices from {@link ThreadPoolExecutorBase}
  * and {@link ThreadPoolExecutorBuilder}. Most Cassandra executors should use or extend this.
@@ -47,6 +49,8 @@ public class ThreadPoolExecutorPlus extends ThreadPoolExecutorBase implements Ex
 
     private <T extends Runnable> T addTask(T task)
     {
+        if (task instanceof TimedTask)
+            ((TimedTask) task).markEnqueued(approxTime.now());
         super.execute(task);
         return task;
     }

@@ -227,6 +227,24 @@ public class ThreadPoolExecutorJMXAdapter implements Runnable, ResizableThreadPo
         return executor.getMaxTasksQueued();
     }
 
+    @Override
+    public long oldestTaskQueueTime()
+    {
+        return executor.oldestTaskQueueTime();
+    }
+
+    @Override
+    public long longestRunningTaskTime()
+    {
+        return executor.longestRunningTaskTime();
+    }
+
+    @Override
+    public String getLongestRunningTaskClass()
+    {
+        return executor.getLongestRunningTaskClass();
+    }
+
     static RejectedExecutionHandler rejectedExecutionHandler(ThreadPoolMetrics metrics, RejectedExecutionHandler wrap)
     {
         return (task, executor) ->
