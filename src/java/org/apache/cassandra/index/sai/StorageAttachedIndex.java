@@ -102,7 +102,6 @@ import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.FutureCombiner;
 import org.apache.cassandra.utils.concurrent.ImmediateFuture;
@@ -112,6 +111,10 @@ import static org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig.MAX_TOP_K
 
 public class StorageAttachedIndex implements Index
 {
+    public static final String ANALYZER_INSIDE_COLLECTIONS_MESSAGE =
+        "index_analyzer and query_analyzer are not supported on indexes on fields inside collections (target %s): " +
+        "results would depend on which element holds each token; use case_sensitive, normalize or ascii";
+
     public static final String NAME = "sai";
     public static final String NGRAM_WITHOUT_QUERY_ANALYZER_WARNING =
     "Using an ngram analyzer without defining a query_analyzer. " +
@@ -248,14 +251,15 @@ public class StorageAttachedIndex implements Index
         this.baseCfs = baseCfs;
         this.config = config;
         TableMetadata tableMetadata = baseCfs.metadata();
-        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(tableMetadata, config);
+        TargetParser.Target target = TargetParser.parseTarget(tableMetadata, config);
         this.indexContext = new IndexContext(tableMetadata.keyspace,
                                              tableMetadata.name,
                                              tableMetadata.id,
                                              tableMetadata.partitionKeyType,
                                              tableMetadata.comparator,
-                                             target.left,
-                                             target.right,
+                                             target.column,
+                                             target.type,
+                                             target.fieldPath,
                                              config,
                                              baseCfs);
     }
@@ -298,7 +302,7 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("A storage-attached index cannot be created over multiple columns: " + targetColumn);
         }
 
-        Pair<ColumnMetadata, IndexTarget.Type> target = TargetParser.parse(metadata, targetColumn);
+        TargetParser.Target target = TargetParser.parseTarget(metadata, targetColumn);
 
         if (target == null)
         {
@@ -311,8 +315,9 @@ public class StorageAttachedIndex implements Index
                                               .filter(index -> index.getIndexClassName().equals(StorageAttachedIndex.class.getName()))
                                               .filter(index -> {
                                                   // Indexes on the same column with different target (KEYS, VALUES, ENTRIES)
-                                                  // are allowed on non-frozen Maps
-                                                  var existingTarget = TargetParser.parse(metadata, index.options.get(IndexTarget.TARGET_OPTION_NAME));
+                                                  // are allowed on non-frozen Maps, and so are the indexes on
+                                                  // different fields of the column, and on the whole column
+                                                  var existingTarget = TargetParser.parseTarget(metadata, index.options.get(IndexTarget.TARGET_OPTION_NAME));
                                                   if (existingTarget == null || !existingTarget.equals(target))
                                                       return false;
                                                   // Also allow different indexes if one is analyzed and the other isn't
@@ -321,19 +326,40 @@ public class StorageAttachedIndex implements Index
                                               .count();
         // >1 because "metadata.indexes" already includes current index
         if (duplicateCount > 1)
-            throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on column: %s", target.left));
+        {
+            if (target.hasFieldPath())
+                throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on field: %s", targetColumn));
+            throw new InvalidRequestException(String.format("Cannot create duplicate storage-attached index on column: %s", target.column));
+        }
+
+        // An index_analyzer / query_analyzer (possibly tokenizing) on a field inside collections would match each
+        // token of a query in some element, possibly a different one for each token, while the filtering (also the
+        // coordinator re-filtering of the replica filtering protection) requires all the tokens in one element: the
+        // results would depend on the consistency level. Only the non-tokenizing options (case_sensitive,
+        // normalize, ascii) are allowed.
+        if (target.hasFieldPath()
+            && target.fieldPath.hasElements()
+            && (options.containsKey(LuceneAnalyzer.INDEX_ANALYZER) || options.containsKey(LuceneAnalyzer.QUERY_ANALYZER)))
+        {
+            throw new InvalidRequestException(String.format(ANALYZER_INSIDE_COLLECTIONS_MESSAGE,
+                                                            target.column.name.toCQLString() + '.' + target.fieldPath.toCQLString(target.column.type)));
+        }
 
         // Analyzer is not supported against PK columns
-        if (isAnalyzed)
+        if (isAnalyzed && !target.hasFieldPath())
         {
             for (ColumnMetadata column : metadata.primaryKeyColumns())
             {
-                if (column.name.equals(target.left.name))
-                    logger.warn("Schema contains an invalid index analyzer on primary key column, allowed for backwards compatibility: " + target.left);
+                if (column.name.equals(target.column.name))
+                    logger.warn("Schema contains an invalid index analyzer on primary key column, allowed for backwards compatibility: " + target.column);
             }
         }
 
-        AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
+        // for an index on a field, the type of the field (or of its elements, if it's a collection indexed by values)
+        AbstractType<?> type = TypeUtil.cellValueType(target.column, target.type, target.fieldPath);
+
+        if (target.hasFieldPath() && type.isVector())
+            throw new InvalidRequestException("Cannot create a storage-attached index on vector field: " + targetColumn);
 
         // Validate analyzers by building them
         try (AbstractAnalyzer.AnalyzerFactory analyzerFactory = AbstractAnalyzer.fromOptions(targetColumn, type, options))
@@ -735,9 +761,16 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public boolean isOnFieldOf(ColumnMetadata column)
+    {
+        return indexContext.hasFieldPath() && dependsOn(column);
+    }
+
+    @Override
     public boolean supportsExpression(ColumnMetadata column, Operator operator)
     {
-        return dependsOn(column) && indexContext.supports(operator);
+        // an index on a field of the column doesn't index the values of the column
+        return dependsOn(column) && !indexContext.hasFieldPath() && indexContext.supports(operator);
     }
 
     @Override

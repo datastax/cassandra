@@ -211,7 +211,8 @@ public class Expression
      */
     private boolean isReversedTerms()
     {
-        return context.getDefinition().isReversedType() && !TypeUtil.isLiteral(validator);
+        // the values of a field of a reversed column are not reversed
+        return context.getDefinition().isReversedType() && !context.hasFieldPath() && !TypeUtil.isLiteral(validator);
     }
 
     /**

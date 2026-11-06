@@ -19,9 +19,11 @@
 package org.apache.cassandra.index.sai;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -41,6 +43,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ClusteringComparator;
@@ -61,6 +64,7 @@ import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.ComplexColumnData;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
@@ -144,6 +148,15 @@ public class IndexContext
     private final TableId tableId;
     private final ColumnMetadata column;
     private final IndexTarget.Type indexType;
+    // the path to the indexed field of the column, null if the whole column is indexed
+    @Nullable
+    private final FieldPath fieldPath;
+    // whether the indexed field is a collection indexed by its elements (map values)
+    private final boolean unpacksLeafCollection;
+    // whether a row can have more than one indexed value, see isMultiValued()
+    private final boolean isMultiValued;
+    // the column name, followed by the field path for an index on a field
+    private final String targetName;
     private final AbstractType<?> validator;
     private final ColumnFamilyStore cfs;
 
@@ -179,6 +192,24 @@ public class IndexContext
                         IndexMetadata config,
                         @Nonnull ColumnFamilyStore cfs)
     {
+        this(keyspace, table, tableId, partitionKeyType, clusteringComparator, column, indexType, null, config, cfs);
+    }
+
+    /**
+     * @param fieldPath the path to the indexed field of the column (see {@link FieldPath}), or {@code null} if the
+     * whole column is indexed
+     */
+    public IndexContext(@Nonnull String keyspace,
+                        @Nonnull String table,
+                        @Nonnull TableId tableId,
+                        @Nonnull AbstractType<?> partitionKeyType,
+                        @Nonnull ClusteringComparator clusteringComparator,
+                        @Nonnull ColumnMetadata column,
+                        @Nonnull IndexTarget.Type indexType,
+                        @Nullable FieldPath fieldPath,
+                        IndexMetadata config,
+                        @Nonnull ColumnFamilyStore cfs)
+    {
         this.keyspace = keyspace;
         this.table = table;
         this.tableId = tableId;
@@ -186,9 +217,19 @@ public class IndexContext
         this.clusteringComparator = clusteringComparator;
         this.column = column;
         this.indexType = indexType;
+        this.fieldPath = fieldPath;
+        this.unpacksLeafCollection = fieldPath != null
+                                     && indexType == IndexTarget.Type.VALUES
+                                     && fieldPath.leafType(column.type).isCollection();
+        this.isMultiValued = fieldPath == null
+                             ? TypeUtil.isNonFrozenCollection(column.type)
+                             : fieldPath.hasElements() || unpacksLeafCollection;
+        this.targetName = fieldPath == null
+                          ? column.name.toCQLString()
+                          : column.name.toCQLString() + '.' + fieldPath.toCQLString(column.type);
         this.config = config;
         this.viewManager = new IndexViewManager(this);
-        this.validator = TypeUtil.cellValueType(column, indexType);
+        this.validator = TypeUtil.cellValueType(column, indexType, fieldPath);
         this.cfs = cfs;
         this.version = Version.current(keyspace);
         this.primaryKeyFactory = version.onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
@@ -302,10 +343,10 @@ public class IndexContext
 
         long start = nanoTime();
 
-        if (isNonFrozenCollection())
+        if (isMultiValued())
         {
             long now = FBUtilities.nowInSeconds();
-            Iterator<ByteBuffer> bufferIterator = getValuesOf(row, now, expiringCellsObserver(target, now));
+            Iterator<ByteBuffer> bufferIterator = getValuesOf(key, row, now, expiringCellsObserver(target, now));
             if (bufferIterator != null)
             {
                 while (bufferIterator.hasNext())
@@ -330,9 +371,9 @@ public class IndexContext
     public void validateMaxTermSizeForRow(DecoratedKey key, Row row)
     {
         AbstractAnalyzer analyzer = getAnalyzerFactory().create();
-        if (isNonFrozenCollection())
+        if (isMultiValued())
         {
-            Iterator<ByteBuffer> bufferIterator = getValuesOf(row, FBUtilities.nowInSeconds());
+            Iterator<ByteBuffer> bufferIterator = getValuesOf(key, row, FBUtilities.nowInSeconds());
             while (bufferIterator != null && bufferIterator.hasNext())
                 validateMaxTermSizeForCell(analyzer, key, bufferIterator.next());
         }
@@ -356,7 +397,7 @@ public class IndexContext
                 if (!validateCumulativeAnalyzedTermLimit(key, analyzer))
                 {
                     String error = String.format(ANALYZED_TERM_OVERSIZE_ERROR_MESSAGE,
-                                                 column.name, FBUtilities.prettyPrintMemory(maxTermSize));
+                                                 getTargetName(), FBUtilities.prettyPrintMemory(maxTermSize));
                     throw new InvalidRequestException(error);
                 }
             }
@@ -368,7 +409,7 @@ public class IndexContext
                     if (!validateMaxTermSize(key, size))
                     {
                         String error = String.format(TERM_OVERSIZE_ERROR_MESSAGE,
-                                                     column.name,
+                                                     getTargetName(),
                                                      FBUtilities.prettyPrintMemory(size),
                                                      FBUtilities.prettyPrintMemory(maxTermSize));
                         throw new InvalidRequestException(error);
@@ -397,7 +438,7 @@ public class IndexContext
         if (termSize > maxTermSize)
         {
             noSpamLogger.warn(logMessage(TERM_OVERSIZE_LOG_MESSAGE),
-                              getColumnName(),
+                              getTargetName(),
                               keyValidator().getString(key.getKey()),
                               FBUtilities.prettyPrintMemory(termSize),
                               FBUtilities.prettyPrintMemory(maxTermSize));
@@ -418,7 +459,7 @@ public class IndexContext
             if (bytesCount > maxTermSize)
             {
                 noSpamLogger.warn(logMessage(ANALYZED_TERM_OVERSIZE_LOG_MESSAGE),
-                                  getColumnName(),
+                                  getTargetName(),
                                   keyValidator().getString(key.getKey()),
                                   FBUtilities.prettyPrintMemory(maxTermSize));
                 return false;
@@ -444,11 +485,11 @@ public class IndexContext
         // C* has already determined this is the current represntation of the oldRow in the memtable, and that means
         // we need to add the newValue to the index and remove the oldValue from it, even if it has already expired via
         // TTL.
-        if (isNonFrozenCollection())
+        if (isMultiValued())
         {
             long now = FBUtilities.nowInSeconds();
-            Iterator<ByteBuffer> oldValues = getValuesOf(oldRow, 0);
-            Iterator<ByteBuffer> newValues = getValuesOf(newRow, now, expiringCellsObserver(target, now));
+            Iterator<ByteBuffer> oldValues = getValuesOf(key, oldRow, 0);
+            Iterator<ByteBuffer> newValues = getValuesOf(key, newRow, now, expiringCellsObserver(target, now));
             target.update(key, oldRow.clustering(), oldValues, newValues, memtable, opGroup);
         }
         else
@@ -735,24 +776,71 @@ public class IndexContext
         return validator;
     }
 
+    /**
+     * @return the path to the indexed field of the column, or {@code null} if the whole column is indexed
+     */
+    @Nullable
+    public FieldPath getFieldPath()
+    {
+        return fieldPath;
+    }
+
+    /**
+     * @return whether the index is on a field of the column, rather than on the whole column
+     */
+    public boolean hasFieldPath()
+    {
+        return fieldPath != null;
+    }
+
+    /**
+     * @return the type of index target; for an index on a field, it applies to the field
+     */
+    public IndexTarget.Type getIndexType()
+    {
+        return indexType;
+    }
+
+    /**
+     * @return whether the index is on the keys, values or entries of a non-frozen collection column. This is not the
+     * case of the indexes on a field of the column, even if the field is inside the elements of the collection.
+     */
     public boolean isNonFrozenCollection()
     {
-        return TypeUtil.isNonFrozenCollection(column.type);
+        return fieldPath == null && TypeUtil.isNonFrozenCollection(column.type);
+    }
+
+    /**
+     * @return whether a row can have more than one indexed value: the indexes on non-frozen collections, and the
+     * indexes on a field that is inside collection elements or that is a collection indexed by its values
+     */
+    public boolean isMultiValued()
+    {
+        return isMultiValued;
     }
 
     public boolean isCollection()
     {
-        return column.type.isCollection();
+        return fieldPath == null ? column.type.isCollection() : isMultiValued();
     }
 
     public boolean isFrozen()
     {
-        return TypeUtil.isFrozen(column.type);
+        return TypeUtil.isFrozen(fieldPath == null ? column.type : validator);
     }
 
     public String getColumnName()
     {
         return column.name.toString();
+    }
+
+    /**
+     * @return the name of the indexed column, followed by the path to the indexed field for an index on a field
+     * (for example {@code addr.city}), in CQL form (quoted when needed), for messages
+     */
+    public String getTargetName()
+    {
+        return targetName;
     }
 
     public String getIndexName()
@@ -898,6 +986,8 @@ public class IndexContext
         return TypeUtil.isUTF8OrAscii(validator)
                // not the keys or values of a non-frozen collection, whose validator is the element type
                && !isNonFrozenCollection()
+               // nor the values of a collection field
+               && !unpacksLeafCollection
                // no tokenizing analyzer, so that the terms are whole (possibly normalized) values
                && !hasCustomAnalyzer();
     }
@@ -922,7 +1012,7 @@ public class IndexContext
         if (op == Operator.ANALYZER_MATCHES) return isAnalyzed;
         // BM25 frequency calculations only work on non-collection columns because it assumes a 1:1 mapping from PrK
         // to frequency, but collections have mulitple documents.
-        if (op == Operator.BM25) return isAnalyzed && !isCollection();
+        if (op == Operator.BM25) return isAnalyzed && !isCollection() && fieldPath == null;
 
         // If the column is analyzed and the operator is EQ, we need to check if the analyzer supports it.
         if (op == Operator.EQ && isAnalyzed && !analyzerFactory.supportsEquals())
@@ -931,14 +1021,15 @@ public class IndexContext
         // ANN is only supported against vectors.
         // BOUNDED_ANN is only supported against vectors with a Euclidean similarity function.
         // Vector indexes only support ANN and BOUNDED_ANN
-        if (column.type instanceof VectorType)
+        if (fieldPath == null && column.type instanceof VectorType)
             return op == Operator.ANN || (op == Operator.BOUNDED_ANN && hasEuclideanSimilarityFunc);
         if (op == Operator.ANN || op == Operator.BOUNDED_ANN)
             return false;
 
-        // Only regular columns can be sorted by SAI (at least for now)
+        // Only regular columns can be sorted by SAI (at least for now), and not by their fields
         if (op == Operator.ORDER_BY_ASC || op == Operator.ORDER_BY_DESC)
-            return !isCollection()
+            return fieldPath == null
+                   && !isCollection()
                    && column.isRegular()
                    && !isAnalyzed
                    && !(column.type instanceof InetAddressType  // Possible, but need to add decoding logic based on
@@ -947,7 +1038,8 @@ public class IndexContext
                          || column.type instanceof IntegerType); // Currently truncates to 20 bytes
 
         Expression.Op operator = Expression.Op.valueOf(op);
-        if (isNonFrozenCollection())
+        // the values of a collection field are indexed as those of a non-frozen collection column
+        if (isNonFrozenCollection() || unpacksLeafCollection)
         {
             if (indexType == IndexTarget.Type.KEYS)
                 return operator == Expression.Op.CONTAINS_KEY
@@ -985,6 +1077,9 @@ public class IndexContext
         if (row == null)
             return null;
 
+        if (fieldPath != null)
+            return getFieldValueOf(key, row, nowInSecs);
+
         switch (column.kind)
         {
             case PARTITION_KEY:
@@ -1013,17 +1108,34 @@ public class IndexContext
 
     public Iterator<ByteBuffer> getValuesOf(Row row, long nowInSecs)
     {
-        return getValuesOf(row, nowInSecs, null);
+        return getValuesOf(null, row, nowInSecs);
     }
 
     /**
-     * As {@link #getValuesOf(Row, long)}, also giving the local expiration time of each live expiring cell (with a TTL)
-     * to the given consumer, if not {@code null}, as the values are iterated.
+     * @param key the partition key of the row, needed for the indexes on the fields of partition key columns
+     * @param row the row
+     * @param nowInSecs the current time, the cells that are not live at that time are ignored
+     * @return the indexed values of the row, for a {@link #isMultiValued() multi-valued} index
      */
-    private Iterator<ByteBuffer> getValuesOf(Row row, long nowInSecs, @Nullable LongConsumer expiringCells)
+    public Iterator<ByteBuffer> getValuesOf(@Nullable DecoratedKey key, Row row, long nowInSecs)
+    {
+        return getValuesOf(key, row, nowInSecs, null);
+    }
+
+    /**
+     * As {@link #getValuesOf(DecoratedKey, Row, long)}, also giving the local expiration time of each live expiring
+     * cell (with a TTL) of the indexed column to the given consumer, if not {@code null}, as the values are extracted.
+     */
+    private Iterator<ByteBuffer> getValuesOf(@Nullable DecoratedKey key, Row row, long nowInSecs, @Nullable LongConsumer expiringCells)
     {
         if (row == null)
             return null;
+
+        if (fieldPath != null)
+        {
+            List<ByteBuffer> values = getFieldValuesOf(key, row, nowInSecs, expiringCells);
+            return values == null ? null : values.iterator();
+        }
 
         switch (column.kind)
         {
@@ -1038,6 +1150,95 @@ public class IndexContext
             default:
                 return null;
         }
+    }
+
+    /**
+     * @return the value of the indexed field in the row, for an index that isn't {@link #isMultiValued()}
+     */
+    @Nullable
+    private ByteBuffer getFieldValueOf(@Nullable DecoratedKey key, Row row, long nowInSecs)
+    {
+        assert fieldPath != null && !isMultiValued : "Multi-valued index " + this;
+        switch (column.kind)
+        {
+            case PARTITION_KEY:
+                if (key == null)
+                    return null;
+                return fieldPath.singleValue(partitionKeyType instanceof CompositeType
+                                             ? CompositeType.extractComponent(key.getKey(), column.position())
+                                             : key.getKey());
+            case CLUSTERING:
+                // skip indexing of static clustering when regular column is indexed
+                return row.isStatic() ? null : fieldPath.singleValue(row.clustering().bufferAt(column.position()));
+            // treat static cell retrieval the same was as regular
+            // only if row kind is STATIC otherwise return null
+            case STATIC:
+                if (!row.isStatic())
+                    return null;
+            case REGULAR:
+                if (column.type.isMultiCell())
+                    return fieldPath.singleValue(row.getComplexColumnData(column), nowInSecs);
+                Cell<?> cell = row.getCell(column);
+                return cell == null || !cell.isLive(nowInSecs) ? null : fieldPath.singleValue(cell.buffer());
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * @return the values of the indexed field in the row, {@code null} if the column has no value in the row
+     */
+    @Nullable
+    private List<ByteBuffer> getFieldValuesOf(@Nullable DecoratedKey key, Row row, long nowInSecs, @Nullable LongConsumer expiringCells)
+    {
+        assert fieldPath != null;
+        List<ByteBuffer> values = new ArrayList<>(isMultiValued() ? 4 : 1);
+        switch (column.kind)
+        {
+            case PARTITION_KEY:
+                if (key == null)
+                    return null;
+                ByteBuffer keyValue = partitionKeyType instanceof CompositeType
+                                      ? CompositeType.extractComponent(key.getKey(), column.position())
+                                      : key.getKey();
+                fieldPath.collectValues(column.type, keyValue, unpacksLeafCollection, values::add);
+                break;
+            case CLUSTERING:
+                // skip indexing of static clustering when regular column is indexed
+                if (row.isStatic())
+                    return null;
+                fieldPath.collectValues(column.type, row.clustering().bufferAt(column.position()), unpacksLeafCollection, values::add);
+                break;
+            // treat static cell retrieval the same was as regular
+            // only if row kind is STATIC otherwise return null
+            case STATIC:
+                if (!row.isStatic())
+                    return null;
+            case REGULAR:
+                if (column.type.isMultiCell())
+                {
+                    ComplexColumnData data = row.getComplexColumnData(column);
+                    if (data == null)
+                        return null;
+                    fieldPath.collectValues(column.type, data, nowInSecs, unpacksLeafCollection, expiringCells, values::add);
+                }
+                else
+                {
+                    Cell<?> cell = row.getCell(column);
+                    if (cell == null || !cell.isLive(nowInSecs))
+                        return null;
+                    if (expiringCells != null && cell.isExpiring())
+                        expiringCells.accept(cell.localDeletionTime());
+                    fieldPath.collectValues(column.type, cell.buffer(), unpacksLeafCollection, values::add);
+                }
+                break;
+            default:
+                return null;
+        }
+
+        // as for collection columns (see TypeUtil#collectionIterator)
+        TypeUtil.sortCollectionValues(validator, values);
+        return values;
     }
 
     @Override
@@ -1122,6 +1323,7 @@ public class IndexContext
 
         return Objects.equals(column, other.column) &&
                Objects.equals(indexType, other.indexType) &&
+               Objects.equals(fieldPath, other.fieldPath) &&
                Objects.equals(config, other.config) &&
                Objects.equals(partitionKeyType, other.partitionKeyType) &&
                Objects.equals(clusteringComparator, other.clusteringComparator);
@@ -1129,7 +1331,7 @@ public class IndexContext
 
     public int hashCode()
     {
-        return Objects.hash(column, indexType, config, partitionKeyType, clusteringComparator);
+        return Objects.hash(column, indexType, fieldPath, config, partitionKeyType, clusteringComparator);
     }
 
     /**
