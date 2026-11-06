@@ -20,16 +20,22 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.CRC32;
 
 import com.google.common.collect.Sets;
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.LoggerFactory;
@@ -43,6 +49,8 @@ import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
+import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
@@ -52,7 +60,6 @@ import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.MockSchema;
-import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.config.InternodeCompatibilityMode.DSE_5_1;
@@ -62,8 +69,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * In {@code internode_compatibility_mode: DSE_6} the transaction logs carry the name, and the remove records the update
  * time, that DSE 6 completes at its start after a rollback ({@link DseTransactionLogs}), and this software still
  * reads them back, in that mode and after the flag drop; with {@code NONE} both are unchanged. In {@code DSE_5_1} the
- * same holds with the types DSE 5.1 knows, and a log as DSE 5.1 writes it is completed. No transaction log written by
- * DSE 5.1 is among the fixtures yet: the one completed here is generated, as DSE 5.1.51 writes one by its source.
+ * same holds with the types DSE 5.1 knows, and the logs DSE 5.1.51 wrote ({@link Dse51Fixtures#transactionLog}),
+ * moved into a directory of the test, are completed or rolled back.
  */
 public class DseTransactionLogsTest
 {
@@ -77,10 +84,19 @@ public class DseTransactionLogsTest
     private static final int OTHER_FILES_RESTORED = 2;
     private static final int TEMPORARY_FILE_NEWER = 3;
     private static final int STATS_OLDER = 4;
+    private static final int DATA_NEWEST = 5;
+    private static final int DATA_NEWER = 6;
     private static final String AS_DSE_6_MODE_WRITES_IT = "with updateTime based on the stats file, as DSE 6, and this software in DSE 6 " +
                                                           "compatibility mode, write it";
     private static final String AS_DSE_51_MODE_WRITES_IT = "with updateTime based on the stats file, as DSE 5.1, and " +
                                                            "this software in DSE 5.1 compatibility mode, write it";
+    /** A record of a log DSE 5.1.51 wrote: its type, path, update time, number of files and checksum. */
+    private static final Pattern DSE_51_RECORD =
+        Pattern.compile("(ADD|REMOVE|COMMIT):\\[(.*),(\\d+),(\\d+)\\]\\[(\\d+)\\]");
+    /** The components of the big {@code me} sstables of the logs DSE 5.1.51 wrote, as the fixtures' sstables have. */
+    private static final List<String> ME_COMPONENTS = List.of("CompressionInfo.db", "Data.db", "Digest.crc32",
+                                                              "Filter.db", "Index.db", "Statistics.db", "Summary.db",
+                                                              "TOC.txt");
     private static final String WRITTEN_AGAIN_SINCE = "with updateTime based on the stats file, which was written again since";
 
     @BeforeClass
@@ -197,32 +213,117 @@ public class DseTransactionLogsTest
     }
 
     /**
-     * A committed compaction log as DSE 5.1.51 writes one, by its source: {@code me_txn_compaction_<id>.log}, an add
-     * record of the output, a remove record of the input with the latest modification time of all its files, the stats
-     * file included, each record naming the sstable by its path without the trailing component separator (not a URI),
-     * then the commit; each record is
-     * {@code TYPE:[path,update time,number of files][checksum]}, the checksum the CRC32 of the path, the type, the
-     * update time as two ints (low half first) and the number of files, masked to 63 bits. The start of this software
-     * in {@code DSE_5_1} completes it: the input deleted, the output kept, the log deleted.
+     * The transaction logs DSE 5.1.51 wrote ({@link Dse51Fixtures#transactionLog}: a compaction of four sstables into
+     * one, as it ran and once committed) are made of the records built here ({@link #dse51Record}), line for line,
+     * checksums included: each record {@code TYPE:[path,update time,number of files][checksum]}, the path of the
+     * sstable without the trailing component separator, the update time 0 but in a remove record, the checksum the
+     * CRC32 of the path, the type, the update time as two ints (low half first) and the number of files. This software
+     * parses each as a valid record. The update times of the remove records are in milliseconds, as the Java 8 of the
+     * capture read the files' times, where the mode writes them cut to the second
+     * ({@link DseTransactionLogs#removeRecordTime}, whose premise of a second's resolution on Java 8 the capture
+     * contradicts): pinned here, the behaviour unchanged until the owner decides it.
      */
     @Test
-    public void aCommittedLogAsDse51WritesItIsCompletedInDse51Mode() throws IOException
+    public void theRecordsOfTheLogsDse51WroteAreTheOnesBuiltHere() throws IOException
     {
-        List<ILoggingEvent> logged = startOnACommittedLogAsDse51WritesIt(false, DSE_5_1, true);
+        List<String> committed = Files.readAllLines(DseFixtures.dse51().transactionLog(true));
+        List<String> inProgress = Files.readAllLines(DseFixtures.dse51().transactionLog(false));
+        assertThat(committed).hasSize(6);
+        assertThat(inProgress).containsExactly(committed.get(0));
+        assertThat(committed).extracting(line -> line.substring(0, line.indexOf(':')))
+                             .containsExactly("ADD", "REMOVE", "REMOVE", "REMOVE", "REMOVE", "COMMIT");
+        List<Long> removeTimes = new ArrayList<>();
+        for (String line : committed)
+        {
+            Matcher matcher = DSE_51_RECORD.matcher(line);
+            assertThat(matcher.matches()).as(line).isTrue();
+            String type = matcher.group(1);
+            String path = matcher.group(2);
+            long updateTime = Long.parseLong(matcher.group(3));
+            int files = Integer.parseInt(matcher.group(4));
+            assertThat(line).isEqualTo(dse51Record(type, path, updateTime, files));
+
+            LogRecord record = LogRecord.make(line);
+            assertThat(record.isValid()).as(line).isTrue();
+            assertThat(record.type.name()).isEqualTo(type);
+            assertThat(record.checksum).as(line).isEqualTo(record.computeChecksum());
+            assertThat(record.updateTime).isEqualTo(updateTime);
+            assertThat(record.numFiles).isEqualTo(files);
+            if (record.type.hasFile())
+            {
+                assertThat(record.absolutePath()).isEqualTo(path).doesNotEndWith(String.valueOf(Component.SEPARATOR));
+                assertThat(files).as(line).isEqualTo(ME_COMPONENTS.size());
+            }
+            if (record.type == LogRecord.Type.REMOVE)
+                removeTimes.add(updateTime);
+            else
+                assertThat(updateTime).as(line).isZero();
+        }
+        assertThat(removeTimes).hasSize(4).noneMatch(time -> time % SECOND == 0);
+        DatabaseDescriptor.setInternodeCompatibilityMode(DSE_5_1);
+        for (long time : removeTimes)
+            assertThat(DseTransactionLogs.removeRecordTime(time)).isEqualTo(LogFile.truncateMillis(time))
+                                                                .isNotEqualTo(time);
+    }
+
+    /**
+     * The committed log DSE 5.1.51 wrote, moved into a directory of this test with files for its sstables
+     * ({@link #startOnTheLogDse51Wrote}): the start of this software in {@code DSE_5_1} checks its records against
+     * the files, through the rule of the remove records the mode writes, at their millisecond times, and completes it:
+     * the input deleted, the output kept, the log deleted.
+     */
+    @Test
+    public void aCommittedLogDse51WroteIsCompletedInDse51Mode() throws IOException
+    {
+        List<ILoggingEvent> logged = startOnTheLogDse51Wrote(true, 0, DSE_5_1, true);
         // read as a record of the mode, not through the legacy branch, which takes it too with a WARN
-        assertThat(logged).anyMatch(e -> e.getLevel() == Level.DEBUG &&
-                                         e.getFormattedMessage().contains(AS_DSE_51_MODE_WRITES_IT));
+        assertThat(logged).filteredOn(e -> e.getLevel() == Level.DEBUG &&
+                                           e.getFormattedMessage().contains(AS_DSE_51_MODE_WRITES_IT))
+                          .hasSize(4);
         assertThat(logged).noneMatch(e -> e.getLevel() == Level.WARN);
     }
 
     /**
-     * The same log, the input's files restored after the record: the start in {@code DSE_5_1} checks the records of
+     * The same log, the input's files restored after the records: the start in {@code DSE_5_1} checks the records of
      * DSE 5.1, which name the absolute path of the sstables, against the files, and refuses the log.
      */
     @Test
-    public void aLogAsDse51WritesItWhoseFilesChangedStopsTheStartInDse51Mode() throws IOException
+    public void aLogDse51WroteWhoseFilesChangedStopsTheStartInDse51Mode() throws IOException
     {
-        startOnACommittedLogAsDse51WritesIt(true, DSE_5_1, false);
+        List<ILoggingEvent> logged = startOnTheLogDse51Wrote(true, OTHER_FILES_RESTORED, DSE_5_1, false);
+        // refused for the update time of its first remove record, not for a checksum or a line that does not parse
+        assertThat(logged).anyMatch(e -> e.getLevel() == Level.ERROR &&
+                                         e.getFormattedMessage().contains("Unexpected files detected for sstable " +
+                                                                          "[me-1-big"));
+        assertThat(logged).noneMatch(e -> e.getFormattedMessage().contains("checksum") ||
+                                          e.getFormattedMessage().contains("Failed to parse"));
+    }
+
+    /**
+     * The same committed log, a data file of each input the newest file, at the record's time: the start in
+     * {@code DSE_5_1} matches the record to the files without the rule of the stats file, and completes it.
+     */
+    @Test
+    public void aCommittedLogDse51WroteWhoseDataFileIsTheNewestIsCompletedInDse51Mode() throws IOException
+    {
+        List<ILoggingEvent> logged = startOnTheLogDse51Wrote(true, DATA_NEWEST, DSE_5_1, true);
+        assertThat(logged).noneMatch(e -> e.getFormattedMessage().contains("updateTime"));
+        assertThat(logged).noneMatch(e -> e.getLevel() == Level.WARN);
+    }
+
+    /**
+     * The same committed log, a data file of each input newer than the record's time by a second: the start in
+     * {@code DSE_5_1} matches the record to the files, finds their time changed, and refuses the log.
+     */
+    @Test
+    public void aCommittedLogDse51WroteWhoseDataFileIsNewerThanTheRecordStopsTheStartInDse51Mode() throws IOException
+    {
+        List<ILoggingEvent> logged = startOnTheLogDse51Wrote(true, DATA_NEWER, DSE_5_1, false);
+        assertThat(logged).anyMatch(e -> e.getLevel() == Level.ERROR &&
+                                         e.getFormattedMessage().contains("Unexpected files detected for sstable " +
+                                                                          "[me-1-big"));
+        assertThat(logged).noneMatch(e -> e.getFormattedMessage().contains("checksum") ||
+                                          e.getFormattedMessage().contains("Failed to parse"));
     }
 
     /**
@@ -230,15 +331,30 @@ public class DseTransactionLogsTest
      * the log is completed without the check of their update time, its files changed or not, as before this mode.
      */
     @Test
-    public void aLogAsDse51WritesItIsCompletedUncheckedInTheOtherModes() throws IOException
+    public void aLogDse51WroteIsCompletedUncheckedInTheOtherModes() throws IOException
     {
         for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
         {
             if (mode.isDse51())
                 continue;
-            List<ILoggingEvent> logged = startOnACommittedLogAsDse51WritesIt(true, mode, true);
-            assertThat(logged).as("%s", mode).noneMatch(e -> e.getFormattedMessage().contains("updateTime"));
+            for (int change : new int[]{ 0, OTHER_FILES_RESTORED })
+            {
+                List<ILoggingEvent> logged = startOnTheLogDse51Wrote(true, change, mode, true);
+                assertThat(logged).as("%s", mode).noneMatch(e -> e.getFormattedMessage().contains("updateTime"));
+            }
         }
+    }
+
+    /**
+     * The log DSE 5.1.51 left while its compaction ran, its add record only: the start of this software rolls the
+     * compaction back in every mode, the output deleted, the input kept, the log deleted.
+     */
+    @Test
+    public void aLogDse51LeftWhileItsCompactionRanIsRolledBackInEveryMode() throws IOException
+    {
+        for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+            assertThat(startOnTheLogDse51Wrote(false, 0, mode, true)).as("%s", mode)
+                                                                       .noneMatch(e -> e.getLevel() == Level.WARN);
     }
 
     /**
@@ -263,7 +379,7 @@ public class DseTransactionLogsTest
 
     /**
      * After the flag drop, a committed compaction written in DSE_5_1 is completed without the check of its records,
-     * which name absolute paths (see {@link #aLogAsDse51WritesItIsCompletedUncheckedInTheOtherModes}).
+     * which name absolute paths (see {@link #aLogDse51WroteIsCompletedUncheckedInTheOtherModes}).
      */
     @Test
     public void aCommittedTransactionWrittenInDse51ModeIsCompletedAtTheNextStartAfterTheFlagDrop() throws IOException
@@ -274,52 +390,88 @@ public class DseTransactionLogsTest
     }
 
     /**
-     * Writes a committed log as DSE 5.1.51 writes one (see
-     * {@link #aCommittedLogAsDse51WritesItIsCompletedInDse51Mode}), the input's other files made 10 s newer than the
-     * record when {@code restored}, then runs the start of this software in {@code startMode} on the directory: it
-     * completes the log when {@code completes}, otherwise it keeps every file. Returns what {@link LogFile} and
-     * {@link DseTransactionLogs} logged.
+     * The transaction log DSE 5.1.51 wrote ({@code committed} or as its compaction ran), moved, as the fixtures' README
+     * says, into a directory of this test, and the start of this software in {@code startMode} on that directory. Every
+     * sstable the committed log names gets the components of a big {@code me} sstable there, empty: the input ones (its
+     * remove records) modified so that their latest modification time is the record's update time, which is all the
+     * capture tells of them: the test chooses the stats file as the newest, the others a second older, as DSE writes
+     * the stats file last, or with {@link #DATA_NEWEST} the data file, the others, the stats file among them, a second
+     * older; with {@link #DATA_NEWER} the data file is a second newer than the record instead; with
+     * {@link #OTHER_FILES_RESTORED} every file but the stats file is then made 10 s newer than the record. The records
+     * name the sstables of the directory, their checksums computed again, their update times kept; the records this
+     * software builds from those files, without the cut of the mode, are the lines of the moved log (but with
+     * {@link #DATA_NEWER}). The start completes the log when {@code completes} (a committed one: the input deleted, the
+     * output kept; one in progress: the output deleted, the input kept), otherwise it keeps every file. Returns what
+     * {@link #loggedWhile} collects.
      */
-    private static List<ILoggingEvent> startOnACommittedLogAsDse51WritesIt(boolean restored,
-                                                                          InternodeCompatibilityMode startMode,
-                                                                          boolean completes) throws IOException
+    private static List<ILoggingEvent> startOnTheLogDse51Wrote(boolean committed, int change,
+                                                                InternodeCompatibilityMode startMode,
+                                                                boolean completes) throws IOException
     {
         File directory = new File(Files.createTempDirectory("dse51txn"));
         try
         {
-            long modified = LogFile.truncateMillis(Clock.Global.currentTimeMillis()) - 60 * SECOND;
-            List<File> input = sstableFiles(directory, 1, modified);
-            List<File> output = sstableFiles(directory, 2, modified + 10 * SECOND);
-            File inputStats = directory.resolve("me-1-big-Statistics.db");
-            assertThat(inputStats.trySetLastModified(modified + 5 * SECOND)).isTrue();
-
-            String inputPath = directory.resolve("me-1-big").absolutePath();
-            String outputPath = directory.resolve("me-2-big").absolutePath();
-            String add = dse51Record("ADD", outputPath, 0, output.size());
-            String remove = dse51Record("REMOVE", inputPath, modified + 5 * SECOND, input.size());
-            String commit = dse51Record("COMMIT", "", 0, 0);
-            // the records this software builds from the same files are the same lines
-            assertThat(LogRecord.make(LogRecord.Type.ADD, output, output.size(), outputPath).raw).isEqualTo(add);
-            assertThat(LogRecord.make(LogRecord.Type.REMOVE, input, input.size(), inputPath, true).raw)
-            .isEqualTo(remove);
-            TimeUUID id = TimeUUID.Generator.nextTimeUUID();
-            File log = directory.resolve("me_txn_compaction_" + id + ".log");
-            Files.write(log.toPath(), List.of(add, remove, commit));
-            if (restored)
+            Map<String, String> moved = new HashMap<>();
+            List<File> input = new ArrayList<>();
+            List<File> output = new ArrayList<>();
+            for (String line : Files.readAllLines(DseFixtures.dse51().transactionLog(true)))
+            {
+                Matcher matcher = DSE_51_RECORD.matcher(line);
+                assertThat(matcher.matches()).as(line).isTrue();
+                String type = matcher.group(1);
+                long updateTime = Long.parseLong(matcher.group(3));
+                int files = Integer.parseInt(matcher.group(4));
+                if (type.equals("COMMIT"))
+                {
+                    moved.put(line, line);
+                    continue;
+                }
+                String path = directory.resolve(new File(matcher.group(2)).name()).absolutePath();
+                String record = dse51Record(type, path, updateTime, files);
+                List<File> sstable = sstableFiles(path);
+                if (type.equals("REMOVE"))
+                {
+                    String newest = change == DATA_NEWEST || change == DATA_NEWER ? "-Data.db" : "-Statistics.db";
+                    long newestTime = change == DATA_NEWER ? updateTime + SECOND : updateTime;
+                    for (File file : sstable)
+                        setLastModified(file, file.name().endsWith(newest) ? newestTime : updateTime - SECOND);
+                    LogRecord built = LogRecord.make(LogRecord.Type.REMOVE, sstable, files, path, true);
+                    if (change != DATA_NEWER)
+                        assertThat(built.raw).isEqualTo(record);
+                    input.addAll(sstable);
+                }
+                else
+                {
+                    assertThat(LogRecord.make(LogRecord.Type.ADD, sstable, files, path).raw).isEqualTo(record);
+                    output.addAll(sstable);
+                }
+                moved.put(line, record);
+            }
+            assertThat(output).hasSize(ME_COMPONENTS.size());
+            assertThat(input).hasSize(4 * ME_COMPONENTS.size());
+            Path captured = DseFixtures.dse51().transactionLog(committed);
+            List<String> lines = new ArrayList<>();
+            for (String line : Files.readAllLines(captured))
+                lines.add(Objects.requireNonNull(moved.get(line), line));
+            File log = directory.resolve(captured.getFileName().toString());
+            Files.write(log.toPath(), lines);
+            if (change == OTHER_FILES_RESTORED)
                 for (File file : input)
-                    if (!file.equals(inputStats))
-                        assertThat(file.trySetLastModified(modified + 15 * SECOND)).isTrue();
+                    if (!file.name().endsWith("-Statistics.db"))
+                        setLastModified(file, file.lastModified() + 11 * SECOND);
 
             DatabaseDescriptor.setInternodeCompatibilityMode(startMode);
             List<File> directories = List.of(directory);
             List<ILoggingEvent> logged = loggedWhile(() -> {
                 assertThat(LogTransaction.removeUnfinishedLeftovers(directories)).isEqualTo(completes);
             });
+            List<File> deleted = committed ? input : output;
+            List<File> kept = committed ? output : input;
             if (completes)
-                assertThat(input).noneMatch(File::exists);
+                assertThat(deleted).noneMatch(File::exists);
             else
-                assertThat(input).allMatch(File::exists);
-            assertThat(output).allMatch(File::exists);
+                assertThat(deleted).allMatch(File::exists);
+            assertThat(kept).allMatch(File::exists);
             assertThat(log.exists()).isEqualTo(!completes);
             return logged;
         }
@@ -329,11 +481,25 @@ public class DseTransactionLogsTest
         }
     }
 
-    /** Runs {@code body} and returns what {@link LogFile} and {@link DseTransactionLogs} logged, DEBUG included. */
+    /**
+     * Sets the modification time of {@code file}, skipping the test where the file system does not keep the
+     * milliseconds of the time, which the remove records of the logs DSE 5.1.51 wrote hold.
+     */
+    private static void setLastModified(File file, long time)
+    {
+        assertThat(file.trySetLastModified(time)).isTrue();
+        Assume.assumeTrue("the file system keeps the milliseconds of a modification time", file.lastModified() == time);
+    }
+
+    /**
+     * Runs {@code body} and returns what {@link LogFile}, {@link DseTransactionLogs} and {@link LogTransaction} logged,
+     * DEBUG included.
+     */
     private static List<ILoggingEvent> loggedWhile(Runnable body)
     {
         List<Logger> loggers = List.of((Logger) LoggerFactory.getLogger(LogFile.class),
-                                       (Logger) LoggerFactory.getLogger(DseTransactionLogs.class));
+                                       (Logger) LoggerFactory.getLogger(DseTransactionLogs.class),
+                                       (Logger) LoggerFactory.getLogger(LogTransaction.class));
         List<Level> levels = loggers.stream().map(Logger::getLevel).collect(Collectors.toList());
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -357,7 +523,10 @@ public class DseTransactionLogsTest
         return appender.list;
     }
 
-    /** A record of a transaction log as DSE 5.1.51 writes it, built byte by byte. */
+    /**
+     * A record of a transaction log as DSE 5.1.51 writes it, by its source, built byte by byte: the lines of the logs
+     * DSE 5.1.51 wrote ({@link #theRecordsOfTheLogsDse51WroteAreTheOnesBuiltHere}).
+     */
     private static String dse51Record(String type, String path, long updateTime, int files)
     {
         CRC32 crc = new CRC32();
@@ -368,15 +537,14 @@ public class DseTransactionLogsTest
         return type + ":[" + path + ',' + updateTime + ',' + files + "][" + (crc.getValue() & Long.MAX_VALUE) + ']';
     }
 
-    /** The components of a big {@code me} sstable of the generation, empty files modified at the given time. */
-    private static List<File> sstableFiles(File directory, int generation, long modified)
+    /** The components of the big {@code me} sstable {@code path} names, without the separator, as empty files. */
+    private static List<File> sstableFiles(String path)
     {
         List<File> files = new ArrayList<>();
-        for (String component : List.of("Data.db", "Index.db", "Filter.db", "Summary.db", "Statistics.db", "TOC.txt"))
+        for (String component : ME_COMPONENTS)
         {
-            File file = directory.resolve("me-" + generation + "-big-" + component);
+            File file = new File(path + Component.SEPARATOR + component);
             assertThat(file.createFileIfNotExists()).isTrue();
-            assertThat(file.trySetLastModified(modified)).isTrue();
             files.add(file);
         }
         return files;
