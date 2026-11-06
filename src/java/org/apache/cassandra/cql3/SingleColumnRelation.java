@@ -220,8 +220,7 @@ public final class SingleColumnRelation extends Relation
      * Resolves the path to the restricted field against the type of the column.
      *
      * @return the path to the restricted field, {@code null} for a relation on the whole column
-     * @throws InvalidRequestException if the path doesn't designate a field of the column, or if it designates a
-     * field inside a collection
+     * @throws InvalidRequestException if the path doesn't designate a field of the column
      */
     @Nullable
     private FieldPath fieldPath(ColumnMetadata columnDef)
@@ -239,15 +238,11 @@ public final class SingleColumnRelation extends Relation
             throw invalidRequest("Invalid restriction on %s: %s", entityAsString(), e.getMessage());
         }
 
-        // the paths through collections reach many values per row: their semantics are not defined yet
-        checkFalse(path.hasElements(), FIELDS_INSIDE_COLLECTIONS_UNSUPPORTED_MESSAGE, entityAsString());
+        // A path through collections (list or set elements, map values) reaches any number of values per row: a
+        // restriction on it is satisfied by some value, or by none for the negative operators (see
+        // RowFilter.FieldExpression).
         return path;
     }
-
-    /**
-     * The message of the error for a restriction on a field of the elements of a collection.
-     */
-    public static final String FIELDS_INSIDE_COLLECTIONS_UNSUPPORTED_MESSAGE = "Restrictions on fields inside collections are not yet supported: %s";
 
     @Override
     protected Term toTerm(List<? extends ColumnSpecification> receivers,

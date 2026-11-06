@@ -137,6 +137,10 @@ public class Operation
                         // NEQ operator will always be a multiple expression if it is the only operator
                         // (e.g. multiple NEQ expressions)
                         isMultiExpression = isMultiExpression || perColumn.isEmpty();
+                        // but the NEQs on a field inside collection elements are combined into one NOT_EQ with
+                        // exclusions (see below)
+                        if (isOnMultiValuedPath(e))
+                            isMultiExpression = false;
                         break;
                 }
                 targetIsMultiExpression.put(target, isMultiExpression);
@@ -186,9 +190,19 @@ public class Operation
                     // for x != (1, 2) AND x > (0, 0) the NEQ has the context of the index and the range the context
                     // of the column without index, so they stay two expressions, the first one searched in the
                     // index and the second one applied as a filter.
+                    // The expressions on a field inside collection elements are never combined: each of them is
+                    // satisfied by some element (by no element for a NEQ), possibly a different one for each
+                    // expression, as RowFilter.FieldExpression evaluates them, while a combined range (or a range with
+                    // exclusions) would be evaluated on each element, requiring a single element to satisfy all of
+                    // them (e.g. 'addrs.zip >= 150 AND addrs.zip < 300' selects the rows with an element whose zip
+                    // is >= 150, and an element whose zip is < 300). The only exception is the AND of NEQs (a NOT IN):
+                    // "no element is equal to a" and "no element is equal to b" is "no element is equal to a or b",
+                    // one NOT_EQ with exclusions, served by a single anti-join (all the keys minus the keys matching
+                    // any of the values, see Expression#negations) and evaluated as "no value excluded" on each element.
                     if (perColumn.size() == 0
                         || op != OperationType.AND
                         || e instanceof RowFilter.MapComparisonExpression
+                        || isOnMultiValuedPath(e) && !(e.operator() == Operator.NEQ && Iterables.getLast(perColumn).getOp() == Expression.Op.NOT_EQ)
                         || !Iterables.getLast(perColumn).context.equals(indexContext))
                     {
                         range = new Expression(indexContext);
@@ -246,6 +260,14 @@ public class Operation
         for (List<Object> target : analyzedByTarget.keySet())
             analyzed.putAll((ColumnMetadata) target.get(0), analyzedByTarget.get(target));
         return analyzed;
+    }
+
+    /**
+     * @return whether the expression is on a field inside the elements of a collection
+     */
+    private static boolean isOnMultiValuedPath(RowFilter.Expression expression)
+    {
+        return expression.fieldPath() != null && expression.fieldPath().hasElements();
     }
 
     /**

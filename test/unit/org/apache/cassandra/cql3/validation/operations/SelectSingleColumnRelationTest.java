@@ -1327,8 +1327,10 @@ public class SelectSingleColumnRelationTest extends CQLTester
 
     /**
      * The restrictions on the fields of UDT and tuple columns, filtered without any index (ALLOW FILTERING): on a
-     * frozen and a non-frozen UDT, a tuple component and a nested field. An unset field satisfies no restriction,
-     * {@code !=} included. The queries served by the SAI indexes on fields are in {@code UdtFieldQueryTest}.
+     * frozen and a non-frozen UDT, a tuple component, a nested field and a field inside a list. An unset field
+     * satisfies no restriction, {@code !=} included; inside a list, a restriction is satisfied by some element, and
+     * {@code !=} and {@code NOT IN} by no element (so also without elements). The queries served by the SAI indexes
+     * on fields are in {@code UdtFieldQueryTest} and {@code UdtCollectionFieldQueryTest}.
      */
     @Test
     public void testFieldRestrictionsWithFiltering() throws Throwable
@@ -1358,6 +1360,11 @@ public class SelectSingleColumnRelationTest extends CQLTester
             assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE t.field2 >= 1 ALLOW FILTERING"), row(1), row(2));
             assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE f.loc.lat > 1.5 ALLOW FILTERING"), row(2));
             assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE f.loc.lat < 1.5 AND n.city = 'Rome' ALLOW FILTERING"), row(1));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE l.city = 'Milan' ALLOW FILTERING"), row(1));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE l.zip >= 300 ALLOW FILTERING"), row(2));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE l.city IN ('Paris', 'Turin') ALLOW FILTERING"), row(2));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE l.city != 'Rome' ALLOW FILTERING"), row(2), row(3), row(4));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE l.zip NOT IN (100, 300) ALLOW FILTERING"), row(3), row(4));
         });
 
         assertInvalidMessage(String.format(StatementRestrictions.FIELD_REQUIRES_ALLOW_FILTERING_MESSAGE, "f.city"),
