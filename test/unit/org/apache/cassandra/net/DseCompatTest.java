@@ -209,6 +209,8 @@ public class DseCompatTest
         // DSE 5.1.51, 5.1.18 and 5.1.3
         for (String dse51 : new String[]{ "3.11.3.5151", "3.11.3.5118", "3.11.3.513" })
             assertThat(DseCompat.isDse51ReleaseVersion(new CassandraVersion(dse51))).as(dse51).isTrue();
+        // a suffix is not part of the rule, as for DSE 6: a 5.1 build that is not a release still reports four parts
+        assertThat(DseCompat.isDse51ReleaseVersion(new CassandraVersion("3.11.3.5151-SNAPSHOT"))).isTrue();
         // Apache Cassandra 3.11.3 and 3.11.11, other releases with four parts (another 3.11, DSE 5.0.15, DSE 6.9.26 and
         // 6.8.65, this software), and DSE versions read as releases
         for (String other : new String[]{ "3.11.3", "3.11.11", "3.11.4.5151", "3.0.15.5015", "4.0.0.6926",
@@ -250,13 +252,14 @@ public class DseCompatTest
             assertThat(DseCompat.isDse51Peer(version, null, null)).as("%d", version).isTrue();
             assertThat(DseCompat.isDse51Peer(version, apache, null)).as("%d", version).isTrue();
         }
-        // a version of 4.0 or later, or DSE 6's own, is no DSE 5.1 node unless its release or dse_version says so
+        // a version of 4.0 or later, or DSE 6's own, is no DSE 5.1 node, whatever release or dse_version a row saved
+        // before its upgrade still holds
         for (int version : new int[]{ MessagingService.VERSION_40, MessagingService.current_version,
                                       DseCompat.DSE_681_VERSION })
         {
             assertThat(DseCompat.isDse51Peer(version, hcd, null)).as("%d", version).isFalse();
             assertThat(DseCompat.isDse51Peer(version, dse6926, "6.8.1")).as("%d", version).isFalse();
-            assertThat(DseCompat.isDse51Peer(version, dse5151, null)).as("%d", version).isTrue();
+            assertThat(DseCompat.isDse51Peer(version, dse5151, "5.1.51")).as("%d", version).isFalse();
         }
         // before any gossip or handshake: the release, or the dse_version
         assertThat(DseCompat.isDse51Peer(null, dse5151, null)).isTrue();

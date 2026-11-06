@@ -24,11 +24,14 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_COMPRESSION_SELECTOR_CLASS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Clients that write sstables without reading cassandra.yaml ({@code CQLSSTableWriter}, the bulk loader) and set
@@ -74,6 +77,32 @@ public class Dse51ModeClientTest
             assertThat(new Config().uuid_sstable_identifiers_enabled).isTrue();
             assertThat(DatabaseDescriptor.getSelectedSSTableFormat().name()).isEqualTo(BigFormat.NAME);
             assertThat(DatabaseDescriptor.isUUIDSSTableIdentifiersEnabled()).isFalse();
+
+            // a client configuration that already selects big: nothing to select, nothing logged about the format
+            Config big = new Config();
+            big.sstable.selected_format = BigFormat.NAME;
+            ddLogger.addAppender(appender);
+            appender.list.clear();
+            try
+            {
+                DatabaseDescriptor.applyInternodeCompatibilityMode(big);
+            }
+            finally
+            {
+                ddLogger.detachAppender(appender);
+            }
+            assertThat(big.sstable.selected_format).isEqualTo(BigFormat.NAME);
+            assertThat(appender.list).noneMatch(e -> e.getFormattedMessage()
+                                                      .contains("selects sstable.selected_format"));
+
+            // the compressor checks apply to a client too
+            String custom = "org.example.CustomSelector";
+            try (WithProperties selector = new WithProperties().set(SSTABLE_COMPRESSION_SELECTOR_CLASS, custom))
+            {
+                assertThatThrownBy(() -> DatabaseDescriptor.applyInternodeCompatibilityMode(new Config()))
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessage(Dse51ModeConfigTest.compressionSelectorRefusal(custom));
+            }
         }
     }
 }
