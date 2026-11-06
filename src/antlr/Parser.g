@@ -906,6 +906,16 @@ indexIdent [List<IndexTarget.Raw> targets]
     ;
 
 /**
+ * The path to a field of a UDT or tuple column (tuple components are named field1, field2, ...), for example
+ * the '.home.city' of 'SELECT ... WHERE p.home.city = ?'.
+ */
+fieldPath returns [List<FieldIdentifier> path]
+    @init { List<FieldIdentifier> names = new ArrayList<>(); }
+    @after { $path = names; }
+    : ('.' f=fident { names.add(f); })+
+    ;
+
+/**
  * CREATE MATERIALIZED VIEW <viewName> AS
  *  SELECT <columns>
  *  FROM <CF>
@@ -1822,22 +1832,22 @@ relationType returns [Operator op]
     ;
 
 relation[WhereClause.Builder clauses]
-    : name=cident type=relationType t=term { $clauses.add(new SingleColumnRelation(name, type, t)); }
-    | name=cident K_LIKE t=term (K_ESCAPE e=likeEscape)? { $clauses.add(SingleColumnRelation.createLikeRelation(name, t, e)); }
-    | name=cident K_IS K_NOT K_NULL { $clauses.add(new SingleColumnRelation(name, Operator.IS_NOT, Constants.NULL_LITERAL)); }
+    : name=cident p=fieldPath? type=relationType t=term { $clauses.add(SingleColumnRelation.create(name, p, type, t)); }
+    | name=cident p=fieldPath? K_LIKE t=term (K_ESCAPE e=likeEscape)? { $clauses.add(SingleColumnRelation.createLikeRelation(name, p, t, e)); }
+    | name=cident p=fieldPath? K_IS K_NOT K_NULL { $clauses.add(SingleColumnRelation.create(name, p, Operator.IS_NOT, Constants.NULL_LITERAL)); }
     | K_TOKEN l=tupleOfIdentifiers type=relationType t=term
         { $clauses.add(new TokenRelation(l, type, t)); }
     | K_GEO_DISTANCE '(' name=cident ',' point=term ')' type=relationType distance=term
         { $clauses.add(new GeoDistanceRelation(name, point, type, distance)); }
-    | name=cident K_IN marker=inMarker
-        { $clauses.add(new SingleColumnRelation(name, Operator.IN, marker)); }
-    | name=cident K_NOT K_IN marker=inMarker
-        { $clauses.add(new SingleColumnRelation(name, Operator.NOT_IN, marker)); }
-    | name=cident K_IN inValues=singleColumnInValues
-        { $clauses.add(SingleColumnRelation.createInRelation($name.id, inValues)); }
-    | name=cident K_NOT K_IN inValues=singleColumnInValues
-            { $clauses.add(SingleColumnRelation.createNotInRelation($name.id, inValues)); }
-    | name=cident rt=containsOperator t=term { $clauses.add(new SingleColumnRelation(name, rt, t)); }
+    | name=cident p=fieldPath? K_IN marker=inMarker
+        { $clauses.add(SingleColumnRelation.create(name, p, Operator.IN, marker)); }
+    | name=cident p=fieldPath? K_NOT K_IN marker=inMarker
+        { $clauses.add(SingleColumnRelation.create(name, p, Operator.NOT_IN, marker)); }
+    | name=cident p=fieldPath? K_IN inValues=singleColumnInValues
+        { $clauses.add(SingleColumnRelation.createInRelation($name.id, p, inValues)); }
+    | name=cident p=fieldPath? K_NOT K_IN inValues=singleColumnInValues
+            { $clauses.add(SingleColumnRelation.createNotInRelation($name.id, p, inValues)); }
+    | name=cident p=fieldPath? rt=containsOperator t=term { $clauses.add(SingleColumnRelation.create(name, p, rt, t)); }
     | name=cident '[' key=term ']' type=relationType t=term { $clauses.add(new SingleColumnRelation(name, key, type, t)); }
     | ids=tupleOfIdentifiers
       ( K_IN

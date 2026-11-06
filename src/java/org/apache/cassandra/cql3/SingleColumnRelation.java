@@ -22,7 +22,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.db.filter.IndexHints;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
@@ -51,6 +54,12 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
 public final class SingleColumnRelation extends Relation
 {
     private final ColumnIdentifier entity;
+    /**
+     * The names of the fields of the path to the restricted field of a UDT or tuple column (see {@link FieldPath}),
+     * {@code null} for a relation on the whole column: {@code city} for {@code addr.city = 'Rome'}.
+     */
+    @Nullable
+    private final List<FieldIdentifier> fieldNames;
     private final Term.Raw mapKey;
     private final Term.Raw value;
     private final List<Term.Raw> inValues;
@@ -59,12 +68,20 @@ public final class SingleColumnRelation extends Relation
 
     private SingleColumnRelation(ColumnIdentifier entity, Term.Raw mapKey, Operator type, Term.Raw value, List<Term.Raw> inValues)
     {
-        this(entity, mapKey, type, value, inValues, null);
+        this(entity, null, mapKey, type, value, inValues, null);
     }
 
-    private SingleColumnRelation(ColumnIdentifier entity, Term.Raw mapKey, Operator type, Term.Raw value, List<Term.Raw> inValues, Term.Raw escape)
+    private SingleColumnRelation(ColumnIdentifier entity,
+                                 @Nullable List<FieldIdentifier> fieldNames,
+                                 Term.Raw mapKey,
+                                 Operator type,
+                                 Term.Raw value,
+                                 List<Term.Raw> inValues,
+                                 Term.Raw escape)
     {
+        assert fieldNames == null || (!fieldNames.isEmpty() && mapKey == null);
         this.entity = entity;
+        this.fieldNames = fieldNames == null ? null : List.copyOf(fieldNames);
         this.mapKey = mapKey;
         this.relationType = type;
         this.value = value;
@@ -100,6 +117,26 @@ public final class SingleColumnRelation extends Relation
         this(entity, null, type, value);
     }
 
+    /**
+     * Creates a new relation on a column or, if the field names aren't {@code null} nor empty, on a field of it.
+     *
+     * @param entity the restricted column
+     * @param fieldNames the names of the fields of the path to the restricted field, {@code null} or empty for a
+     * relation on the whole column
+     * @param type the operator
+     * @param value the value being compared
+     */
+    public static SingleColumnRelation create(ColumnIdentifier entity, @Nullable List<FieldIdentifier> fieldNames, Operator type, Term.Raw value)
+    {
+        return new SingleColumnRelation(entity, emptyToNull(fieldNames), null, type, value, null, null);
+    }
+
+    @Nullable
+    private static List<FieldIdentifier> emptyToNull(@Nullable List<FieldIdentifier> fieldNames)
+    {
+        return fieldNames == null || fieldNames.isEmpty() ? null : fieldNames;
+    }
+
     public Term.Raw getValue()
     {
         return value;
@@ -112,7 +149,12 @@ public final class SingleColumnRelation extends Relation
 
     public static SingleColumnRelation createInRelation(ColumnIdentifier entity, List<Term.Raw> inValues)
     {
-        return new SingleColumnRelation(entity, null, Operator.IN, null, inValues);
+        return createInRelation(entity, null, inValues);
+    }
+
+    public static SingleColumnRelation createInRelation(ColumnIdentifier entity, @Nullable List<FieldIdentifier> fieldNames, List<Term.Raw> inValues)
+    {
+        return new SingleColumnRelation(entity, emptyToNull(fieldNames), null, Operator.IN, null, inValues, null);
     }
 
     /**
@@ -124,12 +166,26 @@ public final class SingleColumnRelation extends Relation
      */
     public static SingleColumnRelation createLikeRelation(ColumnIdentifier entity, Term.Raw pattern, Term.Raw escape)
     {
-        return new SingleColumnRelation(entity, null, Operator.LIKE, pattern, null, escape);
+        return createLikeRelation(entity, null, pattern, escape);
+    }
+
+    /**
+     * Creates a {@code LIKE} relation on a column or, if the field names aren't {@code null} nor empty, on a field of
+     * it.
+     */
+    public static SingleColumnRelation createLikeRelation(ColumnIdentifier entity, @Nullable List<FieldIdentifier> fieldNames, Term.Raw pattern, Term.Raw escape)
+    {
+        return new SingleColumnRelation(entity, emptyToNull(fieldNames), null, Operator.LIKE, pattern, null, escape);
     }
 
     public static SingleColumnRelation createNotInRelation(ColumnIdentifier entity, List<Term.Raw> inValues)
     {
-        return new SingleColumnRelation(entity, null, Operator.NOT_IN, null, inValues);
+        return createNotInRelation(entity, null, inValues);
+    }
+
+    public static SingleColumnRelation createNotInRelation(ColumnIdentifier entity, @Nullable List<FieldIdentifier> fieldNames, List<Term.Raw> inValues)
+    {
+        return new SingleColumnRelation(entity, emptyToNull(fieldNames), null, Operator.NOT_IN, null, inValues, null);
     }
 
     public ColumnIdentifier getEntity()
@@ -141,6 +197,57 @@ public final class SingleColumnRelation extends Relation
     {
         return mapKey;
     }
+
+    /**
+     * @return whether this is a relation on a field of a UDT or tuple column, rather than on a whole column
+     */
+    public boolean hasFieldPath()
+    {
+        return fieldNames != null;
+    }
+
+    /**
+     * @return the names of the fields of the path to the restricted field, {@code null} for a relation on the whole
+     * column
+     */
+    @Nullable
+    public List<FieldIdentifier> getFieldNames()
+    {
+        return fieldNames;
+    }
+
+    /**
+     * Resolves the path to the restricted field against the type of the column.
+     *
+     * @return the path to the restricted field, {@code null} for a relation on the whole column
+     * @throws InvalidRequestException if the path doesn't designate a field of the column, or if it designates a
+     * field inside a collection
+     */
+    @Nullable
+    private FieldPath fieldPath(ColumnMetadata columnDef)
+    {
+        if (fieldNames == null)
+            return null;
+
+        FieldPath path;
+        try
+        {
+            path = FieldPath.resolve(columnDef.type, fieldNames);
+        }
+        catch (InvalidRequestException e)
+        {
+            throw invalidRequest("Invalid restriction on %s: %s", entityAsString(), e.getMessage());
+        }
+
+        // the paths through collections reach many values per row: their semantics are not defined yet
+        checkFalse(path.hasElements(), FIELDS_INSIDE_COLLECTIONS_UNSUPPORTED_MESSAGE, entityAsString());
+        return path;
+    }
+
+    /**
+     * The message of the error for a restriction on a field of the elements of a collection.
+     */
+    public static final String FIELDS_INSIDE_COLLECTIONS_UNSUPPORTED_MESSAGE = "Restrictions on fields inside collections are not yet supported: %s";
 
     @Override
     protected Term toTerm(List<? extends ColumnSpecification> receivers,
@@ -160,8 +267,8 @@ public final class SingleColumnRelation extends Relation
     {
         switch (relationType)
         {
-            case GT: return new SingleColumnRelation(entity, Operator.GTE, value);
-            case LT: return new SingleColumnRelation(entity, Operator.LTE, value);
+            case GT: return new SingleColumnRelation(entity, fieldNames, null, Operator.GTE, value, null, null);
+            case LT: return new SingleColumnRelation(entity, fieldNames, null, Operator.LTE, value, null, null);
             default: return this;
         }
     }
@@ -169,14 +276,25 @@ public final class SingleColumnRelation extends Relation
     public Relation renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
     {
         return entity.equals(from)
-               ? new SingleColumnRelation(to, mapKey, operator(), value, inValues, escape)
+               ? new SingleColumnRelation(to, fieldNames, mapKey, operator(), value, inValues, escape)
                : this;
+    }
+
+    /**
+     * @return the restricted entity in CQL form: the column, followed by the path for a relation on a field
+     */
+    private String entityAsString()
+    {
+        String entityAsString = entity.toCQLString();
+        if (fieldNames != null)
+            entityAsString = entityAsString + '.' + FieldPath.toCQLString(fieldNames);
+        return entityAsString;
     }
 
     @Override
     public String toCQLString()
     {
-        String entityAsString = entity.toCQLString();
+        String entityAsString = entityAsString();
         if (mapKey != null)
             entityAsString = String.format("%s[%s]", entityAsString, mapKey);
 
@@ -192,7 +310,7 @@ public final class SingleColumnRelation extends Relation
     @Override
     public int hashCode()
     {
-        return Objects.hash(relationType, entity, mapKey, value, inValues, escape);
+        return Objects.hash(relationType, entity, fieldNames, mapKey, value, inValues, escape);
     }
 
     @Override
@@ -206,6 +324,7 @@ public final class SingleColumnRelation extends Relation
 
         SingleColumnRelation scr = (SingleColumnRelation) o;
         return Objects.equals(entity, scr.entity)
+            && Objects.equals(fieldNames, scr.fieldNames)
             && Objects.equals(relationType, scr.relationType)
             && Objects.equals(mapKey, scr.mapKey)
             && Objects.equals(value, scr.value)
@@ -217,6 +336,8 @@ public final class SingleColumnRelation extends Relation
     protected Restriction newEQRestriction(TableMetadata table, VariableSpecifications boundNames, IndexHints indexHints)
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
+        if (fieldNames != null)
+            return newFieldEQRestriction(table, columnDef, boundNames, indexHints);
         if (mapKey == null)
         {
             Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
@@ -252,15 +373,45 @@ public final class SingleColumnRelation extends Relation
         return new SingleColumnRestriction.ContainsRestriction(columnDef, entryKey, entryValue, false);
     }
 
+    /**
+     * The EQ restriction on a field: as for a column, it's an analyzer match if the index on the field is configured
+     * to transform EQ into MATCH (see {@link IndexRegistry#getEqBehavior}).
+     */
+    private Restriction newFieldEQRestriction(TableMetadata table, ColumnMetadata columnDef, VariableSpecifications boundNames, IndexHints indexHints)
+    {
+        FieldPath path = fieldPath(columnDef);
+        Term term = toTerm(toReceivers(columnDef, path), value, table.keyspace, boundNames);
+        IndexRegistry.EqBehaviorIndexes ebi = IndexRegistry.obtain(table).getEqBehavior(columnDef, path, indexHints);
+        if (ebi.behavior == IndexRegistry.EqBehavior.EQ)
+            return new SingleColumnRestriction.EQRestriction(columnDef, path, term);
+
+        if (ebi.behavior == IndexRegistry.EqBehavior.MATCH)
+        {
+            ClientWarn.instance.warn(String.format(AnalyzerEqOperatorSupport.EQ_RESTRICTION_ON_ANALYZED_WARNING,
+                                                   entityAsString(),
+                                                   Index.joinNames(ebi.matchIndexes)),
+                                     entityAsString());
+            return new SingleColumnRestriction.AnalyzerMatchesRestriction(columnDef, path, term);
+        }
+
+        assert ebi.behavior == IndexRegistry.EqBehavior.AMBIGUOUS;
+        throw invalidRequest(AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR,
+                             entityAsString(),
+                             Index.joinNames(ebi.matchIndexes),
+                             Index.joinNames(ebi.eqIndexes),
+                             ebi.matchIndexes.iterator().next().getIndexMetadata().name);
+    }
+
     @Override
     protected Restriction newNEQRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
         if (mapKey == null)
         {
-            Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
+            FieldPath path = fieldPath(columnDef);
+            Term term = toTerm(toReceivers(columnDef, path), value, table.keyspace, boundNames);
             MarkerOrTerms skippedValues = new MarkerOrTerms.Terms(Collections.singletonList(term));
-            return SingleColumnRestriction.SliceRestriction.fromSkippedValues(columnDef, skippedValues);
+            return SingleColumnRestriction.SliceRestriction.fromSkippedValues(columnDef, path, skippedValues);
         }
 
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
@@ -273,26 +424,28 @@ public final class SingleColumnRelation extends Relation
     protected Restriction newINRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
-        List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
+        FieldPath path = fieldPath(columnDef);
+        List<? extends ColumnSpecification> receivers = toReceivers(columnDef, path);
         List<Term> terms = toTerms(receivers, inValues, table.keyspace, boundNames);
         if (terms == null)
         {
             Term term = toTerm(receivers, value, table.keyspace, boundNames);
-            return new SingleColumnRestriction.INRestriction(columnDef, new MarkerOrTerms.Marker((Lists.Marker) term));
+            return new SingleColumnRestriction.INRestriction(columnDef, path, new MarkerOrTerms.Marker((Lists.Marker) term));
         }
 
         // An IN restrictions with only one element is the same than an EQ restriction
         if (terms.size() == 1)
-            return new SingleColumnRestriction.EQRestriction(columnDef, terms.get(0));
+            return new SingleColumnRestriction.EQRestriction(columnDef, path, terms.get(0));
 
-        return new SingleColumnRestriction.INRestriction(columnDef, new MarkerOrTerms.Terms(terms));
+        return new SingleColumnRestriction.INRestriction(columnDef, path, new MarkerOrTerms.Terms(terms));
     }
 
     @Override
     protected Restriction newNotINRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
-        List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
+        FieldPath path = fieldPath(columnDef);
+        List<? extends ColumnSpecification> receivers = toReceivers(columnDef, path);
         List<Term> terms = toTerms(receivers, inValues, table.keyspace, boundNames);
         MarkerOrTerms values;
         if (terms == null)
@@ -304,7 +457,7 @@ public final class SingleColumnRelation extends Relation
         {
             values = new MarkerOrTerms.Terms(terms);
         }
-        return SingleColumnRestriction.SliceRestriction.fromSkippedValues(columnDef, values);
+        return SingleColumnRestriction.SliceRestriction.fromSkippedValues(columnDef, path, values);
     }
 
     @Override
@@ -314,19 +467,22 @@ public final class SingleColumnRelation extends Relation
                                               boolean inclusive)
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
+        FieldPath path = fieldPath(columnDef);
+        // for a restriction on a field, it's the type of the field that matters
+        AbstractType<?> type = path == null ? columnDef.type : path.leafType(columnDef.type);
 
-        if (columnDef.type.referencesDuration())
+        if (type.referencesDuration())
         {
-            checkFalse(columnDef.type.isCollection(), "Slice restrictions are not supported on collections containing durations");
-            checkFalse(columnDef.type.isTuple(), "Slice restrictions are not supported on tuples containing durations");
-            checkFalse(columnDef.type.isUDT(), "Slice restrictions are not supported on UDTs containing durations");
+            checkFalse(type.isCollection(), "Slice restrictions are not supported on collections containing durations");
+            checkFalse(type.isTuple(), "Slice restrictions are not supported on tuples containing durations");
+            checkFalse(type.isUDT(), "Slice restrictions are not supported on UDTs containing durations");
             throw invalidRequest("Slice restrictions are not supported on duration columns");
         }
 
         if (mapKey == null)
         {
-            Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-            return SingleColumnRestriction.SliceRestriction.fromBound(columnDef, bound, inclusive, term);
+            Term term = toTerm(toReceivers(columnDef, path), value, table.keyspace, boundNames);
+            return SingleColumnRestriction.SliceRestriction.fromBound(columnDef, path, bound, inclusive, term);
         }
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
@@ -340,8 +496,9 @@ public final class SingleColumnRelation extends Relation
                                                  boolean isKey) throws InvalidRequestException
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
-        Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-        return new SingleColumnRestriction.ContainsRestriction(columnDef, term, isKey, false);
+        FieldPath path = fieldPath(columnDef);
+        Term term = toTerm(toReceivers(columnDef, path), value, table.keyspace, boundNames);
+        return new SingleColumnRestriction.ContainsRestriction(columnDef, path, term, isKey, false);
     }
 
     @Override
@@ -350,8 +507,9 @@ public final class SingleColumnRelation extends Relation
                                                  boolean isKey) throws InvalidRequestException
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
-        Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
-        return new SingleColumnRestriction.ContainsRestriction(columnDef, term, isKey, true);
+        FieldPath path = fieldPath(columnDef);
+        Term term = toTerm(toReceivers(columnDef, path), value, table.keyspace, boundNames);
+        return new SingleColumnRestriction.ContainsRestriction(columnDef, path, term, isKey, true);
     }
 
     @Override
@@ -359,6 +517,8 @@ public final class SingleColumnRelation extends Relation
                                               VariableSpecifications boundNames) throws InvalidRequestException
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
+        // refused by StatementRestrictions (IS NOT NULL on fields is not supported yet)
+        assert fieldNames == null : "IS NOT NULL restriction on field " + entityAsString();
         // currently enforced by the grammar
         assert value == Constants.NULL_LITERAL : "Expected null literal for IS NOT relation: " + this.toString();
         return new SingleColumnRestriction.IsNotNullRestriction(columnDef);
@@ -371,19 +531,22 @@ public final class SingleColumnRelation extends Relation
             throw invalidRequest("%s can't be used with collections.", operator());
 
         ColumnMetadata columnDef = table.getExistingColumn(entity);
-        Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
+        FieldPath path = fieldPath(columnDef);
+        Term term = toTerm(toReceivers(columnDef, path), value, table.keyspace, boundNames);
         Term escapeTerm = escape == null
                           ? null
                           : toTerm(Collections.singletonList(SingleColumnRestriction.LikeRestriction.escapeReceiver(columnDef)),
                                    escape, table.keyspace, boundNames);
 
-        return new SingleColumnRestriction.LikeRestriction(columnDef, operator, term, escapeTerm);
+        return new SingleColumnRestriction.LikeRestriction(columnDef, path, operator, term, escapeTerm);
     }
 
     @Override
     protected Restriction newAnnRestriction(TableMetadata table, VariableSpecifications boundNames)
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
+        // the grammar has no field form in ORDER BY
+        assert fieldNames == null : "ANN restriction on field " + entityAsString();
         if (!(columnDef.type instanceof VectorType))
             throw invalidRequest("ANN is only supported against DENSE FLOAT32 columns");
         Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
@@ -394,6 +557,8 @@ public final class SingleColumnRelation extends Relation
     protected Restriction newBm25Restriction(TableMetadata table, VariableSpecifications boundNames)
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
+        // the grammar has no field form in ORDER BY
+        assert fieldNames == null : "BM25 restriction on field " + entityAsString();
         Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
         return new SingleColumnRestriction.Bm25Restriction(columnDef, term);
     }
@@ -405,9 +570,10 @@ public final class SingleColumnRelation extends Relation
             throw invalidRequest("%s can't be used with collections.", operator());
 
         ColumnMetadata columnDef = table.getExistingColumn(entity);
-        Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
+        FieldPath path = fieldPath(columnDef);
+        Term term = toTerm(toReceivers(columnDef, path), value, table.keyspace, boundNames);
 
-        return new SingleColumnRestriction.AnalyzerMatchesRestriction(columnDef, term);
+        return new SingleColumnRestriction.AnalyzerMatchesRestriction(columnDef, path, term);
     }
 
     /**
@@ -418,6 +584,18 @@ public final class SingleColumnRelation extends Relation
      */
     private List<? extends ColumnSpecification> toReceivers(ColumnMetadata columnDef) throws InvalidRequestException
     {
+        return toReceivers(columnDef, fieldPath(columnDef));
+    }
+
+    /**
+     * Returns the receivers for this relation, on the given field of the column if the path isn't {@code null}: the
+     * values of a relation on a field are of the type of the field.
+     */
+    private List<? extends ColumnSpecification> toReceivers(ColumnMetadata columnDef, @Nullable FieldPath path) throws InvalidRequestException
+    {
+        if (path != null)
+            return toFieldReceivers(path.leafSpecification(columnDef));
+
         ColumnSpecification receiver = columnDef;
 
         checkFalse(isContainsKey() && !(receiver.type instanceof MapType), "Cannot use CONTAINS KEY on non-map column %s", receiver.name);
@@ -460,6 +638,24 @@ public final class SingleColumnRelation extends Relation
                 return receivers;
             }
         }
+
+        return Collections.singletonList(receiver);
+    }
+
+    /**
+     * Returns the receivers for this relation on a field, given the specification of the field.
+     */
+    private List<? extends ColumnSpecification> toFieldReceivers(ColumnSpecification receiver)
+    {
+        // the map-key forms are not supported on fields; the grammar doesn't allow 'addr.m[key]'
+        checkFalse(isContainsKey() || isNotContainsKey(), "%s is not supported on fields: %s", operator(), receiver.name);
+        checkFalse(isContains() && !receiver.type.isCollection(), "Cannot use CONTAINS on non-collection field %s", receiver.name);
+        checkFalse(isNotContains() && !receiver.type.isCollection(), "Cannot use NOT CONTAINS on non-collection field %s", receiver.name);
+
+        // the fields of UDTs and tuples are frozen, so a collection field is a single value, as a frozen collection
+        // column: it can be restricted as a whole, or by CONTAINS
+        if (isContains() || isNotContains())
+            receiver = makeCollectionReceiver(receiver, false);
 
         return Collections.singletonList(receiver);
     }

@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.NavigableSet;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -199,6 +200,8 @@ public abstract class RestrictionSet implements Restrictions
 
                 for (SingleRestriction singleRestriction : columnRestrictions)
                 {
+                    // the CONTAINS restrictions on different targets (a column and its fields) are counted
+                    // together: conservative, as several CONTAINS on the same target need filtering on some indexes
                     if (singleRestriction.isContains())
                     {
                         bitmap |= maskHasContains;
@@ -428,11 +431,13 @@ public abstract class RestrictionSet implements Restrictions
                 Set<SingleRestriction> existingRestrictions = getRestrictions(newRestrictions, columnDefs);
 
                 // merge the new restriction into an existing one.  note that there is only ever a single
-                // restriction (per column), UNLESS one is ORDER BY BM25 and the other is MATCH.
+                // restriction (per column), UNLESS one is ORDER BY BM25 and the other is MATCH, or they are on
+                // different fields of the column (or one is on the whole column and the other on a field): there
+                // is a single restriction per column and field.
                 for (var existing : existingRestrictions)
                 {
                     // shouldMerge exists for the BM25/MATCH case
-                    if (existing.shouldMerge(restriction))
+                    if (Objects.equals(existing.fieldPath(), restriction.fieldPath()) && existing.shouldMerge(restriction))
                     {
                         var merged = existing.mergeWith(restriction);
                         addRestrictionForColumns(merged.getColumnDefs(), merged, Set.of(existing));
