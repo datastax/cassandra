@@ -307,7 +307,7 @@ final class DseGossipStates
      */
     static boolean sendsAllOwnStates(InetAddressAndPort peer)
     {
-        if (!DseCompat.enabled())
+        if (!DseCompat.isDse6())
             return true;
         identify(peer, null);
         return !DsePeers.isDse(peer);
@@ -372,7 +372,7 @@ final class DseGossipStates
     @Nullable
     static Recipient recipient(InetAddressAndPort peer)
     {
-        return DseCompat.enabled() ? new Recipient(peer, false) : null;
+        return DseCompat.isDse6() ? new Recipient(peer, false) : null;
     }
 
     /**
@@ -382,7 +382,7 @@ final class DseGossipStates
     @Nullable
     static Recipient shadowRoundRecipient(InetAddressAndPort peer)
     {
-        return DseCompat.enabled() ? new Recipient(peer, true) : null;
+        return DseCompat.isDse6() ? new Recipient(peer, true) : null;
     }
 
     /**

@@ -572,18 +572,18 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     }
 
     /**
-     * DSE 6 compatibility mode: a request whose verb does not exist in the pre-4.0 dialect (repair, Paxos v2, ping,
-     * multi-range reads, custom verbs...) is never queued for a peer speaking it, which would fail on the unknown verb
-     * id. The refusal is counted in {@code nodetool compatstatus} and the callback, if any, fails at once
-     * instead of timing out. A message queued before the peer's version was known is refused when it is serialized
-     * (see {@code OutboundConnection}).
+     * DSE 6 and DSE 5.1 compatibility modes: a request whose verb does not exist in the pre-4.0 dialect (repair, Paxos
+     * v2, ping, multi-range reads, custom verbs...) is never queued for a peer speaking it, which would fail on the
+     * unknown verb id. The refusal is counted in {@code nodetool compatstatus} and the callback, if any, fails at once
+     * instead of timing out. A message queued before the peer's version was known is refused when it is serialized (see
+     * {@code OutboundConnection}).
      */
     private void refuseForPre40Peer(Message<?> message, InetAddressAndPort to)
     {
         DseCompatRefusals.refused(DseCompat.refusedVerb(message.verb()));
         NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, MINUTES,
-                         "DSE 6 compatibility mode: not sending {} to {}: the verb does not exist in the pre-4.0 dialect that peer speaks",
-                         message.verb(), to);
+                         "{} compatibility mode: not sending {} to {}: the verb does not exist in the pre-4.0 " +
+                         "dialect that peer speaks", DseCompat.source(), message.verb(), to);
         callbacks.onRefused(message, to);
     }
 
@@ -820,12 +820,13 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
 
     /**
      * DSE 6 compatibility mode: the saved peers stored with a DSE 6 release are first connected to with the pre-4.0
-     * handshake, not the 4.0-style one DSE fails to parse (see {@link DseDialectVersions}); nothing happens otherwise.
+     * handshake, not the 4.0-style one DSE fails to parse (see {@link DseDialectVersions}); nothing happens otherwise,
+     * in the DSE 5.1 compatibility mode too, whose saved peers carry no DSE 6 release.
      */
     @VisibleForTesting
     void seedDseDialectPeers()
     {
-        if (DseCompat.enabled())
+        if (DseCompat.isDse6())
             DseDialectVersions.seedFromSavedPeers(versions);
     }
 

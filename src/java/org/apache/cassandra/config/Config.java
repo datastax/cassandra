@@ -1464,7 +1464,8 @@ public class Config
      * peers. {@code DSE_5_1} is set the same way on a cluster being upgraded from DataStax Enterprise 5.1.51; it checks
      * the settings (storage_compatibility_mode {@code HCD_1}, the {@code big} format, numeric generations,
      * {@code paxos_variant: v1}, compressors DSE 5.1 reads), writes its upgrade marker and refuses at start the files
-     * a node in the mode never writes, and writes the transaction logs and statistics DSE 5.1 reads. See
+     * a node in the mode never writes, writes the transaction logs and statistics DSE 5.1 reads, and speaks the pre-4.0
+     * dialect with DSE 5.1 nodes, with the operational guards and the schema freeze of {@code DSE_6}. See
      * {@link InternodeCompatibilityMode}.
      */
     public InternodeCompatibilityMode internode_compatibility_mode = InternodeCompatibilityMode.NONE;

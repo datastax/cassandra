@@ -186,9 +186,9 @@ public class BlockingPartitionRepair
 
     /**
      * The lowest messaging version a replica may be at, where the per-version repair mutations start:
-     * {@link MessagingService#minimum_version}, except in DSE 6 compatibility mode, where a DSE 6 replica is at the
-     * pre-4.0 version {@link MessagingService#VERSION_3014} and the lowest version is the oldest one a pre-4.0 peer may
-     * request, {@link DseCompat#OLDEST_PRE40_VERSION}.
+     * {@link MessagingService#minimum_version}, except in the DSE 6 and DSE 5.1 compatibility modes, where a DSE
+     * replica is at the pre-4.0 version {@link MessagingService#VERSION_3014} and the lowest version is the oldest one
+     * a pre-4.0 peer may request, {@link DseCompat#OLDEST_PRE40_VERSION}.
      */
     private static int lowestVersion()
     {

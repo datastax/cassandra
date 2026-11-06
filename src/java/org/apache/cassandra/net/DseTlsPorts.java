@@ -111,7 +111,7 @@ public final class DseTlsPorts
      */
     public static boolean listensOnSslStoragePortForDse(@Nullable ServerEncryptionOptions encryption)
     {
-        return DseCompat.enabled()
+        return DseCompat.isDse6()
                && encryption != null
                && !encryption.legacy_ssl_storage_port_enabled
                && encryption.internode_encryption != InternodeEncryption.none
@@ -126,7 +126,7 @@ public final class DseTlsPorts
      */
     public static boolean dialsSslStoragePort(InetAddressAndPort peer, boolean legacySslStoragePortEnabled)
     {
-        return DseCompat.enabled() && dialsSslStoragePort(dseMessagingVersion(peer), legacySslStoragePortEnabled);
+        return DseCompat.isDse6() && dialsSslStoragePort(dseMessagingVersion(peer), legacySslStoragePortEnabled);
     }
 
     /**
@@ -158,7 +158,7 @@ public final class DseTlsPorts
      */
     public static SslFallbackConnectionType sslFallback(OutboundConnectionSettings settings, int messagingVersion, SslFallbackConnectionType strategy)
     {
-        if (strategy != SslFallbackConnectionType.NO_SSL || !DseCompat.enabled() || !settings.withEncryption())
+        if (strategy != SslFallbackConnectionType.NO_SSL || !DseCompat.isDse6() || !settings.withEncryption())
             return strategy;
 
         String refusal = plainFallbackRefusal(settings, messagingVersion, settings.endpointToVersion(), MessagingService.instance().versions);
@@ -191,7 +191,7 @@ public final class DseTlsPorts
     static String plainFallbackRefusal(OutboundConnectionSettings settings, int messagingVersion,
                                        EndpointMessagingVersions connectionVersions, EndpointMessagingVersions nodeVersions)
     {
-        if (!DseCompat.enabled() || !settings.withEncryption())
+        if (!DseCompat.isDse6() || !settings.withEncryption())
             return null;
 
         int connectionVersion = knownVersion(connectionVersions, settings.to);

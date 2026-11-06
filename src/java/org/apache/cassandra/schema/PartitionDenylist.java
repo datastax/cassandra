@@ -39,6 +39,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -88,7 +89,7 @@ public class PartitionDenylist
     private static final Logger logger = LoggerFactory.getLogger(PartitionDenylist.class);
     private static final NoSpamLogger AVAILABILITY_LOGGER = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
-    /** The reason under which the denylist operations refused in the DSE 6 compatibility mode are counted. */
+    /** The reason under which the denylist operations refused in the DSE 6 and DSE 5.1 modes are counted. */
     public static final String REFUSED_IN_DSE6 = "partition denylist";
 
     /**
@@ -96,9 +97,18 @@ public class PartitionDenylist
      * is created only once the mode is dropped. Nothing is denied meanwhile, as nothing was before the upgrade: DSE 6 has
      * no partition denylist.
      */
-    public static final String UNAVAILABLE_IN_DSE6 = "the partition denylist is unavailable: " +
-                                                     DseSystemKeyspaces.deferredTable(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME + '.' +
-                                                                                      SystemDistributedKeyspace.PARTITION_DENYLIST_TABLE);
+    public static final String UNAVAILABLE_IN_DSE6 = unavailable(InternodeCompatibilityMode.DSE_6);
+
+    /**
+     * Why the denylist is off in {@code mode}, {@code DSE_6} or {@code DSE_5_1}, as {@link #UNAVAILABLE_IN_DSE6} says
+     * it for the first: DSE 5.1 has no partition denylist either.
+     */
+    public static String unavailable(InternodeCompatibilityMode mode)
+    {
+        return "the partition denylist is unavailable: " +
+               DseSystemKeyspaces.deferredTable(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME + '.' +
+                                                SystemDistributedKeyspace.PARTITION_DENYLIST_TABLE, mode);
+    }
 
     private final ExecutorService executor = executorFactory().pooled("DenylistCache", 2);
 
@@ -131,8 +141,8 @@ public class PartitionDenylist
     private int loadSuccesses = 0;
 
     /**
-     * Refuses a denylist operation (a load, adding or removing a key) in the DSE 6 compatibility mode, where the denylist
-     * is off ({@link #UNAVAILABLE_IN_DSE6}); a no-op otherwise.
+     * Refuses a denylist operation (a load, adding or removing a key) in the DSE 6 or DSE 5.1 compatibility mode, where
+     * the denylist is off ({@link #unavailable}); a no-op otherwise.
      *
      * @throws IllegalStateException in the mode
      */
@@ -141,7 +151,7 @@ public class PartitionDenylist
         if (!DseCompat.enabled())
             return;
         DseCompatRefusals.refused(REFUSED_IN_DSE6);
-        throw new IllegalStateException(UNAVAILABLE_IN_DSE6);
+        throw new IllegalStateException(unavailable(DseCompat.textMode()));
     }
 
     public synchronized int getLoadAttempts()
@@ -164,7 +174,7 @@ public class PartitionDenylist
 
         if (DseCompat.enabled())
         {
-            logger.warn("partition_denylist_enabled is ignored ({})", UNAVAILABLE_IN_DSE6);
+            logger.warn("partition_denylist_enabled is ignored ({})", unavailable(DseCompat.textMode()));
             return;
         }
 

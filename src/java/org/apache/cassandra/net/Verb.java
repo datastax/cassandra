@@ -363,7 +363,15 @@ public class Verb
     private static final int[] PRE40_REQUEST_IDS = { 0, 1, 2, 3, 5, 6, 9, 14, 15, 16, 18, 19, 20, 22, 24, 27, 28, 29, 31, 33, 34, 35 };
 
     /**
-     * True when a peer speaking the pre-4.0 dialect (DSE 6 compatibility mode) can receive this verb: every response,
+     * The id of Apache Cassandra 3.x's {@code REPAIR_MESSAGE}, which a DSE 5.1 repair coordinator sends and this
+     * software has no verb for: in the DSE 5.1 compatibility mode the inbound handler skips such a message, held whole
+     * in one frame or too large for one, and answers it with a failure response when it asks for one
+     * ({@code InboundMessageHandler}), so that {@link #fromId} never meets it.
+     */
+    static final int PRE40_REPAIR_MESSAGE_ID = 32;
+
+    /**
+     * True when a peer speaking the pre-4.0 dialect (a DSE compatibility mode) can receive this verb: every response,
      * and the requests whose id is one of {@link #PRE40_REQUEST_IDS}. A request without a 3.0 id (Paxos v2, repair
      * sessions, ping, multi-range and other DS-only reads, custom verbs) must never reach such a peer.
      */
@@ -375,7 +383,7 @@ public class Verb
     }
 
     /**
-     * The verb a peer speaking the pre-4.0 dialect (DSE 6 compatibility mode) sees for this verb.
+     * The verb a peer speaking the pre-4.0 dialect (a DSE compatibility mode) sees for this verb.
      * <p>
      * Requests keep their id, which for every verb that existed in Cassandra 3.0 is the 3.0 ordinal. Responses
      * become the generic {@link #REQUEST_RSP} (or {@link #INTERNAL_RSP} for the urgent ones and for
@@ -395,7 +403,8 @@ public class Verb
         if (isResponse())
             return priority == P0 ? INTERNAL_RSP : REQUEST_RSP;
         if (!existsInPre40Dialect())
-            throw new UnsupportedOperationException("Verb " + name + " (id " + id + ") does not exist in the pre-4.0 dialect and cannot be sent to a DSE 6 peer");
+            throw new UnsupportedOperationException("Verb " + name + " (id " + id + ") does not exist in the pre-4.0 " +
+                                                    "dialect and cannot be sent to a " + DseCompat.source() + " peer");
         return this;
     }
 

@@ -34,6 +34,7 @@ import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.DseUpgradeMarker;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,7 +43,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * A node in {@code internode_compatibility_mode: DSE_5_1} refuses to start, once its schema is loaded, while a table is
  * compressed with a compressor DSE 5.1 does not read, and starts while every table uses one DSE 5.1 reads. The node
  * first runs without the mode, on the storage settings the mode requires, then is restarted in it. The advice of the
- * refusal, followed, leads back to a start in the mode.
+ * refusal, followed, leads back to a start in the mode. In the mode a {@code CREATE TABLE} with such a compressor is
+ * refused when it runs, {@code allow_ddl} or not.
  */
 public class Dse51CompressorsStartupTest extends TestBaseImpl
 {
@@ -103,6 +105,40 @@ public class Dse51CompressorsStartupTest extends TestBaseImpl
             assertThat(cluster.coordinator(1).execute(withKeyspace("SELECT v FROM %s.zstd WHERE k = 1"),
                                                       ConsistencyLevel.ONE))
             .isDeepEqualTo(new Object[][]{ { 1 } });
+        }
+    }
+
+    /**
+     * In the mode, with {@code allow_ddl}, a {@code CREATE TABLE} with Zstd is refused when the statement runs, so that
+     * the table never reaches the schema and the next start; one with LZ4 runs.
+     */
+    @Test
+    public void aCreateTableWithZstdIsRefusedInTheModeWithAllowDdl() throws Throwable
+    {
+        try (Cluster cluster = dse51ReadyCluster())
+        {
+            init(cluster);
+            restartedInTheMode(cluster, true);
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                String zstd = withKeyspace("CREATE TABLE %s.zstd (k int PRIMARY KEY, v int) " +
+                                           "WITH compression = {'class': 'ZstdCompressor'}");
+                assertThatThrownBy(() -> cluster.coordinator(1).execute(zstd, ConsistencyLevel.ONE))
+                .hasMessageContaining("internode_compatibility_mode DSE_5_1 refuses the statement: " + KEYSPACE +
+                                      ".zstd " +
+                                      "(ZstdCompressor) would be compressed with a compressor DSE 5.1 does not read");
+                cluster.schemaChange(withKeyspace("CREATE TABLE %s.lz4 (k int PRIMARY KEY, v int) " +
+                                                  "WITH compression = {'class': 'LZ4Compressor'}"));
+            }
+            IInvokableInstance node = cluster.get(1);
+            assertThat(node.callOnInstance(() -> Keyspace.open(KEYSPACE).getMetadata().getTableOrViewNullable("zstd")
+                                                 == null)).isTrue();
+            assertThat(node.callOnInstance(() -> Keyspace.open(KEYSPACE).getMetadata().getTableOrViewNullable("lz4")
+                                                 != null)).isTrue();
+            // the node starts in the mode again
+            node.shutdown().get();
+            node.startup();
+            assertThat(node.callOnInstance(DatabaseDescriptor::isDse51CompatibilityMode)).isTrue();
         }
     }
 

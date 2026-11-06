@@ -1025,7 +1025,8 @@ public class StartupChecks
      * Refuses to start when {@code cassandra.internode_compatibility_mode.lost_node_silence_seconds} is set to a value
      * that is not a whole number of seconds or is below the larger of one minute and twice the ring delay, and logs the
      * silence when it is set ({@link DseUpgradeGuards#checkLostNodeSilence}). In every mode, since the removal of a node
-     * lost during the DSE 6 upgrade is allowed in both; a no-op when the property is not set.
+     * lost during the DSE upgrade is allowed with {@code NONE} and in the DSE modes; a no-op when the property is not
+     * set. The texts name DSE 5.1 in {@code DSE_5_1}, DSE 6 otherwise.
      */
     public static final StartupCheck checkLostNodeSilence = new StartupCheck()
     {
@@ -1042,8 +1043,10 @@ public class StartupChecks
                 throw new StartupException(StartupException.ERR_WRONG_CONFIG, e.getMessage());
             }
             if (seconds >= 0)
-                logger.info("A node that is down counts as lost during the DSE 6 upgrade once nothing has been heard of it for {} seconds ({}={})",
-                            seconds, CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey(), seconds);
+                logger.info("A node that is down counts as lost during the {} upgrade once nothing has been heard " +
+                            "of it for {} seconds ({}={})", DseCompat.source(), seconds,
+                            CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey(),
+                            seconds);
         }
     };
 
@@ -1136,14 +1139,11 @@ public class StartupChecks
         else if (!dsePeers.isEmpty())
         {
             remedy.append(marker ? "; " : "");
-            // only the DSE 6 record is maintained, and so empties itself
-            if (source.isDse6())
-                remedy.append("the record empties itself once this node has seen every listed peer at messaging ")
-                      .append("version 4.0 or later (run once more with ").append(source)
-                      .append(" after the last upgrade); delete it by hand only after checking that the listed peers ")
-                      .append("have left the cluster");
-            else
-                remedy.append("delete it by hand once every listed peer runs this software or has left the cluster");
+            // the node maintains the record of either upgrade while it runs in that mode, so it empties itself
+            remedy.append("the record empties itself once this node has seen every listed peer at messaging ")
+                  .append("version 4.0 or later (run once more with ").append(source)
+                  .append(" after the last upgrade); delete it by hand only after checking that the listed peers ")
+                  .append("have left the cluster");
             List<String> notAddresses = new ArrayList<>();
             for (String entry : dsePeers)
             {
@@ -1184,8 +1184,9 @@ public class StartupChecks
     };
 
     /**
-     * In {@code DSE_6} mode, loads the record of DSE 6 peers persisted by the previous run ({@link DsePeersRecord})
-     * before any connection is made, so that a DSE peer that stays down during this run is not forgotten.
+     * In {@code DSE_6} or {@code DSE_5_1} mode, loads the record of the mode's DSE peers persisted by the previous run
+     * ({@link DsePeersRecord}) before any connection is made, so that a DSE peer that stays down during this run is not
+     * forgotten.
      */
     public static final StartupCheck loadDsePeersRecord = new StartupCheck()
     {
