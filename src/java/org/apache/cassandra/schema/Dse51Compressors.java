@@ -104,7 +104,10 @@ public final class Dse51Compressors
                 boolean listed = encrypted ? isEncrypted : !isEncrypted && !READ_BY_DSE51.contains(compression.klass());
                 if (listed)
                 {
-                    String compressor = compression.klass().getSimpleName();
+                    // a class of another package by its full name, so that it is not taken for one DSE 5.1 reads
+                    Class<?> klass = compression.klass();
+                    String compressor = LZ4Compressor.class.getPackage().equals(klass.getPackage())
+                                        ? klass.getSimpleName() : klass.getName();
                     tables.add(table.keyspace + '.' + table.name + " (" + compressor + ')');
                 }
             }
@@ -127,7 +130,7 @@ public final class Dse51Compressors
                         "which this mode does not support");
         return "internode_compatibility_mode DSE_5_1 refused: " + String.join("; ", reasons) + ". DSE 5.1 reads " +
                "LZ4Compressor, SnappyCompressor and DeflateCompressor. Start this node without the mode, keeping " +
-               "sstable.selected_format: big and with uuid_sstable_identifiers_enabled: false, change the " +
+               "sstable.selected_format: big and uuid_sstable_identifiers_enabled: false, change the " +
                "compression of the tables named to one of them, rewrite their sstables (nodetool upgradesstables " +
                "-a), then start the node in the mode again";
     }

@@ -496,6 +496,19 @@ public class Dse6StartupChecksTest
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
     }
 
+    /** DSE_5_1 does not talk to DSE 6 peers either: the same refusal, which names the mode the node runs in. */
+    @Test
+    public void dse51IsRefusedWhileTheMarkerExists() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertThat(DseUpgradeMarker.writeIfAbsent()).isTrue();
+        assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessageContaining("internode_compatibility_mode is DSE_5_1 but the DSE 6 upgrade marker")
+        .hasMessageContaining(DseUpgradeMarker.FILE_NAME + " is present: DSE 6 peers may still be in the cluster")
+        .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
+    }
+
     @Test
     public void noneIsRefusedWhenTheMarkerCannotBeChecked() throws Exception
     {
