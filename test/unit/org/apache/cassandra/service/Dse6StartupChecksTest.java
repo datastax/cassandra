@@ -42,6 +42,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.ApplicationState;
@@ -342,7 +343,11 @@ public class Dse6StartupChecksTest
         assertThat(StartupChecks.isSSTableUnreadableByDse6("ca-1-bti-Data.db")).isTrue();
     }
 
-    /** The names of the files DSE 6.8.65 and 6.9.26 wrote: none of them is taken for one written without the mode. */
+    /**
+     * The names of the files DSE 6.8.65 and 6.9.26 wrote: none of them is taken for one written without the mode. The
+     * fixtures of DSE 5.1.51 (the files and directories named {@code dse-5.1.51*}), which {@code DSE_6} does not
+     * read, are left out.
+     */
     @Test
     public void theFilesDseWroteAreNotFlagged() throws IOException
     {
@@ -350,7 +355,9 @@ public class Dse6StartupChecksTest
         List<String> segments;
         try (Stream<Path> files = Files.walk(DseFixtures.ROOT))
         {
-            List<String> names = files.filter(Files::isRegularFile).map(p -> p.getFileName().toString()).collect(Collectors.toList());
+            List<String> names = files.filter(Files::isRegularFile)
+                                      .filter(p -> !Dse51Fixtures.isDse51Fixture(p))
+                                      .map(p -> p.getFileName().toString()).collect(Collectors.toList());
             sstables = names.stream().filter(n -> Descriptor.isValidFile(new File(n))).collect(Collectors.toList());
             // the fixtures keep the segments compressed
             segments = names.stream().filter(n -> n.startsWith("CommitLog-")).map(n -> n.replaceFirst("\\.gz$", "")).collect(Collectors.toList());

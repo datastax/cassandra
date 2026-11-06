@@ -16,6 +16,18 @@
 
 package org.apache.cassandra.net;
 
+import java.io.IOException;
+import java.net.InetAddress;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -24,9 +36,14 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
+import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
+import org.apache.cassandra.dsecompat.DseFixtures.GossipState;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.Hex;
+import org.apache.cassandra.utils.JsonUtils;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -295,6 +312,107 @@ public class DseCompatTest
         assertThat(DseCompat.dse51Patch(null, "6.8.1")).isNull();
         assertThat(DseCompat.dse51Patch(new CassandraVersion("4.0.0.6926"), "6.8.1")).isNull();
         assertThat(DseCompat.dse51Patch(null, null)).isNull();
+    }
+
+    /**
+     * What real DSE 5.1.51 nodes gossiped (the {@code nodetool gossipinfo} of the DSE 5.1.51 fixtures,
+     * {@code gossip/dse-5.1.51*}: every node of the three-node cluster seen from each node, and the Search and Graph
+     * node) and sent in their handshakes: each node is a DSE 5.1 peer by its {@code NET_VERSION}, by its
+     * {@code RELEASE_VERSION} and by the {@code dse_version} of its DSE state, each alone, and its patch is 51; its
+     * handshake is Apache Cassandra 3.11's at version 11, with no DSE flag. The DSE 6.9.26 node of the DSE 6 fixtures
+     * is no DSE 5.1 peer by any of the three.
+     */
+    @Test
+    public void theRuleRecognisesTheCapturedDse51NodesByTheirGossipAndHandshakes() throws IOException
+    {
+        Dse51Fixtures dse51 = DseFixtures.dse51();
+        Map<Path, List<String>> endpoints = new LinkedHashMap<>();
+        List<String> clusterEndpoints = new ArrayList<>();
+        for (int node = 1; node <= Dse51Fixtures.CLUSTER_NODES; node++)
+            clusterEndpoints.add("/127.0.51.1" + node);
+        for (int node = 1; node <= Dse51Fixtures.CLUSTER_NODES; node++)
+            endpoints.put(dse51.gossipInfo(node), clusterEndpoints);
+        endpoints.put(dse51.searchGraphGossipInfo(), List.of("/127.0.51.21"));
+
+        for (Map.Entry<Path, List<String>> gossipInfo : endpoints.entrySet())
+        {
+            // every endpoint of the file is checked
+            assertThat(Files.readAllLines(gossipInfo.getKey()).stream().filter(line -> line.startsWith("/")))
+            .as("%s", gossipInfo.getKey().getFileName())
+            .containsExactlyElementsOf(gossipInfo.getValue());
+            for (String endpoint : gossipInfo.getValue())
+            {
+                String where = endpoint + " in " + gossipInfo.getKey().getFileName();
+                Map<String, String> states = new HashMap<>();
+                for (GossipState state : dse51.gossipStates(gossipInfo.getKey(), endpoint))
+                    states.put(state.name, state.value);
+                // the DSE state, at ordinal 9, which DSE 5.1's nodetool prints under the Apache name of that ordinal
+                assertThat(states).as(where).containsKeys("NET_VERSION", "RELEASE_VERSION", "X_11_PADDING");
+
+                int messagingVersion = Integer.parseInt(states.get("NET_VERSION"));
+                CassandraVersion release = new CassandraVersion(states.get("RELEASE_VERSION"));
+                String dseVersion = (String) JsonUtils.<Object>fromJsonMap(states.get("X_11_PADDING"))
+                                                      .get("dse_version");
+
+                assertThat(messagingVersion).as(where).isEqualTo(Dse51Fixtures.MESSAGING_VERSION);
+                assertThat(release.toString()).as(where).isEqualTo(Dse51Fixtures.RELEASE_VERSION);
+                assertThat(dseVersion).as(where).isEqualTo(Dse51Fixtures.DSE_VERSION);
+                // each of the three alone tells the peer
+                assertThat(DseCompat.isDse51Peer(messagingVersion, null, null)).as(where).isTrue();
+                assertThat(DseCompat.isDse51Peer(null, release, null)).as(where).isTrue();
+                assertThat(DseCompat.isDse51Peer(null, null, dseVersion)).as(where).isTrue();
+                assertThat(DseCompat.isDse6ReleaseVersion(release)).as(where).isFalse();
+                assertThat(DseCompat.dse51Patch(release, null)).as(where).isEqualTo(51);
+                assertThat(DseCompat.dse51Patch(null, dseVersion)).as(where).isEqualTo(51);
+            }
+        }
+
+        // the handshakes: msg1 of the connecting node, the accepting node's answer (msg2), the connecting node's msg3
+        List<Dse51Fixtures.Handshake> handshakes = dse51.handshakes();
+        assertThat(handshakes).hasSize(2);
+        for (Dse51Fixtures.Handshake handshake : handshakes)
+        {
+            String where = handshake.client + " -> " + handshake.server;
+            assertThat(handshake.msg1).as(where).hasSize(8);
+            assertThat(handshake.msg2).as(where).hasSize(4);
+            assertThat(handshake.msg3).as(where).hasSize(9);
+            // msg1: the magic, then the header: no flag in bits 0 to 7 (no compression, no streaming), the requested
+            // version in bits 8 to 15, and bits 16 to 31, the accepted range of a 4.0 message, zero
+            assertThat(handshake.msg1).as(where).isEqualTo(Hex.hexToBytes("ca552dfa00000b00"));
+            int header = ByteBuffer.wrap(handshake.msg1, 4, 4).getInt();
+            assertThat(header & 0xFF).as(where).isZero();
+            int requested = (header >>> 8) & 0xFF;
+            int min = (header >>> 16) & 0xFF;
+            int max = (header >>> 24) & 0xFF;
+            assertThat(DseCompat.isDseFlaggedInitiate(requested, min, max)).as(where).isFalse();
+            assertThat(DseCompat.isPre40Initiate(requested, min, max)).as(where).isTrue();
+            int answered = ByteBuffer.wrap(handshake.msg2).getInt();
+            int connecting = ByteBuffer.wrap(handshake.msg3, 0, 4).getInt();
+            for (int version : new int[]{ requested, answered, connecting })
+            {
+                assertThat(version).as(where).isEqualTo(Dse51Fixtures.MESSAGING_VERSION);
+                assertThat(DseCompat.isDse51Peer(version, null, null)).as(where).isTrue();
+            }
+            // msg3 ends with the connecting node's address, of 4 bytes, the one the connection line names
+            assertThat(handshake.msg3[4]).as(where).isEqualTo((byte) 4);
+            assertThat(InetAddress.getByAddress(Arrays.copyOfRange(handshake.msg3, 5, 9)).getHostAddress())
+            .as(where).isEqualTo(handshake.client);
+        }
+
+        // the DSE 6.9.26 node, the only DSE 6 node whose gossip is among the fixtures: its NET_VERSION, its release
+        // and its dse_version are DSE 6's
+        Map<String, String> dse6 = new HashMap<>();
+        for (GossipState state : DseFixtures.gossipStates(DseVersion.DSE_6_9_26))
+            dse6.put(state.name, state.value);
+        assertThat(dse6).containsKeys("NET_VERSION", "RELEASE_VERSION", "DSE_GOSSIP_STATE");
+        int dse6MessagingVersion = Integer.parseInt(dse6.get("NET_VERSION"));
+        CassandraVersion dse6Release = new CassandraVersion(dse6.get("RELEASE_VERSION"));
+        String dse6DseVersion = (String) JsonUtils.<Object>fromJsonMap(dse6.get("DSE_GOSSIP_STATE"))
+                                                  .get("dse_version");
+        assertThat(DseCompat.isDse6ReleaseVersion(dse6Release)).isTrue();
+        assertThat(DseCompat.isDse51Peer(dse6MessagingVersion, null, null)).isFalse();
+        assertThat(DseCompat.isDse51Peer(null, dse6Release, null)).isFalse();
+        assertThat(DseCompat.isDse51Peer(null, null, dse6DseVersion)).isFalse();
     }
 
     /** {@link DseCompat#enabled()} stays DSE 6 only: a DSE_5_1 node takes no pre-4.0 code path. */
