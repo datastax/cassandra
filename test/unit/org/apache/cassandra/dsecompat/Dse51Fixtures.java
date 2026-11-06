@@ -112,6 +112,21 @@ public final class Dse51Fixtures
     {
     }
 
+    /**
+     * Whether {@code path}, a path under {@link DseFixtures#ROOT} as {@code Files.walk} of that directory gives it, is
+     * one of these fixtures: whether one of its name elements below the root, a directory or the file itself, starts
+     * with {@code dse-5.1.51}.
+     */
+    public static boolean isDse51Fixture(Path path)
+    {
+        if (!path.startsWith(DseFixtures.ROOT))
+            throw new IllegalArgumentException(path + " is not under " + DseFixtures.ROOT);
+        for (Path part : DseFixtures.ROOT.relativize(path))
+            if (part.toString().startsWith(DIR))
+                return true;
+        return false;
+    }
+
     /** The {@code nodetool gossipinfo} of node {@code node} (1 to 3) of the three-node cluster. */
     public Path gossipInfo(int node)
     {
