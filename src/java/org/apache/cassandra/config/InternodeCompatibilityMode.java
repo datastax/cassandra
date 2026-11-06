@@ -33,8 +33,9 @@ package org.apache.cassandra.config;
  * {@code paxos_variant: v1}, writes numeric sstable generations, refuses the compressors DSE 5.1 does not read, and
  * refuses the authenticators and authorizers that read tables of {@code system_auth} DSE 5.1 does not have. The node
  * still writes big sstables of version {@code nb}, which DSE 5.1 does not read, and speaks no pre-4.0 dialect, so it
- * cannot connect to DSE 5.1 nodes. Offline tools inherit the checks of the on-disk settings only; clients, which do not
- * read {@code cassandra.yaml}, get the {@code big} format and numeric generations forced.
+ * cannot connect to DSE 5.1 nodes. Offline tools inherit the checks of the on-disk settings only (they write big
+ * {@code oa}, without the storage mode); clients, which do not read {@code cassandra.yaml}, get the {@code big} format
+ * and numeric generations forced.
  * <p>
  * The mode is removed with a rolling restart once every node runs this software.
  */

@@ -182,5 +182,11 @@ public class AuthConfigDse6Test
         assertThatThrownBy(() -> AuthConfig.checkDse51CompatibilityMode(mutualTls, NETWORK, CIDR))
         .isInstanceOf(ConfigurationException.class)
         .hasMessage(refusal);
+
+        // the refusal is worded for a mode of an upgrade from DSE only
+        assertThatThrownBy(() -> AuthConfig.refuseWhatNeedsTablesDseLacks(InternodeCompatibilityMode.NONE, mutualTls,
+                                                                          NETWORK, CIDR))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("not a mode of an upgrade from DSE: NONE");
     }
 }
