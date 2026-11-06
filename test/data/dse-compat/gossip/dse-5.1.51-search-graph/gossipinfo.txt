@@ -1,0 +1,16 @@
+/127.0.51.21
+  generation:1793959866
+  heartbeat:114
+  STATUS:48:NORMAL,-231011715724534521
+  LOAD:19:11575.0
+  SCHEMA:96:1fbe9764-5df9-3109-a348-ee77b5c391fe
+  DC:52:SearchGraph
+  RACK:13:rack1
+  RELEASE_VERSION:4:3.11.3.5151
+  RPC_ADDRESS:3:127.0.51.21
+  X_11_PADDING:102:{"dse_version":"5.1.51","workloads":"SearchGraphCassandra","workload":"Search","active":"true","server_id":"14-B5-CD-55-FA-6B","graph":true}
+  NET_VERSION:1:11
+  HOST_ID:2:5f5e669a-efde-460d-bba4-5a89e25f26c3
+  RPC_READY:100:true
+  TOKENS:47:<hidden>
+

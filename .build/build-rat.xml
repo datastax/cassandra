@@ -77,6 +77,7 @@
                  <exclude name="test/data/CASSANDRA-15313/lz4-jvm-crash-failure.txt"/>
                  <exclude name="test/data/jmxdump/cassandra-*-jmx.yaml"/>
                  <exclude name="test/data/dse-compat/conf/**"/>
+                 <exclude name="test/data/dse-compat/**/*_txn_*.log"/>
                  <exclude name=".github/**"/>
                  <!-- Documentation files -->
                  <exclude name=".github/pull_request_template.md"/>
