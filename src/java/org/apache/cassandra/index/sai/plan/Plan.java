@@ -1004,7 +1004,10 @@ abstract public class Plan
             // In the future we probably will need to take more index metrics into account
             // (e.g. number of distinct values).
 
-            double keysPerSSTable = (double) matchingKeysCount / factory.tableMetrics.sstables;
+            // there are no sstables when all the data is in memtables, avoid dividing by zero and getting NaN costs
+            double keysPerSSTable = factory.tableMetrics.sstables == 0
+                                    ? 0.0
+                                    : (double) matchingKeysCount / factory.tableMetrics.sstables;
 
             double skipCostFactor;
             double postingsCountFactor;
