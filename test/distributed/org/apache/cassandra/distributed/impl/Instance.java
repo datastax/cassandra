@@ -34,6 +34,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -45,6 +46,7 @@ import javax.management.Notification;
 import javax.management.NotificationListener;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.Runnables;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -923,7 +925,6 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                                 () -> UncommittedTableData.shutdownAndWait(1L, MINUTES),
                                 () -> AbstractAllocatorMemtable.MEMORY_POOL.shutdownAndWait(1L, MINUTES),
                                 () -> DiagnosticSnapshotService.instance.shutdownAndWait(1L, MINUTES),
-                                () -> SSTableReader.shutdownBlocking(1L, MINUTES),
                                 () -> shutdownAndWait(Collections.singletonList(ActiveRepairService.repairCommandExecutor())),
                                 () -> ActiveRepairService.instance().shutdownNowAndWait(1L, MINUTES),
                                 () -> SnapshotManager.shutdownAndWait(1L, MINUTES)
@@ -939,6 +940,16 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                                 () -> Stage.shutdownAndWait(1L, MINUTES),
                                 () -> SharedExecutorPool.SHARED.shutdownAndWait(1L, MINUTES)
             );
+
+            // The deletions of the sstables a compaction made obsolete run on the non-periodic tasks executor, queued when
+            // the last reference to each goes, and SSTableReader.GlobalTidy deletes nothing for a descriptor that is no
+            // longer in its lookup, which SSTableReader.shutdownBlocking clears. Compactions can finish during this stop
+            // (for instance one triggered by the flush of the schema tables at the start of the stop), and the stages and
+            // the shared executor pool can hold the last reference to an input until they are down: only then let the
+            // queued deletions run, and clear the lookup after them, or the inputs and the compaction's committed
+            // transaction log stay on disk after the stop.
+            error = parallelRun(error, executor, () -> waitForDeletions(1L, MINUTES));
+            error = parallelRun(error, executor, () -> SSTableReader.shutdownBlocking(1L, MINUTES));
 
             // CommitLog must shut down after Stage, or threads from the latter may attempt to use the former.
             // (ex. A Mutation stage thread may attempt to add a mutation to the CommitLog.)
@@ -1173,6 +1184,29 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     public long killAttempts()
     {
         return callOnInstance(InstanceKiller::getKillAttempts);
+    }
+
+    /**
+     * {@code LifecycleTransaction.waitForDeletions} with a bound: lets the deletions already queued on the non-periodic
+     * tasks executor run. After a drain that executor is already shut down and its queued tasks were dropped, so there
+     * is nothing to wait for.
+     */
+    private static void waitForDeletions(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException
+    {
+        if (ScheduledExecutors.nonPeriodicTasks.isShutdown())
+            return;
+        Future<?> barrier = ScheduledExecutors.nonPeriodicTasks.schedule(Runnables.doNothing(), 0, TimeUnit.MILLISECONDS);
+        try
+        {
+            barrier.get(timeout, unit);
+        }
+        catch (TimeoutException e)
+        {
+            barrier.cancel(false);
+            TimeoutException failure = new TimeoutException("Timed out after " + unit.toMillis(timeout) + " ms waiting for the queued sstable deletions");
+            failure.initCause(e);
+            throw failure;
+        }
     }
 
     private static void shutdownAndWait(List<ExecutorService> executors) throws TimeoutException, InterruptedException
