@@ -21,6 +21,7 @@ package org.apache.cassandra.repair.consistent;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -342,7 +343,7 @@ public class CoordinatorSession extends ConsistentSession
     /**
      * Runs the asynchronous consistent repair session. Actual repair sessions are scheduled via a submitter to make unit testing easier
      */
-    public Future<CoordinatedRepairResult> execute(Supplier<Future<CoordinatedRepairResult>> sessionSubmitter)
+    public Future<CoordinatedRepairResult> execute(Supplier<Future<CoordinatedRepairResult>> sessionSubmitter, Executor repairExecutor)
     {
         logger.info("Beginning coordination of incremental repair session {} with {} participant(s): {}",
                     sessionID, participants.size(), participants);
@@ -350,13 +351,29 @@ public class CoordinatorSession extends ConsistentSession
         sessionStart = ctx.clock().currentTimeMillis();
         Future<Void> prepareResult = prepare();
 
-        // run repair sessions normally
+        // run repair sessions on the repair executor rather than on the thread completing the prepare phase
+        // (normally AntiEntropyStage), as session startup blocks on repair history writes
         Future<CoordinatedRepairResult> repairSessionResults = prepareResult.flatMap(ignore -> {
-            repairStart = ctx.clock().currentTimeMillis();
-            logger.info("Incremental repair {} prepare phase completed in {}", sessionID, formatDuration(sessionStart, repairStart));
-            setRepairing();
+            // Since this task is offloaded to the repair executor, fail() (e.g. from a participant failure or
+            // a repair abort) may run after the prepare phase completed but before this task runs. Without this
+            // check, setRepairing() would throw on the invalid FAILED -> REPAIRING transition instead of failing
+            // with a meaningful error. Synchronizing on the session makes the state check and
+            // setRepairing() atomic with respect to fail(), which is also synchronized.
+            synchronized (this)
+            {
+                if (getState() == State.FAILED)
+                {
+                    String msg = String.format("Incremental repair session %s has failed after the prepare phase " +
+                                               "before running repair sessions", sessionID);
+                    return ImmediateFuture.failure(new RuntimeException(msg));
+                }
+
+                repairStart = ctx.clock().currentTimeMillis();
+                logger.info("Incremental repair {} prepare phase completed in {}", sessionID, formatDuration(sessionStart, repairStart));
+                setRepairing();
+            }
             return sessionSubmitter.get();
-        });
+        }, repairExecutor);
 
         // if any session failed, then fail the future
         Future<CoordinatedRepairResult> onlySuccessSessionResults = repairSessionResults.flatMap(result -> {
