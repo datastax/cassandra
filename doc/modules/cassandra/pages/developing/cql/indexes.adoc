@@ -52,6 +52,16 @@ function, the index will be on the map keys, allowing you to use
 `CONTAINS KEY` in `WHERE` clauses. Otherwise, the index will be on the
 map values.
 
+=== Indexes on UDT and tuple fields
+
+A storage-attached (`sai`) index can be created on a single field of a
+user-defined type or tuple column, with the path to the field after the
+column name: `addr.city`, `p.home.loc.lat`, `t.field2` (the components of a
+tuple are `field1`, `field2`, ...), and `addrs.city` or `values(addrs).city`
+for the fields of the elements of a list, set or map of UDTs or tuples.
+`full(addr.tags)` indexes a frozen collection field as a whole. See
+xref:cassandra:developing/cql/indexing/sai/udt-tuple-fields.adoc[Indexes on UDT and tuple fields].
+
 [[drop-index-statement]]
 == DROP INDEX
 

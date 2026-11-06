@@ -127,6 +127,11 @@ rows (and we suppose no secondary indexes are set):
 include::cassandra:example$CQL/where_fail.cql[]
 ----
 
+The fields of user-defined type and tuple columns can be restricted with their path, for example
+`addr.city = 'Rome'` or `t.field2 > 1`, and the elements of a collection of UDTs or tuples with
+`addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100)`, using SAI indexes on the fields or `ALLOW FILTERING`.
+See xref:cassandra:developing/cql/indexing/sai/udt-tuple-fields.adoc[Indexes on UDT and tuple fields].
+
 When specifying relationships, the `TOKEN` function can be applied to the `PARTITION KEY` column to query.
 Rows will be selected based on the token of the `PARTITION_KEY` rather than on the value.
 [IMPORTANT]
