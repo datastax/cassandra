@@ -725,7 +725,7 @@ public class Expression
     public String toString(boolean redact)
     {
         return String.format("Expression{name: %s, op: %s, lower: (%s, %s), upper: (%s, %s), exclusions: %s}",
-                             context.getColumnName(),
+                             context.hasFieldPath() ? context.getTargetName() : context.getColumnName(),
                              patternOperator == null ? operation : operation + " " + patternOperator,
                              lower == null ? "null" : validator.getString(lower.value.raw, redact ? Redaction.REDACT : Redaction.NONE),
                              lower != null && lower.inclusive,
@@ -742,6 +742,7 @@ public class Expression
     public int hashCode()
     {
         return new HashCodeBuilder().append(context.getColumnName())
+                                    .append(context.getFieldPath())
                                     .append(operation)
                                     .append(patternOperator)
                                     .append(validator)
@@ -760,6 +761,7 @@ public class Expression
         Expression o = (Expression) other;
 
         return Objects.equals(context.getColumnName(), o.context.getColumnName())
+                && Objects.equals(context.getFieldPath(), o.context.getFieldPath())
                 && validator.equals(o.validator)
                 && operation == o.operation
                 && patternOperator == o.patternOperator

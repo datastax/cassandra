@@ -257,6 +257,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         if (index != null)
             return index.getIndexContext();
 
+        // a non-indexed context to filter the column or, for an expression on a field, the field
         return new IndexContext(cfs.metadata().keyspace,
                                 cfs.metadata().name,
                                 cfs.metadata().id,
@@ -264,6 +265,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                                 cfs.metadata().comparator,
                                 expression.column(),
                                 determineIndexTargetType(expression),
+                                expression.fieldPath(),
                                 null,
                                 cfs);
     }
@@ -274,6 +276,18 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      */
     public static IndexTarget.Type determineIndexTargetType(RowFilter.Expression expression)
     {
+        // for an expression on a field, it's the type of the field that matters
+        if (expression.fieldPath() != null)
+        {
+            // the fields are frozen: CONTAINS reads the elements of a collection field, as an index on its values
+            // does, the other operators read the whole value
+            AbstractType<?> leafType = expression.fieldPath().leafType(expression.column().type);
+            Operator operator = expression.operator();
+            return leafType.isCollection() && (operator == Operator.CONTAINS || operator == Operator.NOT_CONTAINS)
+                   ? IndexTarget.Type.VALUES
+                   : IndexTarget.Type.SIMPLE;
+        }
+
         AbstractType<?> type  = expression.column().type;
         IndexTarget.Type indexTargetType = IndexTarget.Type.SIMPLE;
         if (type.isCollection() && type.isMultiCell())
