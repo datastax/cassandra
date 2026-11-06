@@ -23,6 +23,7 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -160,7 +161,7 @@ final class HintsDispatcher implements AutoCloseable
         {
             HintDiagnostics.pageFailureResult(this, success, failures, timeouts);
             if (DseCompat.isPre40Layout(messagingVersion))
-                warnUnacknowledgedByDse6(failures + timeouts);
+                warnUnacknowledgedByDse(failures + timeouts);
             return Action.ABORT;
         }
         else
@@ -183,19 +184,46 @@ final class HintsDispatcher implements AutoCloseable
      * reliable, since a failure is a failure response from the node or one of those local failures, and the expiry of
      * the hint's callback is reported as a timeout failure when it comes before the dispatcher's own deadline. Once
      * every ten minutes per node at most.
+     * <p>
+     * In {@code internode_compatibility_mode: DSE_5_1}, for a page sent to a DSE 5.1 node, the WARN names DSE 5.1,
+     * which by its source acknowledges the hints it drops too (an unknown table, invalid data, a range it no longer
+     * owns, whose hint it sends on to the replicas) and leaves unanswered only a hint whose application fails
+     * ({@link #unacknowledgedHintsWarning}). So far no node in that mode sends a hint to a DSE 5.1 node: there
+     * {@link DseCompat#enabled} is false, and so is {@link DseCompat#isPre40Layout} at every version.
      */
-    private void warnUnacknowledgedByDse6(long unacknowledged)
+    private void warnUnacknowledgedByDse(long unacknowledged)
     {
-        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, "dse6-unacknowledged-hints-" + address, 10, TimeUnit.MINUTES,
-                         "DSE 6 compatibility mode: hints not acknowledged by DSE 6 node {}: {} in file {}; the file stays and is " +
-                         "sent again from that page. The node may be down or overloaded, it may have answered with a failure, the " +
-                         "hints may not have been sent (see the messaging log), or it dropped them: DSE 6 does not acknowledge a " +
-                         "hint it drops (unknown table, invalid data, range no longer owned if configured to reject such hints), " +
-                         "and such a hint holds back this file and the later ones for that node until it expires (the smallest " +
-                         "gc_grace_seconds of its tables, capped by cassandra.maxHintTTL) or the node is upgraded. If this repeats " +
-                         "for the same file, nodetool truncatehints {} deletes all the pending hints for that node, and the repair " +
-                         "after the compatibility mode is dropped brings their writes to it.",
+        boolean dse51 = DseCompat.isDse51();
+        String key = (dse51 ? "dse51" : "dse6") + "-unacknowledged-hints-" + address;
+        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, key, 10, TimeUnit.MINUTES, unacknowledgedHintsWarning(dse51),
                          address, unacknowledged, reader.descriptor().fileName(), address.getHostAddress(false));
+    }
+
+    /**
+     * The WARN of {@link #warnUnacknowledgedByDse}, with four parameters: the node, the number of hints it did not
+     * acknowledge, the file and the node's address; for a DSE 5.1 node when {@code dse51}, otherwise for a DSE 6 node.
+     */
+    @VisibleForTesting
+    static String unacknowledgedHintsWarning(boolean dse51)
+    {
+        if (dse51)
+            return "DSE 5.1 compatibility mode: hints not acknowledged by DSE 5.1 node {}: {} in file {}; the file " +
+                   "stays and is sent again from that page. The node may be down or overloaded, it may have answered " +
+                   "with a failure, the hints may not have been sent (see the messaging log), or it failed to apply " +
+                   "them: DSE 5.1 acknowledges a hint it drops (unknown table, invalid data, range no longer owned) " +
+                   "but not one it fails to apply, and such a hint holds back this file and the later ones for that " +
+                   "node until it expires (the smallest gc_grace_seconds of its tables, capped by " +
+                   "cassandra.maxHintTTL) or the node is upgraded. If this repeats for the same file, nodetool " +
+                   "truncatehints {} deletes all the pending hints for that node, and the repair after the " +
+                   "compatibility mode is dropped brings their writes to it.";
+        return "DSE 6 compatibility mode: hints not acknowledged by DSE 6 node {}: {} in file {}; the file stays and " +
+               "is sent again from that page. The node may be down or overloaded, it may have answered with a " +
+               "failure, the hints may not have been sent (see the messaging log), or it dropped them: DSE 6 does " +
+               "not acknowledge a hint it drops (unknown table, invalid data, range no longer owned if configured to " +
+               "reject such hints), and such a hint holds back this file and the later ones for that node until it " +
+               "expires (the smallest gc_grace_seconds of its tables, capped by cassandra.maxHintTTL) or the node is " +
+               "upgraded. If this repeats for the same file, nodetool truncatehints {} deletes all the pending hints " +
+               "for that node, and the repair after the compatibility mode is dropped brings their writes to it.";
     }
 
     private void updateMetrics(long success, long failures, long timeouts)

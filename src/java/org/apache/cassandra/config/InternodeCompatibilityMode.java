@@ -28,14 +28,18 @@ package org.apache.cassandra.config;
  * states, and refuses the operations a mixed cluster cannot run (topology changes, repair, sstable rewrites, schema
  * changes).
  * <p>
- * {@link #DSE_5_1} is the mode of the in-place upgrade of a DataStax Enterprise 5.1.51 cluster. So far it only checks
- * the settings: it requires {@code storage_compatibility_mode: HCD_1}, the {@code big} sstable format and
- * {@code paxos_variant: v1}, writes numeric sstable generations, refuses the compressors DSE 5.1 does not read, and
- * refuses the authenticators and authorizers that read tables of {@code system_auth} DSE 5.1 does not have. The node
- * still writes big sstables of version {@code nb}, which DSE 5.1 does not read, and speaks no pre-4.0 dialect, so it
- * cannot connect to DSE 5.1 nodes. Offline tools inherit the checks of the on-disk settings only (they write big
- * {@code oa}, without the storage mode); clients, which do not read {@code cassandra.yaml}, get the {@code big} format
- * and numeric generations forced.
+ * {@link #DSE_5_1} is the mode of the in-place upgrade of a DataStax Enterprise 5.1.51 cluster. It requires
+ * {@code storage_compatibility_mode: HCD_1}, the {@code big} sstable format and {@code paxos_variant: v1}, writes
+ * numeric sstable generations, refuses the compressors DSE 5.1 does not read, and refuses the authenticators and
+ * authorizers that read tables of {@code system_auth} DSE 5.1 does not have. At start it refuses the files a node in
+ * the mode never writes (sstables of the {@code bti} format or another format than {@code big}, big sstables newer than
+ * {@code oa}, non-numeric generations, commit log segments above version 7), writes the marker of the upgrade from
+ * DSE 5.1 (which refuses a later start with {@code NONE}) and moves aside the commit log segments of DSE 5.1 it
+ * replayed; it writes the transaction logs and the sstable statistics as DSE 5.1 reads them. The node still writes
+ * big sstables of version {@code nb}, which DSE 5.1 does not read, and speaks no pre-4.0 dialect, so it cannot connect
+ * to DSE 5.1 nodes. Offline tools inherit only the checks of the on-disk settings and the transaction logs and
+ * statistics of the mode (they write big {@code oa}, without the storage mode); clients, which do not read
+ * {@code cassandra.yaml}, get the {@code big} format and numeric generations forced.
  * <p>
  * The mode is removed with a rolling restart once every node runs this software.
  */

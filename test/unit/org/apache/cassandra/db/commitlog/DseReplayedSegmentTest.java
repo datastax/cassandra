@@ -55,6 +55,8 @@ public class DseReplayedSegmentTest
     private static final String DSE_SEGMENT = "CommitLog-680-1790248906231.log";
     private static final String SECOND_DSE_SEGMENT = "CommitLog-680-1790248906233.log";
     private static final String OWN_SEGMENT = "CommitLog-7-1790248906232.log";
+    /** A segment of DSE 5.1, which writes version 6, that of Cassandra 3.x. */
+    private static final String DSE_51_SEGMENT = "CommitLog-6-1790248906234.log";
     private static final byte[] CONTENT = "segment".getBytes(StandardCharsets.UTF_8);
 
     @Rule
@@ -153,6 +155,53 @@ public class DseReplayedSegmentTest
     {
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
         assertKept(DSE_SEGMENT, true);
+    }
+
+    @Test
+    public void dse51ModeMovesAsideADse51Segment() throws IOException
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        Path segment = segment(DSE_51_SEGMENT);
+
+        File file = new File(segment);
+        List<String> warnings = warnings(() -> assertThat(CommitLog.moveAsideReplayedDseSegment(file, false, false))
+                                               .isTrue());
+
+        assertThat(Files.exists(segment)).isFalse();
+        Path moved = dir.resolve(DSE_51_SEGMENT + CommitLog.REPLAYED_DSE_SEGMENT_SUFFIX);
+        assertThat(Files.readAllBytes(moved)).isEqualTo(CONTENT);
+        assertThat(warnings).singleElement().asString()
+                            .startsWith("Commit log segment " + segment + " was written by DataStax Enterprise 5.1 " +
+                                        "and read at the start")
+                            .contains("Renamed to " + moved.getFileName() + " so that it is not replayed again");
+    }
+
+    @Test
+    public void dse51ModeKeepsItsOwnSegmentsAndThoseOfDse6() throws IOException
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertKept(OWN_SEGMENT, false);
+        assertKept(DSE_SEGMENT, false);
+    }
+
+    @Test
+    public void dse51ModeKeepsADse51SegmentWithFailedMutations() throws IOException
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertKept(DSE_51_SEGMENT, true);
+    }
+
+    /** Version 6 is moved aside in DSE_5_1 mode only. */
+    @Test
+    public void theOtherModesKeepADse51Segment() throws IOException
+    {
+        for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+        {
+            if (mode.isDse51())
+                continue;
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            assertKept(DSE_51_SEGMENT, false);
+        }
     }
 
     @Test

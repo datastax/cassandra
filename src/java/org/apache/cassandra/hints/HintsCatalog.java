@@ -93,6 +93,11 @@ final class HintsCatalog
      * (version field -1) and a name {@link HintsDescriptor#isHintFileName} does not match, so the catalog never loads,
      * delivers or moves them aside; in {@code internode_compatibility_mode: DSE_6} {@link DseHintsConverter} turns them
      * into hints files of this software when hints dispatch starts.
+     * <p>
+     * DataStax Enterprise 5.1 writes plain hints files of version 1 ({@code <host id>-<timestamp>-1.hints}, the
+     * Cassandra 3.0 layout), which are none of these: the catalog loads them as its own, in every mode, and each hint
+     * is decoded at messaging version 10 when it is dispatched, then sent at the target's version; nothing converts
+     * them.
      */
     static List<Path> dseHintsFiles(File hintsDirectory) throws IOException
     {

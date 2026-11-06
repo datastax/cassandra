@@ -22,6 +22,7 @@ import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.compress.DeflateCompressor;
@@ -130,9 +131,12 @@ public final class Dse51Compressors
             reasons.add(String.join(", ", encrypted) + (encrypted.size() == 1 ? " is" : " are") + " encrypted, " +
                         "which this mode does not support");
         return "internode_compatibility_mode DSE_5_1 refused: " + String.join("; ", reasons) + ". DSE 5.1 reads " +
-               "LZ4Compressor, SnappyCompressor and DeflateCompressor. Start this node without the mode, keeping " +
-               "sstable.selected_format: big and uuid_sstable_identifiers_enabled: false, change the " +
-               "compression of the tables named to one of them, rewrite their sstables (nodetool upgradesstables " +
-               "-a), then start the node in the mode again";
+               "LZ4Compressor, SnappyCompressor and DeflateCompressor. Start this node without the mode, with -D" +
+               CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS.getKey() + "=true (the " +
+               "DSE 5.1 upgrade marker this node wrote at its start in the mode refuses that start otherwise), " +
+               "keeping storage_compatibility_mode: HCD_1, sstable.selected_format: big and " +
+               "uuid_sstable_identifiers_enabled: false, change the compression of the tables named to one of them, " +
+               "rewrite their sstables (nodetool upgradesstables -a), then start the node in the mode again without " +
+               "that property";
     }
 }
