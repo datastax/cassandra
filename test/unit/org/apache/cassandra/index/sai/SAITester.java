@@ -1196,7 +1196,14 @@ public class SAITester extends CQLTester
         StorageAttachedIndexSearcher searcher = indexPlan.searcherFor(command);
         Plan.RowsIteration saiPlan = searcher.buildPlan();
 
-        Assertions.assertThat(containsPlan(saiPlan, planClass)).isTrue();
+        assertContainsPlan(saiPlan, planClass);
+    }
+
+    private static void assertContainsPlan(Plan plan, Class<? extends Plan> planClass)
+    {
+        Assertions.assertThat(containsPlan(plan, planClass))
+                  .withFailMessage("Expected plan %s to be present in %s", planClass, plan.toStringRecursive(Redaction.NONE))
+                  .isTrue();
     }
 
     private static boolean containsPlan(Plan plan, Class<? extends Plan> planClass)
@@ -1296,6 +1303,15 @@ public class SAITester extends CQLTester
             Assertions.assertThat(plan)
                       .withFailMessage("Plan didn't match:\n%s", plan.toStringRecursive(Redaction.NONE))
                       .matches(predicate);
+        }
+
+        @SafeVarargs
+        public final void hasSubplans(Class<? extends Plan>... planClasses)
+        {
+            for (Class<? extends Plan> planClass : planClasses)
+            {
+                assertContainsPlan(plan, planClass);
+            }
         }
     }
 

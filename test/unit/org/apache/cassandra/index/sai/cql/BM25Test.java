@@ -16,33 +16,35 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
-import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.index.sai.IndexContext;
-import org.apache.cassandra.index.sai.plan.Plan;
-import org.assertj.core.api.Assertions;
-
 import org.junit.Before;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
+import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.SegmentBuilder;
-
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
+import org.apache.cassandra.index.sai.plan.Plan;
+import org.assertj.core.api.Assertions;
 
 import static java.lang.String.format;
 import static org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport.EQ_AMBIGUOUS_ERROR;
@@ -1325,14 +1327,14 @@ public class BM25Test extends SAITester
                               Plan.Bm25IndexScan.class,
                               row(3), row(4), row(5), row(6), row(7));
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'banana' LIMIT 5",
-                              Plan.Bm25IndexScan.class);
+                              Plan.NumericIndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'apple' LIMIT 5",
                               Plan.NumericIndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5",
                               Plan.NumericIndexScan.class,
                               row(8), row(9));
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'banana' LIMIT 5",
-                              Plan.Bm25IndexScan.class);
+                              Plan.NumericIndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'apple' LIMIT 5",
                               Plan.NumericIndexScan.class);
         assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'orange' LIMIT 5",
@@ -1373,6 +1375,59 @@ public class BM25Test extends SAITester
                              "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH excluded_indexes = {" + literalIndex + '}');
         assertInvalidMessage(String.format(StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, 's'),
                              "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH excluded_indexes = {" + numericIndex + ',' + literalIndex + '}');
+    }
+
+    @Test
+    public void testPlanningOnHybridQueriesWithIntersection()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, a int, b int, s text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        execute("INSERT INTO %s (k, a, b, s) VALUES (0, 0, 0, 'apple')");
+        execute("INSERT INTO %s (k, a, b, s) VALUES (1, 0, 1, 'apple')");
+        execute("INSERT INTO %s (k, a, b, s) VALUES (2, 1, 0, 'apple')");
+        execute("INSERT INTO %s (k, a, b, s) VALUES (3, 1, 1, 'orange')");
+        execute("INSERT INTO %s (k, a, b, s) VALUES (4, 1, 1, 'orange')");
+        execute("INSERT INTO %s (k, a, b, s) VALUES (5, 1, 1, 'orange')");
+        execute("INSERT INTO %s (k, a, b, s) VALUES (6, 1, 1, 'orange')");
+        execute("INSERT INTO %s (k, a, b, s) VALUES (7, 1, 1, 'orange')");
+        execute("INSERT INTO %s (k, a, b, s) VALUES (8, 1, 1, 'orange')");
+        execute("INSERT INTO %s (k, a, b, s) VALUES (9, 1, 1, 'orange')");
+
+        // When the BM25 orderer is more selective than the WHERE intersection, sort-then-filter (Bm25IndexScan) is chosen
+        assertThatPlanFor("SELECT k FROM %s WHERE a = 1 AND b = 1 ORDER BY s BM25 OF 'apple' LIMIT 1")
+                .hasSubplans(Plan.Bm25IndexScan.class);
+
+        // When the WHERE filters combined with the BM25 term are more selective than the BM25 orderer alone,
+        // filter-then-sort is chosen and the BM25 term scan is included in the intersection.
+        assertThatPlanFor("SELECT k FROM %s WHERE a = 0 AND b = 1 ORDER BY s BM25 OF 'apple' LIMIT 1", row(1))
+                .hasSubplans(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+
+        // When the WHERE intersection is very selective, filter-then-sort is chosen over sort-then-filter
+        assertThatPlanFor("SELECT k FROM %s WHERE a = 0 AND b = 0 ORDER BY s BM25 OF 'orange' LIMIT 1")
+                .hasSubplans(Plan.NumericIndexScan.class);
+
+        // When the BM25 term is already explicitly present in the WHERE clause, filter-then-sort is chosen without duplicate scans
+        assertThatPlanFor("SELECT k FROM %s WHERE s : 'apple' AND a = 0 AND b = 1 ORDER BY s BM25 OF 'apple' LIMIT 1", row(1))
+                .hasSubplans(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+
+        // Single selective filter vs non-selective BM25 orderer chooses filter-then-sort
+        assertThatPlanFor("SELECT k FROM %s WHERE a = 0 ORDER BY s BM25 OF 'orange' LIMIT 1")
+                .hasSubplans(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+
+        // Single non-selective filter vs selective BM25 orderer chooses sort-then-filter
+        assertThatPlanFor("SELECT k FROM %s WHERE a = 1 ORDER BY s BM25 OF 'apple' LIMIT 1", row(2))
+                .hasSubplans(Plan.Bm25IndexScan.class);
+
+        // Single filter vs identical BM25 orderer chooses sort-then-filter
+        assertThatPlanFor("SELECT k FROM %s WHERE s : 'apple' ORDER BY s BM25 OF 'apple' LIMIT 1", row(1))
+                .hasSubplans(Plan.Bm25IndexScan.class);
+
+        // BM25 orderer alone chooses sort (it's not added as a filter)
+        assertThatPlanFor("SELECT k FROM %s ORDER BY s BM25 OF 'apple' LIMIT 1", row(1))
+                .hasSubplans(Plan.Bm25IndexScan.class);
     }
 
     private void assertCannotBeRestrictedByClustering(String query, String column)
