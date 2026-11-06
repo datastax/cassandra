@@ -552,8 +552,8 @@ public enum CassandraRelevantProperties
     INDEX_UNKNOWN_IGNORE("cassandra.index.unknown_custom_class.ignore"),
     INITIAL_TOKEN("cassandra.initial_token"),
     /**
-     * Overrides {@code internode_compatibility_mode} of cassandra.yaml (values {@code NONE}, {@code DSE_6});
-     * for tests and for entering the DSE 6 compatibility mode without editing the configuration.
+     * Overrides {@code internode_compatibility_mode} of cassandra.yaml (values {@code NONE}, {@code DSE_6},
+     * {@code DSE_5_1}); for tests and for entering a DSE compatibility mode without editing the configuration.
      */
     INTERNODE_COMPATIBILITY_MODE("cassandra.internode_compatibility_mode"),
     /**

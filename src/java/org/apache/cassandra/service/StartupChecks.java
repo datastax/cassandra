@@ -943,7 +943,8 @@ public class StartupChecks
     };
 
     /**
-     * With {@code internode_compatibility_mode: NONE}, refuses to start while the DSE 6 upgrade marker is present or
+     * With {@code internode_compatibility_mode: NONE} (or {@code DSE_5_1}, which does not talk to DSE 6 peers either),
+     * refuses to start while the DSE 6 upgrade marker is present or
      * while the node's own record of DSE 6 peers ({@link DsePeersRecord}) is not empty: DSE peers may still be in the
      * cluster, and a node without the mode cannot talk to them. These two files are the only sources of truth here;
      * no guess is made from release versions. The record is what this node persisted the last time it ran: the
@@ -1014,7 +1015,8 @@ public class StartupChecks
             // refused, and DSE_6 is one of its remedies (loadDsePeersRecord, which cannot do without the record, reports
             // the same file as a disk state error)
             throw new StartupException(StartupException.ERR_WRONG_CONFIG,
-                                       String.format("internode_compatibility_mode is NONE but %s: " +
+                                       String.format("internode_compatibility_mode is " +
+                                                     DatabaseDescriptor.getInternodeCompatibilityMode() + " but %s: " +
                                                      "DSE 6 peers may still be in the cluster. Set internode_compatibility_mode: DSE_6, or %s, " +
                                                      "or start with -D%s=true",
                                                      found, remedy,

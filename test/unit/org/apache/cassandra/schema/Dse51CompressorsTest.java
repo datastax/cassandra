@@ -106,9 +106,11 @@ public class Dse51CompressorsTest extends CQLTester
     {
         String zstd = createTableCompressedWith("{'class': 'ZstdCompressor'}");
         String noop = createTableCompressedWith("{'class': 'NoopCompressor'}");
+        String adaptive = createTableCompressedWith("{'class': 'AdaptiveCompressor'}");
         String lz4 = createTableCompressedWith("{'class': 'LZ4Compressor'}");
         List<String> expected = List.of(KEYSPACE + '.' + zstd + " (ZstdCompressor)",
-                                        KEYSPACE + '.' + noop + " (NoopCompressor)");
+                                        KEYSPACE + '.' + noop + " (NoopCompressor)",
+                                        KEYSPACE + '.' + adaptive + " (AdaptiveCompressor)");
         // the LZ4 table is not named
         assertThat(unreadable()).containsExactlyInAnyOrderElementsOf(expected).isSorted();
         assertThat(keyspaceMetadata().getTableOrViewNullable(lz4)).isNotNull();
@@ -129,6 +131,7 @@ public class Dse51CompressorsTest extends CQLTester
         // altered to a compressor DSE 5.1 reads, or dropped: the start is accepted
         execute(String.format("ALTER TABLE %s.%s WITH compression = {'class': 'SnappyCompressor'}", KEYSPACE, zstd));
         execute(String.format("DROP TABLE %s.%s", KEYSPACE, noop));
+        execute(String.format("DROP TABLE %s.%s", KEYSPACE, adaptive));
         assertThatCode(Dse51Compressors::verifyAtStartup).doesNotThrowAnyException();
     }
 
@@ -168,7 +171,7 @@ public class Dse51CompressorsTest extends CQLTester
     public void theRefusalNamesEveryTableAndTheFix()
     {
         String fix = ". DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor. Start this node without " +
-                     "the mode, keeping sstable.selected_format: big and with uuid_sstable_identifiers_enabled: " +
+                     "the mode, keeping sstable.selected_format: big and uuid_sstable_identifiers_enabled: " +
                      "false, change the compression of the tables named to one of them, rewrite their sstables " +
                      "(nodetool upgradesstables -a), then start the node in the mode again";
         assertThat(Dse51Compressors.refusal(List.of("ks.t (ZstdCompressor)"), List.of()))

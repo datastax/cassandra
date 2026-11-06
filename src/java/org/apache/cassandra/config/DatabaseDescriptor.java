@@ -1747,7 +1747,8 @@ public class DatabaseDescriptor
      * format in place of {@code bti} and no trie version, and forces numeric sstable generations; tools inherit the
      * on-disk checks (the format, the compressors, the generations) without the storage mode and paxos checks, and
      * clients, which do not read {@code cassandra.yaml}, get the {@code big} format forced instead of refused. The
-     * mode still writes big sstables of version {@code nb} and speaks no pre-4.0 dialect.
+     * mode still writes big sstables of version {@code nb} (offline tools, which run without the storage mode,
+     * {@code oa}) and speaks no pre-4.0 dialect.
      */
     @VisibleForTesting
     static void applyInternodeCompatibilityMode(Config conf)
@@ -1789,6 +1790,9 @@ public class DatabaseDescriptor
             if (!isDsePaxosVariant(paxosVariant))
                 throw new ConfigurationException(dsePaxosVariantRefusal(mode, paxosVariant), false);
             applyDse51SSTableOutput(conf);
+            logger.warn("Running in internode_compatibility_mode DSE_5_1: the node writes big nb sstables with " +
+                        "numeric generations, which DSE 5.1 does not read, and requires paxos_variant v1; it does " +
+                        "not connect to DSE 5.1 nodes");
         }
 
         internodeCompatibilityMode = mode;

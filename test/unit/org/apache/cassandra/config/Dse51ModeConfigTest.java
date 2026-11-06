@@ -137,7 +137,25 @@ public class Dse51ModeConfigTest
     public void dse51WithMatchingSettings()
     {
         DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
-        apply(dse51Config());
+        Logger ddLogger = (Logger) LoggerFactory.getLogger(DatabaseDescriptor.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ddLogger.addAppender(appender);
+        try
+        {
+            apply(dse51Config());
+        }
+        finally
+        {
+            ddLogger.detachAppender(appender);
+        }
+        // the mode is announced, with what it does not do yet
+        String announcement = "Running in internode_compatibility_mode DSE_5_1: the node writes big nb sstables with " +
+                              "numeric generations, which DSE 5.1 does not read, and requires paxos_variant v1; it " +
+                              "does not connect to DSE 5.1 nodes";
+        assertThat(appender.list).filteredOn(e -> e.getLevel() == Level.WARN &&
+                                                  e.getFormattedMessage().equals(announcement))
+                                 .hasSize(1);
         assertThat(mode()).isEqualTo(DSE_5_1);
         assertThat(DatabaseDescriptor.isDse51CompatibilityMode()).isTrue();
         assertThat(DatabaseDescriptor.isDseCompatibilityMode()).isTrue();

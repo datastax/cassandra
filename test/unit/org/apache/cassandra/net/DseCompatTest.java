@@ -209,7 +209,7 @@ public class DseCompatTest
         // DSE 5.1.51, 5.1.18 and 5.1.3
         for (String dse51 : new String[]{ "3.11.3.5151", "3.11.3.5118", "3.11.3.513" })
             assertThat(DseCompat.isDse51ReleaseVersion(new CassandraVersion(dse51))).as(dse51).isTrue();
-        // a suffix is not part of the rule, as for DSE 6: a 5.1 build that is not a release still reports four parts
+        // a suffix, which DSE 5.1 never writes, does not change the answer, as for DSE 6
         assertThat(DseCompat.isDse51ReleaseVersion(new CassandraVersion("3.11.3.5151-SNAPSHOT"))).isTrue();
         // Apache Cassandra 3.11.3 and 3.11.11, other releases with four parts (another 3.11, DSE 5.0.15, DSE 6.9.26 and
         // 6.8.65, this software), and DSE versions read as releases
@@ -228,7 +228,7 @@ public class DseCompatTest
         for (String dse51 : new String[]{ "5.1.51", "5.1.18", "5.1.0" })
             assertThat(DseCompat.isDse51DseVersion(dse51)).as(dse51).isTrue();
         for (String other : new String[]{ "6.8.1", "6.9.26", "5.0.15", "5.1", "5.1.51.0", "5.1.51-SNAPSHOT",
-                                          "3.11.3.5151", "", "none" })
+                                          "5.1.051", "5.1.00", "3.11.3.5151", "", "none" })
             assertThat(DseCompat.isDse51DseVersion(other)).as(other).isFalse();
         assertThat(DseCompat.isDse51DseVersion(null)).isFalse();
     }
@@ -283,8 +283,8 @@ public class DseCompatTest
         // the dse_version wins over the build number
         assertThat(DseCompat.dse51Patch(new CassandraVersion("3.11.3.5118"), "5.1.51")).isEqualTo(51);
         // a DSE 5.1 release whose build number names no 5.1 release, and other releases
-        for (String other : new String[]{ "3.11.3.6926", "3.11.3.51", "3.11.3.515151", "3.11.11", "4.0.0.6926",
-                                          "5.0.7.0" })
+        for (String other : new String[]{ "3.11.3.6926", "3.11.3.51", "3.11.3.515151", "3.11.3.5105", "3.11.11",
+                                          "4.0.0.6926", "5.0.7.0" })
             assertThat(DseCompat.dse51Patch(new CassandraVersion(other), null)).as(other).isNull();
         assertThat(DseCompat.dse51Patch(null, "6.8.1")).isNull();
         assertThat(DseCompat.dse51Patch(new CassandraVersion("4.0.0.6926"), "6.8.1")).isNull();

@@ -31,7 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * A node in {@code internode_compatibility_mode: DSE_5_1} refuses to start, once its schema is loaded, while a table is
- * compressed with a compressor DSE 5.1 does not read, and starts while every table uses one DSE 5.1 reads. Each node
+ * compressed with a compressor DSE 5.1 does not read, and starts while every table uses one DSE 5.1 reads. The node
  * first runs without the mode, on the storage settings the mode requires, then is restarted in it.
  */
 public class Dse51CompressorsStartupTest extends TestBaseImpl

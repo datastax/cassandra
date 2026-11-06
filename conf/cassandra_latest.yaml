@@ -2289,8 +2289,9 @@ storage_compatibility_mode: NONE
 # and forces uuid_sstable_identifiers_enabled off. The node still writes big sstables of version
 # nb, which DSE 5.1 does not read, and does not connect to DSE 5.1 nodes. Offline tools that read
 # this file inherit the checks of the sstable format, the compression selector and
-# flush_compression, and the numeric generations; clients that set the system property below get
-# the big format selected instead of refused.
+# flush_compression, and the numeric generations (they write big oa sstables, without the storage
+# mode); clients that set the system property below get the big format selected instead of
+# refused.
 # The system property cassandra.internode_compatibility_mode overrides this setting.
 # Possible values: NONE (default), DSE_6, DSE_5_1.
 #

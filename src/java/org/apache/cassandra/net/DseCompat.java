@@ -120,7 +120,7 @@ public final class DseCompat
     private static final Pattern GOSSIPED_DSE_VERSION = Pattern.compile("6\\.8\\.[01]");
 
     /** A DSE 5.1 {@code dse_version}: {@code 5.1.<patch>}, three numeric parts and no suffix ({@code 5.1.51}). */
-    private static final Pattern DSE51_DSE_VERSION = Pattern.compile("5\\.1\\.(\\d{1,4})");
+    private static final Pattern DSE51_DSE_VERSION = Pattern.compile("5\\.1\\.(0|[1-9]\\d{0,3})");
 
     private DseCompat()
     {
@@ -369,7 +369,9 @@ public final class DseCompat
         if (!isDse51ReleaseVersion(release))
             return null;
         String build = Integer.toString(release.hotfix);
-        if ((build.length() != 3 && build.length() != 4) || !build.startsWith("51"))
+        // 51 and the patch without its leading zeros: 513 for 5.1.3, 5118 for 5.1.18 (5105 is no 5.1 build)
+        if ((build.length() != 3 && build.length() != 4) || !build.startsWith("51")
+            || (build.length() == 4 && build.charAt(2) == '0'))
             return null;
         return Integer.parseInt(build.substring(2));
     }
