@@ -144,8 +144,9 @@ final class PartitionKeySingleRestrictionSet extends RestrictionSetWrapper imple
         if (isEmpty())
             return false;
 
-        // slice or has unrestricted key component
-        return hasUnrestrictedPartitionKeyComponents(table) || hasSlice() || hasContains();
+        // has unrestricted key component, or a restriction that doesn't select the partitions by their key values
+        // (a slice, CONTAINS, LIKE, ':', '!=' ...), which the index or the filter must serve
+        return hasUnrestrictedPartitionKeyComponents(table) || !hasOnlyEqualityRestrictions();
     }
 
     @Override

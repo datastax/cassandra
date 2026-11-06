@@ -1081,7 +1081,7 @@ public class BM25Test extends SAITester
     {
         createTable("CREATE TABLE %s (k text PRIMARY KEY)");
         assertInvalidMessage("Cannot create secondary index on the only partition key column k",
-                             "CREATE CUSTOM INDEX ON %s(k) USING 'StorageAttachedIndex'");
+                             "CREATE CUSTOM INDEX ON %s(k) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
     }
 
     @Test
