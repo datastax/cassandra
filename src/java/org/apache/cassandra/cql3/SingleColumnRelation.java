@@ -268,6 +268,37 @@ public final class SingleColumnRelation extends Relation
         }
     }
 
+    /**
+     * Turns a relation of a {@code CONTAINS ELEMENT} group (see {@link ElementMatchRelation}), whose names are a path
+     * relative to the elements of a collection ({@code city} in {@code addrs CONTAINS ELEMENT (city = 'Rome')}), into
+     * the same relation on the absolute path from the column ({@code addrs.city = 'Rome'}).
+     *
+     * @param column the column of the collection
+     * @param collectionPath the names of the path from the column to the collection, empty if it's the column
+     * @return the relation on the absolute path
+     */
+    SingleColumnRelation withColumnPrefix(ColumnIdentifier column, List<FieldIdentifier> collectionPath)
+    {
+        assert mapKey == null;
+        List<FieldIdentifier> names = new ArrayList<>(collectionPath.size() + 1 + (fieldNames == null ? 0 : fieldNames.size()));
+        names.addAll(collectionPath);
+        // the first name, parsed as a column name, is that of a field of the elements
+        names.add(FieldIdentifier.forInternalString(entity.toString()));
+        if (fieldNames != null)
+            names.addAll(fieldNames);
+        return new SingleColumnRelation(column, names, null, relationType, value, inValues, escape);
+    }
+
+    /**
+     * @return the same relation with the given operator, of the same kind (a single value), e.g. the {@code !=} of an
+     * {@code =}
+     */
+    SingleColumnRelation withOperator(Operator operator)
+    {
+        assert inValues == null && escape == null;
+        return new SingleColumnRelation(entity, fieldNames, mapKey, operator, value, null, null);
+    }
+
     public Relation renameIdentifier(ColumnIdentifier from, ColumnIdentifier to)
     {
         return entity.equals(from)
@@ -295,6 +326,9 @@ public final class SingleColumnRelation extends Relation
 
         if (isIN())
             return String.format("%s IN %s", entityAsString, inValues == null ? value : Tuples.tupleToString(inValues));
+
+        if (relationType == Operator.NOT_IN)
+            return String.format("%s NOT IN %s", entityAsString, inValues == null ? value : Tuples.tupleToString(inValues));
 
         if (escape != null)
             return String.format("%s %s %s ESCAPE %s", entityAsString, relationType, value, escape);

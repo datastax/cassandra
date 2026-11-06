@@ -239,6 +239,7 @@ K_COLUMN:      C O L U M N;
 K_RECORD:      R E C O R D;
 K_ANN:         A N N;
 K_BM25:        B M '2' '5';
+K_ELEMENT:     E L E M E N T;
 
 // Case-insensitive alpha characters
 fragment A: ('a'|'A');

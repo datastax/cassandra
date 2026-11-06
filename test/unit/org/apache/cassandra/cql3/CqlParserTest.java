@@ -17,6 +17,8 @@
  */
 package org.apache.cassandra.cql3;
 
+import java.util.List;
+
 import org.junit.Test;
 
 import org.antlr.runtime.ANTLRStringStream;
@@ -74,6 +76,54 @@ public class CqlParserTest
 
         assertEquals(1, firstCounter.count);
         assertEquals(0, secondCounter.count);
+    }
+
+    /**
+     * {@code CONTAINS ELEMENT (...)} is a group of relations on the elements of a collection, but {@code ELEMENT} is
+     * an unreserved keyword: {@code CONTAINS element(...)} stays a call to a function named {@code element}, and
+     * {@code element} a valid column and field name.
+     */
+    @Test
+    public void testContainsElement() throws Exception
+    {
+        assertElementMatch("addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100)", false, "addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100)");
+        assertElementMatch("addrs NOT CONTAINS ELEMENT (city = 'Rome')", true, "addrs NOT CONTAINS ELEMENT (city = 'Rome')");
+        assertElementMatch("addrs contains element ((city = 'Rome' OR zip >= 1) AND loc.lat < 2)", false,
+                           "addrs CONTAINS ELEMENT ((city = 'Rome' OR zip >= 1) AND loc.lat < 2)");
+        assertElementMatch("p.home.names CONTAINS ELEMENT (first = ? AND last IN ('a', 'b'))", false,
+                           "p.home.names CONTAINS ELEMENT (first = ? AND last IN ('a', 'b'))");
+        assertElementMatch("element CONTAINS ELEMENT (element = 1)", false, "element CONTAINS ELEMENT (element = 1)");
+        assertElementMatch("addrs CONTAINS ELEMENT (city LIKE 'R%' AND tags NOT CONTAINS 'x' AND zip NOT IN (1, 2))", false,
+                           "addrs CONTAINS ELEMENT (city LIKE 'R%' AND tags NOT CONTAINS 'x' AND zip NOT IN (1, 2))");
+
+        // calls to a function named element
+        for (String cql : new String[]{ "c CONTAINS element(1)", "c CONTAINS element(?)", "c NOT CONTAINS element(:x)",
+                                        "c CONTAINS element(foo(1))", "c CONTAINS element((int) 1)", "c CONTAINS element('a', 1)",
+                                        "c CONTAINS KEY element(1)", "c CONTAINS ELEMENT ()" })
+        {
+            WhereClause clause = WhereClause.parse(cql);
+            List<Relation> relations = clause.root().relations();
+            assertEquals(cql, 1, relations.size());
+            assertTrue(cql, relations.get(0) instanceof SingleColumnRelation);
+        }
+
+        // a group in a WHERE clause with other relations
+        WhereClause clause = WhereClause.parse("id = 1 AND (addrs CONTAINS ELEMENT (city = 'a') OR v = 2) AND addrs CONTAINS ELEMENT (zip = 1)");
+        assertEquals("id = 1 AND (addrs CONTAINS ELEMENT (city = 'a') OR v = 2) AND addrs CONTAINS ELEMENT (zip = 1)", clause.toCQLString());
+
+        parseAndCountErrors("addrs CONTAINS ELEMENT (city = 1", 1, CqlParser::whereClause);
+        parseAndCountErrors("addrs CONTAINS ELEMENT city = 1", 1, CqlParser::whereClause);
+    }
+
+    private static void assertElementMatch(String cql, boolean negated, String expected) throws Exception
+    {
+        WhereClause clause = WhereClause.parse(cql);
+        List<Relation> relations = clause.root().relations();
+        assertEquals(cql, 1, relations.size());
+        assertTrue(cql, relations.get(0) instanceof ElementMatchRelation);
+        ElementMatchRelation relation = (ElementMatchRelation) relations.get(0);
+        assertEquals(negated, relation.isNegated());
+        assertEquals(expected, relation.toCQLString());
     }
 
     @Test

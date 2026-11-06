@@ -37,6 +37,7 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.ElementMatchRelation;
 import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.Ordering;
@@ -116,6 +117,20 @@ public class StatementRestrictions
 
     public static final String FIELD_REQUIRES_ALLOW_FILTERING_MESSAGE = ALLOW_FILTERING_MESSAGE +
             "No index serves the restrictions on %s. " +
+            "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING";
+
+    public static final String NOT_CONTAINS_ELEMENT_REQUIRES_ALLOW_FILTERING_MESSAGE = ALLOW_FILTERING_MESSAGE +
+            "%s is not served by the indexes: a NOT CONTAINS ELEMENT group is filtered, except a single equality on " +
+            "a field whose index has no analyzer. " +
+            "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING";
+
+    /**
+     * The message for filtered-only {@code NOT CONTAINS ELEMENT} groups next to other restrictions on fields that
+     * no index serves: the groups, then the other fields.
+     */
+    public static final String NOT_CONTAINS_ELEMENT_AND_FIELDS_REQUIRE_ALLOW_FILTERING_MESSAGE = ALLOW_FILTERING_MESSAGE +
+            "%s is not served by the indexes: a NOT CONTAINS ELEMENT group is filtered, except a single equality on " +
+            "a field whose index has no analyzer. No index serves the restrictions on %s. " +
             "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING";
 
     public static final String FIELD_RESTRICTIONS_ONLY_IN_SELECT_MESSAGE =
@@ -458,14 +473,19 @@ public class StatementRestrictions
              */
             for (Relation relation : element.relations())
             {
-                if ((relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey())
-                        && (type.isUpdate() || type.isDelete()))
+                // the CONTAINS ELEMENT groups restrict fields: they are field relations, whose operator isn't that of
+                // a relation on a column
+                boolean isElementMatch = relation instanceof ElementMatchRelation;
+                if (!isElementMatch
+                    && (relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey())
+                    && (type.isUpdate() || type.isDelete()))
                 {
                     throw invalidRequest("Cannot use %s with %s", type, relation.operator());
                 }
 
                 // the restrictions on the fields of UDT and tuple columns are served by indexes or filtering only
-                boolean isFieldRelation = relation instanceof SingleColumnRelation && ((SingleColumnRelation) relation).hasFieldPath();
+                boolean isFieldRelation = isElementMatch
+                                          || relation instanceof SingleColumnRelation && ((SingleColumnRelation) relation).hasFieldPath();
                 if (isFieldRelation)
                 {
                     if (forView)
@@ -933,7 +953,18 @@ public class StatementRestrictions
                 // name the restricted fields that no index serves, the field indexes being created one by one
                 Set<String> unindexedFields = getUnindexedFields(table, indexHints, columnRestrictions);
                 if (!unindexedFields.isEmpty() && Guardrails.allowFilteringEnabled.isEnabled(state))
-                    throw invalidRequest(FIELD_REQUIRES_ALLOW_FILTERING_MESSAGE, String.join(", ", unindexedFields));
+                {
+                    // the NOT CONTAINS ELEMENT groups need ALLOW FILTERING whatever the indexes on their fields: say
+                    // so, and name the other restricted fields that no index serves, if any
+                    Set<String> filteredGroups = getFilteredOnlyGroups(columnRestrictions);
+                    if (filteredGroups.isEmpty())
+                        throw invalidRequest(FIELD_REQUIRES_ALLOW_FILTERING_MESSAGE, String.join(", ", unindexedFields));
+                    unindexedFields.removeAll(filteredGroups);
+                    if (unindexedFields.isEmpty())
+                        throw invalidRequest(NOT_CONTAINS_ELEMENT_REQUIRES_ALLOW_FILTERING_MESSAGE, String.join(", ", filteredGroups));
+                    throw invalidRequest(NOT_CONTAINS_ELEMENT_AND_FIELDS_REQUIRE_ALLOW_FILTERING_MESSAGE,
+                                         String.join(", ", filteredGroups), String.join(", ", unindexedFields));
+                }
                 throw invalidRequest(allowFilteringMessage(state));
             }
         }
@@ -1509,6 +1540,21 @@ public class StatementRestrictions
                 fields.add(targetName(restriction));
         }
         return fields;
+    }
+
+    /**
+     * @return the CQL forms of the {@code NOT CONTAINS ELEMENT} groups that no index can serve (see
+     * {@link ElementMatchRestriction#isFilteredOnly()})
+     */
+    private static Set<String> getFilteredOnlyGroups(Iterable<Restriction> restrictions)
+    {
+        Set<String> groups = new LinkedHashSet<>();
+        for (Restriction restriction : restrictions)
+        {
+            if (restriction instanceof ElementMatchRestriction && ((ElementMatchRestriction) restriction).isFilteredOnly())
+                groups.add(targetName(restriction));
+        }
+        return groups;
     }
 
     /**
