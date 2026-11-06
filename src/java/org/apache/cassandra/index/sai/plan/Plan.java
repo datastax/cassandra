@@ -908,7 +908,7 @@ abstract public class Plan
         }
     }
 
-    abstract static class IndexScan extends Leaf
+    public abstract static class IndexScan extends Leaf
     {
         @Nullable
         protected final Expression predicate;
@@ -2103,6 +2103,24 @@ abstract public class Plan
         public KeysIteration intersection(List<KeysIteration> subplans)
         {
             return intersection(subplans, nextId++);
+        }
+
+        /**
+         * Constructs a plan node representing an intersection of the given plan with some additional subplans.
+         * If the given plan is already an intersection, the additional subplans are added to it.
+         *
+         * @param source a plan, possibly an intersection, to intersect with the additional subplans
+         * @param additional the subplans to be added to the intersection
+         */
+        public KeysIteration intersection(KeysIteration source, List<KeysIteration> additional)
+        {
+            List<KeysIteration> subplans = new ArrayList<>();
+            if (source instanceof Intersection)
+                subplans.addAll(((Intersection) source).subplansSupplier.orig);
+            else
+                subplans.add(source);
+            subplans.addAll(additional);
+            return intersection(subplans);
         }
 
         private KeysIteration intersection(List<KeysIteration> subplans, int id)
