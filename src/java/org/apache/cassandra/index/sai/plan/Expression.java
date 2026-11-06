@@ -383,10 +383,15 @@ public class Expression
                     return cmp == 0;
 
                 if (operation == Op.NOT_EQ || operation == Op.NOT_CONTAINS_KEY || operation == Op.NOT_CONTAINS_VALUE)
-                    return cmp != 0;
-
-                if (cmp > 0 || (cmp == 0 && !lowerInclusive))
+                {
+                    // the other excluded values of a NOT_EQ with exclusions (see #negations) are checked below
+                    if (cmp == 0)
+                        return false;
+                }
+                else if (cmp > 0 || (cmp == 0 && !lowerInclusive))
+                {
                     return false;
+                }
             }
         }
 
@@ -729,6 +734,31 @@ public class Expression
                 && Objects.equals(lower, o.lower)
                 && Objects.equals(upper, o.upper)
                 && exclusions.equals(o.exclusions);
+    }
+
+    /**
+     * Returns the expressions matching the keys that a non-equality excludes, whose union is the complement of this
+     * expression: the {@link #negated() negated} expression, followed, for a {@link Op#NOT_EQ} with exclusions (a
+     * {@code NOT IN} on a multi-valued field, see {@code Operation#analyzeGroup}), by an equality on each excluded
+     * value.
+     */
+    public List<Expression> negations()
+    {
+        if (exclusions.isEmpty())
+            return Collections.singletonList(negated());
+
+        assert operation == Op.NOT_EQ : "Exclusions on a " + operation + " non-equality";
+        List<Expression> negations = new ArrayList<>(1 + exclusions.size());
+        negations.add(negated());
+        for (ByteBuffer exclusion : exclusions)
+        {
+            Expression equality = new Expression(context);
+            equality.operation = Op.EQ;
+            equality.lower = new Bound(exclusion, validator, true);
+            equality.upper = equality.lower;
+            negations.add(equality);
+        }
+        return negations;
     }
 
     /**
