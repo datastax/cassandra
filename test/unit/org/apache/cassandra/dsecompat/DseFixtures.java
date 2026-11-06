@@ -575,6 +575,39 @@ public final class DseFixtures
         return writeDseHintsFile(directory, hostId, timestamp, -1, "{}", hints);
     }
 
+    /**
+     * Writes a hints file as DataStax Enterprise 5.1.51 writes one, by its source:
+     * {@code <host id>-<timestamp>-1.hints} in the directory, the Cassandra 3.0 layout of version 1 (the header as in
+     * {@link #writeDseHintsFile}, with the version 1 and the parameters {@code {}}, then the hints framed the same
+     * way), holding the given hints (see {@link #dseHint}), with its two companion files:
+     * {@code <host id>-<timestamp>-1.crc32}, the CRC32 of the hints file in hexadecimal, and
+     * {@code <host id>-<timestamp>-1-Statistics.hints}, the number of hints as a long. DSE 5.1 serializes the
+     * mutations at messaging version 11, which lays them out as this software does at version 12 ({@link #mutation40}).
+     */
+    public static Path writeDse51HintsFile(Path directory, UUID hostId, long timestamp, List<byte[]> hints)
+    throws IOException
+    {
+        String base = hostId + "-" + timestamp + "-1";
+        Path file = writeHintsFile(directory, base + ".hints", hostId, timestamp, 1, "{}", hints);
+        CRC32 crc = new CRC32();
+        crc.update(Files.readAllBytes(file));
+        Files.write(directory.resolve(base + ".crc32"),
+                    Integer.toHexString((int) crc.getValue()).getBytes(StandardCharsets.UTF_8));
+        Files.write(directory.resolve(base + "-Statistics.hints"),
+                    ByteBuffer.allocate(Long.BYTES).putLong(hints.size()).array());
+        return file;
+    }
+
+    /** {@code mutation} serialized at messaging version 12, the layout of versions 10 to 12. */
+    public static ByteBuffer mutation40(Mutation mutation) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            Mutation.serializer.serialize(mutation, out, MessagingService.VERSION_40);
+            return out.asNewBuffer();
+        }
+    }
+
     private static Path writeDseHintsFile(Path directory, UUID hostId, long timestamp, int descriptorVersion, String parametersJson,
                                           List<byte[]> hints) throws IOException
     {
@@ -610,6 +643,49 @@ public final class DseFixtures
             out.putInt((int) crc.getValue());
         }
         Path file = Files.createDirectories(directory).resolve(hostId + "-" + timestamp + "-v1.hints");
+        Files.write(file, Arrays.copyOf(out.array(), out.position()));
+        return file;
+    }
+
+    /**
+     * A hints file named {@code name} in the directory: the header of Cassandra 3.0's layout with the given version and
+     * parameters, then the hints framed as in {@link #writeDseHintsFile(Path, UUID, long, List)}.
+     */
+    private static Path writeHintsFile(Path directory, String name, UUID hostId, long timestamp, int descriptorVersion,
+                                       String parametersJson, List<byte[]> hints) throws IOException
+    {
+        byte[] parameters = parametersJson.getBytes(StandardCharsets.UTF_8);
+        int size = HINTS_HEADER_SIZE + parameters.length;
+        for (byte[] hint : hints)
+            size += 3 * Integer.BYTES + hint.length;
+        ByteBuffer out = ByteBuffer.allocate(size);
+        CRC32 crc = new CRC32();
+        out.putInt(descriptorVersion);
+        updateChecksumInt(crc, descriptorVersion);
+        out.putLong(timestamp);
+        updateChecksumLong(crc, timestamp);
+        out.putLong(hostId.getMostSignificantBits());
+        updateChecksumLong(crc, hostId.getMostSignificantBits());
+        out.putLong(hostId.getLeastSignificantBits());
+        updateChecksumLong(crc, hostId.getLeastSignificantBits());
+        out.putInt(parameters.length);
+        updateChecksumInt(crc, parameters.length);
+        out.putInt((int) crc.getValue());
+        out.put(parameters);
+        crc.update(parameters);
+        out.putInt((int) crc.getValue());
+
+        for (byte[] hint : hints)
+        {
+            crc.reset();
+            updateChecksumInt(crc, hint.length);
+            out.putInt(hint.length);
+            out.putInt((int) crc.getValue());
+            out.put(hint);
+            crc.update(hint);
+            out.putInt((int) crc.getValue());
+        }
+        Path file = Files.createDirectories(directory).resolve(name);
         Files.write(file, Arrays.copyOf(out.array(), out.position()));
         return file;
     }
