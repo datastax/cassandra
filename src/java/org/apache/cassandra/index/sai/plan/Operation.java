@@ -146,7 +146,16 @@ public class Operation
                 }
                 targetIsMultiExpression.put(target, isMultiExpression);
 
-                if (isMultiExpression && e.operator() == Operator.LIKE_MATCHES)
+                if (e.operator() == Operator.IS_NOT)
+                {
+                    // IS NOT NULL on a field has no operand to analyze: all the terms of the index; combined with the
+                    // previous expression on the same single-valued target, which implies it
+                    if (perColumn.isEmpty() || op != OperationType.AND || isOnMultiValuedPath(e) || !Iterables.getLast(perColumn).context.equals(indexContext))
+                        perColumn.add(new Expression(indexContext).add(Operator.IS_NOT, ByteBuffer.allocate(0)));
+                    else
+                        Iterables.getLast(perColumn).add(Operator.IS_NOT, ByteBuffer.allocate(0));
+                }
+                else if (isMultiExpression && e.operator() == Operator.LIKE_MATCHES)
                 {
                     // the analyzer normalizes the literals of the pattern, not its wildcards and escapes
                     ByteBuffer pattern = LikePatterns.normalizeLiterals(e.getIndexValue(), literal -> analyzeLiteral(analyzerFactory, literal));
@@ -340,6 +349,12 @@ public class Operation
             case NEQ:
                 return 1;
 
+            // IS NOT NULL on a field is strictly last (below the other operators, also those of the default case):
+            // it's combined with the previous expression on the same single-valued field, whatever its operator
+            // (see analyzeGroup and Expression#add), which keeps its operation and bounds
+            case IS_NOT:
+                return -1;
+
             default:
                 return 0;
         }
@@ -414,8 +429,8 @@ public class Operation
 
         static Node buildExpression(QueryController controller, RowFilter.Expression expression, boolean isDisjunction)
         {
-            if (expression instanceof RowFilter.ElementMatchExpression)
-                return new ElementNode(controller, (RowFilter.ElementMatchExpression) expression, !isDisjunction);
+            // the groups are built by buildTree, which knows whether an OR is above them
+            assert !(expression instanceof RowFilter.ElementMatchExpression) : "CONTAINS ELEMENT groups are built by buildTree: " + expression;
 
             if (expression.operator() == Operator.IN)
             {

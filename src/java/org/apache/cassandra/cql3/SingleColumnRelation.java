@@ -546,10 +546,11 @@ public final class SingleColumnRelation extends Relation
                                               VariableSpecifications boundNames) throws InvalidRequestException
     {
         ColumnMetadata columnDef = table.getExistingColumn(entity);
-        // refused by StatementRestrictions (IS NOT NULL on fields is not supported yet)
-        assert fieldNames == null : "IS NOT NULL restriction on field " + entityAsString();
         // currently enforced by the grammar
         assert value == Constants.NULL_LITERAL : "Expected null literal for IS NOT relation: " + this.toString();
+        // on a field, it selects the rows where the field is set
+        if (fieldNames != null)
+            return new SingleColumnRestriction.FieldIsNotNullRestriction(columnDef, fieldPath(columnDef));
         return new SingleColumnRestriction.IsNotNullRestriction(columnDef);
     }
 

@@ -814,12 +814,13 @@ public class UdtElementMatchQueryTest extends SAITester
         assertIds("addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100) OR addrs.zip = 300", 2, 5, 6);
         assertThat(metrics.totalElementFilterRejectedRows.getCount() - before).isZero();
 
-        // but a group AND-ed with an OR is: the rows the element filter evaluates, here 1 and 6 if the planner
-        // intersects the candidates with the OR, also 5 if it keeps only the scans of the OR (the metric counts the
-        // rows evaluated and rejected by the filter, an approximation of the false positives of the candidates)
+        // but a group AND-ed with an OR is. The metric counts the rows the element filter evaluates and rejects, an
+        // approximation of the false positives of the candidates, as the planner may keep only some of the scans
+        // of an intersection: here every scan selects rows 1, 2 and 6, so whichever plan the rejected rows are 1
+        // and 6
         before = metrics.totalElementFilterRejectedRows.getCount();
-        assertIds("addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100) AND (addrs.zip = 100 OR addrs.zip = 300)", 2);
-        assertThat(metrics.totalElementFilterRejectedRows.getCount() - before).isBetween(2L, 3L);
+        assertIds("addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100) AND (addrs.city = 'Rome' OR addrs.city = 'Nowhere')", 2);
+        assertThat(metrics.totalElementFilterRejectedRows.getCount() - before).isEqualTo(2);
     }
 
     /**
@@ -1002,8 +1003,11 @@ public class UdtElementMatchQueryTest extends SAITester
                              "SELECT id FROM %s WHERE addrs CONTAINS ELEMENT (tags CONTAINS KEY 'a') ALLOW FILTERING");
         assertInvalidMessage("Nested CONTAINS ELEMENT groups are not supported",
                              "SELECT id FROM %s WHERE addrs CONTAINS ELEMENT (city = 'a' AND tags CONTAINS ELEMENT (x = 1)) ALLOW FILTERING");
-        assertInvalidMessage("IS NOT NULL restrictions on fields are not yet supported: addrs.city IS NOT NULL",
-                             "SELECT id FROM %s WHERE addrs CONTAINS ELEMENT (city IS NOT NULL) ALLOW FILTERING");
+        // IS NOT NULL in groups (P5, see UdtFieldIsNotNullTest)
+        execute("INSERT INTO %s (id, addrs) VALUES (1, [{city: 'Rome'}])");
+        execute("INSERT INTO %s (id, addrs) VALUES (2, [{zip: 1}])");
+        assertRows(execute("SELECT id FROM %s WHERE addrs CONTAINS ELEMENT (city IS NOT NULL)"), row(1));
+        execute("DELETE FROM %s WHERE id IN (1, 2)");
         assertInvalidMessage(String.format(ElementMatchRelation.UNSUPPORTED_RELATION_MESSAGE, "token(id) > 0"),
                              "SELECT id FROM %s WHERE addrs CONTAINS ELEMENT (token(id) > 0) ALLOW FILTERING");
         assertInvalidMessage(String.format(ElementMatchRelation.UNSUPPORTED_RELATION_MESSAGE, "city['a'] = 1"),

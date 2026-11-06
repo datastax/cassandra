@@ -492,11 +492,11 @@ public class StatementRestrictions
                         throw invalidRequest(FIELD_RESTRICTIONS_NOT_IN_VIEWS_MESSAGE, relation);
                     if (!type.allowUseOfSecondaryIndices())
                         throw invalidRequest(FIELD_RESTRICTIONS_ONLY_IN_SELECT_MESSAGE, relation);
-                    if (relation.operator() == Operator.IS_NOT)
-                        throw invalidRequest("IS NOT NULL restrictions on fields are not yet supported: %s", relation);
                 }
 
-                if (relation.operator() == Operator.IS_NOT)
+                // the IS NOT NULL on a field selects rows, as the other field restrictions; that on a column is only
+                // a materialized view restriction
+                if (relation.operator() == Operator.IS_NOT && !isFieldRelation)
                 {
                     if (!forView)
                         throw invalidRequest("Unsupported restriction: %s", relation);

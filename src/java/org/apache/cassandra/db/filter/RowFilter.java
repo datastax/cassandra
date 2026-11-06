@@ -706,7 +706,8 @@ public class RowFilter
                 return add(def, op, value);
 
             assert op != Operator.ANN : "ANN expressions are not supported on fields";
-            Index.Analyzer analyzer = indexRegistry == null
+            // IS NOT has no operand to analyze, and it checks the presence of the value, not its terms
+            Index.Analyzer analyzer = indexRegistry == null || op == Operator.IS_NOT
                                       ? null
                                       : indexRegistry.getAnalyzerFor(def, fieldPath, op, value, indexHints).orElse(null);
             FieldExpression expression = new FieldExpression(def, fieldPath, op, value, analyzer);
@@ -1617,10 +1618,14 @@ public class RowFilter
                             if (!column.equals(group.column))
                                 throw new IOException("Invalid CONTAINS ELEMENT condition on column " + column.name + " in a group on " + group.column.name);
                             // the path is relative to the elements, the analyzer that of the index on the absolute path
-                            Index.Analyzer conditionAnalyzer = indexRegistry.getAnalyzerFor(column, group.prefix.concat(fieldPath), operator, fieldValue, indexHints).orElse(null);
+                            Index.Analyzer conditionAnalyzer = operator == Operator.IS_NOT
+                                                               ? null
+                                                               : indexRegistry.getAnalyzerFor(column, group.prefix.concat(fieldPath), operator, fieldValue, indexHints).orElse(null);
                             return FieldExpression.relative(column, group.elementType, fieldPath, operator, fieldValue, conditionAnalyzer);
                         }
-                        Index.Analyzer fieldAnalyzer = indexRegistry.getAnalyzerFor(column, fieldPath, operator, fieldValue, indexHints).orElse(null);
+                        Index.Analyzer fieldAnalyzer = operator == Operator.IS_NOT
+                                                       ? null
+                                                       : indexRegistry.getAnalyzerFor(column, fieldPath, operator, fieldValue, indexHints).orElse(null);
                         return new FieldExpression(column, fieldPath, operator, fieldValue, fieldAnalyzer);
                     case ELEMENT_MATCH:
                         FieldPath prefix = FieldPath.deserialize(in);
@@ -1888,6 +1893,9 @@ public class RowFilter
                 case ORDER_BY_DESC:
                     // These don't have a value, so we return here to prevent an error calling type.getString(value)
                     return String.format("ORDER BY %s %s", targetCQLString(), operator);
+                case IS_NOT:
+                    // no operand either (IS NOT NULL on a field)
+                    return String.format("%s IS NOT NULL", targetCQLString());
                 case ANN:
                     return String.format("ORDER BY %s ANN OF %s", targetCQLString(), truncateValue(type.toCQLString(value, redaction)));
                 case LIKE_PREFIX:
@@ -2138,6 +2146,8 @@ public class RowFilter
         {
             switch (operator)
             {
+                case IS_NOT:
+                    return isSet(leafType, fieldValue);
                 case CONTAINS:
                     return contains(fieldValue);
                 case NOT_CONTAINS:
@@ -2153,6 +2163,15 @@ public class RowFilter
                     // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
                     return isSatisfiedBy(leafType, fieldValue);
             }
+        }
+
+        /**
+         * Whether a field is set, for {@code IS NOT NULL}: it has a value, which the indexes on the field index (the
+         * empty values only for the literal types, as the indexes do, see {@code TypeUtil.skipsEmptyValue}).
+         */
+        public static boolean isSet(AbstractType<?> type, @Nullable ByteBuffer fieldValue)
+        {
+            return fieldValue != null && (fieldValue.hasRemaining() || !TypeUtil.skipsEmptyValue(type));
         }
 
         /**
@@ -2410,6 +2429,7 @@ public class RowFilter
                 case LIKE_SUFFIX:
                 case LIKE_CONTAINS:
                 case LIKE_MATCHES:
+                case IS_NOT:
                     return true;
                 default:
                     return false;

@@ -440,7 +440,7 @@ public abstract class RestrictionSet implements Restrictions
                 for (var existing : existingRestrictions)
                 {
                     // shouldMerge exists for the BM25/MATCH case
-                    if (Objects.equals(existing.fieldPath(), restriction.fieldPath()) && existing.shouldMerge(restriction))
+                    if (Objects.equals(existing.fieldPath(), restriction.fieldPath()) && existing.shouldMerge(restriction) && restriction.shouldMerge(existing))
                     {
                         var merged = existing.mergeWith(restriction);
                         addRestrictionForColumns(merged.getColumnDefs(), merged, Set.of(existing));

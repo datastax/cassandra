@@ -1170,9 +1170,11 @@ public class UdtFieldQueryTest extends SAITester
                              "SELECT id FROM %s WHERE addr.zip NOT CONTAINS 1 ALLOW FILTERING");
         assertInvalidMessage("is not supported on fields: addr.tags",
                              "SELECT id FROM %s WHERE addr.tags CONTAINS KEY 'a' ALLOW FILTERING");
-        // IS NOT NULL
-        assertInvalidMessage("IS NOT NULL restrictions on fields are not yet supported",
-                             "SELECT id FROM %s WHERE addr.city IS NOT NULL ALLOW FILTERING");
+        // IS NOT NULL (P5, see UdtFieldIsNotNullTest)
+        execute("INSERT INTO %s (id, addr) VALUES (1, {city: 'Rome'})");
+        execute("INSERT INTO %s (id, addr) VALUES (2, {zip: 1})");
+        assertRows(execute("SELECT id FROM %s WHERE addr.city IS NOT NULL"), row(1));
+        execute("DELETE FROM %s WHERE id IN (1, 2)");
         // the field restrictions on an equality
         assertInvalidMessage("addr.city cannot be restricted by more than one relation if it includes an Equal",
                              "SELECT id FROM %s WHERE addr.city = 'a' AND addr.city = 'b'");
