@@ -22,6 +22,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.auth.AuthenticatedUser;
@@ -132,7 +134,11 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
 
         validateKeyspaceName(keyspaceName, AlterSchemaStatement::ire);
 
-        SchemaTransformationResult result = Schema.instance.transform(DseUpgradeGuards.schemaChangesFrozen() ? new FrozenSchemaStatement(this) : this, locally);
+        SchemaTransformation transformation = DseUpgradeGuards.schemaChangesFrozen() ? new FrozenSchemaStatement(this)
+                                                                                     : this;
+        if (DatabaseDescriptor.isDse51CompatibilityMode())
+            transformation = new Dse51CompressorsCheck(transformation);
+        SchemaTransformationResult result = Schema.instance.transform(transformation, locally);
 
         clientWarnings(result.diff).forEach(ClientWarn.instance::warn);
 
@@ -154,16 +160,17 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
     }
 
     /**
-     * A schema statement under the schema freeze of the DSE 6 upgrade, which applies to client and internal (local)
-     * statements alike; created only once the schema was found frozen. Applied to the schema like the statement itself,
-     * by the same update handler under the same lock, it refuses a result that differs from the schema
+     * A schema statement under the schema freeze of the DSE 6 or DSE 5.1 upgrade, which applies to client and internal
+     * (local) statements alike; created only once the schema was found frozen. Applied to the schema like the statement
+     * itself, by the same update handler under the same lock, it refuses a result that differs from the schema
      * ({@link DseUpgradeGuards#refuseSchemaChange}) and lets a statement that changes nothing ({@code CREATE ... IF NOT
-     * EXISTS} of an existing object, {@code DROP ... IF EXISTS} of a missing one) run as without the freeze. So it never
-     * yields a schema change, and it is not a {@code CQLStatement} (a schema announcement would not carry the statement,
-     * but there is none to announce). The statement is applied in full before the refusal: a statement that fails to
-     * apply (an existing object, a disabled feature, a guardrail) fails with its own error, as without the freeze, and a
-     * refused one may have emitted its guardrail warnings. It holds no state of its own and adds no side effect but the
-     * refusal: an update handler may apply it more than once, and each refusal is counted once per application.
+     * EXISTS} of an existing object, {@code DROP ... IF EXISTS} of a missing one) run as without the freeze. So it
+     * never yields a schema change, and it is not a {@code CQLStatement} (a schema announcement would not carry the
+     * statement, but there is none to announce). The statement is applied in full before the refusal: a statement that
+     * fails to apply (an existing object, a disabled feature, a guardrail) fails with its own error, as without the
+     * freeze, and a refused one may have emitted its guardrail warnings. It holds no state of its own and adds no side
+     * effect but the refusal: an update handler may apply it more than once, and each refusal is counted once per
+     * application.
      */
     private static final class FrozenSchemaStatement implements SchemaTransformation
     {
@@ -180,6 +187,60 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
             Keyspaces after = statement.apply(schema);
             if (!Keyspaces.diff(schema, after).isEmpty())
                 DseUpgradeGuards.refuseSchemaChange();
+            return after;
+        }
+
+        @Override
+        public Optional<Long> fixedTimestampMicros()
+        {
+            return statement.fixedTimestampMicros();
+        }
+
+        @Override
+        public String toString()
+        {
+            return statement.toString();
+        }
+    }
+
+    /**
+     * The statement of a schema transformation, for the schema announcement events: the transformation itself when it
+     * is a statement, the statement {@link Dse51CompressorsCheck} wraps in the DSE 5.1 compatibility mode, or null.
+     */
+    @Nullable
+    public static CQLStatement statementOf(@Nullable SchemaTransformation transformation)
+    {
+        if (transformation instanceof Dse51CompressorsCheck)
+            return statementOf(((Dse51CompressorsCheck) transformation).statement);
+        return transformation instanceof CQLStatement ? (CQLStatement) transformation : null;
+    }
+
+    /**
+     * A schema statement in {@code internode_compatibility_mode: DSE_5_1}, schema freeze or not ({@code allow_ddl}): it
+     * refuses a result that creates a table or a view, or changes its compression, with a compressor DSE 5.1 does not
+     * read or with encryption ({@link Dse51Compressors#refusedStatementChanges}), so that such a table is refused when
+     * the statement runs, not at the next start of the node. Applied by the same update handler under the same lock as
+     * the statement it wraps, which it applies in full first, so a statement that fails to apply, or that the schema
+     * freeze refuses, fails with its own error. It adds no side effect but the refusal, counted once per application.
+     * It is not a {@code CQLStatement}: the schema announcement events take the statement it wraps
+     * ({@link #statementOf}).
+     */
+    private static final class Dse51CompressorsCheck implements SchemaTransformation
+    {
+        private final SchemaTransformation statement;
+
+        private Dse51CompressorsCheck(SchemaTransformation statement)
+        {
+            this.statement = statement;
+        }
+
+        @Override
+        public Keyspaces apply(Keyspaces schema)
+        {
+            Keyspaces after = statement.apply(schema);
+            String refusal = Dse51Compressors.refusedStatementChanges(schema, after);
+            if (refusal != null)
+                throw ire("%s", refusal);
             return after;
         }
 

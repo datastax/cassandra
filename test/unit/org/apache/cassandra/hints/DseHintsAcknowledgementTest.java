@@ -501,6 +501,44 @@ public class DseHintsAcknowledgementTest
                      MessageFormatter.arrayFormat(HintsDispatcher.unacknowledgedHintsWarning(true), args).getMessage());
     }
 
+    /**
+     * In {@code DSE_5_1} the hints go to a DSE 5.1 node at version 11 too: a page it does not acknowledge keeps the
+     * file, and the WARN names DSE 5.1, not DSE 6.
+     */
+    @Test
+    public void theDse51WarningIsLoggedOnTheDispatchToADse51Node() throws Throwable
+    {
+        hintsTimeout("2s");
+        HintsStore store = writeAndFlushHints(metadata, targetHostId, HINTS);
+        String file = onlyHintsFile();
+        long notDelivered = notDelivered();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try
+        {
+            MockMessagingSpy silent = MockMessagingService.when(verb(HINT_REQ)).dontReply();
+            dispatchAndWait(store);
+
+            assertEquals(HINTS, silent.messagesIntercepted());
+            assertEquals(notDelivered + HINTS, notDelivered());
+            assertEquals(1, hintsFilesOnDisk().size());
+            assertEquals(0, dse6Warnings().size());
+            Object[] args = { target, (long) HINTS, file, target.getHostAddress(false) };
+            String expected = MessageFormatter.arrayFormat(HintsDispatcher.unacknowledgedHintsWarning(true), args)
+                                              .getMessage();
+            String prefix = "DSE 5.1 compatibility mode: ";
+            List<String> dse51 = warnings.list.stream()
+                                              .filter(e -> e.getLevel() == Level.WARN &&
+                                                           e.getFormattedMessage().startsWith(prefix))
+                                              .map(ILoggingEvent::getFormattedMessage)
+                                              .collect(Collectors.toList());
+            assertEquals(Collections.singletonList(expected), dse51);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        }
+    }
+
     /** No WARN with the mode off: a peer at a pre-4.0 version is not a DSE 6 node then. */
     @Test
     public void noDse6WarningWithTheModeOff() throws Throwable

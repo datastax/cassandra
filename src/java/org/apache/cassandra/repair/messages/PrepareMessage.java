@@ -102,7 +102,7 @@ public class PrepareMessage extends RepairMessage
                                                    "To allow repair during rolling upgrades, set -Dcassandra.allow_mixed_repair=true";
 
     /**
-     * A pre-4.0 messaging version is only ever negotiated with a DSE 6 peer, in the DSE 6 compatibility mode: repair
+     * A pre-4.0 messaging version is only ever negotiated with a DSE peer, in a DSE compatibility mode: repair
      * cannot involve such a peer, and the coordinator says so instead of the mixed-major-version text above. Defence
      * in depth: {@code StorageService.repair} already refuses in that mode, and the pre-4.0 verb mapping refuses the
      * repair verbs before any serialization; this is the last line for a message that reaches the serializer anyway.
@@ -114,7 +114,7 @@ public class PrepareMessage extends RepairMessage
         if (version >= MessagingService.VERSION_40 || !DseCompat.enabled())
             return;
         DseCompatRefusals.refused("repair");
-        throw new UnsupportedOperationException(DseUpgradeGuards.REPAIR_WITH_DSE_PEER);
+        throw new UnsupportedOperationException(DseUpgradeGuards.repairWithDsePeer());
     }
 
     public static final IVersionedSerializer<PrepareMessage> serializer = new IVersionedSerializer<PrepareMessage>()

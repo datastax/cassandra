@@ -18,6 +18,8 @@ package org.apache.cassandra.batchlog;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -43,16 +45,22 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.UntypedResultSet;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
 import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog.HiddenColumn;
 import org.apache.cassandra.db.view.DseViewWireFormat;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.DseCompat;
@@ -180,6 +188,131 @@ public class DseBatchlogReplayTest extends CQLTester
         dseBatchOfAnUnknownTableIsDropped(InternodeCompatibilityMode.DSE_6);
     }
 
+    @Test
+    public void replaysDse5151BatchesInDse51Mode() throws Throwable
+    {
+        replaysDse5151Batches(InternodeCompatibilityMode.DSE_5_1);
+    }
+
+    @Test
+    public void replaysDse5151BatchesAfterTheFlagDrop() throws Throwable
+    {
+        replaysDse5151Batches(InternodeCompatibilityMode.NONE);
+    }
+
+    /**
+     * The two batches DSE 5.1.51 left in {@code system.batches} of a node of its test cluster
+     * ({@link Dse51Fixtures#batchesSSTableDirectory()}), imported as DSE left them, stored at version 11 with the
+     * mutations of {@code test_ks.bt} in the 3.0 layout, are replayed in {@code DSE_5_1} and after the flag drop: their
+     * mutations decode at 4.0. They are stored again under ids of this test, so that their age does not depend on the
+     * day the test runs (the replay skips a batch older than the gc_grace_seconds of its tables).
+     */
+    private void replaysDse5151Batches(InternodeCompatibilityMode mode) throws Throwable
+    {
+        schemaChange("CREATE KEYSPACE IF NOT EXISTS test_ks WITH replication = " +
+                     "{'class': 'SimpleStrategy', 'replication_factor': 1}");
+        schemaChange("CREATE TABLE IF NOT EXISTS test_ks.bt (id int PRIMARY KEY, v text) WITH ID = " +
+                     Dse51Fixtures.BATCH_TABLE_ID);
+        ColumnFamilyStore batches = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
+                                            .getColumnFamilyStore(SystemKeyspace.BATCHES);
+        List<Pair<List<ByteBuffer>, Integer>> stored = new ArrayList<>();
+        batches.disableAutoCompaction();
+        try
+        {
+            Dse51Fixtures dse51 = DseFixtures.dse51();
+            importSSTable(batches, dse51.sstableComponents(dse51.batchesSSTableDirectory()));
+            for (UntypedResultSet.Row row : execute("SELECT mutations, version FROM system.batches"))
+                stored.add(Pair.create(row.getList("mutations", BytesType.instance), row.getInt("version")));
+            batches.truncateBlocking();
+        }
+        finally
+        {
+            batches.enableAutoCompaction();
+        }
+        assertEquals(2, stored.size());
+        useMode(mode);
+        long replayedBefore = BatchlogManager.instance.getTotalBatchesReplayed();
+        for (int n = 0; n < stored.size(); n++)
+        {
+            assertEquals(Dse51Fixtures.MESSAGING_VERSION, (int) stored.get(n).right);
+            storeBatch(batchId(n), stored.get(n).right, stored.get(n).left);
+        }
+
+        BatchlogManager.instance.forceBatchlogReplay();
+
+        assertEquals(Collections.emptySet(), storedBatchIds());
+        assertEquals(Collections.emptySet(), BatchlogManager.instance.undecodableBatchIds());
+        assertEquals(2, BatchlogManager.instance.getTotalBatchesReplayed() - replayedBefore);
+        // the batch of the capture: INSERT INTO test_ks.bt (id, v) VALUES (1, 'b1'); ... (2, 'b2'), stored twice
+        List<String> rows = new ArrayList<>();
+        for (UntypedResultSet.Row row : execute("SELECT id, v FROM test_ks.bt"))
+            rows.add(row.getInt("id") + "=" + row.getString("v"));
+        rows.sort(null);
+        assertEquals(Arrays.asList("1=b1", "2=b2"), rows);
+    }
+
+    /**
+     * A batch stored below Apache Cassandra 3.0's messaging version, the layout of the legacy {@code system.batchlog},
+     * is kept and reported, not decoded, in every mode; in DSE 5.1 compatibility mode with a reason of its own
+     * (versions 1 to 9 only: a version of 0 or below is no release's), in the other modes as before.
+     */
+    @Test
+    public void aBatchStoredBeforeCassandra30IsKeptNotDecoded() throws Throwable
+    {
+        int n = 0;
+        for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+            for (int version : new int[]{ MessagingService.VERSION_30 - 1, 0 })
+                aBatchStoredBeforeCassandra30IsKeptNotDecoded(mode, version, n++);
+    }
+
+    private void aBatchStoredBeforeCassandra30IsKeptNotDecoded(InternodeCompatibilityMode mode, int version, int n)
+    throws Throwable
+    {
+        useMode(mode);
+        BatchlogManager.instance.resetLastReplayedUuid();
+        TimeUUID legacy = batchId(n);
+        storeBatch(legacy, version, DseFixtures.fixtureHintMutations(DseVersion.DSE_6_8_65));
+        withLogAppender(BatchlogManager.class, appender -> {
+            BatchlogManager.instance.forceBatchlogReplay();
+            String as = mode.name() + " at " + version;
+            assertEquals(as, Collections.singleton(legacy), BatchlogManager.instance.undecodableBatchIds());
+            assertEquals(as, Collections.singleton(legacy), storedBatchIds());
+            List<String> errors = messages(appender.list, Level.ERROR);
+            assertEquals(as + ": " + errors, 1, errors.size());
+            String reason = "cannot be decoded: it was stored before Apache Cassandra 3.0 (messaging version " +
+                            "10), whose layout this software does not read";
+            assertTrue(errors.get(0), errors.get(0).contains(" cannot be decoded: "));
+            assertEquals(version + ": " + errors.get(0), mode.isDse51() && version > 0,
+                         errors.get(0).contains(reason));
+        });
+        Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(SystemKeyspace.BATCHES)
+                .truncateBlocking();
+        BatchlogManager.instance.expireUndecodableBatchesWarnInterval();
+        BatchlogManager.instance.forceBatchlogReplay();
+        assertEquals(Collections.emptySet(), BatchlogManager.instance.undecodableBatchIds());
+    }
+
+    /** Imports the sstable of {@code components} into {@code table}, as the node that wrote it left it. */
+    private static void importSSTable(ColumnFamilyStore table, List<Path> components) throws IOException
+    {
+        Path root = Files.createTempDirectory("dse-5.1.51-" + table.name);
+        try
+        {
+            Path directory = root.resolve(table.keyspace.getName())
+                                 .resolve(table.name + '-' + table.metadata.id.toHexString());
+            Files.createDirectories(directory);
+            for (Path component : components)
+                Files.copy(component, directory.resolve(component.getFileName()));
+            List<String> failed = table.importNewSSTables(Collections.singleton(directory.toString()), false, false,
+                                                          false, false, false, false, false, false, false);
+            assertEquals(Collections.emptyList(), failed);
+        }
+        finally
+        {
+            FileUtils.deleteRecursive(new File(root));
+        }
+    }
+
     /**
      * A DSE batch writing to a table this software does not have (DSE's {@code system_distributed.nodesync_status}) is
      * dropped with the warning the replay logs for a batch of a dropped table: the existing policy for a mutation of an
@@ -229,9 +362,17 @@ public class DseBatchlogReplayTest extends CQLTester
         pre40BatchOfAnUnknownTableIsDropped(InternodeCompatibilityMode.DSE_6);
     }
 
+    /** In DSE 5.1 compatibility mode the warning names DSE 5.1, the version and the table, as for a DSE 6 batch. */
+    @Test
+    public void pre40BatchOfAnUnknownTableIsDroppedInDse51Mode() throws Throwable
+    {
+        pre40BatchOfAnUnknownTableIsDropped(InternodeCompatibilityMode.DSE_5_1);
+    }
+
     /**
      * A batch stored with a pre-4.0 version whose mutation writes to a table this software does not have is dropped, as
-     * at the versions of this software: the table id is read before anything of the pre-4.0 layout.
+     * at the versions of this software: the table id is read before anything of the pre-4.0 layout. The mutation is
+     * one of DSE 6 (DSE 5.1's batches of the fixtures write to a table this software has).
      */
     private void pre40BatchOfAnUnknownTableIsDropped(InternodeCompatibilityMode mode) throws Throwable
     {
@@ -245,7 +386,13 @@ public class DseBatchlogReplayTest extends CQLTester
             assertEquals(Collections.emptySet(), storedBatchIds());
             assertEquals(Collections.emptySet(), BatchlogManager.instance.undecodableBatchIds());
             assertEquals(Collections.emptyList(), messages(appender.list, Level.ERROR));
-            assertEquals(Collections.singletonList("Skipped batch replay of " + unknownTable + " due to Couldn't find table with id " +
+            String source = mode.isDse51() ? " (stored by DSE 5.1 with messaging version 11; its mutations, none of " +
+                                             "which is replayed, write to unknown table " +
+                                             DseFixtures.NODESYNC_STATUS_TABLE_ID + ", the first table of each " +
+                                             "mutation)"
+                                           : "";
+            assertEquals(Collections.singletonList("Skipped batch replay of " + unknownTable + source +
+                                                   " due to Couldn't find table with id " +
                                                    DseFixtures.NODESYNC_STATUS_TABLE_ID + ". If a table was just created, this is " +
                                                    "likely due to the schemanot being fully propagated.  Please wait for schema " +
                                                    "agreement on table creation."),

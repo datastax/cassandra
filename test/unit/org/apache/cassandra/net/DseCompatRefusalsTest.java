@@ -24,6 +24,10 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.schema.Dse51Compressors;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class DseCompatRefusalsTest
@@ -64,6 +68,37 @@ public class DseCompatRefusalsTest
         DseCompatRefusals.refused("decommission");
         assertThat(snapshot.get("decommission")).isEqualTo(1L);
         assertThat(DseCompatRefusals.snapshot().get("decommission")).isEqualTo(2L);
+    }
+
+    /**
+     * The refusals of the DSE 5.1 compatibility mode, counted under reasons of their own, which {@code nodetool
+     * compatstatus} lists with the others: the repair messages and the Thrift reads of DSE 5.1 peers, the schema
+     * changes with a compressor DSE 5.1 does not read, and the verbs the dialect lacks, named with DSE 5.1.
+     */
+    @Test
+    public void theReasonsOfTheDse51ModeAreCountedApart()
+    {
+        DatabaseDescriptor.daemonInitialization();
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try
+        {
+            DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_REPAIR_MESSAGE);
+            DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_REPAIR_MESSAGE);
+            DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_THRIFT_READ);
+            DseCompatRefusals.refused(Dse51Compressors.REFUSED_SCHEMA_CHANGE);
+            DseCompatRefusals.refused(DseCompat.refusedVerb(Verb.PAXOS2_PREPARE_REQ));
+            assertThat(DseCompatRefusals.snapshot())
+            .containsExactly(Map.entry("Thrift read from a DSE 5.1 peer", 1L),
+                             Map.entry("repair message from a DSE 5.1 peer", 2L),
+                             Map.entry("schema change with a compressor DSE 5.1 does not read", 1L),
+                             Map.entry("verb PAXOS2_PREPARE_REQ to a DSE 5.1 peer", 1L));
+            assertThat(DseCompatRefusals.total()).isEqualTo(5);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+        }
     }
 
     @Test

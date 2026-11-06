@@ -63,4 +63,19 @@ public class Dse6EndpointGroupingTest extends CQLTester
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
         assertFalse(RangeCommandIterator.supportsEndpointGrouping(command));
     }
+
+    /** Nor in DSE 5.1 compatibility mode: Apache Cassandra 3.11, and DSE 5.1, have no multi-range read verb either. */
+    @Test
+    public void noEndpointGroupingInDse51Mode()
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        createIndex("CREATE INDEX ON %s(v) USING 'sai'");
+        ReadCommand command = parseReadCommand("SELECT * FROM %s WHERE v = 1");
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        assertTrue(RangeCommandIterator.supportsEndpointGrouping(command));
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertFalse(RangeCommandIterator.supportsEndpointGrouping(command));
+    }
 }

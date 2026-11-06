@@ -18,6 +18,7 @@ package org.apache.cassandra.distributed.test.dsecompat;
 
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -232,6 +233,79 @@ public class Dse6GuardsTest extends TestBaseImpl
             // the periodic status line and the access-control check were scheduled at the DSE_6 start
             List<String> scheduled = node.logs().grep("The DSE 6 upgrade status will be logged, and the DSE access controls checked again, every 10 minutes").getResult();
             assertThat(scheduled).isNotEmpty();
+        }
+    }
+
+    /**
+     * In {@code DSE_5_1} mode the same guards apply, their texts naming DSE 5.1 and the mode: the schema freeze, lifted
+     * by the property, and the refused operations, counted by {@code compatstatus}, which lists the DSE 5.1 peers and
+     * their record; the periodic status line is scheduled, without the DSE 6 access-control check. The nodes are
+     * started without the mode first, on the storage settings DSE 5.1 requires ({@code big}, {@code HCD_1}, numeric
+     * generations), as upgraded DSE 5.1 nodes. The removal of a lost DSE 5.1 node is checked in
+     * {@code Dse51UpgradeGuardsTest}: no DSE 5.1 node runs in this harness.
+     */
+    @Test
+    public void operationsAndSchemaChangesAreRefusedInDse51Mode() throws Throwable
+    {
+        String refused = "is refused while the DSE 5.1 upgrade is in progress (internode_compatibility_mode: DSE_5_1)";
+        String frozen = "schema changes are frozen during the DSE 5.1 upgrade; run them after the flag is dropped";
+        Cluster.Builder builder = Cluster.build(2).withSubnet(SUBNET).withDynamicPortAllocation(true)
+                                         .withConfig(c -> {
+                                             dseStorage(c);
+                                             c.set("sstable", Map.of("selected_format", "big"));
+                                         });
+        try (Cluster cluster = builder.start())
+        {
+            init(cluster);
+            for (int node = 1; node <= 2; node++)
+            {
+                IInvokableInstance instance = cluster.get(node);
+                instance.shutdown().get();
+                instance.config().set("internode_compatibility_mode", "DSE_5_1");
+                instance.startup();
+            }
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (id int PRIMARY KEY, v text)"));
+            }
+            String insert = withKeyspace("INSERT INTO %s.t (id, v) VALUES (?, ?)");
+            for (int i = 0; i < 10; i++)
+                cluster.coordinator(1).execute(insert, ConsistencyLevel.ALL, i, "v" + i);
+
+            String alter = withKeyspace("ALTER TABLE %s.t ADD w int");
+            assertThatThrownBy(() -> cluster.coordinator(1).execute(alter, ConsistencyLevel.ALL))
+            .hasMessageContaining(frozen);
+            String create = withKeyspace("CREATE TABLE %s.t2 (id int PRIMARY KEY)");
+            Throwable internal = catchThrowable(() -> cluster.schemaChange(create));
+            assertThat(internal).isNotNull();
+            assertThat(messages(internal)).contains(frozen);
+
+            IInvokableInstance node = cluster.get(1);
+            assertRefused(node.nodetoolResult("decommission"), "decommission " + refused);
+            assertRefused(node.nodetoolResult("repair", KEYSPACE), "repair " + refused);
+            assertRefused(node.nodetoolResult("upgradesstables", KEYSPACE, "t"), "upgradesstables " + refused);
+            assertRefused(node.nodetoolResult("rebuild"), "rebuild " + refused);
+            Throwable paxos = catchThrowable(() -> node.runOnInstance(() -> StorageProxy.instance
+                                                                                    .setPaxosVariant("v2")));
+            assertThat(paxos).isNotNull();
+            assertThat(messages(paxos)).contains("changing paxos_variant to v2 " + refused);
+
+            Object[][] rows = cluster.coordinator(2).execute(withKeyspace("SELECT count(*) FROM %s.t"),
+                                                             ConsistencyLevel.ALL);
+            assertThat(rows[0][0]).isEqualTo(10L);
+            NodeToolResult status = node.nodetoolResult("compatstatus");
+            status.asserts().success();
+            String out = status.getStdout();
+            assertThat(out).contains("Internode compatibility mode : DSE_5_1");
+            assertThat(out).contains("(0 speaking the pre-4.0 dialect)");
+            assertThat(out).contains("DSE peers                    : 0\n");
+            assertThat(out).contains("DSE 5.1 peers on record      : 0\n");
+            assertThat(out).contains("Requests refused (upgrade)   : 7\n");
+            assertThat(out).containsPattern("  schema change +2\n");
+            assertThat(out).containsPattern("  repair +1\n");
+            assertThat(node.logs().grep("The DSE 5.1 upgrade status will be logged every 10 minutes").getResult())
+            .isNotEmpty();
+            assertThat(node.logs().grep("DSE access controls checked again").getResult()).isEmpty();
         }
     }
 

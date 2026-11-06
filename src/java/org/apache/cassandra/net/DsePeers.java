@@ -21,6 +21,8 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -33,6 +35,7 @@ import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.service.DseUpgradeMarker;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
@@ -124,31 +127,123 @@ import org.apache.cassandra.utils.FBUtilities;
  * software never has them (see {@code DseGossipStates.receivedFrom}), and asked for again later. It lasts until the
  * first gossip exchange that carries the node's own state, which identifies it: at the latest the answer to this node's
  * request for the state of a node whose state it does not have.
+ * <p>
+ * In the DSE 5.1 compatibility mode ({@code internode_compatibility_mode: DSE_5_1}) the peers recorded here are the DSE
+ * 5.1 nodes, by the rule of that mode ({@link DseCompat#isDse51Peer}): a peer that gossips a {@code NET_VERSION} of 10
+ * or 11, opens a handshake requesting 10 or 11, or answers this node's first handshake message with 10 or 11. In such a
+ * cluster only DSE 5.1 nodes speak a pre-4.0 version. A gossiped {@code NET_VERSION} is authoritative both ways
+ * there too: any other value clears the identification. Gossip with a DSE 5.1 node uses this software's ordinals,
+ * which DSE 5.1 shares up to the ones it knows, so the record serves the operational guards of the upgrade, the listing
+ * of {@code nodetool compatstatus} and the schema exchange, not the ordinals; nothing is presumed. A DSE 5.1 peer whose
+ * release ({@code 3.11.3.<build>}) or {@code dse_version} is not the one of DSE 5.1.51 is logged at WARN once
+ * ({@link #warnIfNotDse5151}), and not refused.
  */
 public final class DsePeers
 {
     private static final Logger logger = LoggerFactory.getLogger(DsePeers.class);
 
+    /** The patch of the one DSE 5.1 release the DSE 5.1 compatibility mode is tested with, 5.1.51. */
+    private static final Integer DSE51_TESTED_PATCH = 51;
+
+    /** The {@code dse_version} entry of the JSON DSE gossips as {@code DSE_GOSSIP_STATE}. */
+    private static final Pattern DSE_VERSION_IN_GOSSIP_STATE = Pattern.compile("\"dse_version\"\\s*:\\s*\"([^\"]+)\"");
+
     /** The identified DSE peers, with the evidence that identified them first. */
     private static final ConcurrentMap<InetAddressAndPort, String> IDENTIFIED = new ConcurrentHashMap<>();
     /** The peers presumed to be DSE nodes (see the class comment), with the reason. */
     private static final ConcurrentMap<InetAddressAndPort, String> PRESUMED = new ConcurrentHashMap<>();
+    /** The DSE 5.1 peers of another release than DSE 5.1.51 already logged at WARN ({@link #warnIfNotDse5151}). */
+    private static final Set<InetAddressAndPort> WARNED_RELEASE = ConcurrentHashMap.newKeySet();
 
     private DsePeers()
     {
     }
 
     /**
-     * Records {@code peer} as a DSE 6 node, on the evidence {@code evidence} describes; nothing happens outside DSE 6
-     * compatibility mode or when the peer is identified already.
+     * Records {@code peer} as a DSE node of the mode's release, DSE 6 or DSE 5.1 ({@link DseCompat#source()}), on the
+     * evidence {@code evidence} describes; nothing happens outside a DSE compatibility mode, and nothing is logged when
+     * the peer is identified already. A DSE 5.1 peer is checked against DSE 5.1.51 ({@link #warnIfNotDse5151}) each
+     * time.
      */
     public static void identify(InetAddressAndPort peer, String evidence)
     {
         if (!DseCompat.enabled())
             return;
         if (IDENTIFIED.putIfAbsent(peer, evidence) == null)
-            logger.info("Identified {} as a DSE 6 node ({}): gossip with it uses DSE's application-state ordinals", peer, evidence);
+        {
+            if (DseCompat.isDse51())
+                logger.info("Identified {} as a DSE 5.1 node ({})", peer, evidence);
+            else
+                logger.info("Identified {} as a DSE 6 node ({}): gossip with it uses DSE's application-state ordinals",
+                            peer, evidence);
+        }
         PRESUMED.remove(peer);
+        if (DseCompat.isDse51())
+            warnIfNotDse5151(peer, Gossiper.instance.getEndpointStateForEndpoint(peer));
+    }
+
+    /**
+     * In the DSE 5.1 compatibility mode, logs at WARN, once per peer, a DSE 5.1 peer whose gossip state shows another
+     * release than DSE 5.1.51: a {@code RELEASE_VERSION} or a {@code dse_version} (in its {@code DSE_GOSSIP_STATE}) of
+     * another DSE 5.1 patch, or of a form that names none ({@link DseCompat#dse51Patch}). The peer is not refused: a
+     * refusal in the middle of a rolling upgrade would partition the cluster. A state that carries neither value says
+     * nothing yet; the peer is checked again at its next identification, and when either value changes
+     * ({@link #dse51ReleaseChanged}).
+     */
+    @VisibleForTesting
+    static void warnIfNotDse5151(InetAddressAndPort peer, EndpointState state)
+    {
+        if (!DseCompat.isDse51() || state == null || WARNED_RELEASE.contains(peer))
+            return;
+        VersionedValue releaseValue = state.getApplicationState(ApplicationState.RELEASE_VERSION);
+        String dseVersion = gossipedDseRelease(state);
+        String release = releaseValue == null ? null : releaseValue.value;
+        boolean otherRelease = release != null
+                               && !DSE51_TESTED_PATCH.equals(DseCompat.dse51Patch(parseRelease(release), null));
+        boolean otherDseVersion = dseVersion != null
+                                  && !DSE51_TESTED_PATCH.equals(DseCompat.dse51Patch(null, dseVersion));
+        if ((otherRelease || otherDseVersion) && WARNED_RELEASE.add(peer))
+            logger.warn("{} is a DSE 5.1 node of release {} (dse_version {}), not of DSE 5.1.51, the one DSE 5.1 " +
+                        "release internode_compatibility_mode DSE_5_1 supports; it is not refused: upgrade it to DSE " +
+                        "5.1.51 before it is upgraded to this software",
+                        peer, release == null ? "unknown" : release, dseVersion == null ? "unknown" : dseVersion);
+    }
+
+    /**
+     * In the DSE 5.1 compatibility mode, checks a peer identified as a DSE 5.1 node against DSE 5.1.51 again
+     * ({@link #warnIfNotDse5151}) when its gossiped {@code RELEASE_VERSION} or {@code DSE_GOSSIP_STATE} changes, which
+     * may arrive after the {@code NET_VERSION} that identified it; nothing happens in the other modes or for another
+     * peer.
+     */
+    public static void dse51ReleaseChanged(InetAddressAndPort peer, EndpointState state)
+    {
+        if (DseCompat.isDse51() && IDENTIFIED.containsKey(peer))
+            warnIfNotDse5151(peer, state);
+    }
+
+    private static CassandraVersion parseRelease(String release)
+    {
+        try
+        {
+            return new CassandraVersion(release);
+        }
+        catch (IllegalArgumentException e)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * The {@code dse_version} of the {@code DSE_GOSSIP_STATE} a DSE node gossips at the ordinal of this software's
+     * {@code X_11_PADDING}, or null when the state is null or carries none.
+     */
+    public static String gossipedDseRelease(EndpointState state)
+    {
+        VersionedValue dseState = state == null ? null : state.getApplicationState(ApplicationState.X_11_PADDING);
+        if (dseState == null)
+            return null;
+        Matcher dseVersion = DSE_VERSION_IN_GOSSIP_STATE.matcher(dseState.value);
+        return dseVersion.find() ? dseVersion.group(1) : null;
     }
 
     /**
@@ -158,7 +253,7 @@ public final class DsePeers
      */
     public static void presume(InetAddressAndPort peer, String reason)
     {
-        if (!DseCompat.enabled() || IDENTIFIED.containsKey(peer))
+        if (!DseCompat.isDse6() || IDENTIFIED.containsKey(peer))
             return;
         if (PRESUMED.putIfAbsent(peer, reason) == null)
             logger.debug("Presuming {} to be a DSE 6 node ({}) until its gossip state says: the gossip acks sent to it carry no endpoint state",
@@ -171,7 +266,7 @@ public final class DsePeers
      */
     public static void refutePresumption(InetAddressAndPort peer, String evidence)
     {
-        if (!DseCompat.enabled())
+        if (!DseCompat.isDse6())
             return;
         String presumed = PRESUMED.remove(peer);
         if (presumed != null)
@@ -183,7 +278,9 @@ public final class DsePeers
     private static void notDse(InetAddressAndPort peer, String evidence)
     {
         String previous = IDENTIFIED.remove(peer);
-        if (previous != null)
+        if (previous != null && DseCompat.isDse51())
+            logger.info("{} is not a DSE 5.1 node ({}; it was identified by {})", peer, evidence, previous);
+        else if (previous != null)
             logger.info("{} is not a DSE 6 node ({}; it was identified by {}): gossip with it uses this software's application-state ordinals",
                         peer, evidence, previous);
         String presumed = PRESUMED.remove(peer);
@@ -198,11 +295,15 @@ public final class DsePeers
         if (!DseCompat.enabled())
             return;
         if (IDENTIFIED.remove(peer) != null)
-            logger.debug("Forgot the DSE 6 identification of {}", peer);
+            logger.debug("Forgot the {} identification of {}", DseCompat.source(), peer);
         PRESUMED.remove(peer);
+        WARNED_RELEASE.remove(peer);
     }
 
-    /** True when {@code peer} was identified as a DSE 6 node, in DSE 6 compatibility mode. */
+    /**
+     * True when {@code peer} was identified as a DSE node of the mode's release, in a DSE compatibility mode: a DSE 6
+     * node in {@code DSE_6}, a DSE 5.1 node in {@code DSE_5_1}.
+     */
     public static boolean isDse(InetAddressAndPort peer)
     {
         return DseCompat.enabled() && IDENTIFIED.containsKey(peer);
@@ -218,9 +319,10 @@ public final class DsePeers
     }
 
     /**
-     * Records what a gossiped {@code NET_VERSION} of {@code endpoint} says about it (see the class comment): a DSE node
-     * for a value of 256 or more, not one for a smaller value; a value that is not a number says nothing. Nothing
-     * happens outside DSE 6 compatibility mode.
+     * Records what a gossiped {@code NET_VERSION} of {@code endpoint} says about it (see the class comment): in
+     * {@code DSE_6} a DSE node for a value of 256 or more, not one for a smaller value; in {@code DSE_5_1} a DSE 5.1
+     * node for 10 or 11, not one for any other value; a value that is not a number says nothing. Nothing happens
+     * outside a DSE compatibility mode.
      */
     public static void fromGossipedNetVersion(InetAddressAndPort endpoint, String netVersion)
     {
@@ -243,7 +345,9 @@ public final class DsePeers
     {
         if (!DseCompat.enabled())
             return;
-        if (version >= DseCompat.DSE_HANDSHAKE_MIN)
+        boolean dse = DseCompat.isDse51() ? DseCompat.isDse51Peer(version, null, null)
+                                          : version >= DseCompat.DSE_HANDSHAKE_MIN;
+        if (dse)
             identify(endpoint, "gossiped NET_VERSION " + version);
         else
             notDse(endpoint, "gossiped NET_VERSION " + version);
@@ -255,11 +359,16 @@ public final class DsePeers
      * {@code NET_VERSION} in DSE 6 compatibility mode, 12 (see the class comment). Reached with DSE 6.9.26, which sends
      * the third message on the same socket after either of those first messages, as its logs of the identifications
      * made here show; not with DSE 6.8.65, which sends no third message after them but closes the socket and reconnects
-     * at 11.
+     * at 11. In {@code DSE_5_1}, a first message requesting 10 or 11 records a DSE 5.1 node, which sends no other.
      */
     static void fromPre40Initiate(InetAddressAndPort peer, int requestedVersion)
     {
-        if (requestedVersion == DseCompat.DSE_VERSION_BYTE)
+        if (DseCompat.isDse51())
+        {
+            if (DseCompat.isDse51Peer(requestedVersion, null, null))
+                identify(peer, "pre-4.0 first handshake message requesting version " + requestedVersion);
+        }
+        else if (requestedVersion == DseCompat.DSE_VERSION_BYTE)
             identify(peer, "DSE-flagged first handshake message");
         else if (requestedVersion == DseCompat.NET_VERSION_PUBLISHED)
             identify(peer, "pre-4.0 first handshake message requesting version " + requestedVersion);
@@ -275,7 +384,14 @@ public final class DsePeers
      */
     static void fromPre40Reply(InetAddressAndPort peer, int peerVersion, boolean toPre40FirstMessage)
     {
-        if (DseCompat.isDseHandshakeVersion(peerVersion))
+        // in DSE_5_1 a reply of 10 or 11 is a DSE 5.1 node's
+        if (DseCompat.isDse51())
+        {
+            if (DseCompat.isDse51Peer(peerVersion, null, null))
+                identify(peer, (toPre40FirstMessage ? "pre-4.0 handshake reply" : "handshake reply") +
+                               " with the messaging version " + peerVersion);
+        }
+        else if (DseCompat.isDseHandshakeVersion(peerVersion))
             identify(peer, (toPre40FirstMessage ? "pre-4.0 handshake reply" : "handshake reply") + " with the DSE messaging version " + peerVersion);
     }
 
@@ -302,13 +418,33 @@ public final class DsePeers
      */
     public static int gossipedDseVersion(EndpointState state)
     {
+        return gossipedNetVersion(state, DseCompat.DSE_HANDSHAKE_MIN);
+    }
+
+    /**
+     * Whether the gossip state of a node carries the {@code NET_VERSION} of a DSE node of the mode's release: in
+     * {@code DSE_5_1}, 10 or 11 ({@link DseCompat#isDse51Peer}); otherwise DSE's own messaging version
+     * ({@link #gossipedDseVersion}). How {@code nodetool compatstatus}, {@link #knownAtStartup} and the operational
+     * guards of the upgrade tell a DSE peer from its gossip.
+     */
+    public static boolean gossipsDseVersion(EndpointState state)
+    {
+        if (!DseCompat.isDse51())
+            return gossipedDseVersion(state) >= 0;
+        int version = gossipedNetVersion(state, MessagingService.VERSION_30);
+        return version >= 0 && DseCompat.isDse51Peer(version, null, null);
+    }
+
+    /** The {@code NET_VERSION} of the state when it is a number of at least {@code min}, -1 otherwise. */
+    private static int gossipedNetVersion(EndpointState state, int min)
+    {
         VersionedValue netVersion = state == null ? null : state.getApplicationState(ApplicationState.NET_VERSION);
         if (netVersion == null)
             return -1;
         try
         {
             int version = Integer.parseInt(netVersion.value);
-            return version >= DseCompat.DSE_HANDSHAKE_MIN ? version : -1;
+            return version >= min ? version : -1;
         }
         catch (NumberFormatException e)
         {
@@ -317,24 +453,33 @@ public final class DsePeers
     }
 
     /**
-     * In DSE 6 compatibility mode, called once at startup, after the wait for gossip to settle: warns when this node
-     * knows no DSE 6 peer ({@link #knownAtStartup}), the cue that the mode is no longer needed. A node that skips that
-     * wait (its broadcast address is the loopback address, or {@code cassandra.skip_wait_for_gossip_to_settle} is 0)
-     * warns on what it knows then: the record and the peers assumed at the dialect, which need no gossip, still keep it
-     * quiet. Nothing happens outside the mode or when a DSE 6 peer is known.
+     * In a DSE compatibility mode, called once at startup, after the wait for gossip to settle: warns when this node
+     * knows no DSE peer of the mode's release ({@link #knownAtStartup}), the cue that the mode is no longer needed. A
+     * node that skips that wait (its broadcast address is the loopback address, or
+     * {@code cassandra.skip_wait_for_gossip_to_settle} is 0) warns on what it knows then: the record and the peers
+     * assumed at the dialect, which need no gossip, still keep it quiet. Nothing happens outside the modes or when such
+     * a peer is known.
      */
     public static void warnIfNoneKnownAtStartup()
     {
         if (!DseCompat.enabled() || !knownAtStartup().isEmpty())
             return;
-        logger.warn("No DSE peers found, the mode can be dropped (internode_compatibility_mode DSE_6: no peer speaks the pre-4.0 " +
-                    "dialect or gossips a DSE messaging version, and none is known or on record as a DSE 6 node): once every node " +
-                    "runs this software, delete the DSE 6 upgrade marker {} and restart the node with internode_compatibility_mode NONE",
-                    DseUpgradeMarker.path());
+        if (DseCompat.isDse51())
+            logger.warn("No DSE peers found, the mode can be dropped (internode_compatibility_mode DSE_5_1: no peer " +
+                        "speaks the pre-4.0 dialect, and none is known or on record as a DSE 5.1 node): once every " +
+                        "node runs this software, delete the DSE 5.1 upgrade marker {} and restart the node with " +
+                        "internode_compatibility_mode NONE",
+                        DseUpgradeMarker.path(DseCompat.textMode()));
+        else
+            logger.warn("No DSE peers found, the mode can be dropped (internode_compatibility_mode DSE_6: no peer " +
+                        "speaks the pre-4.0 dialect or gossips a DSE messaging version, and none is known or on " +
+                        "record as a DSE 6 node): once every node runs this software, delete the DSE 6 upgrade " +
+                        "marker {} and restart the node with internode_compatibility_mode NONE",
+                        DseUpgradeMarker.path());
     }
 
     /**
-     * The DSE 6 peers this node knows of, in DSE 6 compatibility mode, sorted (empty outside it): the peers recorded at a
+     * The DSE peers this node knows of, in a DSE compatibility mode, sorted (empty outside it): the peers recorded at a
      * pre-4.0 messaging version now (DSE's own gossip values, 256 or more, read as the dialect), which includes the peers
      * stored with a DSE 6 release that {@link DseDialectVersions#seed} assumed at the dialect until gossip says otherwise;
      * the peers on record from earlier runs ({@link DsePeersRecord}, where a DSE peer that stays down is only found),
@@ -363,12 +508,12 @@ public final class DsePeers
             if (!hasLeftTheRing(Gossiper.instance.getEndpointStateForEndpoint(peer)))
                 known.add(peer.getHostAddressAndPort());
         for (Map.Entry<InetAddressAndPort, EndpointState> e : Gossiper.instance.endpointStateMap.entrySet())
-            if (!e.getKey().equals(self) && !hasLeftTheRing(e.getValue()) && gossipedDseVersion(e.getValue()) >= 0)
+            if (!e.getKey().equals(self) && !hasLeftTheRing(e.getValue()) && gossipsDseVersion(e.getValue()))
                 known.add(e.getKey().getHostAddressAndPort());
         return known;
     }
 
-    /** The identified peers with the evidence that identified each, in DSE 6 compatibility mode; empty otherwise. */
+    /** The identified peers with the evidence that identified each, in a DSE compatibility mode; empty otherwise. */
     public static Map<InetAddressAndPort, String> snapshot()
     {
         return DseCompat.enabled() ? Map.copyOf(IDENTIFIED) : Map.of();
@@ -385,5 +530,6 @@ public final class DsePeers
     {
         IDENTIFIED.clear();
         PRESUMED.clear();
+        WARNED_RELEASE.clear();
     }
 }

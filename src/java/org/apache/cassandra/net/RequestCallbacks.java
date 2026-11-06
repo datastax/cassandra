@@ -77,7 +77,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     }
 
     /**
-     * The serializer of the response a pre-4.0 peer (DSE 6 compatibility mode) sends for the request with this id:
+     * The serializer of the response a pre-4.0 peer (a DSE compatibility mode) sends for the request with this id:
      * such a peer answers with the generic {@link Verb#REQUEST_RSP} or {@link Verb#INTERNAL_RSP} verbs, which have
      * no serializer of their own, so the payload is read with the serializer of the response verb of the request.
      * Null when no callback is registered (the payload is skipped) or the request verb has no response verb.
@@ -92,7 +92,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     }
 
     /**
-     * When the response to the request with this id, read from a pre-4.0 peer (DSE 6 compatibility mode), expires on
+     * When the response to the request with this id, read from a pre-4.0 peer (a DSE compatibility mode), expires on
      * receipt: at the deadline of the request's callback. Such a peer stamps a response with the start of the
      * operation and names only the generic response verbs, whose own timeout would drop, for instance, a TRUNCATE
      * response that took longer than the RPC timeout. Without a callback, the response verb's own expiry applies:

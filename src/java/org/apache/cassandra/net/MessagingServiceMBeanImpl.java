@@ -25,8 +25,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.apache.cassandra.auth.CassandraAuthorizer;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -335,13 +333,10 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
         return result;
     }
 
-    /** The {@code dse_version} entry of the JSON DSE gossips as {@code DSE_GOSSIP_STATE}. */
-    private static final Pattern DSE_VERSION_IN_GOSSIP_STATE = Pattern.compile("\"dse_version\"\\s*:\\s*\"([^\"]+)\"");
-
     @Override
     public Map<String, String> getDsePeers()
     {
-        // outside DSE 6 compatibility mode no peer is a DSE node this node talks to
+        // outside a DSE compatibility mode no peer is a DSE node this node talks to
         if (!DseCompat.enabled())
             return Collections.emptyMap();
         Map<String, String> result = new HashMap<>();
@@ -352,20 +347,18 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
             // a DSE node that left or was removed stays in gossip for days: it is not a peer any more
             if (e.getKey().equals(self) || DsePeers.hasLeftTheRing(e.getValue()))
                 continue;
-            int version = DsePeers.gossipedDseVersion(e.getValue());
-            if (version < 0)
+            // DSE 6's own messaging version in DSE_6, 10 or 11 in DSE_5_1
+            if (!DsePeers.gossipsDseVersion(e.getValue()))
                 continue;
+            String version = DseCompat.isDse51() ? e.getValue().getApplicationState(ApplicationState.NET_VERSION).value
+                                                 : String.valueOf(DsePeers.gossipedDseVersion(e.getValue()));
             VersionedValue release = e.getValue().getApplicationState(ApplicationState.RELEASE_VERSION);
             StringBuilder description = new StringBuilder("release ").append(release == null ? "unknown" : release.value)
                                                                      .append(", NET_VERSION ").append(version);
             // DSE gossips its DSE_GOSSIP_STATE at the ordinal of this software's X_11_PADDING
-            VersionedValue dseState = e.getValue().getApplicationState(ApplicationState.X_11_PADDING);
-            if (dseState != null)
-            {
-                Matcher dseVersion = DSE_VERSION_IN_GOSSIP_STATE.matcher(dseState.value);
-                if (dseVersion.find())
-                    description.append(", DSE ").append(dseVersion.group(1));
-            }
+            String dseVersion = DsePeers.gossipedDseRelease(e.getValue());
+            if (dseVersion != null)
+                description.append(", DSE ").append(dseVersion);
             result.put(e.getKey().getHostAddressAndPort(), description.append(", ").append(ordinals(identified.get(e.getKey()))).toString());
         }
         // the other identified peers: identified by a handshake, with no gossip state yet, a state without NET_VERSION
@@ -382,9 +375,15 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
         return result;
     }
 
-    /** Which ordinals gossip with a peer uses, from what {@link DsePeers} identified it by (null when it did not). */
+    /**
+     * Which ordinals gossip with a peer uses, from what {@link DsePeers} identified it by (null when it did not): DSE's
+     * for an identified DSE 6 peer; this software's for a DSE 5.1 peer, whose ordinals are a prefix of them.
+     */
     private static String ordinals(String evidence)
     {
+        if (DseCompat.isDse51())
+            return evidence == null ? "gossip ordinals: this software's (not identified as DSE 5.1 yet)"
+                                    : "gossip ordinals: this software's (identified as DSE 5.1 by " + evidence + ')';
         return evidence == null ? "gossip ordinals: this software's (not identified as DSE yet)" : "gossip ordinals: DSE's (" + evidence + ')';
     }
 
