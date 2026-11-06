@@ -18,6 +18,7 @@ package org.apache.cassandra.hints;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,6 +43,7 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.io.util.File;
@@ -153,6 +155,77 @@ public class DseHintsFileTest
             assertThat(list(directory)).containsExactlyInAnyOrder(file.getFileName().toString(),
                                                                   hostId + "-" + timestamp + "-1.crc32",
                                                                   hostId + "-" + timestamp + "-1-Statistics.hints");
+        }
+    }
+
+    /**
+     * The hints file DSE 5.1.51 wrote: the one {@link DseFixtures#writeDse51HintsFile} writes for its host id, its
+     * timestamp and its hints, byte for byte, and a hints file of this software, which the catalog loads in every mode
+     * and leaves as it is. It was copied while DSE still had it open, so it comes without the {@code .crc32} and
+     * {@code -Statistics.hints} companions, as a file DSE 5.1 left open when it was killed would: the copy here is
+     * loaded alone. The catalog logs nothing; the descriptor logs an ERROR for the missing statistics (pinned). The
+     * generated file, with both companions, is {@link #dse51HintsFileIsLoadedAsAHintsFileOfThisSoftwareInEveryMode}'s.
+     */
+    @Test
+    public void theHintsFileDse51WroteIsTheOneGeneratedAndIsLoadedInEveryMode() throws IOException
+    {
+        Path captured = DseFixtures.dse51().hintsFile();
+        String name = captured.getFileName().toString();
+        UUID hostId = UUID.fromString(name.substring(0, 36));
+        long timestamp = Long.parseLong(name.substring(37, name.length() - "-1.hints".length()));
+        assertThat(hostId).isEqualTo(Dse51Fixtures.HOST_IDS.get(2));
+        List<byte[]> hints = DseFixtures.hintsRecords(captured);
+        assertThat(hints).hasSize(Dse51Fixtures.FIXTURE_HINTS);
+        Path generated = DseFixtures.writeDse51HintsFile(folder.newFolder().toPath(), hostId, timestamp, hints);
+        assertThat(generated.getFileName().toString()).isEqualTo(name);
+        assertThat(Files.readAllBytes(generated)).isEqualTo(Files.readAllBytes(captured));
+
+        for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+        {
+            File directory = new File(folder.newFolder());
+            Path file = Files.copy(captured, directory.toPath().resolve(name));
+            byte[] before = Files.readAllBytes(file);
+
+            assertThat(HintsDescriptor.isHintFileName(file)).isTrue();
+            assertThat(HintsCatalog.dseHintsFiles(directory)).isEmpty();
+            HintsDescriptor descriptor = HintsDescriptor.readFromFileQuietly(file).orElseThrow();
+            assertThat(descriptor.version).isEqualTo(Dse51Fixtures.HINTS_VERSION);
+            assertThat(descriptor.messagingVersion()).isEqualTo(MessagingService.VERSION_30);
+            assertThat(descriptor.hostId).isEqualTo(hostId);
+            assertThat(descriptor.timestamp).isEqualTo(timestamp);
+            assertThat(descriptor.parameters).isEmpty();
+
+            Logger descriptorLogger = (Logger) LoggerFactory.getLogger(HintsDescriptor.class);
+            ListAppender<ILoggingEvent> descriptorEvents = new ListAppender<>();
+            descriptorEvents.start();
+            descriptorLogger.addAppender(descriptorEvents);
+            try
+            {
+                assertThat(loadAndCollectEvents(directory, mode, 1)).as("log of the catalog load in " + mode).isEmpty();
+            }
+            finally
+            {
+                descriptorLogger.detachAppender(descriptorEvents);
+            }
+            // without its statistics companion the descriptor logs, as for any hints file of this software without it,
+            // an ERROR (the missing file is not the FileNotFoundException its WARN expects), and starts with empty
+            // statistics, which only metrics read; counted during the catalog load only (the readFromFileQuietly
+            // above logs the same ERROR)
+            Path statistics = directory.toPath().resolve(name.replaceFirst("\\.hints$", "-Statistics.hints"));
+            assertThat(descriptorEvents.list).filteredOn(e -> e.getLevel().isGreaterOrEqual(Level.WARN))
+                                             .as("WARN and ERROR of the descriptors in " + mode)
+                                             .singleElement()
+                                             .satisfies(e -> {
+                                                 assertThat(e.getLevel()).isEqualTo(Level.ERROR);
+                                                 assertThat(e.getFormattedMessage())
+                                                 .isEqualTo("Cannot read stats component `" + statistics +
+                                                            "` for hints descriptor, initialising with empty " +
+                                                            "statistics.");
+                                                 assertThat(e.getThrowableProxy().getClassName())
+                                                 .isEqualTo(NoSuchFileException.class.getName());
+                                             });
+            assertThat(Files.readAllBytes(file)).isEqualTo(before);
+            assertThat(list(directory)).containsExactly(name);
         }
     }
 

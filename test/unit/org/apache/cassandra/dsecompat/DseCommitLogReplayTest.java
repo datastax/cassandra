@@ -103,8 +103,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * DSE 5.1 writes segments of version 6, the Cassandra 3.x layout (the header, the sync markers and the entries as in a
  * segment of this software, the mutations at messaging version 11, laid out as at 10 and 12), which the replay reads
- * at messaging version 10. No segment written by DSE 5.1 is among the fixtures yet: the tests of {@code DSE_5_1} replay
- * a segment of version 6 built here ({@code segment}), holding mutations this software serializes at version 12.
+ * at messaging version 10. The segments DSE 5.1.51 wrote with entries (the active one,
+ * {@link Dse51Fixtures#commitLogSegmentGz()}, and the older one of {@link Dse51Fixtures#killedCommitLogDirectory()},
+ * which continues it) hold, beside the collection table's mutations, the writes of DSE's endpoint state persister
+ * to {@code system.local} and {@code system.peers}, which name columns those tables do not have here, so that their
+ * replay stops on them: their headers are checked against the one built here, and the tests of {@code DSE_5_1}
+ * replay a segment of version 6 built here ({@code segment}), holding mutations this software serializes at
+ * version 12.
  */
 public class DseCommitLogReplayTest extends CQLTester
 {
@@ -619,24 +624,65 @@ public class DseCommitLogReplayTest extends CQLTester
     }
 
     @Test
-    public void segmentVersion6MapsToMessagingVersion10()
+    public void segmentVersion6MapsToMessagingVersion10() throws IOException
     {
-        CommitLogDescriptor descriptor = CommitLogDescriptor.fromFileName("CommitLog-6-1790248906231.log");
+        String name = DseFixtures.dse51().commitLogSegmentGz().getFileName().toString().replaceFirst("\\.gz$", "");
+        assertThat(name).startsWith("CommitLog-" + Dse51Fixtures.COMMIT_LOG_VERSION + '-');
+        CommitLogDescriptor descriptor = CommitLogDescriptor.fromFileName(name);
         assertThat(descriptor.getMessagingVersion()).isEqualTo(MessagingService.VERSION_30);
     }
 
     /**
-     * The header of the segments of version 6 built here is the one DSE 5.1.51 writes, by its source: the version (an
-     * int), the id (a long), the length of the parameters (an unsigned short), the parameters (a JSON map, empty
-     * here), then the CRC32 of the version, of the id as two ints (low half first), of the length as an int and of the
-     * parameters, all big endian; then the first sync marker. Built here byte by byte, apart from this software's
-     * writer.
+     * The header of the segments of version 6 built here ({@code segment}) is the one DSE 5.1.51 writes
+     * ({@link #dse51Header}), which the segments DSE 5.1.51 wrote start with
+     * ({@link #theHeaderOfTheSegmentsDse51WroteIsTheOneBuiltHere}).
      */
     @Test
     public void theHeaderOfAVersion6SegmentIsTheOneDse51Writes() throws Throwable
     {
         Path segment = segment(folder.newFolder().toPath(), CommitLogDescriptor.VERSION_30, List.of());
         long id = CommitLogDescriptor.fromFileName(segment.getFileName().toString()).id;
+        byte[] expected = dse51Header(id);
+        byte[] bytes = Files.readAllBytes(segment);
+        assertThat(Arrays.copyOf(bytes, expected.length)).isEqualTo(expected);
+    }
+
+    /**
+     * The segments DSE 5.1.51 wrote (the active segment of node 1, and both segments of that node killed without a
+     * drain) start with the header built here, byte for byte, with the id of their name, and this software reads that
+     * header as one of a segment of version 6.
+     */
+    @Test
+    public void theHeaderOfTheSegmentsDse51WroteIsTheOneBuiltHere() throws Throwable
+    {
+        Dse51Fixtures dse51 = DseFixtures.dse51();
+        List<Path> segments = new ArrayList<>(dse51.unpackCommitLogSegments(dse51.commitLogSegmentGz().getParent(),
+                                                                            folder.newFolder().toPath()));
+        segments.addAll(dse51.unpackCommitLogSegments(dse51.killedCommitLogDirectory(), folder.newFolder().toPath()));
+        assertThat(segments).hasSize(3);
+        for (Path segment : segments)
+        {
+            long id = CommitLogDescriptor.fromFileName(segment.getFileName().toString()).id;
+            byte[] expected = dse51Header(id);
+            byte[] bytes = Files.readAllBytes(segment);
+            assertThat(Arrays.copyOf(bytes, expected.length)).as(segment.toString()).isEqualTo(expected);
+            CommitLogDescriptor header = CommitLogDescriptor.fromHeader(new File(segment), new EncryptionContext());
+            assertThat(header).as(segment.toString()).isNotNull();
+            // the name of a descriptor holds its version and its id
+            assertThat(header.fileName()).as(segment.toString()).isEqualTo(segment.getFileName().toString())
+                                         .startsWith("CommitLog-" + Dse51Fixtures.COMMIT_LOG_VERSION + '-');
+            assertThat(header.getMessagingVersion()).as(segment.toString()).isEqualTo(MessagingService.VERSION_30);
+        }
+    }
+
+    /**
+     * The header of a segment of version 6 with the id {@code id}, as DSE 5.1.51 writes it, by its source: the version
+     * (an int), the id (a long), the length of the parameters (an unsigned short), the parameters (a JSON map, empty),
+     * then the CRC32 of the version, of the id as two ints (low half first), of the length as an int and of the
+     * parameters, all big endian. Built byte by byte, apart from this software's writer.
+     */
+    private static byte[] dse51Header(long id)
+    {
         byte[] parameters = "{}".getBytes(StandardCharsets.UTF_8);
         ByteBuffer expected = ByteBuffer.allocate(4 + 8 + 2 + parameters.length + 4);
         expected.putInt(6).putLong(id).putShort((short) parameters.length).put(parameters);
@@ -645,8 +691,7 @@ public class DseCommitLogReplayTest extends CQLTester
                              .putInt(parameters.length).array());
         crc.update(parameters);
         expected.putInt((int) crc.getValue());
-        byte[] bytes = Files.readAllBytes(segment);
-        assertThat(Arrays.copyOf(bytes, expected.capacity())).isEqualTo(expected.array());
+        return expected.array();
     }
 
     /**

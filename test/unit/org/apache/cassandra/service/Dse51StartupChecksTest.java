@@ -39,7 +39,10 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
+import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ULIDBasedSSTableId;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.Ec2Snitch;
@@ -242,6 +245,39 @@ public class Dse51StartupChecksTest
         assertThat(StartupChecks.isCommitLogSegmentWrittenWithoutDse51Mode("CommitLog-6-1.log")).isFalse();
         assertThat(StartupChecks.isCommitLogSegmentWrittenWithoutDse51Mode("CommitLog-1234567890123.log")).isFalse();
         assertThat(StartupChecks.isCommitLogSegmentWrittenWithoutDse51Mode("CommitLog-99999999999-1.log")).isFalse();
+    }
+
+    /**
+     * The names of the files DSE 5.1.51 wrote ({@link Dse51Fixtures}: its sstables of every kind and its commit log
+     * segments): none of them is taken for one written without the mode, while each, made a trie sstable or given
+     * DSE 6's commit log version, is.
+     */
+    @Test
+    public void theFilesDse51WroteAreNotFlagged() throws IOException
+    {
+        List<String> sstables;
+        List<String> segments;
+        try (Stream<Path> files = Files.walk(DseFixtures.ROOT))
+        {
+            List<String> names = files.filter(Files::isRegularFile)
+                                      .filter(Dse51Fixtures::isDse51Fixture)
+                                      .map(p -> p.getFileName().toString()).collect(Collectors.toList());
+            sstables = names.stream().filter(n -> Descriptor.isValidFile(new File(n))).collect(Collectors.toList());
+            // the fixtures keep the segments compressed
+            segments = names.stream().filter(n -> n.startsWith("CommitLog-")).map(n -> n.replaceFirst("\\.gz$", ""))
+                            .collect(Collectors.toList());
+        }
+        assertThat(sstables).isNotEmpty().allMatch(n -> n.startsWith(Dse51Fixtures.SSTABLE_VERSION + '-') &&
+                                                        n.contains("-big-"));
+        assertThat(segments).isNotEmpty().allMatch(n -> n.startsWith("CommitLog-" +
+                                                                     Dse51Fixtures.COMMIT_LOG_VERSION + '-'));
+        assertThat(sstables).allMatch(n -> n.split("-").length == 4, "four parts");
+        assertThat(sstables).noneMatch(StartupChecks::isSSTableWrittenWithoutDse51Mode);
+        assertThat(segments).noneMatch(StartupChecks::isCommitLogSegmentWrittenWithoutDse51Mode);
+        // the names reach the classification: the same names of another format or version are refused
+        assertThat(sstables).allMatch(n -> StartupChecks.isSSTableWrittenWithoutDse51Mode(n.replace("-big-", "-bti-")));
+        assertThat(segments).allMatch(n -> StartupChecks.isCommitLogSegmentWrittenWithoutDse51Mode(
+            n.replaceFirst("^CommitLog-" + Dse51Fixtures.COMMIT_LOG_VERSION + '-', "CommitLog-680-")));
     }
 
     @Test
