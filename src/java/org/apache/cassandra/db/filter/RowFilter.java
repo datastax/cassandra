@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -38,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -228,7 +230,7 @@ public class RowFilter
     public boolean isMutableIntersection()
     {
         List<Expression> exprs = expressions();
-        Set<ColumnMetadata> columns = null;
+        Set<Object> targets = null;
         for (Expression e : exprs)
         {
             if (e.column.isStatic() && exprs.size() > 1)
@@ -236,11 +238,20 @@ public class RowFilter
 
             if (!e.column.isPrimaryKeyColumn())
             {
-                if (columns == null)
-                    columns = new HashSet<>(exprs.size());
+                if (targets == null)
+                    targets = new HashSet<>(exprs.size());
 
-                columns.add(e.column);
-                if (columns.size() > 1)
+                // the fields of a non-frozen (multi-cell) UDT are different cells, so each is a mutable target of its
+                // own; those of a frozen column are parts of a single cell, so they're the same target as the column.
+                // Each expression on a field inside the elements of a non-frozen collection may be satisfied by a
+                // different element, that is, by a different cell, even if they are on the same field: each of them
+                // is a mutable target of its own (the same expression twice is the same condition).
+                boolean isCellTarget = e.fieldPath() != null && e.column.type.isMultiCell();
+                if (isCellTarget && e.fieldPath().hasElements() && e.column.type.isCollection())
+                    targets.add(e);
+                else
+                    targets.add(isCellTarget ? List.of(e.column, e.fieldPath()) : e.column);
+                if (targets.size() > 1)
                     return true;
             }
         }
@@ -376,7 +387,7 @@ public class RowFilter
                              ? ((CompositeType) keyValidator).split(key.getKey())[e.column.position()]
                              : key.getKey();
 
-            if (!e.isSatisfiedBy(e.column.type, value))
+            if (!e.isSatisfiedByColumnValue(value))
                 return false;
         }
         return true;
@@ -395,7 +406,7 @@ public class RowFilter
 
             ByteBuffer value = clustering.bufferAt(e.column.position());
 
-            if (!e.isSatisfiedBy(e.column.type, value))
+            if (!e.isSatisfiedByColumnValue(value))
                 return false;
         }
         return true;
@@ -423,7 +434,8 @@ public class RowFilter
         if (isEmpty())
             return this;
 
-        return new RowFilter(root.filter(e -> !e.column().equals(column) || e.operator() != op || !e.value.equals(value)), needsReconciliation, indexHints, optimizerOptions);
+        // the expressions on the fields of the column are not expressions on the column
+        return new RowFilter(root.filter(e -> !e.column().equals(column) || e.fieldPath() != null || e.operator() != op || !e.value.equals(value)), needsReconciliation, indexHints, optimizerOptions);
     }
 
     public boolean hasNonKeyExpression()
@@ -450,7 +462,8 @@ public class RowFilter
      */
     public RowFilter withoutFirstLevelExpression(ColumnMetadata column)
     {
-        return restrictFirstLevel(e -> !e.column.equals(column));
+        // the expressions on the fields of the column are not expressions on the column
+        return restrictFirstLevel(e -> !e.column.equals(column) || e.fieldPath() != null);
     }
 
     /**
@@ -678,6 +691,30 @@ public class RowFilter
         }
 
         /**
+         * Adds the specified filter expression on a field of a UDT or tuple column to this builder.
+         *
+         * @param def the column of the filtered field
+         * @param fieldPath the path to the filtered field of the column, or {@code null} to filter the whole column,
+         * as {@link #add(ColumnMetadata, Operator, ByteBuffer)} does
+         * @param op the filtering operator, shouldn't be {@link Operator#ANN}.
+         * @param value the filtered value, of the type of the field
+         * @return the added expression
+         */
+        public SimpleExpression add(ColumnMetadata def, @Nullable FieldPath fieldPath, Operator op, ByteBuffer value)
+        {
+            if (fieldPath == null)
+                return add(def, op, value);
+
+            assert op != Operator.ANN : "ANN expressions are not supported on fields";
+            Index.Analyzer analyzer = indexRegistry == null
+                                      ? null
+                                      : indexRegistry.getAnalyzerFor(def, fieldPath, op, value, indexHints).orElse(null);
+            FieldExpression expression = new FieldExpression(def, fieldPath, op, value, analyzer);
+            add(expression);
+            return expression;
+        }
+
+        /**
          * Adds the specified ANN expression to this builder.
          *
          * @param def the column for ANN ordering
@@ -894,16 +931,22 @@ public class RowFilter
                 || !(upper instanceof SimpleExpression)
                 || !(lower.operator == Operator.GT || lower.operator == Operator.GTE)
                 || !(upper.operator == Operator.LT || upper.operator == Operator.LTE)
-                || !lower.column.equals(upper.column))
+                || !lower.column.equals(upper.column)
+                // the bounds of the same target: the column, or the same field of it
+                || !Objects.equal(lower.fieldPath(), upper.fieldPath())
+                // the bounds on a field inside collection elements may be satisfied by different elements
+                || lower.fieldPath() != null && lower.fieldPath().hasElements())
                 return false;
+
+            // as the operators compare the values, see SimpleExpression#isSatisfiedBy (FieldExpression: of the field)
+            AbstractType<?> type = lower instanceof FieldExpression
+                                   ? ((FieldExpression) lower).leafType()
+                                   : lower.column.type.isCounter() ? LongType.instance : lower.column.type;
 
             // an index can order the values differently than their type, e.g. SAI compares IPv4 addresses as
             // IPv4-mapped IPv6 ones, so the type order can't tell that the range is empty
-            if (lower.column.type.unwrap() instanceof InetAddressType)
+            if (type.unwrap() instanceof InetAddressType)
                 return false;
-
-            // as the operators compare the values, see SimpleExpression#isSatisfiedBy
-            AbstractType<?> type = lower.column.type.isCounter() ? LongType.instance : lower.column.type;
             int cmp = type.compareForCQL(lower.value, upper.value);
             return cmp > 0 || cmp == 0 && !(lower.operator == Operator.GTE && upper.operator == Operator.LTE);
         }
@@ -1101,7 +1144,7 @@ public class RowFilter
         // VECTOR
         protected enum Kind
         {
-            SIMPLE(0), MAP_COMPARISON(1), UNUSED1(2), CUSTOM(3), USER(4), VECTOR_RADIUS(100);
+            SIMPLE(0), MAP_COMPARISON(1), UNUSED1(2), CUSTOM(3), USER(4), FIELD(5), VECTOR_RADIUS(100);
             private final int val;
             Kind(int v) { val = v; }
             public int getVal() { return val; }
@@ -1114,6 +1157,7 @@ public class RowFilter
                     case 2: return UNUSED1;
                     case 3: return CUSTOM;
                     case 4: return USER;
+                    case 5: return FIELD;
                     case 100: return VECTOR_RADIUS;
                     default: throw new IllegalArgumentException("Unknown index expression kind: " + val);
                 }
@@ -1150,6 +1194,16 @@ public class RowFilter
         public ColumnMetadata column()
         {
             return column;
+        }
+
+        /**
+         * @return the path to the restricted field of the {@link #column() column} for an expression on a field of a
+         * UDT or tuple column (see {@link FieldExpression}), {@code null} for the expressions on whole columns
+         */
+        @Nullable
+        public FieldPath fieldPath()
+        {
+            return null;
         }
 
         public Operator operator()
@@ -1302,6 +1356,18 @@ public class RowFilter
         public abstract boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec);
 
         /**
+         * Returns whether the provided value of the {@link #column() column} of this expression (a partition key or
+         * clustering value) satisfies this expression.
+         *
+         * @param columnValue the value of the column
+         * @return whether the value satisfies this expression
+         */
+        public boolean isSatisfiedByColumnValue(ByteBuffer columnValue)
+        {
+            return isSatisfiedBy(column.type, columnValue);
+        }
+
+        /**
          * Returns the number of values that this expression will check after applying any index analyzers.
          */
         protected int numFilteredValues()
@@ -1405,6 +1471,10 @@ public class RowFilter
                         ByteBufferUtil.writeWithShortLength(mexpr.key, out);
                         ByteBufferUtil.writeWithShortLength(mexpr.value, out);
                         break;
+                    case FIELD:
+                        ((FieldExpression) expression).fieldPath.serialize(out);
+                        ByteBufferUtil.writeWithShortLength(expression.value, out);
+                        break;
                     case VECTOR_RADIUS:
                         GeoDistanceExpression gexpr = (GeoDistanceExpression) expression;
                         gexpr.distanceOperator.writeTo(out);
@@ -1450,6 +1520,11 @@ public class RowFilter
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
                         ByteBuffer val = ByteBufferUtil.readWithShortLength(in);
                         return new MapComparisonExpression(column, key, operator, val);
+                    case FIELD:
+                        FieldPath fieldPath = FieldPath.deserialize(in);
+                        ByteBuffer fieldValue = ByteBufferUtil.readWithShortLength(in);
+                        Index.Analyzer fieldAnalyzer = indexRegistry.getAnalyzerFor(column, fieldPath, operator, fieldValue, indexHints).orElse(null);
+                        return new FieldExpression(column, fieldPath, operator, fieldValue, fieldAnalyzer);
                     case VECTOR_RADIUS:
                         Operator boundaryOperator = Operator.readFrom(in);
                         ByteBuffer distance = ByteBufferUtil.readWithShortLength(in);
@@ -1480,6 +1555,10 @@ public class RowFilter
                         MapComparisonExpression mexpr = (MapComparisonExpression)expression;
                         size += ByteBufferUtil.serializedSizeWithShortLength(mexpr.key)
                               + ByteBufferUtil.serializedSizeWithShortLength(mexpr.value);
+                        break;
+                    case FIELD:
+                        size += ((FieldExpression) expression).fieldPath.serializedSize()
+                                + ByteBufferUtil.serializedSizeWithShortLength(expression.value);
                         break;
                     case CUSTOM:
                         size += IndexMetadata.serializer.serializedSize(((CustomExpression)expression).targetIndex, version)
@@ -1676,7 +1755,7 @@ public class RowFilter
         @Override
         public String toCQLString(Redaction redaction)
         {
-            AbstractType<?> type = column.type;
+            AbstractType<?> type = targetType();
             switch (operator)
             {
                 case CONTAINS:
@@ -1697,9 +1776,9 @@ public class RowFilter
                 case ORDER_BY_ASC:
                 case ORDER_BY_DESC:
                     // These don't have a value, so we return here to prevent an error calling type.getString(value)
-                    return String.format("ORDER BY %s %s", column.name.toCQLString(), operator);
+                    return String.format("ORDER BY %s %s", targetCQLString(), operator);
                 case ANN:
-                    return String.format("ORDER BY %s ANN OF %s", column.name.toCQLString(), truncateValue(type.toCQLString(value, redaction)));
+                    return String.format("ORDER BY %s ANN OF %s", targetCQLString(), truncateValue(type.toCQLString(value, redaction)));
                 case LIKE_PREFIX:
                     return likeToCQLString("'%s%%'", type, redaction, true);
                 case LIKE_SUFFIX:
@@ -1712,20 +1791,36 @@ public class RowFilter
                 default:
                     break;
             }
-            return String.format("%s %s %s", column.name.toCQLString(), operator, truncateValue(type.toCQLString(value, redaction)));
+            return String.format("%s %s %s", targetCQLString(), operator, truncateValue(type.toCQLString(value, redaction)));
         }
 
         private String likeToCQLString(String pattern, AbstractType<?> type, Redaction redaction, boolean literal)
         {
             if (redaction == Redaction.REDACT)
-                return String.format("%s LIKE ?", column.name.toCQLString());
+                return String.format("%s LIKE ?", targetCQLString());
 
             String term = type.getString(value);
             if (literal)
                 term = LikePatterns.escape(term);
             String stringValue = String.format(pattern, term);
             String escape = term.indexOf(LikePatterns.ESCAPE) >= 0 ? " ESCAPE '" + LikePatterns.ESCAPE + '\'' : "";
-            return String.format("%s LIKE %s%s", column.name.toCQLString(), truncateValue(stringValue), escape);
+            return String.format("%s LIKE %s%s", targetCQLString(), truncateValue(stringValue), escape);
+        }
+
+        /**
+         * @return the CQL form of the restricted target: the name of the column
+         */
+        protected String targetCQLString()
+        {
+            return column.name.toCQLString();
+        }
+
+        /**
+         * @return the type of the restricted target: that of the column
+         */
+        protected AbstractType<?> targetType()
+        {
+            return column.type;
         }
 
         private static String truncateValue(String value)
@@ -1737,6 +1832,217 @@ public class RowFilter
         protected Kind kind()
         {
             return Kind.SIMPLE;
+        }
+    }
+
+    /**
+     * An expression on a field of a UDT or tuple column, of the form 'column.field.field' OPERATOR 'value' (see
+     * {@link FieldPath}): the value is of the type of the field, and it is compared with the value of the field.
+     * <p>
+     * A row where the field is unset (or the column is null) doesn't satisfy the expression, except for
+     * {@link Operator#NOT_CONTAINS}, as for {@link SimpleExpression}.
+     * <p>
+     * A path through collections ({@link FieldPath#hasElements() elements}: list or set elements, map values) reaches
+     * any number of values per row, the field of each element (the unset fields are skipped). The expression is then
+     * satisfied by the rows where <em>some</em> value satisfies it, but for the negative operators ({@code !=},
+     * {@code NOT IN}, {@code NOT CONTAINS}), satisfied by the rows where <em>no</em> value equals (contains) the value
+     * of the expression, which includes the rows without any value, as for {@code NOT CONTAINS} on a collection
+     * column. The SAI post-filter evaluates the multi-valued indexes the same way.
+     */
+    public static class FieldExpression extends SimpleExpression
+    {
+        private final FieldPath fieldPath;
+        private final AbstractType<?> leafType;
+        // whether the path reaches any number of values per row
+        private final boolean isMultiValued;
+
+        public FieldExpression(ColumnMetadata column,
+                               FieldPath fieldPath,
+                               Operator operator,
+                               ByteBuffer value,
+                               @Nullable Index.Analyzer analyzer)
+        {
+            super(column, operator, value, analyzer, null);
+            this.fieldPath = fieldPath;
+            try
+            {
+                this.leafType = fieldPath.leafType(column.type);
+            }
+            catch (IllegalStateException e)
+            {
+                // the path doesn't match the type of the column, possibly a sender with a different schema
+                throw new InvalidRequestException(String.format("Invalid field path %s for column %s of type %s: %s",
+                                                                fieldPath, column.name, column.type.asCQL3Type(), e.getMessage()));
+            }
+            // the elements are only crossed to reach a field of them: a path never ends with them
+            List<FieldPath.Step> steps = fieldPath.steps();
+            if (steps.get(steps.size() - 1).kind != FieldPath.Step.Kind.FIELD)
+                throw new InvalidRequestException(String.format("Invalid field path %s for column %s of type %s: it doesn't end with a field",
+                                                                fieldPath, column.name, column.type.asCQL3Type()));
+            this.isMultiValued = fieldPath.hasElements();
+        }
+
+        @Override
+        public FieldPath fieldPath()
+        {
+            return fieldPath;
+        }
+
+        /**
+         * @return the type of the restricted field
+         */
+        public AbstractType<?> leafType()
+        {
+            return leafType;
+        }
+
+        @Override
+        public void validate()
+        {
+            checkNotNull(value, "Unsupported null value for field %s", targetCQLString());
+            checkBindValueSet(value, "Unsupported unset value for field %s", targetCQLString());
+        }
+
+        @Override
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            if (!isMultiValued)
+                return isSatisfiedByField(fieldValue(metadata, partitionKey, row, nowInSec));
+            return isSatisfiedByFields(metadata, partitionKey, row, nowInSec, isNegativeOperator() ? VIOLATED_BY : SATISFIED_BY);
+        }
+
+        /**
+         * The predicate of the values of a multi-valued path satisfying a positive expression: one is enough.
+         */
+        private static final BiPredicate<FieldExpression, ByteBuffer> SATISFIED_BY = FieldExpression::isSatisfiedByField;
+        /**
+         * The predicate of the values of a multi-valued path not satisfying a negative expression: one excludes the
+         * row.
+         */
+        private static final BiPredicate<FieldExpression, ByteBuffer> VIOLATED_BY = (e, v) -> !e.isSatisfiedByField(v);
+
+        /**
+         * @return the value of the field in the row, {@code null} if it's unset or the column is null, for a path
+         * without elements
+         */
+        @Nullable
+        private ByteBuffer fieldValue(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            return column.isComplex()
+                   ? fieldPath.singleValue(row.getComplexColumnData(column), nowInSec)
+                   : fieldPath.singleValue(getValue(metadata, partitionKey, row, nowInSec));
+        }
+
+        /**
+         * @return whether the values of the field reached by a path through collections (the field of each element,
+         * the unset fields skipped) satisfy this expression: some value satisfies it, but for the negative operators,
+         * which every value must satisfy (no value is equal to, or contains, the value of the expression). The given
+         * predicate is the one deciding, the satisfaction for a positive operator and the violation for a negative
+         * one: the visit of the values stops at the first value it accepts.
+         */
+        private boolean isSatisfiedByFields(TableMetadata metadata,
+                                            DecoratedKey partitionKey,
+                                            Row row,
+                                            long nowInSec,
+                                            BiPredicate<FieldExpression, ByteBuffer> deciding)
+        {
+            boolean decided = column.isComplex()
+                              ? fieldPath.anyValue(column.type, row.getComplexColumnData(column), nowInSec, this, deciding)
+                              : fieldPath.anyValue(column.type, getValue(metadata, partitionKey, row, nowInSec), this, deciding);
+            return isNegativeOperator() != decided;
+        }
+
+        /**
+         * @return whether the operator of this expression excludes values: a value of a multi-valued path that
+         * doesn't satisfy it excludes the row
+         */
+        private boolean isNegativeOperator()
+        {
+            return operator == Operator.NEQ || operator == Operator.NOT_IN || operator == Operator.NOT_CONTAINS;
+        }
+
+        @Override
+        public boolean isSatisfiedByColumnValue(ByteBuffer columnValue)
+        {
+            if (!isMultiValued)
+                return isSatisfiedByField(fieldPath.singleValue(columnValue));
+
+            boolean negative = isNegativeOperator();
+            return negative != fieldPath.anyValue(column.type, columnValue, this, negative ? VIOLATED_BY : SATISFIED_BY);
+        }
+
+        private boolean isSatisfiedByField(@Nullable ByteBuffer fieldValue)
+        {
+            switch (operator)
+            {
+                case CONTAINS:
+                    return contains(fieldValue);
+                case NOT_CONTAINS:
+                    return !contains(fieldValue);
+                case CONTAINS_KEY:
+                case NOT_CONTAINS_KEY:
+                case ANN:
+                case BM25:
+                case ORDER_BY_ASC:
+                case ORDER_BY_DESC:
+                    throw new AssertionError("Unsupported operator on a field: " + operator);
+                default:
+                    // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
+                    return isSatisfiedBy(leafType, fieldValue);
+            }
+        }
+
+        /**
+         * @return whether the value of the field, a frozen collection, contains the value of this expression
+         */
+        private boolean contains(@Nullable ByteBuffer fieldValue)
+        {
+            if (fieldValue == null)
+                return false;
+
+            assert leafType.isCollection() : "CONTAINS on non-collection field " + targetCQLString();
+            if (analyzer == null)
+                return Operator.CONTAINS.isSatisfiedBy(leafType, fieldValue, value);
+
+            // as for the elements of non-frozen collection columns (see SimpleExpression#contains)
+            AbstractType<?> elementType = FieldPath.Step.ELEMENTS.apply(leafType);
+            List<ByteBuffer> queriedTokens = analyzer.queriedTokens();
+            boolean[] found = { false };
+            FieldPath.forEachElement((CollectionType<?>) leafType, fieldValue, element -> {
+                if (!found[0] && Operator.ANALYZER_MATCHES.isSatisfiedByAnalyzed(elementType, analyzer.indexedTokens(element), queriedTokens))
+                    found[0] = true;
+            });
+            return found[0];
+        }
+
+        @Override
+        protected String targetCQLString()
+        {
+            return column.name.toCQLString() + '.' + fieldPath.toCQLString(column.type);
+        }
+
+        @Override
+        protected AbstractType<?> targetType()
+        {
+            return leafType;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            return super.equals(o) && fieldPath.equals(((FieldExpression) o).fieldPath);
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return 31 * super.hashCode() + fieldPath.hashCode();
+        }
+
+        @Override
+        protected Kind kind()
+        {
+            return Kind.FIELD;
         }
     }
 
