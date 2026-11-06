@@ -842,11 +842,17 @@ public final class DseFixtures
      */
     public static List<String> fixtureSchema(DseVersion version)
     {
+        return fixtureSchema(fixtureTableId(version));
+    }
+
+    /** The CQL creating {@code test_ks_fixture.t} as in {@link #fixtureSchema(DseVersion)}, with the id given. */
+    static List<String> fixtureSchema(UUID tableId)
+    {
         return Arrays.asList("CREATE KEYSPACE " + FIXTURE_KEYSPACE + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}",
                              "CREATE TYPE " + FIXTURE_KEYSPACE + ".addr (street text, zip int)",
                              "CREATE TABLE " + FIXTURE_KEYSPACE + ".t (id int, ck text, fu frozen<addr>, l list<int>, m map<text, int>, " +
                              "n bigint, s int static, tp frozen<tuple<int, text>>, u addr, v text, PRIMARY KEY (id, ck)) WITH ID = " +
-                             fixtureTableId(version));
+                             tableId);
     }
 
     /** One application state of a DSE node as {@code nodetool gossipinfo} prints it: {@code NAME:version:value}. */
