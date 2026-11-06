@@ -39,6 +39,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.google.common.collect.Iterables;
 import com.google.common.net.InetAddresses;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
@@ -49,11 +50,14 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.ExecutorPlus;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -91,6 +95,7 @@ import org.apache.cassandra.schema.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.security.EncryptionContext;
+import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMKiller;
 import org.apache.cassandra.utils.JVMStabilityInspector;
@@ -124,10 +129,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@link Dse51Fixtures#commitLogSegmentGz()}, and the older one of {@link Dse51Fixtures#killedCommitLogDirectory()},
  * which continues it) hold, beside the collection table's mutations, the writes of DSE's endpoint state persister
  * to {@code system.local} and {@code system.peers}, which name the columns DSE 5.1 adds to those tables
- * ({@link Dse51SystemTables}): their headers are checked against the one built here. The tests of {@code DSE_5_1}
- * replay a segment of version 6 built here ({@code segment}), holding mutations this software serializes at
- * version 12; so do the tests of the persister's writes ({@code persisterMutations}), serialized from the
- * definitions of those tables with the five columns ({@link Dse51SystemTables#withDse51Columns}).
+ * ({@link Dse51SystemTables}): their headers are checked against the one built here, and their replay in each mode
+ * is tested. The tests of what the fixtures do not hold or what is not checked on them (a mutation naming another
+ * unknown column, the sstable flushed from the replayed persister's writes, a replay without the mode that completes)
+ * replay a segment of version 6 built here ({@code segment}), holding mutations this software serializes at version
+ * 12, those of the persister serialized from the definitions of those tables with the five columns
+ * ({@code persisterMutations}, {@link Dse51SystemTables#withDse51Columns}).
  */
 public class DseCommitLogReplayTest extends CQLTester
 {
@@ -167,6 +174,20 @@ public class DseCommitLogReplayTest extends CQLTester
     private static final Logger TRANSLATION_LOGGER = (Logger) LoggerFactory.getLogger(DseViewWireFormat.class);
     /** The logger of the INFO line of the mutations naming the columns DSE 5.1 adds to system.local and peers. */
     private static final Logger READER_LOGGER = (Logger) LoggerFactory.getLogger(CommitLogReader.class);
+    /** The mutations naming the five columns in the active segment of the DSE 5.1.51 fixtures. */
+    private static final int DSE_51_ACTIVE_SEGMENT_PERSISTER_MUTATIONS = 146;
+    /**
+     * The same in the older segment of the killed DSE 5.1.51 node, which continues the active one: its mutations, and
+     * the 20 the persister wrote for both peers after node 3 restarted.
+     */
+    private static final int DSE_51_KILLED_SEGMENT_PERSISTER_MUTATIONS =
+        DSE_51_ACTIVE_SEGMENT_PERSISTER_MUTATIONS + 20;
+    /**
+     * The first mutation the replay of the segments DSE 5.1.51 wrote stops on without the mode: a write of DSE's
+     * endpoint state persister.
+     */
+    private static final String FIRST_UNKNOWN_COLUMN_OF_THE_DSE_51_SEGMENTS =
+        "Unknown column dse_version during deserialization of system.local";
     /** The peer of the writes of DSE 5.1's endpoint state persister ({@code persisterMutations}). */
     private static final InetAddress DSE_51_PEER = InetAddresses.forString("10.0.51.2");
     private static final UUID DSE_51_HOST_ID = UUID.fromString("5a5a5a5a-0000-4000-8000-000000005151");
@@ -192,6 +213,8 @@ public class DseCommitLogReplayTest extends CQLTester
     public void dropFixtureKeyspace() throws Throwable
     {
         execute("DROP KEYSPACE IF EXISTS " + FIXTURE_KEYSPACE);
+        // the rows the replays of DSE 5.1's segments write, also when a test fails before it truncates them
+        execute("TRUNCATE system.peers");
     }
 
     @Test
@@ -718,24 +741,272 @@ public class DseCommitLogReplayTest extends CQLTester
     }
 
     /**
-     * In {@code DSE_5_1}, a segment of DSE 5.1 (version 6) read at the start is replayed, its mutations of a table
-     * unknown here (one of DSE 5.1's own) skipped, and renamed so that it is not replayed again.
+     * In {@code DSE_5_1}, the active segment of a DSE 5.1.51 node (version 6) read at the start is replayed: the
+     * mutations of the collection table give back the fixture data set, those of tables unknown here (DSE 5.1's own,
+     * and those of the cluster's other keyspaces) are skipped, those of {@code system.local} and {@code system.peers}
+     * naming the columns DSE 5.1 adds are applied without them, counted by one INFO line; the segment is then renamed
+     * so that it is not replayed again.
      */
     @Test
     public void dse51ModeReplaysADse51SegmentAndMovesItAside() throws Throwable
     {
-        Path segment = dse51Segment();
-        withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
-            List<String> warnings = replayAtStartupCollectingWarnings(segment, DSE_51_ROWS);
-            assertMovedAside(segment);
-            assertThat(warnings).anyMatch(w -> w.startsWith("Commit log segment " + segment + " was written by " +
-                                                            "DataStax Enterprise 5.1 and read at the start"));
-        });
-        assertRows(execute("SELECT count(*) FROM " + DSE_51_TABLE), row((long) DSE_51_ROWS));
-        assertRows(execute("SELECT id, v FROM " + DSE_51_TABLE + " WHERE id = 2"), row(2, "v2"));
+        Path segment = replayTheActiveDse51Segment();
+        assertMovedAside(segment);
+        assertFixtureDataSet();
+        assertDse51Peers();
+        assertTheLocalRowIsThisServers();
     }
 
-    /** Without the mode the same segment is replayed and, its mutations of an unknown table skipped, kept. */
+    /**
+     * In {@code DSE_5_1}, the segments of a DSE 5.1.51 node killed without a drain after a peer's restart are replayed
+     * at the start and moved aside: the older one holds, in its tail, the writes of DSE's endpoint state persister to
+     * {@code system.peers} for both peers after node 3 restarted, which are applied without the columns DSE 5.1 adds
+     * (node 3's row is written later than by the active segment alone), counted by its INFO line; the newer one holds
+     * its header only.
+     */
+    @Test
+    public void dse51ModeReplaysTheSegmentsOfAKilledDse51Node() throws Throwable
+    {
+        replayTheActiveDse51Segment();
+        long beforeTheRestart = latestWriteOfTheRowOf(3);
+        execute("TRUNCATE system.peers");
+        prepareTheReplayOfDse51Segments();
+        Dse51Fixtures dse51 = DseFixtures.dse51();
+        List<Path> segments = dse51.unpackCommitLogSegments(dse51.killedCommitLogDirectory(),
+                                                            folder.newFolder().toPath());
+        assertThat(segments).hasSize(2);
+        // the newer segment: its header only, then the zeros of the preallocated file, no sync marker
+        byte[] header = dse51Header(CommitLogDescriptor.fromFileName(segments.get(1).getFileName().toString()).id);
+        byte[] newer = Files.readAllBytes(segments.get(1));
+        assertThat(Arrays.copyOf(newer, header.length)).isEqualTo(header);
+        assertThat(Arrays.copyOfRange(newer, header.length, newer.length)).containsOnly((byte) 0);
+        File[] files = segments.stream().map(File::new).toArray(File[]::new);
+        withDse51SSTableFormat(() -> {
+            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
+                List<String> info = new ArrayList<>();
+                List<String> warnings = new ArrayList<>();
+                Logger commitLogLogger = (Logger) LoggerFactory.getLogger(CommitLog.class);
+                Map<Keyspace, Integer> replayed = collecting(READER_LOGGER, Level.INFO, info, () -> {
+                    return collecting(commitLogLogger, Level.WARN, warnings, () -> {
+                        ColumnFamilyStore.FlushReason startup = ColumnFamilyStore.FlushReason.STARTUP;
+                        return CommitLog.instance.recoverSegmentsOnDiskNoArchive(startup, files);
+                    });
+                });
+                for (Path segment : segments)
+                    assertThat(warnings).anyMatch(w -> w.startsWith("Commit log segment " + segment + " was " +
+                                                                    "written by DataStax Enterprise 5.1 and read " +
+                                                                    "at the start"));
+                assertThat(replayed.get(Keyspace.open(FIXTURE_KEYSPACE))).isEqualTo(FIXTURE_MUTATIONS);
+                assertThat(info).filteredOn(line -> line.startsWith("DSE 5.1 compatibility mode: mutations of"))
+                                .containsExactly(dse51ColumnsInfo(segments.get(0),
+                                                                  DSE_51_KILLED_SEGMENT_PERSISTER_MUTATIONS));
+                for (Path segment : segments)
+                    assertMovedAside(segment);
+            });
+            assertFixtureDataSet();
+            assertThat(latestWriteOfTheRowOf(3)).isGreaterThan(beforeTheRestart);
+            assertDse51Peers();
+            assertTheLocalRowIsThisServers();
+        });
+    }
+
+    /**
+     * In the other modes the replay of the segments of the killed DSE 5.1.51 node stops at the first write of DSE's
+     * endpoint state persister, on the unknown column, as before: the JVM is killed (here a killer that only records
+     * it) and the replay stops (here with the {@code stop_commit} policy), the segments kept. The copy of the mutation
+     * the replay saves is deleted, and the mutations handed to the mutation stage before the stop are waited for.
+     */
+    @Test
+    public void theOtherModesStopTheReplayOfTheSegmentsOfAKilledDse51NodeAsBefore() throws Throwable
+    {
+        prepareTheReplayOfDse51Segments();
+        String savedPrefix = "Unexpected error deserializing mutation; saved to ";
+        Config.CommitFailurePolicy policy = DatabaseDescriptor.getCommitFailurePolicy();
+        DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.stop_commit);
+        KillerForTests killer = new KillerForTests();
+        JVMKiller previousKiller = JVMStabilityInspector.replaceKiller(killer);
+        try
+        {
+            for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+            {
+                if (mode.isDse51())
+                    continue;
+                killer.reset();
+                Dse51Fixtures dse51 = DseFixtures.dse51();
+                List<Path> segments = dse51.unpackCommitLogSegments(dse51.killedCommitLogDirectory(),
+                                                                    folder.newFolder().toPath());
+                File[] files = segments.stream().map(File::new).toArray(File[]::new);
+                // NONE with the default storage mode, as a node that dropped the flag
+                StorageCompatibilityMode storage = mode == InternodeCompatibilityMode.NONE
+                                                   ? StorageCompatibilityMode.NONE
+                                                   : StorageCompatibilityMode.HCD_1;
+                withModes(mode, storage, () -> {
+                    ColumnFamilyStore.FlushReason startup = ColumnFamilyStore.FlushReason.STARTUP;
+                    assertThatThrownBy(() -> CommitLog.instance.recoverSegmentsOnDiskNoArchive(startup, files))
+                    .as("%s", mode)
+                    .isInstanceOf(CommitLogReplayer.CommitLogReplayException.class)
+                    .hasMessageStartingWith(savedPrefix)
+                    .hasMessageEndingWith("Exception follows: java.lang.RuntimeException: " +
+                                          FIRST_UNKNOWN_COLUMN_OF_THE_DSE_51_SEGMENTS)
+                    .satisfies(e -> {
+                        String saved = e.getMessage().substring(savedPrefix.length());
+                        Files.delete(Path.of(saved.substring(0, saved.indexOf(".  "))));
+                    });
+                });
+                awaitTheMutationStage();
+                assertThat(killer.wasKilled()).as("%s", mode).isTrue();
+                for (Path segment : segments)
+                    assertKept(segment);
+                assertTheLocalRowIsThisServers();
+                execute("TRUNCATE system.peers");
+                SystemKeyspace.removeTruncationRecord(SystemKeyspace.LegacyPeers.id);
+            }
+        }
+        finally
+        {
+            JVMStabilityInspector.replaceKiller(previousKiller);
+            DatabaseDescriptor.setCommitFailurePolicy(policy);
+            execute("TRUNCATE system.peers");
+        }
+    }
+
+    /**
+     * Replays the active segment of the DSE 5.1.51 fixtures in {@code DSE_5_1} through the start-up path, the
+     * collection table created, and returns it: its fixture mutations replayed, its WARN of a DSE 5.1 segment and its
+     * INFO line of the mutations naming the five logged.
+     */
+    private Path replayTheActiveDse51Segment() throws Throwable
+    {
+        prepareTheReplayOfDse51Segments();
+        Path segment = Iterables.getOnlyElement(DseFixtures.dse51().unpackCommitLogSegments(
+            DseFixtures.dse51().commitLogSegmentGz().getParent(), folder.newFolder().toPath()));
+        withDse51SSTableFormat(() -> {
+            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
+                List<String> info = new ArrayList<>();
+                List<String> warnings = new ArrayList<>();
+                collecting(READER_LOGGER, Level.INFO, info, () -> {
+                    warnings.addAll(replayAtStartupCollectingWarnings(segment, FIXTURE_MUTATIONS));
+                    return Map.of();
+                });
+                assertThat(warnings).anyMatch(w -> w.startsWith("Commit log segment " + segment + " was written by " +
+                                                                "DataStax Enterprise 5.1 and read at the start"));
+                assertThat(info).contains(dse51ColumnsInfo(segment, DSE_51_ACTIVE_SEGMENT_PERSISTER_MUTATIONS));
+            });
+        });
+        return segment;
+    }
+
+    /**
+     * Creates the collection table with its id on the DSE 5.1.51 cluster, and removes the truncation record of
+     * {@code system.peers}, which a TRUNCATE of an earlier test leaves at a position of this server's commit log, after
+     * every position of the DSE segments: the replay would skip their mutations of that table. The replay of the DSE
+     * segments also writes node 1's cells to {@code system.local}, older than this server's, which win; the cells of
+     * DSE 5.1's local row that this server never writes ({@code thrift_version}, read as a dropped column, and the
+     * five, replayed without their values) add nothing any test of the class reads.
+     */
+    private void prepareTheReplayOfDse51Segments() throws Throwable
+    {
+        execute("DROP KEYSPACE IF EXISTS " + FIXTURE_KEYSPACE);
+        for (String statement : DseFixtures.dse51().fixtureSchema())
+            execute(statement);
+        SystemKeyspace.removeTruncationRecord(SystemKeyspace.LegacyPeers.id);
+    }
+
+    /**
+     * Waits until the mutation stage has applied every mutation the replay handed to it: until it reads idle twice in a
+     * row, 10 ms apart.
+     */
+    private static void awaitTheMutationStage()
+    {
+        ExecutorPlus mutations = Stage.MUTATION.executor();
+        long deadline = Clock.Global.nanoTime() + TimeUnit.MINUTES.toNanos(1);
+        // idle at two reads in a row, so that a task taken from the queue but not yet running is not missed
+        int idleReads = 0;
+        while (idleReads < 2)
+        {
+            boolean idle = mutations.getActiveTaskCount() == 0 && mutations.getPendingTaskCount() == 0;
+            idleReads = idle ? idleReads + 1 : 0;
+            assertThat(Clock.Global.nanoTime()).as("the mutation stage still busy").isLessThan(deadline);
+            Uninterruptibles.sleepUninterruptibly(10, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    /** The INFO line of the replay of {@code segment} in {@code DSE_5_1} for its {@code mutations} naming the five. */
+    private static String dse51ColumnsInfo(Path segment, int mutations)
+    {
+        return "DSE 5.1 compatibility mode: mutations of system.local or system.peers naming the columns " +
+               "[dse_version, graph, server_id, workload, workloads] DSE 5.1 adds to those tables, read in " + segment +
+               ": " + mutations + "; those not yet in an sstable are replayed without the values of those columns, " +
+               "which this software reads as dropped columns";
+    }
+
+    /**
+     * Both peers of DSE 5.1.51's three-node cluster, nodes 2 and 3, are in the replayed {@code system.peers}, with
+     * their data center, rack, host id and release, as DSE's persister wrote them; then {@code system.peers} is
+     * truncated.
+     */
+    private void assertDse51Peers() throws Throwable
+    {
+        try
+        {
+            for (int node = 2; node <= Dse51Fixtures.CLUSTER_NODES; node++)
+            {
+                assertRows(execute("SELECT data_center, rack, host_id, release_version FROM system.peers " +
+                                   "WHERE peer = ?", InetAddresses.forString("127.0.51.1" + node)),
+                           row("Cassandra", "rack1", Dse51Fixtures.HOST_IDS.get(node - 1),
+                               Dse51Fixtures.RELEASE_VERSION));
+            }
+        }
+        finally
+        {
+            execute("TRUNCATE system.peers");
+        }
+    }
+
+    /** The latest write time, in microseconds, of the cells of node {@code node}'s row of {@code system.peers}. */
+    private long latestWriteOfTheRowOf(int node) throws Throwable
+    {
+        UntypedResultSet rows = execute("SELECT WRITETIME(data_center) AS dc, WRITETIME(rack) AS rack, " +
+                                        "WRITETIME(host_id) AS host, WRITETIME(release_version) AS release, " +
+                                        "WRITETIME(rpc_address) AS rpc, WRITETIME(schema_version) AS schema_time " +
+                                        "FROM system.peers WHERE peer = ?",
+                                        InetAddresses.forString("127.0.51.1" + node));
+        assertThat(rows.size()).isEqualTo(1);
+        long latest = Long.MIN_VALUE;
+        for (String column : List.of("dc", "rack", "host", "release", "rpc", "schema_time"))
+            if (rows.one().has(column))
+                latest = Math.max(latest, rows.one().getLong(column));
+        assertThat(latest).isPositive();
+        return latest;
+    }
+
+    /** The row {@code local} of {@code system.local} keeps this server's host id and cluster name. */
+    private void assertTheLocalRowIsThisServers() throws Throwable
+    {
+        assertRows(execute("SELECT host_id, cluster_name FROM system.local WHERE key = 'local'"),
+                   row(SystemKeyspace.getLocalHostId(), DatabaseDescriptor.getClusterName()));
+    }
+
+    /** Runs {@code body} with the big format selected, as in {@code DSE_5_1}, which the reader of the five reads. */
+    private static void withDse51SSTableFormat(Body body) throws Throwable
+    {
+        SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
+        DatabaseDescriptor.setSelectedSSTableFormat(BigFormat.getInstance());
+        try
+        {
+            body.run();
+        }
+        finally
+        {
+            DatabaseDescriptor.setSelectedSSTableFormat(format);
+        }
+    }
+
+    /**
+     * Without the mode, a generated segment of version 6 ({@code dse51Segment}) is replayed and, its mutations of an
+     * unknown table skipped, kept. It is generated: the replay of the segments DSE 5.1.51 wrote stops without the mode
+     * ({@link #theOtherModesStopTheReplayOfTheSegmentsOfAKilledDse51NodeAsBefore}).
+     */
     @Test
     public void noneModeKeepsADse51SegmentWithUnknownTableMutations() throws Throwable
     {
@@ -784,51 +1055,50 @@ public class DseCommitLogReplayTest extends CQLTester
     public void dse51ModeReplaysThePersisterWritesWithoutTheColumnsDse51Adds() throws Throwable
     {
         Path segment = segment(folder.newFolder().toPath(), CommitLogDescriptor.VERSION_30, persisterMutations());
-        // the format the mode selects, which the reader of the five columns reads
-        SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
-        DatabaseDescriptor.setSelectedSSTableFormat(BigFormat.getInstance());
         try
         {
-            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
-                List<String> info = new ArrayList<>();
-                Map<Keyspace, Integer> replayed = replayCollecting(segment, READER_LOGGER, Level.INFO, info, null);
-                assertThat(replayed.get(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME))).isEqualTo(3);
-                assertThat(info).contains("DSE 5.1 compatibility mode: mutations of system.local or system.peers " +
-                                          "naming the columns [dse_version, graph, server_id, workload, " +
-                                          "workloads] DSE 5.1 adds to those tables, read in " + segment + ": 3; " +
-                                          "those not yet in an sstable are replayed without the values of those " +
-                                          "columns, which this software reads as dropped columns");
-            });
-            assertMovedAside(segment);
-            // the replayed rows hold no value of the five columns, as the sstable written from them shows
-            ColumnFamilyStore peers = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
-                                              .getColumnFamilyStore(SystemKeyspace.LEGACY_PEERS);
-            peers.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
-            TableMetadata withDse51Columns = Dse51SystemTables.withDse51Columns(SystemKeyspace.LegacyPeers);
-            List<Row> rows = new ArrayList<>();
-            for (SSTableReader sstable : peers.getLiveSSTables())
-            {
-                for (PartitionUpdate update : Dse51SystemTables.partitions(sstable, withDse51Columns))
-                    rows.add(update.getRow(Clustering.EMPTY));
-            }
-            assertThat(rows).isNotEmpty().doesNotContainNull();
-            for (Row row : rows)
-            {
-                for (ColumnMetadata column : withDse51Columns.regularColumns())
+            // the format the mode selects, which the reader of the five columns reads
+            withDse51SSTableFormat(() -> {
+                withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
+                    List<String> info = new ArrayList<>();
+                    Map<Keyspace, Integer> replayed = replayCollecting(segment, READER_LOGGER, Level.INFO, info, null);
+                    assertThat(replayed.get(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME))).isEqualTo(3);
+                    assertThat(info).contains("DSE 5.1 compatibility mode: mutations of system.local or system.peers " +
+                                              "naming the columns [dse_version, graph, server_id, workload, " +
+                                              "workloads] DSE 5.1 adds to those tables, read in " + segment + ": 3; " +
+                                              "those not yet in an sstable are replayed without the values of those " +
+                                              "columns, which this software reads as dropped columns");
+                });
+                assertMovedAside(segment);
+                // the replayed rows hold no value of the five columns, as the sstable written from them shows
+                ColumnFamilyStore peers = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
+                                                  .getColumnFamilyStore(SystemKeyspace.LEGACY_PEERS);
+                peers.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+                TableMetadata withDse51Columns = Dse51SystemTables.withDse51Columns(SystemKeyspace.LegacyPeers);
+                List<Row> rows = new ArrayList<>();
+                for (SSTableReader sstable : peers.getLiveSSTables())
                 {
-                    if (Dse51SystemTables.COLUMNS.containsKey(column.name.toString()))
-                        assertThat(row.getColumnData(column)).as("%s", column).isNull();
+                    for (PartitionUpdate update : Dse51SystemTables.partitions(sstable, withDse51Columns))
+                        rows.add(update.getRow(Clustering.EMPTY));
                 }
-            }
-            assertRows(execute("SELECT data_center, rack, host_id, release_version FROM system.peers WHERE peer = ?",
-                               DSE_51_PEER),
-                       row("dc1", "r1", DSE_51_HOST_ID, "3.11.3.5151"));
-            assertRows(execute("SELECT cluster_name FROM system.local WHERE key = 'local'"),
-                       row(DatabaseDescriptor.getClusterName()));
+                assertThat(rows).isNotEmpty().doesNotContainNull();
+                for (Row row : rows)
+                {
+                    for (ColumnMetadata column : withDse51Columns.regularColumns())
+                    {
+                        if (Dse51SystemTables.COLUMNS.containsKey(column.name.toString()))
+                            assertThat(row.getColumnData(column)).as("%s", column).isNull();
+                    }
+                }
+                assertRows(execute("SELECT data_center, rack, host_id, release_version FROM system.peers " +
+                                   "WHERE peer = ?", DSE_51_PEER),
+                           row("dc1", "r1", DSE_51_HOST_ID, "3.11.3.5151"));
+                assertRows(execute("SELECT cluster_name FROM system.local WHERE key = 'local'"),
+                           row(DatabaseDescriptor.getClusterName()));
+            });
         }
         finally
         {
-            DatabaseDescriptor.setSelectedSSTableFormat(format);
             execute("TRUNCATE system.peers");
         }
     }
@@ -1131,9 +1401,16 @@ public class DseCommitLogReplayTest extends CQLTester
         if (version == DseVersion.DSE_6_9_26)
             assertRows(execute("SELECT count(*) FROM system.batches"), row(0L));
 
-        // the data set of the fixtures README: 100 partitions of two rows, partition 1 deleted, cell v of (2, ck1)
-        // deleted, the clustering range ck1..ck2 of partition 3 deleted (its static row survives): count(*) counts the
-        // live regular rows plus one row for the partition left with only its static row
+        assertFixtureDataSet();
+    }
+
+    /**
+     * The data set of the fixtures README: 100 partitions of two rows, partition 1 deleted, cell v of (2, ck1) deleted,
+     * the clustering range ck1..ck2 of partition 3 deleted (its static row survives): count(*) counts the live regular
+     * rows plus one row for the partition left with only its static row.
+     */
+    private void assertFixtureDataSet() throws Throwable
+    {
         String t = FIXTURE_KEYSPACE + ".t";
         assertRows(execute("SELECT count(*) FROM " + t), row((long) DseFixtures.COLLECTION_TABLE_COUNT_STAR));
         assertRows(execute("SELECT id, ck FROM " + t + " WHERE id = 1"));

@@ -28,9 +28,12 @@ import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -40,6 +43,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import com.google.common.collect.Iterables;
+import com.google.common.net.InetAddresses;
 import org.junit.After;
 import org.junit.Assume;
 import org.junit.Before;
@@ -66,13 +70,17 @@ import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
+import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.FSReadError;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -105,19 +113,24 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * are read here in every mode, with those cells skipped, and their values are read in {@code DSE_5_1} by
  * {@link Dse51SystemTables#read}.
  * <p>
- * No sstable written by DSE 5.1 is among the fixtures yet: the sstables here are written by this software (big format)
- * from DSE 5.1's definition of the table, the table of this software with the five columns
- * ({@link Dse51SystemTables#withDse51Columns}), and opened with the definition of this software, as a start of this
- * software opens those of a former DSE 5.1 node. Their header is the one DSE 5.1.51 writes, by its source: the columns
- * with their types, the compacted one built from the whole table definition.
+ * The sstables DSE 5.1.51 wrote (the fixtures of node 1 of the three-node cluster and of the Search and Graph node,
+ * after a flush and after a compaction, {@link Dse51Fixtures#systemSSTables} and
+ * {@link Dse51Fixtures#searchGraphSystemSSTables}) are added to the tables of the test server and read as a start of
+ * this software reads them. The other tests cover what those sstables do not hold (a value deleted or expired, a
+ * partition that cannot be decoded, an sstable that cannot be read, a merge of conflicting values, a compaction of
+ * this software): their sstables are written by this software (big format) from DSE 5.1's definition of the table,
+ * the table of this software with the five columns ({@link Dse51SystemTables#withDse51Columns}), and opened with the
+ * definition of this software. The five columns of their header have the types of the captured headers.
  */
 @RunWith(BMUnitRunner.class)
 public class Dse51SystemTablesTest extends CQLTester
 {
     private static final String PEERS = SchemaConstants.SYSTEM_KEYSPACE_NAME + '.' + SystemKeyspace.LEGACY_PEERS;
     private static final String PEERS_V2 = SchemaConstants.SYSTEM_KEYSPACE_NAME + '.' + SystemKeyspace.PEERS_V2;
-    private static final String RELEASE = "3.11.3.5151";
-    private static final String DSE_VERSION = "5.1.51";
+    private static final String RELEASE = Dse51Fixtures.RELEASE_VERSION;
+    private static final String DSE_VERSION = Dse51Fixtures.DSE_VERSION;
+    /** The columns of the five in the headers of the three {@code sstablemetadata} dumps of the system sstables. */
+    private static final int DUMPED_HEADER_COLUMNS_OF_THE_FIVE = 40;
 
     /** The id of the sstable whose read the rule of {@code anFSErrorStopsTheStart...} fails; null for none. */
     public static volatile String failingSSTable;
@@ -143,6 +156,14 @@ public class Dse51SystemTablesTest extends CQLTester
         Files.deleteIfExists(Dse51SystemTables.recordPath());
         execute("TRUNCATE " + PEERS);
         execute("TRUNCATE " + PEERS_V2);
+        removeLocalSSTables();
+        local().enableAutoCompaction();
+        peers().enableAutoCompaction();
+    }
+
+    /** Removes the sstables of {@code system.local} a test added. */
+    private void removeLocalSSTables()
+    {
         ColumnFamilyStore local = local();
         for (SSTableReader sstable : localSSTables)
         {
@@ -153,8 +174,6 @@ public class Dse51SystemTablesTest extends CQLTester
             }
         }
         localSSTables.clear();
-        local().enableAutoCompaction();
-        peers().enableAutoCompaction();
     }
 
     @Test
@@ -1047,6 +1066,290 @@ public class Dse51SystemTablesTest extends CQLTester
         });
         assertThat(Dse51SystemTables.read(peers())).isEmpty();
         assertRows(execute("SELECT peer, data_center FROM " + PEERS + " WHERE peer = ?", peer), row(peer, "dc1"));
+    }
+
+    /**
+     * The {@code system.local} and {@code system.peers} sstables of node 1 of DSE 5.1.51's three-node cluster after a
+     * flush, each header naming the columns its rows wrote, as the {@code sstablemetadata} dump shows: see
+     * {@link #assertTheSSTablesOfTheClusterAreReadWithTheirValuesAndMigrated}.
+     */
+    @Test
+    public void theFlushedSSTablesDse51WroteAreReadInEveryModeWithTheirValuesAndMigrated() throws Throwable
+    {
+        assertTheSSTablesOfTheClusterAreReadWithTheirValuesAndMigrated(false);
+    }
+
+    /**
+     * The same sstables after a compaction, each header naming every column of DSE 5.1's tables, the five among them,
+     * as the {@code sstablemetadata} dump shows: see
+     * {@link #assertTheSSTablesOfTheClusterAreReadWithTheirValuesAndMigrated}.
+     */
+    @Test
+    public void theCompactedSSTablesDse51WroteAreReadInEveryModeWithTheirValuesAndMigrated() throws Throwable
+    {
+        assertTheSSTablesOfTheClusterAreReadWithTheirValuesAndMigrated(true);
+    }
+
+    /**
+     * The sstables of node 1 of DSE 5.1.51's three-node cluster ({@code compacted} or flushed), added to the tables
+     * of the test server: their headers are those of the dump; they are read in every mode with the five skipped,
+     * the other columns of the peers' rows as written; their values are read by {@link Dse51SystemTables#read}; the
+     * peers are migrated to {@code peers_v2} with their release. They are the only unit test of
+     * {@link Dse51SystemTables#partitions} on big {@code me} sstables, which this software does not write.
+     */
+    private void assertTheSSTablesOfTheClusterAreReadWithTheirValuesAndMigrated(boolean compacted) throws Throwable
+    {
+        Dse51Fixtures dse51 = DseFixtures.dse51();
+        Path captured = dse51.systemSSTables(compacted);
+        Map<SSTableReader, Path> peers = addCapturedSSTables(dse51.tableDirectory(captured, "peers"), peers());
+        Map<SSTableReader, Path> local = addCapturedSSTables(dse51.tableDirectory(captured, "local"), local());
+        assertThat(peers).hasSize(compacted ? 1 : 2);
+        assertThat(local).hasSize(compacted ? 1 : 2);
+        Map<SSTableReader, Path> all = new HashMap<>(peers);
+        all.putAll(local);
+        for (Map.Entry<SSTableReader, Path> sstable : all.entrySet())
+        {
+            assertThat(sstable.getKey().descriptor.version.toString()).isEqualTo(Dse51Fixtures.SSTABLE_VERSION);
+            Set<String> header = headerColumns(sstable.getKey());
+            assertThat(header).as("%s", sstable.getValue())
+                              .isEqualTo(dumpedHeader(dse51.sstableMetadataDump(captured), sstable.getValue())
+                                         .keySet());
+            if (compacted)
+                assertThat(header).containsAll(Dse51SystemTables.COLUMNS.keySet());
+        }
+
+        for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+        {
+            withMode(mode, () -> {
+                for (int node = 2; node <= Dse51Fixtures.CLUSTER_NODES; node++)
+                {
+                    InetAddress peer = InetAddress.getByName("127.0.51.1" + node);
+                    UntypedResultSet rows = execute("SELECT * FROM " + PEERS + " WHERE peer = ?", peer);
+                    assertThat(rows.size()).as("%s in %s", peer, mode).isEqualTo(1);
+                    UntypedResultSet.Row row = rows.one();
+                    assertThat(row.getString("data_center")).isEqualTo("Cassandra");
+                    assertThat(row.getString("rack")).isEqualTo("rack1");
+                    assertThat(row.getUUID("host_id")).isEqualTo(Dse51Fixtures.HOST_IDS.get(node - 1));
+                    assertThat(row.getString("release_version")).isEqualTo(Dse51Fixtures.RELEASE_VERSION);
+                }
+                assertThat(execute("SELECT * FROM " + PEERS).size()).isEqualTo(Dse51Fixtures.CLUSTER_NODES - 1);
+                // the read merges the captured sstables of system.local, and does not fail on the five
+                assertThat(execute("SELECT * FROM system.local WHERE key = 'local'").size()).isEqualTo(1);
+            });
+        }
+
+        assertThat(Dse51SystemTables.read(peers())).extracting(columns -> columns.peer)
+                                                   .containsExactly(InetAddress.getByName("127.0.51.12"),
+                                                                    InetAddress.getByName("127.0.51.13"));
+        assertThat(Dse51SystemTables.read(local())).singleElement()
+                                                   .satisfies(columns -> assertThat(columns.peer).isNull());
+        for (Dse51SystemTables.StoredColumns columns : Iterables.concat(Dse51SystemTables.read(peers()),
+                                                                        Dse51SystemTables.read(local())))
+        {
+            assertThat(columns.workloads).as("%s", columns).containsExactly("Cassandra");
+            assertThat(columns.workload).as("%s", columns).isEqualTo("Cassandra");
+            assertThat(columns.graph).as("%s", columns).isFalse();
+            assertThat(columns.dseVersion).as("%s", columns).isEqualTo(Dse51Fixtures.DSE_VERSION);
+        }
+
+        SystemKeyspaceMigrator41.migratePeers();
+        for (int node = 2; node <= Dse51Fixtures.CLUSTER_NODES; node++)
+        {
+            InetAddress peer = InetAddress.getByName("127.0.51.1" + node);
+            UntypedResultSet migrated = execute("SELECT * FROM " + PEERS_V2 + " WHERE peer = ?", peer);
+            assertThat(migrated.size()).as("%s", peer).isEqualTo(1);
+            assertThat(migrated.one().getUUID("host_id")).isEqualTo(Dse51Fixtures.HOST_IDS.get(node - 1));
+            assertThat(migrated.one().getString("release_version")).isEqualTo(Dse51Fixtures.RELEASE_VERSION);
+        }
+    }
+
+    /**
+     * The sstables of DSE 5.1.51's node started with Search and Graph: its row {@code local}, flushed and compacted,
+     * holds the workloads of both, read with the five skipped in every mode and their values read; its flushed
+     * {@code system.peers} sstable holds only a partition deletion of its own address, so no peer and no value.
+     */
+    @Test
+    public void theSSTablesOfTheSearchAndGraphNodeHoldItsWorkloads() throws Throwable
+    {
+        Dse51Fixtures dse51 = DseFixtures.dse51();
+        Path flushedPeers = dse51.tableDirectory(dse51.searchGraphSystemSSTables(false), "peers");
+        Map<SSTableReader, Path> peers = addCapturedSSTables(flushedPeers, peers());
+        assertThat(peers).hasSize(1);
+        SSTableReader peersSSTable = Iterables.getOnlyElement(peers.keySet());
+        assertThat(headerColumns(peersSSTable)).isEmpty();
+        // one partition, the node's own address, deleted, without a row
+        TableMetadata withDse51Columns = Dse51SystemTables.withDse51Columns(SystemKeyspace.LegacyPeers);
+        assertThat(Dse51SystemTables.partitions(peersSSTable, withDse51Columns)).singleElement().satisfies(update -> {
+            assertThat(InetAddressType.instance.compose(update.partitionKey().getKey()))
+            .isEqualTo(InetAddresses.forString("127.0.51.21"));
+            assertThat(update.partitionLevelDeletion().isLive()).isFalse();
+            assertThat(update.rowCount()).isZero();
+        });
+        for (boolean compacted : new boolean[]{ false, true })
+        {
+            Path captured = dse51.searchGraphSystemSSTables(compacted);
+            Map<SSTableReader, Path> local = addCapturedSSTables(dse51.tableDirectory(captured, "local"), local());
+            assertThat(local).hasSize(compacted ? 1 : 2);
+            for (Map.Entry<SSTableReader, Path> sstable : local.entrySet())
+                assertThat(headerColumns(sstable.getKey()))
+                .isEqualTo(dumpedHeader(dse51.sstableMetadataDump(captured), sstable.getValue()).keySet());
+
+            for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+            {
+                withMode(mode, () -> {
+                    assertThat(execute("SELECT * FROM " + PEERS).size()).as("peers in %s", mode).isZero();
+                    // the read merges the captured sstables of system.local, and does not fail on the five
+                    assertThat(execute("SELECT * FROM system.local WHERE key = 'local'").size()).isEqualTo(1);
+                });
+            }
+            assertThat(Dse51SystemTables.read(peers())).isEmpty();
+            assertThat(Dse51SystemTables.read(local())).as("compacted %s", compacted).singleElement().satisfies(c -> {
+                assertThat(c.peer).isNull();
+                assertThat(c.workloads).containsExactly("Cassandra", "Graph", "Search");
+                assertThat(c.workload).isEqualTo("Search");
+                assertThat(c.graph).isTrue();
+                assertThat(c.dseVersion).isEqualTo(Dse51Fixtures.DSE_VERSION);
+            });
+            removeLocalSSTables();
+        }
+    }
+
+    /**
+     * The types of {@link Dse51SystemTables#COLUMNS}, from which the sstables written here take the header of the five,
+     * are those of the five in the headers of the sstables DSE 5.1.51 wrote (both captures, flushed and compacted, as
+     * the dumps print them): {@code workloads} a frozen set.
+     */
+    @Test
+    public void theTypesOfTheFiveAreThoseOfTheHeadersDse51Wrote() throws Throwable
+    {
+        Map<String, String> types = new TreeMap<>();
+        for (Map.Entry<String, AbstractType<?>> column : Dse51SystemTables.COLUMNS.entrySet())
+            types.put(column.getKey(), column.getValue().toString());
+        Dse51Fixtures dse51 = DseFixtures.dse51();
+        int checked = 0;
+        for (Path dump : List.of(dse51.sstableMetadataDump(dse51.systemSSTables(false)),
+                                 dse51.sstableMetadataDump(dse51.systemSSTables(true)),
+                                 dse51.sstableMetadataDump(dse51.searchGraphSystemSSTables(true))))
+        {
+            for (Map<String, String> header : dumpedHeaders(dump).values())
+            {
+                for (Map.Entry<String, String> column : header.entrySet())
+                {
+                    if (types.containsKey(column.getKey()))
+                    {
+                        assertThat(column.getValue()).as("%s in %s", column.getKey(), dump)
+                                                     .isEqualTo(types.get(column.getKey()));
+                        checked++;
+                    }
+                }
+            }
+        }
+        assertThat(checked).isEqualTo(DUMPED_HEADER_COLUMNS_OF_THE_FIVE);
+    }
+
+    /**
+     * Copies each sstable of {@code tableDirectory}, written by DSE 5.1.51, into the data directory of {@code cfs}
+     * under a new generation of its version {@code me}, opens it with the definition of {@code cfs} and adds it to the
+     * live sstables of {@code cfs} (those of {@code system.local} to the ones the test removes); returns each with the
+     * data file it was copied from. The files of an sstable that cannot be opened are deleted.
+     */
+    private Map<SSTableReader, Path> addCapturedSSTables(Path tableDirectory, ColumnFamilyStore cfs) throws IOException
+    {
+        Map<SSTableReader, Path> added = new LinkedHashMap<>();
+        Version me = BigFormat.getInstance().getVersion(Dse51Fixtures.SSTABLE_VERSION);
+        List<Path> data;
+        try (Stream<Path> files = Files.list(tableDirectory))
+        {
+            data = files.filter(file -> file.getFileName().toString().endsWith("-big-Data.db"))
+                        .sorted()
+                        .collect(Collectors.toList());
+        }
+        for (Path dataFile : data)
+        {
+            String base = dataFile.getFileName().toString().replaceFirst("Data\\.db$", "");
+            Descriptor descriptor = cfs.newSSTableDescriptor(cfs.getDirectories().getDirectoryForNewSSTables(), me);
+            String target = descriptor.baseFile().name() + Component.SEPARATOR;
+            List<Path> copied = new ArrayList<>();
+            SSTableReader sstable;
+            try
+            {
+                try (Stream<Path> files = Files.list(tableDirectory))
+                {
+                    for (Path file : files.filter(f -> f.getFileName().toString().startsWith(base))
+                                          .collect(Collectors.toList()))
+                    {
+                        String component = file.getFileName().toString().substring(base.length());
+                        copied.add(Files.copy(file, descriptor.directory.toPath().resolve(target + component)));
+                    }
+                }
+                sstable = SSTableReader.open(cfs, descriptor);
+            }
+            catch (Throwable t)
+            {
+                for (Path file : copied)
+                    Files.deleteIfExists(file);
+                throw t;
+            }
+            cfs.addSSTable(sstable);
+            if (cfs == local())
+                localSSTables.add(sstable);
+            added.put(sstable, dataFile);
+        }
+        assertThat(added).as("sstables in %s", tableDirectory).isNotEmpty();
+        return added;
+    }
+
+    /**
+     * The regular columns of the header of the captured sstable whose data file is {@code dataFile}, by name with their
+     * type, as the {@code sstablemetadata} dump {@code dump} prints them under {@code system/<table>-<id>/me-<n>-big}.
+     */
+    private static Map<String, String> dumpedHeader(Path dump, Path dataFile) throws IOException
+    {
+        String name = "system/" + dataFile.getParent().getFileName() + '/' +
+                      dataFile.getFileName().toString().replaceFirst("-Data\\.db$", "");
+        Map<String, String> header = dumpedHeaders(dump).get(name);
+        assertThat(header).as("%s in %s", name, dump).isNotNull();
+        return header;
+    }
+
+    /** The regular columns of each sstable of an {@code sstablemetadata} dump, by sstable, by name with their type. */
+    private static Map<String, Map<String, String>> dumpedHeaders(Path dump) throws IOException
+    {
+        Map<String, Map<String, String>> headers = new TreeMap<>();
+        String sstable = null;
+        for (String line : Files.readAllLines(dump))
+        {
+            if (line.startsWith("SSTable: "))
+                sstable = line.substring("SSTable: ".length());
+            if (!line.startsWith("RegularColumns: {"))
+                continue;
+            assertThat(sstable).as("RegularColumns before any SSTable in %s", dump).isNotNull();
+            Map<String, String> columns = new TreeMap<>();
+            String list = line.substring("RegularColumns: {".length(), line.length() - 1);
+            int depth = 0;
+            int start = 0;
+            for (int i = 0; i <= list.length(); i++)
+            {
+                char c = i < list.length() ? list.charAt(i) : ',';
+                if (c == '(')
+                    depth++;
+                else if (c == ')')
+                    depth--;
+                else if (c == ',' && depth == 0)
+                {
+                    String column = list.substring(start, i).trim();
+                    if (!column.isEmpty())
+                    {
+                        int colon = column.indexOf(':');
+                        columns.put(column.substring(0, colon), column.substring(colon + 1));
+                    }
+                    start = i + 1;
+                }
+            }
+            assertThat(headers.put(sstable, columns)).as("two headers of %s in %s", sstable, dump).isNull();
+        }
+        assertThat(headers).as("headers in %s", dump).isNotEmpty();
+        return headers;
     }
 
     /** The row {@code local} with the five columns, at {@code timestamp}, in a new sstable of {@code system.local}. */
