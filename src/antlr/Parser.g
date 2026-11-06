@@ -898,16 +898,16 @@ createIndexStatement returns [CreateIndexStatement.Raw stmt]
     ;
 
 indexIdent [List<IndexTarget.Raw> targets]
-    : c=cident                   { $targets.add(IndexTarget.Raw.simpleIndexOn(c)); }
-    | K_VALUES '(' c=cident ')'  { $targets.add(IndexTarget.Raw.valuesOf(c)); }
-    | K_KEYS '(' c=cident ')'    { $targets.add(IndexTarget.Raw.keysOf(c)); }
-    | K_ENTRIES '(' c=cident ')' { $targets.add(IndexTarget.Raw.keysAndValuesOf(c)); }
-    | K_FULL '(' c=cident ')'    { $targets.add(IndexTarget.Raw.fullCollection(c)); }
+    : c=cident p=fieldPath?                               { $targets.add(IndexTarget.Raw.simpleIndexOn(c, p)); }
+    | K_VALUES '(' c=cident p=fieldPath? ')' e=fieldPath? { $targets.add(IndexTarget.Raw.valuesOf(c, p, e)); }
+    | K_KEYS '(' c=cident ')'                             { $targets.add(IndexTarget.Raw.keysOf(c)); }
+    | K_ENTRIES '(' c=cident ')'                          { $targets.add(IndexTarget.Raw.keysAndValuesOf(c)); }
+    | K_FULL '(' c=cident p=fieldPath? ')'                { $targets.add(IndexTarget.Raw.fullCollection(c, p)); }
     ;
 
 /**
  * The path to a field of a UDT or tuple column (tuple components are named field1, field2, ...), for example
- * the '.home.city' of 'SELECT ... WHERE p.home.city = ?'.
+ * the '.home.city' of 'CREATE INDEX ON t (p.home.city)' or of 'SELECT ... WHERE p.home.city = ?'.
  */
 fieldPath returns [List<FieldIdentifier> path]
     @init { List<FieldIdentifier> names = new ArrayList<>(); }
