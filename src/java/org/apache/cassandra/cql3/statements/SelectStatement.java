@@ -1394,7 +1394,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             String msg = String.format("Read on table %s has exceeded the size warning threshold of %,d bytes", table, options.getCoordinatorReadSizeWarnThresholdBytes());
             ClientState state = ClientState.forInternalCalls();
             ClientWarn.instance.warn(msg + " with " + loggableTokens(options, state));
-            logger.warn("{} with query {}", msg, asCQL(options, state));
+            logger.warn("{} with query {}", msg, asRedactedCQL(options, state));
             if (store != null)
                 store.metric.coordinatorReadSizeWarnings.mark();
         }
@@ -1435,7 +1435,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             ClientState state = ClientState.forInternalCalls();
             String clientMsg = msg + " with " + loggableTokens(options, state);
             ClientWarn.instance.warn(clientMsg);
-            logger.warn("{} with query {}", msg, asCQL(options, state));
+            logger.warn("{} with query {}", msg, asRedactedCQL(options, state));
             ColumnFamilyStore store = cfs();
             if (store != null)
             {
@@ -2286,12 +2286,16 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         }
     }
 
-    private String asCQL(QueryOptions options, ClientState state)
+    /**
+     * @return a CQL representation of this query for the specified options, with the values redacted so it can be
+     * safely written to logs
+     */
+    private String asRedactedCQL(QueryOptions options, ClientState state)
     {
         ColumnFilter columnFilter = selection.newSelectors(options).getColumnFilter();
         StringBuilder sb = new StringBuilder();
 
-        sb.append("SELECT ").append(queriedColumns().toCQLString(Redaction.NONE));
+        sb.append("SELECT ").append(queriedColumns().toCQLString(Redaction.REDACT));
         sb.append(" FROM ").append(table.keyspace).append('.').append(table.name);
         if (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing())
         {
@@ -2316,12 +2320,14 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 // We put the row filter first because the data range can end by "ORDER BY"
                 if (!rowFilter.isEmpty())
                 {
-                    sb.append(rowFilter);
+                    sb.append(rowFilter.toCQLString(Redaction.REDACT));
                     if (!dataRange.isUnrestricted(table))
                         sb.append(" AND ");
                 }
                 if (!dataRange.isUnrestricted(table))
-                    sb.append(dataRange.toCQLString(table, rowFilter, Redaction.NONE));
+                    sb.append(dataRange.toCQLString(table, rowFilter, Redaction.REDACT));
+
+                sb.append(clusteringIndexFilter.toCQLString(table, rowFilter, Redaction.REDACT));
             }
         }
         else
@@ -2336,7 +2342,6 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             sb.append(" WHERE ");
 
-
             boolean compoundPk = table.partitionKeyColumns().size() > 1;
             if (compoundPk) sb.append('(');
             sb.append(ColumnMetadata.toCQLString(table.partitionKeyColumns()));
@@ -2345,7 +2350,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             {
                 sb.append(" = ");
                 if (compoundPk) sb.append('(');
-                DataRange.appendKeyString(sb, table.partitionKeyType, Iterables.getOnlyElement(keys), Redaction.NONE);
+                DataRange.appendKeyString(sb, table.partitionKeyType, Iterables.getOnlyElement(keys), Redaction.REDACT);
                 if (compoundPk) sb.append(')');
             }
             else
@@ -2358,7 +2363,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                         sb.append(", ");
 
                     if (compoundPk) sb.append('(');
-                    DataRange.appendKeyString(sb, table.partitionKeyType, key, Redaction.NONE);
+                    DataRange.appendKeyString(sb, table.partitionKeyType, key, Redaction.REDACT);
                     if (compoundPk) sb.append(')');
                     first = false;
                 }
@@ -2368,9 +2373,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
             RowFilter rowFilter = getRowFilter(options, state);
             if (!rowFilter.isEmpty())
-                sb.append(" AND ").append(rowFilter);
+                sb.append(" AND ").append(rowFilter.toCQLString(Redaction.REDACT));
 
-            String filterString = filter.toCQLString(table, rowFilter, Redaction.NONE);
+            String filterString = filter.toCQLString(table, rowFilter, Redaction.REDACT);
             if (!filterString.isEmpty())
                 sb.append(" AND ").append(filterString);
         }

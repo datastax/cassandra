@@ -48,9 +48,11 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.TracingClientState;
 import org.apache.cassandra.utils.progress.ProgressEvent;
+import org.jspecify.annotations.NonNull;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
 import static java.lang.String.format;
+import static org.assertj.core.api.Assertions.assertThat;
 
 public final class TracingTest extends CQLTester
 {
@@ -146,6 +148,60 @@ public final class TracingTest extends CQLTester
         assert "test-3".equals(traces.get(3));
         assert tracing.getPayloads().containsKey("test-key");
         assert customPayloadValue.equals(tracing.getPayloads().get("test-key"));
+    }
+
+    @Test
+    public void testTraceSensitive()
+    {
+        List<String> sensitiveTraces = new ArrayList<>();
+        List<String> redactedTraces = new ArrayList<>();
+        List<String> notifications = new ArrayList<>();
+
+        TraceState state = sensitiveTraceState(sensitiveTraces, redactedTraces);
+        state.enableActivityNotification("test-tag");
+        state.addProgressListener((tag, pe) -> notifications.add(pe.getMessage()));
+
+        // the client receives the message with the sensitive data, and the redacted one is only offered to the logs
+        state.traceSensitive("test-sensitive", "test-redacted");
+        assertThat(sensitiveTraces).containsExactly("test-sensitive");
+        assertThat(redactedTraces).containsExactly("test-redacted");
+        assertThat(notifications).containsExactly("test-sensitive");
+
+        // the argument variant formats the message with each of the arguments
+        state.traceSensitive("test-arg: {}", "secret", "redacted");
+        assertThat(sensitiveTraces).containsExactly("test-sensitive", "test-arg: secret");
+        assertThat(redactedTraces).containsExactly("test-redacted", "test-arg: redacted");
+        assertThat(notifications).containsExactly("test-sensitive", "test-arg: secret");
+
+        // regular traces use the same message for both
+        state.trace("test-plain");
+        assertThat(sensitiveTraces).containsExactly("test-sensitive", "test-arg: secret", "test-plain");
+        assertThat(redactedTraces).containsExactly("test-redacted", "test-arg: redacted", "test-plain");
+        assertThat(notifications).containsExactly("test-sensitive", "test-arg: secret", "test-plain");
+
+        assertThat(state.waitActivity(1)).isEqualTo(TraceState.Status.ACTIVE);
+    }
+
+    private static @NonNull TraceState sensitiveTraceState(List<String> sensitiveTraces, List<String> redactedTraces)
+    {
+        return new TraceState(ClientState.forInternalCalls(),
+                              InetAddressAndPort.getLoopbackAddress(),
+                              nextTimeUUID(),
+                              Tracing.TraceType.REPAIR)
+        {
+            @Override
+            protected void traceImpl(String message)
+            {
+                sensitiveTraces.add(message);
+            }
+
+            @Override
+            protected void traceImpl(String sensitiveMessage, String redactedMessage)
+            {
+                redactedTraces.add(redactedMessage);
+                super.traceImpl(sensitiveMessage, redactedMessage);
+            }
+        };
     }
 
     @Test

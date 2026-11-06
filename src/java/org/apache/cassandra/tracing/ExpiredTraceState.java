@@ -43,6 +43,12 @@ class ExpiredTraceState extends TraceState
         delegate.traceImpl(message);
     }
 
+    @Override
+    protected void traceImpl(String sensitiveMessage, String redactedMessage)
+    {
+        delegate.traceImpl(sensitiveMessage, redactedMessage);
+    }
+
     protected void waitForPendingEvents()
     {
         delegate.waitForPendingEvents();
