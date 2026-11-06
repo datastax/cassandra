@@ -252,7 +252,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             throw new AssertionError(e);
         }
-        // Note: the tombstoneCount here may be incorrect (some boundaries become covering deletions).
+        // Note: the tombstoneCount here may be an overestimation (some boundaries become covering deletions).
         return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, dataSize, t);
     }
 
@@ -448,19 +448,21 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                        (InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>) trie);
     }
 
-    /// Returns true iff the given marker has a row-level deletion on its right side, and it introduces
-    /// a superseding deletion.
+    /// Returns true iff the given marker has a new row-level deletion on its right side.
     static boolean startsRowDeletion(TrieTombstoneMarker update)
     {
-        TrieTombstoneMarker.Covering side = update.rightDeletion();
-        if (side == null)
+        TrieTombstoneMarker.Covering right = update.rightDeletion();
+        // Don't count if it's not a boundary, or if it does not introduce a new deletion
+        // (row level marker under covering deletion).
+        TrieTombstoneMarker.Covering left = update.leftDeletion();
+        if (right == null || right == left)
             return false;
 
-        if (!ROW_DELETION_KINDS.contains(side.deletionKind()))
-            return false;
+        // Note that we will overcount boundaries under a covering deletion (we count once
+        // on entry, and once on exit). There's no easy way to avoid this and not risk
+        // undercounting (e.g. when two ranges partially overlap).
 
-        TrieTombstoneMarker.Covering prev = update.leftDeletion();
-        return prev == null || side.supersedes(prev);
+        return ROW_DELETION_KINDS.contains(right.deletionKind()) && (left == null || ROW_DELETION_KINDS.contains(left.deletionKind()));
     }
 
     /**
@@ -690,8 +692,8 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             else
             {
                 TrieTombstoneMarker merged = update.mergeWith(existing);
-                int hadTombstone = existing.isBoundary() && startsRowDeletion(existing) ? 1 : 0;
-                int hasTombstone = merged != null && merged.isBoundary() && startsRowDeletion(merged) ? 1 : 0;
+                int hadTombstone = startsRowDeletion(existing) ? 1 : 0;
+                int hasTombstone = merged != null && startsRowDeletion(merged) ? 1 : 0;
                 tombstoneCount += hasTombstone - hadTombstone;
                 return merged;
             }

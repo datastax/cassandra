@@ -128,8 +128,8 @@ public class TriePartitionUpdater
         else
         {
             TrieTombstoneMarker merged = update.mergeWith(existing);
-            int hadTombstone = existing.isBoundary() && TriePartitionUpdate.startsRowDeletion(existing) ? 1 : 0;
-            int hasTombstone = merged != null && merged.isBoundary() && TriePartitionUpdate.startsRowDeletion(merged) ? 1 : 0;
+            int hadTombstone = TriePartitionUpdate.startsRowDeletion(existing) ? 1 : 0;
+            int hasTombstone = merged != null && TriePartitionUpdate.startsRowDeletion(merged) ? 1 : 0;
             currentPartition.markAddedTombstones(hasTombstone - hadTombstone);
             dataSize -= dataSizeOfMarker(existing);
             dataSize += dataSizeOfMarker(update);
