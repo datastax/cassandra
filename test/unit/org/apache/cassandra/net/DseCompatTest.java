@@ -34,7 +34,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The pure functions of {@link DseCompat}: DSE 6's release and messaging versions, the gossiped DSE version, and the
- * gate of the pre-4.0 layout.
+ * gate of the pre-4.0 layout; DSE 5.1's releases and the rule that tells a DSE 5.1 peer.
  */
 public class DseCompatTest
 {
@@ -197,5 +197,116 @@ public class DseCompatTest
     public void refusedVerbReason()
     {
         assertThat(DseCompat.refusedVerb(Verb.PING_REQ)).isEqualTo("verb PING_REQ to a DSE 6 peer");
+    }
+
+    /**
+     * A DSE 5.1 release is {@code 3.11.3.<build>}; Apache Cassandra 3.11, DSE 6 and this software's releases are
+     * not.
+     */
+    @Test
+    public void dse51ReleaseVersions()
+    {
+        // DSE 5.1.51, 5.1.18 and 5.1.3
+        for (String dse51 : new String[]{ "3.11.3.5151", "3.11.3.5118", "3.11.3.513" })
+            assertThat(DseCompat.isDse51ReleaseVersion(new CassandraVersion(dse51))).as(dse51).isTrue();
+        // Apache Cassandra 3.11.3 and 3.11.11, other releases with four parts (another 3.11, DSE 5.0.15, DSE 6.9.26 and
+        // 6.8.65, this software), and DSE versions read as releases
+        for (String other : new String[]{ "3.11.3", "3.11.11", "3.11.4.5151", "3.0.15.5015", "4.0.0.6926",
+                                          "4.0.0.6865", "5.0.7.0", "5.1.51", "6.8.1" })
+            assertThat(DseCompat.isDse51ReleaseVersion(new CassandraVersion(other))).as(other).isFalse();
+        assertThat(DseCompat.isDse51ReleaseVersion(null)).isFalse();
+        // and the DSE 6 rule does not take a DSE 5.1 release
+        assertThat(DseCompat.isDse6ReleaseVersion(new CassandraVersion("3.11.3.5151"))).isFalse();
+    }
+
+    /** A DSE 5.1 {@code dse_version} is {@code 5.1.<patch>}, nothing else. */
+    @Test
+    public void dse51DseVersions()
+    {
+        for (String dse51 : new String[]{ "5.1.51", "5.1.18", "5.1.0" })
+            assertThat(DseCompat.isDse51DseVersion(dse51)).as(dse51).isTrue();
+        for (String other : new String[]{ "6.8.1", "6.9.26", "5.0.15", "5.1", "5.1.51.0", "5.1.51-SNAPSHOT",
+                                          "3.11.3.5151", "", "none" })
+            assertThat(DseCompat.isDse51DseVersion(other)).as(other).isFalse();
+        assertThat(DseCompat.isDse51DseVersion(null)).isFalse();
+    }
+
+    /**
+     * The rule of the DSE 5.1 mode: a peer at messaging version 10 or 11, or, while its version is not known, a peer
+     * with a DSE 5.1 release or {@code dse_version}, is a DSE 5.1 node.
+     */
+    @Test
+    public void dse51PeerRule()
+    {
+        CassandraVersion dse5151 = new CassandraVersion("3.11.3.5151");
+        CassandraVersion dse5118 = new CassandraVersion("3.11.3.5118");
+        CassandraVersion apache = new CassandraVersion("3.11.11");
+        CassandraVersion dse6926 = new CassandraVersion("4.0.0.6926");
+        CassandraVersion hcd = new CassandraVersion("5.0.7.0");
+
+        // the messaging version of gossip or of a handshake: 10 or 11, whatever else is known
+        for (int version : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_3014 })
+        {
+            assertThat(DseCompat.isDse51Peer(version, null, null)).as("%d", version).isTrue();
+            assertThat(DseCompat.isDse51Peer(version, apache, null)).as("%d", version).isTrue();
+        }
+        // a version of 4.0 or later, or DSE 6's own, is no DSE 5.1 node unless its release or dse_version says so
+        for (int version : new int[]{ MessagingService.VERSION_40, MessagingService.current_version,
+                                      DseCompat.DSE_681_VERSION })
+        {
+            assertThat(DseCompat.isDse51Peer(version, hcd, null)).as("%d", version).isFalse();
+            assertThat(DseCompat.isDse51Peer(version, dse6926, "6.8.1")).as("%d", version).isFalse();
+            assertThat(DseCompat.isDse51Peer(version, dse5151, null)).as("%d", version).isTrue();
+        }
+        // before any gossip or handshake: the release, or the dse_version
+        assertThat(DseCompat.isDse51Peer(null, dse5151, null)).isTrue();
+        assertThat(DseCompat.isDse51Peer(null, dse5118, null)).isTrue();
+        assertThat(DseCompat.isDse51Peer(null, null, "5.1.51")).isTrue();
+        assertThat(DseCompat.isDse51Peer(null, apache, null)).isFalse();
+        assertThat(DseCompat.isDse51Peer(null, dse6926, "6.8.1")).isFalse();
+        assertThat(DseCompat.isDse51Peer(null, hcd, null)).isFalse();
+        assertThat(DseCompat.isDse51Peer(null, null, "6.8.1")).isFalse();
+        assertThat(DseCompat.isDse51Peer(null, null, null)).isFalse();
+    }
+
+    /** The patch of a DSE 5.1 node: from its dse_version, else from the build number of its release. */
+    @Test
+    public void dse51PatchIsReadFromTheDseVersionOrTheBuildNumber()
+    {
+        assertThat(DseCompat.dse51Patch(new CassandraVersion("3.11.3.5151"), null)).isEqualTo(51);
+        assertThat(DseCompat.dse51Patch(new CassandraVersion("3.11.3.5118"), null)).isEqualTo(18);
+        assertThat(DseCompat.dse51Patch(new CassandraVersion("3.11.3.513"), null)).isEqualTo(3);
+        assertThat(DseCompat.dse51Patch(null, "5.1.51")).isEqualTo(51);
+        // the dse_version wins over the build number
+        assertThat(DseCompat.dse51Patch(new CassandraVersion("3.11.3.5118"), "5.1.51")).isEqualTo(51);
+        // a DSE 5.1 release whose build number names no 5.1 release, and other releases
+        for (String other : new String[]{ "3.11.3.6926", "3.11.3.51", "3.11.3.515151", "3.11.11", "4.0.0.6926",
+                                          "5.0.7.0" })
+            assertThat(DseCompat.dse51Patch(new CassandraVersion(other), null)).as(other).isNull();
+        assertThat(DseCompat.dse51Patch(null, "6.8.1")).isNull();
+        assertThat(DseCompat.dse51Patch(new CassandraVersion("4.0.0.6926"), "6.8.1")).isNull();
+        assertThat(DseCompat.dse51Patch(null, null)).isNull();
+    }
+
+    /** {@link DseCompat#enabled()} stays DSE 6 only: a DSE_5_1 node takes no pre-4.0 code path. */
+    @Test
+    public void theModeGatesOfDse51()
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertThat(DseCompat.isDse51()).isTrue();
+        assertThat(DseCompat.isDse6()).isFalse();
+        assertThat(DseCompat.enabled()).isFalse();
+        assertThat(DseCompat.isPre40Layout(MessagingService.VERSION_3014)).isFalse();
+        assertThatThrownBy(() -> DseCompat.checkPre40Layout(MessagingService.VERSION_3014))
+        .isInstanceOf(AssertionError.class)
+        .hasMessage("pre-4.0 serialization version 11");
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        assertThat(DseCompat.isDse51()).isFalse();
+        assertThat(DseCompat.isDse6()).isTrue();
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        assertThat(DseCompat.isDse51()).isFalse();
+        assertThat(DseCompat.isDse6()).isFalse();
     }
 }

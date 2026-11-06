@@ -32,7 +32,7 @@ import static org.mockito.Mockito.mock;
 /**
  * In the DSE 6 compatibility mode the node refuses to start with an authenticator or authorizer that reads a table of
  * {@code system_auth} DSE 6 does not have: silently not enforcing a network or CIDR restriction would open access.
- * Without the mode they are accepted as before.
+ * Without the mode they are accepted as before. The DSE 5.1 compatibility mode refuses the same ones.
  */
 public class AuthConfigDse6Test
 {
@@ -131,5 +131,56 @@ public class AuthConfigDse6Test
         assertThatThrownBy(() -> AuthConfig.checkDse6CompatibilityMode(mutualTls, NETWORK, CIDR))
         .isInstanceOf(ConfigurationException.class)
         .hasMessage("internode_compatibility_mode DSE_6 refused: " + NETWORK_REFUSAL + ". " + CIDR_REFUSAL + ". " + authenticatorRefusal(mutualTls));
+    }
+
+    /**
+     * DSE 5.1's {@code system_auth} has no network, CIDR or identity table either: the DSE_5_1 mode refuses the same
+     * three settings, in its own words, and accepts the defaults and password authentication.
+     */
+    @Test
+    public void theSameSettingsAreRefusedInDse51Mode()
+    {
+        InternodeCompatibilityMode dse51 = InternodeCompatibilityMode.DSE_5_1;
+        IAuthenticator allowAll = new AllowAllAuthenticator();
+        for (IAuthenticator accepted : new IAuthenticator[]{ allowAll, PASSWORD })
+            assertThatCode(() -> AuthConfig.refuseWhatNeedsTablesDseLacks(dse51, accepted, ALLOW_ALL_NETWORK,
+                                                                          ALLOW_ALL_CIDR))
+            .doesNotThrowAnyException();
+
+        IAuthenticator mutualTls = mock(MutualTlsWithPasswordFallbackAuthenticator.class);
+        String networkRefusal = "network_authorizer " + NETWORK.getClass().getName() + " reads " +
+                                "system_auth.network_permissions, which DSE 5.1 does not have; use " +
+                                "AllowAllNetworkAuthorizer until the mode is dropped";
+        String cidrRefusal = "cidr_authorizer " + CIDR.getClass().getName() + " reads system_auth.cidr_permissions " +
+                             "and system_auth.cidr_groups, which DSE 5.1 does not have: this software creates them " +
+                             "only with storage_compatibility_mode UPGRADING or NONE, after the upgrade " +
+                             "(internode_compatibility_mode DSE_5_1 requires HCD_1); use AllowAllCIDRAuthorizer " +
+                             "until then";
+        String authenticatorRefusal = "authenticator " + mutualTls.getClass().getName() + " reads " +
+                                      "system_auth.identity_to_role, which DSE 5.1 does not have: this software " +
+                                      "creates it only with storage_compatibility_mode UPGRADING or NONE, after the " +
+                                      "upgrade (internode_compatibility_mode DSE_5_1 requires HCD_1); use " +
+                                      "PasswordAuthenticator until then";
+        String refusal = "internode_compatibility_mode DSE_5_1 refused: " + networkRefusal + ". " + cidrRefusal + ". " +
+                         authenticatorRefusal;
+        assertThatThrownBy(() -> AuthConfig.refuseWhatNeedsTablesDseLacks(dse51, mutualTls, NETWORK, CIDR))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessage(refusal);
+
+        // the check applyAuth runs for DSE 5.1 refuses in DSE_5_1 mode only, and the DSE 6 check does not refuse there
+        for (InternodeCompatibilityMode mode : new InternodeCompatibilityMode[]{ InternodeCompatibilityMode.NONE,
+                                                                                 InternodeCompatibilityMode.DSE_6 })
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            assertThatCode(() -> AuthConfig.checkDse51CompatibilityMode(mutualTls, NETWORK, CIDR))
+            .as(mode.name())
+            .doesNotThrowAnyException();
+        }
+        DatabaseDescriptor.setInternodeCompatibilityMode(dse51);
+        assertThatCode(() -> AuthConfig.checkDse6CompatibilityMode(mutualTls, NETWORK, CIDR))
+        .doesNotThrowAnyException();
+        assertThatThrownBy(() -> AuthConfig.checkDse51CompatibilityMode(mutualTls, NETWORK, CIDR))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessage(refusal);
     }
 }

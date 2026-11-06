@@ -407,7 +407,8 @@ public class InternodeCompatibilityModeTest
             {
                 assertThatThrownBy(() -> DatabaseDescriptor.applyInternodeCompatibilityMode(new Config()))
                 .isInstanceOf(ConfigurationException.class)
-                .hasMessage("internode_compatibility_mode: unknown value " + value + ", expected NONE or DSE_6");
+                .hasMessage("internode_compatibility_mode: unknown value " + value +
+                            ", expected NONE, DSE_6 or DSE_5_1");
             }
         }
     }

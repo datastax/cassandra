@@ -64,6 +64,7 @@ import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.StartupClusterConnectivityChecker;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.Dse51Compressors;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -294,6 +295,16 @@ public class CassandraDaemon
         try
         {
             Dse6NonCoreTraces.verifyAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
+        // DSE 5.1 compatibility: refuse to start while a table is compressed with a compressor DSE 5.1 does not read
+        try
+        {
+            Dse51Compressors.verifyAtStartup();
         }
         catch (StartupException e)
         {

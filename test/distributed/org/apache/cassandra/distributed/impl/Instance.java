@@ -121,6 +121,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.Dse51Compressors;
 import org.apache.cassandra.schema.MigrationCoordinator;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -683,6 +684,16 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 try
                 {
                     Dse6NonCoreTraces.verifyAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
+
+                // as CassandraDaemon.setup: the DSE 5.1 check of the compressors of the tables
+                try
+                {
+                    Dse51Compressors.verifyAtStartup();
                 }
                 catch (StartupException e)
                 {

@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.net;
 
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.annotation.Nullable;
 
@@ -35,6 +36,12 @@ import org.apache.cassandra.utils.CassandraVersion;
  * "relative" version (4 = 6.8.1+, 5 = 6.9.0–6.9.6, 6 = 6.9.7+) in the top byte (captures
  * {@code test/data/dse-compat/handshake}). A 4-byte second message of 256 or more is such a relative
  * version shifted left by 8.
+ * <p>
+ * It also holds how a DataStax Enterprise 5.1 node is told from the others ({@link #isDse51Peer}), for the DSE 5.1
+ * compatibility mode. DSE 5.1 speaks the Apache Cassandra 3.11 dialect, messaging version 11 (10 when started with
+ * {@code -Dcassandra.force_3_0_protocol_version=true}), with no DSE flag in its handshake and no DSE version in its
+ * {@code NET_VERSION}; what tells it from an Apache Cassandra 3.11 node is its release, {@code 3.11.3.<build>}, and its
+ * {@code dse_version}, {@code 5.1.<patch>}, both read from DSE 5.1.51's source.
  */
 public final class DseCompat
 {
@@ -112,6 +119,9 @@ public final class DseCompat
      */
     private static final Pattern GOSSIPED_DSE_VERSION = Pattern.compile("6\\.8\\.[01]");
 
+    /** A DSE 5.1 {@code dse_version}: {@code 5.1.<patch>}, three numeric parts and no suffix ({@code 5.1.51}). */
+    private static final Pattern DSE51_DSE_VERSION = Pattern.compile("5\\.1\\.(\\d{1,4})");
+
     private DseCompat()
     {
     }
@@ -142,6 +152,21 @@ public final class DseCompat
     public static boolean enabled()
     {
         return DatabaseDescriptor.isDse6CompatibilityMode();
+    }
+
+    /** True while the node runs in {@code internode_compatibility_mode: DSE_6}. */
+    public static boolean isDse6()
+    {
+        return DatabaseDescriptor.isDse6CompatibilityMode();
+    }
+
+    /**
+     * True while the node runs in {@code internode_compatibility_mode: DSE_5_1}. Unlike {@link #enabled()}, which stays
+     * false in that mode, it opens no pre-4.0 code path.
+     */
+    public static boolean isDse51()
+    {
+        return DatabaseDescriptor.isDse51CompatibilityMode();
     }
 
     /** True for the first handshake message DSE sends to a peer whose version it does not know yet. */
@@ -281,6 +306,71 @@ public final class DseCompat
     public static boolean isDse6ReleaseVersion(@Nullable CassandraVersion version)
     {
         return version != null && version.major == 4 && version.minor == 0 && version.patch == 0 && version.hotfix >= 0;
+    }
+
+    /**
+     * True for the release a DSE 5.1 node reports ({@code RELEASE_VERSION} in gossip, {@code release_version} in
+     * {@code system.local} and {@code system.peers}): {@code 3.11.3.<build>}, the version of DSE's Cassandra module
+     * with the DSE version without its dots as a fourth component, {@code 3.11.3.5151} for 5.1.51 and
+     * {@code 3.11.3.5118} for 5.1.18, by DSE 5.1.51's build files. Apache Cassandra 3.11 reports three components
+     * ({@code 3.11.11}), a DSE 6 node {@code 4.0.0.<build>} ({@link #isDse6ReleaseVersion}).
+     */
+    public static boolean isDse51ReleaseVersion(@Nullable CassandraVersion version)
+    {
+        return version != null && version.major == 3 && version.minor == 11 && version.patch == 3
+               && version.hotfix >= 0;
+    }
+
+    /**
+     * True for a {@code dse_version} of DSE 5.1, {@code 5.1.<patch>}, as DSE 5.1 writes it in gossip and in its system
+     * tables.
+     */
+    public static boolean isDse51DseVersion(@Nullable String dseVersion)
+    {
+        return dseVersion != null && DSE51_DSE_VERSION.matcher(dseVersion).matches();
+    }
+
+    /**
+     * True for a peer that is a DSE 5.1 node by the rule of the DSE 5.1 compatibility mode: the peer gossips a
+     * {@code NET_VERSION} of 10 or 11, or answers or opens a handshake at 10 or 11 ({@code messagingVersion}), or,
+     * before any gossip or handshake, its release is a DSE 5.1 one ({@link #isDse51ReleaseVersion}) or its
+     * {@code dse_version} is ({@link #isDse51DseVersion}). The rule takes any pre-4.0 peer for a DSE 5.1 node, which
+     * holds only in a cluster of DSE 5.1 nodes and nodes of this software, so it applies in the DSE 5.1 mode only, and
+     * the DSE 6 rule is no part of it. A pure function: each argument may be unknown (null).
+     *
+     * @param messagingVersion the peer's gossiped {@code NET_VERSION} or the version of its handshake, null when not
+     *                         known
+     * @param release          the peer's release, from gossip or {@code system.peers}, null when not known
+     * @param dseVersion       the peer's {@code dse_version}, from gossip or {@code system.peers}, null when not known
+     */
+    public static boolean isDse51Peer(@Nullable Integer messagingVersion,
+                                      @Nullable CassandraVersion release,
+                                      @Nullable String dseVersion)
+    {
+        if (messagingVersion != null
+            && (messagingVersion == MessagingService.VERSION_30 || messagingVersion == MessagingService.VERSION_3014))
+            return true;
+        return isDse51ReleaseVersion(release) || isDse51DseVersion(dseVersion);
+    }
+
+    /**
+     * The patch of a DSE 5.1 node's release, {@code 51} for DSE 5.1.51: read from its {@code dse_version} when that
+     * is a DSE 5.1 one ({@link #isDse51DseVersion}), else from the build number of its release, {@code 51<patch>}
+     * ({@code 3.11.3.5151} is 5.1.51, {@code 3.11.3.5118} 5.1.18, {@code 3.11.3.513} 5.1.3). Null when neither tells
+     * it: no DSE 5.1 value, or a build number of another form.
+     */
+    @Nullable
+    public static Integer dse51Patch(@Nullable CassandraVersion release, @Nullable String dseVersion)
+    {
+        Matcher matcher = dseVersion == null ? null : DSE51_DSE_VERSION.matcher(dseVersion);
+        if (matcher != null && matcher.matches())
+            return Integer.parseInt(matcher.group(1));
+        if (!isDse51ReleaseVersion(release))
+            return null;
+        String build = Integer.toString(release.hotfix);
+        if ((build.length() != 3 && build.length() != 4) || !build.startsWith("51"))
+            return null;
+        return Integer.parseInt(build.substring(2));
     }
 
     /**
