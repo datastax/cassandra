@@ -247,38 +247,44 @@ public class RowFilter
     }
 
     /**
-     * Checks if some of the expressions apply to clustering or regular columns.
-     * @return {@code true} if some of the expressions apply to clustering or regular columns, {@code false} otherwise.
+     * Checks if only a row can match this filter, because it has expressions on clustering or regular columns that can't
+     * be avoided. If not, a partition can match with no rows, as it does for {@code s = 1 OR v = 2} if {@code s} is a
+     * static column.
+     * @return {@code true} if a partition with no rows can't match this filter, {@code false} otherwise.
      */
     public boolean hasExpressionOnClusteringOrRegularColumns()
     {
-        for (Expression expression : expressions())
-        {
-            ColumnMetadata column = expression.column();
-            if (column.isClusteringColumn() || column.isRegular())
-                return true;
-        }
-        return false;
+        return root.needsMatchingRow();
     }
 
     protected Transformation<BaseRowIterator<?>> filter(TableMetadata metadata, long nowInSec)
     {
+        // Splitting the tree in a partition level part and a row level part that must both pass is only valid when no
+        // disjunction spans both levels: for "s = 1 OR v = 2" a row can match without its partition matching.
+        final boolean evaluateWholeTree = root.hasDisjunctionAcrossLevels();
         FilterElement partitionLevelOperation = root.partitionLevelTree();
         FilterElement rowLevelOperation = root.rowLevelTree();
 
-        final boolean filterNonStaticColumns = !rowLevelOperation.isEmpty();
+        final boolean filterNonStaticColumns = root.hasRowLevelExpression();
 
         return new Transformation<>()
         {
             DecoratedKey pk;
+            Row staticRow;
 
             @Override
             protected BaseRowIterator<?> applyToPartition(BaseRowIterator<?> partition)
             {
                 pk = partition.partitionKey();
+                staticRow = partition.staticRow();
+
+                // Whether the partition matches regardless of its rows. If so, a partition with no rows is a match.
+                boolean partitionMatches = evaluateWholeTree
+                                           ? root.isSatisfiedBy(metadata, pk, null, staticRow, nowInSec)
+                                           : partitionLevelOperation.isSatisfiedBy(metadata, pk, staticRow, nowInSec);
 
                 // Short-circuit all partitions that won't match based on static and partition keys
-                if (!partitionLevelOperation.isSatisfiedBy(metadata, partition.partitionKey(), partition.staticRow(), nowInSec))
+                if (!evaluateWholeTree && !partitionMatches)
                 {
                     partition.close();
                     return null;
@@ -288,7 +294,8 @@ public class RowFilter
                                               ? Transformation.apply((UnfilteredRowIterator) partition, this)
                                               : Transformation.apply((RowIterator) partition, this);
 
-                if (filterNonStaticColumns && !iterator.hasNext())
+                boolean emptyPartitionMatches = evaluateWholeTree && partitionMatches;
+                if (filterNonStaticColumns && !emptyPartitionMatches && !iterator.hasNext())
                 {
                     iterator.close();
                     return null;
@@ -307,10 +314,10 @@ public class RowFilter
                 if (purged == null)
                     return null;
 
-                if (!rowLevelOperation.isSatisfiedBy(metadata, pk, purged, nowInSec))
-                    return null;
-
-                return row;
+                boolean matches = evaluateWholeTree
+                                  ? root.isSatisfiedBy(metadata, pk, purged, staticRow, nowInSec)
+                                  : rowLevelOperation.isSatisfiedBy(metadata, pk, purged, nowInSec);
+                return matches ? row : null;
             }
         };
     }
@@ -361,12 +368,12 @@ public class RowFilter
     }
 
     /**
-     * Returns true if all the expressions within this filter that apply to the partition key are satisfied by
-     * the given key, false otherwise.
+     * Returns true if all the expressions that every matching row must satisfy and that apply to the partition key are
+     * satisfied by the given key, false otherwise. Expressions under a disjunction are not required, so they are ignored.
      */
     public boolean partitionKeyRestrictionsAreSatisfiedBy(DecoratedKey key, AbstractType<?> keyValidator)
     {
-        for (Expression e : expressions())
+        for (Expression e : root.requiredExpressions())
         {
             if (!e.column.isPartitionKey())
                 continue;
@@ -382,12 +389,13 @@ public class RowFilter
     }
 
     /**
-     * Returns true if all the expressions within this filter that apply to the clustering key are satisfied by
-     * the given Clustering, false otherwise.
+     * Returns true if all the expressions that every matching row must satisfy and that apply to the clustering key are
+     * satisfied by the given Clustering, false otherwise. Expressions under a disjunction are not required, so they are
+     * ignored.
      */
     public boolean clusteringKeyRestrictionsAreSatisfiedBy(Clustering<?> clustering)
     {
-        for (Expression e : expressions())
+        for (Expression e : root.requiredExpressions())
         {
             if (!e.column.isClusteringColumn())
                 continue;
@@ -785,6 +793,108 @@ public class RowFilter
             return allExpressions;
         }
 
+        /**
+         * @return the expressions that every matching row must satisfy: those not nested under any disjunction
+         */
+        private List<Expression> requiredExpressions()
+        {
+            if (isDisjunction)
+                return Collections.emptyList();
+
+            if (children.isEmpty())
+                return expressions;
+
+            List<Expression> required = new ArrayList<>(expressions);
+            for (FilterElement child : children)
+                required.addAll(child.requiredExpressions());
+            return required;
+        }
+
+        /**
+         * @return {@code true} if the expression is evaluated against the partition key and the static row, which means
+         * that it has the same result for all the rows of a partition
+         */
+        private static boolean isPartitionLevel(Expression expression)
+        {
+            return expression.column.isStatic() || expression.column.isPartitionKey();
+        }
+
+        /**
+         * @return {@code true} if a partition with no rows can't match this element
+         */
+        private boolean needsMatchingRow()
+        {
+            if (isEmpty())
+                return false;
+
+            if (isDisjunction)
+            {
+                // every branch must need a row
+                for (Expression expression : expressions)
+                    if (isPartitionLevel(expression))
+                        return false;
+
+                for (FilterElement child : children)
+                    if (!child.needsMatchingRow())
+                        return false;
+
+                return true;
+            }
+
+            // any condition that needs a row is enough
+            for (Expression expression : expressions)
+                if (!isPartitionLevel(expression))
+                    return true;
+
+            for (FilterElement child : children)
+                if (child.needsMatchingRow())
+                    return true;
+
+            return false;
+        }
+
+        private boolean hasRowLevelExpression()
+        {
+            for (Expression expression : expressions)
+                if (!isPartitionLevel(expression))
+                    return true;
+
+            for (FilterElement child : children)
+                if (child.hasRowLevelExpression())
+                    return true;
+
+            return false;
+        }
+
+        private boolean hasPartitionLevelExpression()
+        {
+            for (Expression expression : expressions)
+                if (isPartitionLevel(expression))
+                    return true;
+
+            for (FilterElement child : children)
+                if (child.hasPartitionLevelExpression())
+                    return true;
+
+            return false;
+        }
+
+        /**
+         * @return {@code true} if there is a disjunction with both partition level and row level expressions below it,
+         * in which case this tree can't be split in {@link #partitionLevelTree()} and {@link #rowLevelTree()}
+         */
+        private boolean hasDisjunctionAcrossLevels()
+        {
+            if (isDisjunction && hasPartitionLevelExpression() && hasRowLevelExpression())
+                return true;
+
+            for (FilterElement child : children)
+                if (child.hasDisjunctionAcrossLevels())
+                    return true;
+
+            return false;
+        }
+
         private FilterElement withoutDisjunctions()
         {
             if (isDisjunction)
@@ -892,6 +1002,47 @@ public class RowFilter
                         return false;
                 return true;
             }
+        }
+
+        /**
+         * Evaluates the whole tree, reading each expression from the part of the partition that holds its column.
+         *
+         * @param row the row to evaluate, or {@code null} to tell if the partition matches regardless of its rows, in
+         * which case row level expressions aren't satisfied
+         * @param staticRow the static row of the partition
+         */
+        private boolean isSatisfiedBy(TableMetadata table, DecoratedKey key, @Nullable Row row, Row staticRow, long nowInSec)
+        {
+            if (isEmpty())
+                return true;
+            if (isDisjunction)
+            {
+                for (Expression e : expressions)
+                    if (isSatisfiedBy(e, table, key, row, staticRow, nowInSec))
+                        return true;
+                for (FilterElement child : children)
+                    if (child.isSatisfiedBy(table, key, row, staticRow, nowInSec))
+                        return true;
+                return false;
+            }
+            else
+            {
+                for (Expression e : expressions)
+                    if (!isSatisfiedBy(e, table, key, row, staticRow, nowInSec))
+                        return false;
+                for (FilterElement child : children)
+                    if (!child.isSatisfiedBy(table, key, row, staticRow, nowInSec))
+                        return false;
+                return true;
+            }
+        }
+
+        private static boolean isSatisfiedBy(Expression e, TableMetadata table, DecoratedKey key, @Nullable Row row, Row staticRow, long nowInSec)
+        {
+            if (isPartitionLevel(e))
+                return e.isSatisfiedBy(table, key, staticRow, nowInSec);
+
+            return row != null && e.isSatisfiedBy(table, key, row, nowInSec);
         }
 
         /**

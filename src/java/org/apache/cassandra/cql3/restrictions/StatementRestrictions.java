@@ -1481,7 +1481,45 @@ public class StatementRestrictions
      */
     private boolean queriesFullPartitions()
     {
-        return !hasClusteringColumnsRestrictions() && !hasRegularColumnsRestrictions();
+        return !needsMatchingRow();
+    }
+
+    /**
+     * @return {@code true} if a partition with no rows can't match these restrictions, because they have restrictions on
+     * clustering or regular columns that can't be avoided
+     */
+    private boolean needsMatchingRow()
+    {
+        if (isDisjunction)
+        {
+            // every branch must need a row
+            if (children.isEmpty() && nonPrimaryKeyRestrictions.isEmpty())
+                return false;
+
+            for (ColumnMetadata column : nonPrimaryKeyRestrictions.getColumnDefs())
+                if (column.isStatic() || column.isPartitionKey())
+                    return false;
+
+            for (StatementRestrictions child : children)
+                if (!child.needsMatchingRow())
+                    return false;
+
+            return true;
+        }
+
+        if (hasClusteringColumnsRestrictions() || hasRegularColumnsRestrictions())
+            return true;
+
+        // a clustering column nested under OR is in the non primary key restrictions
+        for (ColumnMetadata column : nonPrimaryKeyRestrictions.getColumnDefs())
+            if (column.isClusteringColumn())
+                return true;
+
+        for (StatementRestrictions child : children)
+            if (child.needsMatchingRow())
+                return true;
+
+        return false;
     }
 
     /**
