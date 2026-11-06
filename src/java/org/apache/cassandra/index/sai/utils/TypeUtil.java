@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.function.LongConsumer;
 import java.util.stream.Stream;
@@ -31,7 +32,10 @@ import java.util.stream.StreamSupport;
 import javax.annotation.Nullable;
 
 import com.googlecode.concurrenttrees.radix.ConcurrentRadixTree;
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.AsciiType;
@@ -146,6 +150,24 @@ public class TypeUtil
         else if (isBigDecimal(type))
             return DECIMAL_APPROXIMATION_BYTES;
         return DEFAULT_FIXED_LENGTH;
+    }
+
+    /**
+     * @param columnMetadata the indexed column
+     * @param indexType the type of index target
+     * @param fieldPath the path to the indexed field of the column, or {@code null} if the whole column is indexed
+     * @return the type of the indexed values: for a field, that of the field (the leaf), or that of its elements
+     * (map values) if it's a collection indexed by its values
+     */
+    public static AbstractType<?> cellValueType(ColumnMetadata columnMetadata, IndexTarget.Type indexType, @Nullable FieldPath fieldPath)
+    {
+        if (fieldPath == null)
+            return cellValueType(columnMetadata, indexType);
+
+        AbstractType<?> leafType = fieldPath.leafType(columnMetadata.type);
+        if (indexType == IndexTarget.Type.VALUES && leafType.isCollection())
+            return FieldPath.Step.ELEMENTS.apply(leafType);
+        return leafType;
     }
 
     public static AbstractType<?> cellValueType(ColumnMetadata columnMetadata, IndexTarget.Type indexType)
@@ -365,6 +387,19 @@ public class TypeUtil
             stream = stream.sorted((c1, c2) -> compareInet(encodeInetAddress(c1), encodeInetAddress(c2)));
 
         return stream.iterator();
+    }
+
+    /**
+     * Sorts the given values of the given type as {@link #collectionIterator} does: inet addresses by their encoded
+     * form, so that IPv4 and the equivalent IPv6 addresses are next to each other; other types are left unsorted.
+     *
+     * @param type the type of the values
+     * @param values the values to sort in place
+     */
+    public static void sortCollectionValues(AbstractType<?> type, List<ByteBuffer> values)
+    {
+        if (values.size() > 1 && isInetAddress(type))
+            values.sort((c1, c2) -> compareInet(encodeInetAddress(c1), encodeInetAddress(c2)));
     }
 
     public static Comparator<ByteBuffer> comparator(AbstractType<?> type, Version version)
