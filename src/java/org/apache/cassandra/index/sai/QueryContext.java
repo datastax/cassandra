@@ -127,6 +127,15 @@ public class QueryContext
 
     private long postFilteringReadLatency = 0;
 
+    /**
+     * Number of rows evaluated by the same-element filter of the {@code CONTAINS ELEMENT} groups whose index candidates
+     * are the source of the keys (no OR above the group).
+     */
+    private long elementFilterCandidates = 0;
+
+    /** Number of those rows rejected by that filter: an approximation of the false positives of the candidates. */
+    private long elementFilterRejections = 0;
+
     // Determines the order of using indexes for filtering and sorting.
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
@@ -290,6 +299,38 @@ public class QueryContext
         postFilteringReadLatency += val;
     }
 
+    public void addElementFilterCandidates(long val)
+    {
+        checkThreadOwnership();
+        elementFilterCandidates += val;
+    }
+
+    public void addElementFilterRejections(long val)
+    {
+        checkThreadOwnership();
+        elementFilterRejections += val;
+    }
+
+    /**
+     * @return the number of index candidate rows evaluated by the same-element filter of {@code CONTAINS ELEMENT}
+     * groups
+     */
+    public long elementFilterCandidates()
+    {
+        checkThreadOwnership();
+        return elementFilterCandidates;
+    }
+
+    /**
+     * @return the number of index candidate rows rejected by the same-element filter of {@code CONTAINS ELEMENT}
+     * groups: no single element satisfies the group
+     */
+    public long elementFilterRejections()
+    {
+        checkThreadOwnership();
+        return elementFilterRejections;
+    }
+
     /**
      * Checks if the query has exceeded its execution quota and aborts it if it has timed out.
      *
@@ -399,6 +440,8 @@ public class QueryContext
         public final boolean queryTimedOut;
         public final long annGraphSearchLatency;
         public final long postFilteringReadLatency;
+        public final long elementFilterCandidates;
+        public final long elementFilterRejections;
         public final FilterSortOrder filterSortOrder;
 
         @Nullable
@@ -433,6 +476,8 @@ public class QueryContext
             queryTimedOut = context.queryTimedOut;
             annGraphSearchLatency = context.annGraphSearchLatency;
             postFilteringReadLatency = context.postFilteringReadLatency;
+            elementFilterCandidates = context.elementFilterCandidates;
+            elementFilterRejections = context.elementFilterRejections;
             filterSortOrder = context.filterSortOrder;
             queryPlanInfo = context.queryPlanInfo;
         }
