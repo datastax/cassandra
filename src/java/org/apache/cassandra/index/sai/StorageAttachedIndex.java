@@ -36,6 +36,7 @@ import java.util.TreeMap;
 import java.util.concurrent.Callable;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Predicates;
@@ -47,6 +48,7 @@ import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.CassandraWriteContext;
@@ -767,10 +769,27 @@ public class StorageAttachedIndex implements Index
     }
 
     @Override
+    public boolean isOnField(ColumnMetadata column, FieldPath fieldPath)
+    {
+        return indexContext.hasFieldPath() && dependsOn(column) && fieldPath.equals(indexContext.getFieldPath());
+    }
+
+    @Override
     public boolean supportsExpression(ColumnMetadata column, Operator operator)
     {
         // an index on a field of the column doesn't index the values of the column
         return dependsOn(column) && !indexContext.hasFieldPath() && indexContext.supports(operator);
+    }
+
+    @Override
+    public boolean supportsExpression(ColumnMetadata column, @Nullable FieldPath fieldPath, Operator operator)
+    {
+        if (fieldPath == null)
+            return supportsExpression(column, operator);
+
+        // an index serves the restrictions on exactly the field it indexes: neither its parent (the column or an
+        // enclosing field) nor one of its own fields
+        return isOnField(column, fieldPath) && indexContext.supports(operator);
     }
 
     @Override
