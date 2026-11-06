@@ -33,6 +33,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -47,6 +48,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.exceptions.BloomFilterTooLargeException;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSWriteError;
@@ -56,6 +58,7 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.CorruptFileException;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
@@ -410,18 +413,35 @@ public class BackgroundCompactionRunner implements Runnable
             Executor executor = task.getCustomExecutor() == null ? compactionExecutor : task.getCustomExecutor();
             return CompletableFuture.runAsync(
             () -> {
+                boolean deterministicFailure = false;
                 try
                 {
                     task.execute(activeOperations);
+                }
+                catch (Throwable t)
+                {
+                    deterministicFailure = Throwables.anyCauseMatches(t, BloomFilterTooLargeException.class::isInstance);
+                    throw t;
                 }
                 finally
                 {
                     ongoingCompactions.decrementAndGet();
 
-                    // Request a new round of checking for compactions. We do this for two reasons:
-                    //  - a task has completed and there may now be new compaction possibilities in this CFS,
-                    //  - a thread has freed up, and a new compaction task (from any CFS) can be scheduled on it
-                    markForCompactionCheck(cfs);
+                    if (deterministicFailure)
+                    {
+                        // The failed task has released its sstables, so the next check would select the same
+                        // task and fail in the same way, in a loop. Retries are left to the external triggers
+                        // (flush, the periodic check, changes of the compaction thresholds, etc.). A thread has
+                        // still freed up, so request a check without re-requesting this CFS.
+                        maybeScheduleNextCheck();
+                    }
+                    else
+                    {
+                        // Request a new round of checking for compactions. We do this for two reasons:
+                        //  - a task has completed and there may now be new compaction possibilities in this CFS,
+                        //  - a thread has freed up, and a new compaction task (from any CFS) can be scheduled on it
+                        markForCompactionCheck(cfs);
+                    }
                 }
             }, executor);
         }
@@ -536,6 +556,18 @@ public class BackgroundCompactionRunner implements Runnable
         {
             logger.warn(String.format("Aborting background compaction of %s due to interruption", cfs), Throwables.unwrapped(t));
             CompactionManager.instance.incrementAborted();
+        }
+        else if (Throwables.isCausedBy(t, BloomFilterTooLargeException.class))
+        {
+            // Deterministic, and attempted again by every external trigger, so don't log it as an ERROR with a
+            // stack trace each time.
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, cfs.getKeyspaceName() + '.' + cfs.getTableName(),
+                             1, TimeUnit.MINUTES,
+                             "Background compaction of table {} failed: {}. It will be attempted again on the next " +
+                             "flush, sstable addition, change of compaction thresholds or periodic background check, " +
+                             "and will keep failing until bloom_filter_fp_chance is increased.",
+                             cfs, Throwables.getCauseOfType(t, BloomFilterTooLargeException.class).get().getMessage());
+            CompactionManager.instance.incrementFailed();
         }
         else
         {

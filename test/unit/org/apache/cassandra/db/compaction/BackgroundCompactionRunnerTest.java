@@ -31,12 +31,17 @@ import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
 import org.apache.cassandra.concurrent.WrappedExecutorPlus;
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.exceptions.BloomFilterTooLargeException;
 import org.apache.cassandra.io.FSDiskFullWriteError;
 import org.apache.cassandra.io.FSNoDiskAvailableForWriteError;
 import org.apache.cassandra.io.FSWriteError;
@@ -68,6 +73,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 import org.openjdk.jmh.util.FileUtils;
+import org.slf4j.LoggerFactory;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -723,6 +729,31 @@ public class BackgroundCompactionRunnerTest
         {
             JVMStabilityInspector.replaceKiller(originalKiller);
             JVMStabilityInspector.setGlobalErrorHandler(originalGlobalErrorHandler);
+        }
+    }
+
+    @Test
+    public void handleBloomFilterTooLargeException()
+    {
+        Logger runnerLogger = (Logger) LoggerFactory.getLogger(BackgroundCompactionRunner.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        runnerLogger.addAppender(appender);
+        try
+        {
+            long before = CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount();
+
+            // wrapped, as it arrives from the CompletableFuture
+            BackgroundCompactionRunner.handleCompactionError(new CompletionException(new BloomFilterTooLargeException(20L << 30)), cfs);
+
+            assertThat(CompactionManager.instance.getMetrics().totalCompactionsFailed.getCount()).isEqualTo(before + 1);
+            // a WARN without a stack trace, not the generic ERROR
+            assertThat(appender.list).extracting(ILoggingEvent::getLevel, ILoggingEvent::getThrowableProxy)
+                                     .containsExactly(tuple(Level.WARN, null));
+        }
+        finally
+        {
+            runnerLogger.detachAppender(appender);
         }
     }
 
