@@ -293,8 +293,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 {
     private static final Logger logger = LoggerFactory.getLogger(StorageService.class);
 
-    /** The replicated system keyspaces whose deferred additions were logged in the DSE 6 compatibility mode. */
-    private static final Set<String> DSE6_DEFERRED_ADDITIONS_LOGGED = ConcurrentHashMap.newKeySet();
+    /** The replicated system keyspaces whose deferred additions were logged in a DSE compatibility mode. */
+    private static final Set<String> DSE_DEFERRED_ADDITIONS_LOGGED = ConcurrentHashMap.newKeySet();
 
     public static final int INDEFINITE = -1;
     /** The ring delay without {@code cassandra.ring_delay_ms}; a constant, so that reading it does not initialise this class. */
@@ -1324,13 +1324,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * DSE 6 compatibility mode: adds to the states this node starts gossiping with DSE's {@code DSE_GOSSIP_STATE}, at the
      * ordinal of {@code X_11_PADDING}, which this software never uses, unless the gossiped DSE version is
-     * {@link DseCompat#NO_DSE_VERSION} (see {@link DseCompat#gossipedDseVersion}). Outside the mode nothing is added and
-     * the property is not read.
+     * {@link DseCompat#NO_DSE_VERSION} (see {@link DseCompat#gossipedDseVersion}). Outside the mode, in the DSE 5.1 one
+     * too, nothing is added and the property is not read.
      */
     @VisibleForTesting
     static void addDseState(Map<ApplicationState, VersionedValue> appStates, VersionedValue.VersionedValueFactory valueFactory)
     {
-        if (!DseCompat.enabled())
+        if (!DseCompat.isDse6())
             return;
         String dseVersion = DseCompat.gossipedDseVersion();
         if (dseVersion != null)
@@ -1575,9 +1575,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     /**
      * Brings a replicated system keyspace to this software's definition, at the fixed timestamp of its generation.
      * <p>
-     * In the DSE 6 compatibility mode a keyspace that exists keeps the definition it was loaded with, DSE's on an
-     * upgraded node: this software's additions would reach the DSE nodes, which pull and merge the schema of a peer
-     * whose schema version differs from theirs, and would break the schema freeze of the upgrade (see
+     * In the DSE 6 and DSE 5.1 compatibility modes a keyspace that exists keeps the definition it was loaded with,
+     * DSE's on an upgraded node: this software's additions would reach the DSE nodes, which pull and merge the schema
+     * of a peer whose schema version differs from theirs, and would break the schema freeze of the upgrade (see
      * {@link DseSystemKeyspaces}). They are made at the first start with {@code NONE}, where this method runs as it
      * always did. A keyspace that does not exist at all (a node that never ran DSE) is created as without the mode:
      * there is no DSE definition to keep, and this node never sends its schema to a DSE peer, though the upgraded peers
@@ -1592,12 +1592,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             KeyspaceMetadata loaded = Schema.instance.getKeyspaceMetadata(keyspace.name);
             if (loaded != null)
             {
-                if (DSE6_DEFERRED_ADDITIONS_LOGGED.add(keyspace.name))
+                if (DSE_DEFERRED_ADDITIONS_LOGGED.add(keyspace.name))
                 {
                     List<String> deferred = DseSystemKeyspaces.deferredAdditions(keyspace, loaded);
-                    logger.info("internode_compatibility_mode DSE_6: {} keeps the definition it was loaded with (DSE's on an upgraded node); " +
-                                "this software's additions to it are made at the first start with internode_compatibility_mode NONE{}",
-                                keyspace.name, deferred.isEmpty() ? " (no table or column is missing, table options aside)" : ": " + deferred);
+                    logger.info("internode_compatibility_mode {}: {} keeps the definition it was loaded with (DSE's " +
+                                "on an upgraded node); this software's additions to it are made at the first start " +
+                                "with internode_compatibility_mode NONE{}", DseCompat.textMode(), keyspace.name,
+                                deferred.isEmpty() ? " (no table or column is missing, table options aside)"
+                                                   : ": " + deferred);
                 }
                 return;
             }
@@ -3008,6 +3010,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 return;
             }
 
+            // DSE 5.1 compatibility mode: a DSE 5.1 peer of another release than 5.1.51, told by its release or its DSE
+            // state (X_11_PADDING) arriving after its NET_VERSION
+            if (DseCompat.isDse51() &&
+                (state == ApplicationState.RELEASE_VERSION || state == ApplicationState.X_11_PADDING))
+                DsePeers.dse51ReleaseChanged(endpoint, epState);
+
             if (getTokenMetadata().isMember(endpoint))
             {
                 switch (state)
@@ -3051,7 +3059,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         catch (NumberFormatException e)
         {
-            // DSE 6 compatibility mode: a value this software cannot parse must not break the gossip stage
+            // DSE 6 and DSE 5.1 compatibility modes: a value this software cannot parse must not break the gossip stage
             if (DseCompat.enabled())
             {
                 logger.warn("Ignoring the NET_VERSION {} gossiped by {}: not a number; the messaging version of the peer stays {}",
@@ -3062,7 +3070,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         if (DseCompat.enabled())
         {
-            // whether the peer is a DSE 6 node, which decides the ordinals of the gossip states exchanged with it
+            // whether the peer is a DSE node of the mode's release: in DSE_6 it decides the ordinals of the gossip
+            // states exchanged with it, in DSE_5_1 (10 or 11) it is what the guards of the upgrade read
             DsePeers.fromGossipedNetVersion(endpoint, version);
             // A DSE 6 peer gossips its own messaging version (256 or more); we speak the pre-4.0 dialect with it.
             int dialect = DseCompat.messagingVersionFromGossip(version);
@@ -3978,7 +3987,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // Then, the node may have been upgraded and changed its messaging protocol version. If so, we
         // want to update that before we mark the node live again to avoid problems like CASSANDRA-11128.
         VersionedValue netVersion = state.getApplicationState(ApplicationState.NET_VERSION);
-        // DSE 6 compatibility mode: the state given is the one from before the restart, and a DSE node upgraded to this
+        // DSE modes: the state given is the one from before the restart, and a DSE node upgraded to this
         // software (or one of its nodes rolled back to DSE) changed its NET_VERSION with it; the gossiper has stored the
         // new state already, so its NET_VERSION is the one to record
         if (DseCompat.enabled())
@@ -4359,7 +4368,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     }
 
     /**
-     * Refuses upgradesstables while the DSE 6 upgrade is in progress: it is the maintenance step of a finished upgrade,
+     * Refuses upgradesstables while a DSE upgrade is in progress: it is the maintenance step of a finished upgrade,
      * and nothing in the mixed cluster needs it; recompress_sstables is the same rewrite. The other rewrites (scrub,
      * garbagecollect, relocatesstables, cleanup) repair or reclaim and stay allowed: like compaction they write trie
      * {@code bb} sstables, with their storage-attached index components at the SAI on-disk version a start in

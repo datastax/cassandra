@@ -39,6 +39,7 @@ import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.Tables;
 
 import static org.apache.cassandra.cql3.QueryProcessor.process;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 public class PartitionDenylistTest
@@ -181,6 +182,36 @@ public class PartitionDenylistTest
         }
         // without the mode the key is denied again
         testReadDenylisted();
+    }
+
+    /** In the DSE 5.1 compatibility mode too, the refusal naming that mode and DSE 5.1. */
+    @Test
+    public void testDenylistOffInDse51Mode()
+    {
+        String unavailable = "the partition denylist is unavailable: table system_distributed.partition_denylist " +
+                             "is missing in internode_compatibility_mode DSE_5_1 (DSE 5.1 does not have it): the " +
+                             "replicated system keyspaces keep DSE 5.1's definitions during the upgrade, and this " +
+                             "software creates its own tables in them at the first start with " +
+                             "internode_compatibility_mode NONE";
+        assertThat(PartitionDenylist.unavailable(InternodeCompatibilityMode.DSE_5_1)).isEqualTo(unavailable);
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        long refusedBefore = DseCompatRefusals.count(PartitionDenylist.REFUSED_IN_DSE6);
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            process("SELECT * FROM " + ks_cql + ".table1 WHERE keyone='bbb' and keytwo='ccc'", ConsistencyLevel.ONE);
+            Assert.assertFalse(StorageProxy.instance.isKeyDenylisted(ks_cql, "table1", "bbb:ccc"));
+            assertThatThrownBy(() -> denylist("table1", "aaa:bbb")).isInstanceOf(IllegalStateException.class)
+                                                                   .hasMessage(unavailable);
+            Assert.assertEquals(refusedBefore + 1, DseCompatRefusals.count(PartitionDenylist.REFUSED_IN_DSE6));
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+        }
+        // the DSE 6 text does not depend on the mode
+        assertThat(PartitionDenylist.UNAVAILABLE_IN_DSE6)
+        .isEqualTo(PartitionDenylist.unavailable(InternodeCompatibilityMode.DSE_6));
     }
 
     @Test

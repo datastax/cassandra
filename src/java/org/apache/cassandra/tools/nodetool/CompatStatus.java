@@ -40,12 +40,14 @@ import org.apache.cassandra.tools.NodeTool;
  * record, the SAI on-disk version it pins for a rollback to DSE, the traces of the DSE features it does not support
  * that it ignored, the DSE access controls it does not enforce, the DataStax Enterprise grants of UPDATE or TRUNCATE
  * alone it drops and the requests it refused because of the upgrade: the operator's view during an in-place upgrade
- * from DataStax Enterprise 6.
+ * from DataStax Enterprise 6. In {@code DSE_5_1}, the upgrade from DataStax Enterprise 5.1, the peers are the DSE 5.1
+ * ones and the record that of the DSE 5.1 peers; the help text is left as it was.
  */
 @Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE peers seen in gossip or identified by a handshake, the DSE 6 peers on record, the SAI on-disk version pinned, the traces of the DSE features not supported that were ignored, the DSE access controls not enforced, the DSE grants of UPDATE or TRUNCATE alone that are dropped and the requests refused during the upgrade")
 public class CompatStatus extends NodeTool.NodeToolCmd
 {
     private static final String DSE_6 = InternodeCompatibilityMode.DSE_6.name();
+    private static final String DSE_5_1 = InternodeCompatibilityMode.DSE_5_1.name();
     /** What is printed for an attribute the node does not have: a server older than this nodetool. */
     private static final String NOT_REPORTED = "unknown (this node does not report them)";
 
@@ -87,22 +89,24 @@ public class CompatStatus extends NodeTool.NodeToolCmd
             out.printf("  %-45s %d%s%n", e.getKey(), version, note);
         }
 
-        // the DSE peers, their record and the access-control check exist in DSE_6 mode only; the record's entries that
-        // are not addresses with port are counted and listed too
+        // the DSE peers and their record exist in DSE_6 and DSE_5_1 modes, the access-control check in DSE_6 mode only;
+        // the record's entries that are not addresses with port are counted and listed too
         boolean dse6 = DSE_6.equals(mode);
+        boolean dse51 = DSE_5_1.equals(mode);
         String notInTheMode = " (internode_compatibility_mode " + mode + ')';
-        if (dse6)
+        if (dse6 || dse51)
             printDsePeers(probe, out);
         else
             out.printf("DSE peers                    : not tracked%s%n", notInTheMode);
 
-        List<String> onRecord = dse6 ? ifReported(probe::getDsePeersOnRecord) : null;
-        if (!dse6)
-            out.printf("DSE 6 peers on record        : not maintained%s%n", notInTheMode);
+        List<String> onRecord = dse6 || dse51 ? ifReported(probe::getDsePeersOnRecord) : null;
+        String recordLabel = dse51 ? "DSE 5.1 peers on record      : " : "DSE 6 peers on record        : ";
+        if (!dse6 && !dse51)
+            out.printf("%snot maintained%s%n", recordLabel, notInTheMode);
         else if (onRecord == null)
-            out.printf("DSE 6 peers on record        : %s%n", NOT_REPORTED);
+            out.printf("%s%s%n", recordLabel, NOT_REPORTED);
         else
-            out.printf("DSE 6 peers on record        : %d%s%n", onRecord.size(), onRecord.isEmpty() ? "" : " " + onRecord);
+            out.printf("%s%d%s%n", recordLabel, onRecord.size(), onRecord.isEmpty() ? "" : " " + onRecord);
 
         // the SAI on-disk version a node rolled back to DSE reads, pinned by a startup check in DSE_6 mode
         if (dse6)

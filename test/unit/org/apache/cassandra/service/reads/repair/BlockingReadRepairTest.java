@@ -197,6 +197,16 @@ public class BlockingReadRepairTest extends AbstractReadRepairTest
         additionalMutationToReplicaAtVersion(MessagingService.VERSION_30);
     }
 
+    /**
+     * DSE 5.1 compatibility mode: the speculative repair write to a replica of a DSE 5.1 node, at 11, is sent and read
+     * back as in DSE 6 compatibility mode, the per-version mutations starting at the oldest pre-4.0 version there too.
+     */
+    @Test
+    public void additionalMutationToDse51Replica() throws Exception
+    {
+        additionalMutationToReplicaAtVersion(InternodeCompatibilityMode.DSE_5_1, MessagingService.VERSION_3014);
+    }
+
     /** As {@link #additionalMutationToDse6Replica()}, to a replica of this software in a cluster in DSE 6 compatibility mode. */
     @Test
     public void additionalMutationToCurrentReplicaInDse6Mode() throws Exception
@@ -249,13 +259,19 @@ public class BlockingReadRepairTest extends AbstractReadRepairTest
 
     private void additionalMutationToReplicaAtVersion(int target3Version) throws Exception
     {
+        additionalMutationToReplicaAtVersion(InternodeCompatibilityMode.DSE_6, target3Version);
+    }
+
+    private void additionalMutationToReplicaAtVersion(InternodeCompatibilityMode mode, int target3Version)
+    throws Exception
+    {
         InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
         EndpointMessagingVersions versions = MessagingService.instance().versions;
         int minClusterVersionBefore = versions.minClusterVersion;
         Integer target3VersionBefore = versions.knows(target3) ? versions.getRaw(target3) : null;
         try
         {
-            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
             versions.set(target3, target3Version);
 
             Map<Replica, Mutation> repairs = new HashMap<>();

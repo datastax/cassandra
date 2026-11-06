@@ -426,6 +426,12 @@ public class BatchlogManager implements BatchlogManagerMBean
                     logger.warn("Skipped batch replay of {} (stored by DSE 6 with messaging version {}; its mutations, none of which " +
                                 "is replayed, write to {}, the first table of each mutation) due to {}",
                                 id, version, describeTables(serializedMutations), e.getMessage());
+                else if (DseCompat.isDse51() && version < MessagingService.VERSION_40)
+                    // DSE 5.1 compatibility mode: a batch DSE 5.1 stored, for a table this software does not have
+                    logger.warn("Skipped batch replay of {} (stored by DSE 5.1 with messaging version {}; its " +
+                                "mutations, none of which is replayed, write to {}, the first table of each " +
+                                "mutation) due to {}",
+                                id, version, describeTables(serializedMutations), e.getMessage());
                 else
                     logger.warn("Skipped batch replay of {} due to {}", id, e.getMessage());
                 caughtException = e;
@@ -493,9 +499,9 @@ public class BatchlogManager implements BatchlogManagerMBean
         // the decoding failure, if any, with its stack trace the first time its class is met; an unknown or missing version
         // has none
         Throwable cause = e.getCause();
-        // in DSE_6 the upgrade is in progress: the tables are repaired once it is finished
+        // in DSE_6 and DSE_5_1 the upgrade is in progress, repair refused: the tables are repaired once it is finished
         String stored = version == null ? "stored without a messaging version" : "stored with messaging version " + version;
-        String repairWhen = DatabaseDescriptor.isDse6CompatibilityMode() ? " (once the DSE 6 upgrade is finished)" : "";
+        String repairWhen = DseCompat.enabled() ? " (once the " + DseCompat.source() + " upgrade is finished)" : "";
         String message = "Batch {} of system.batches, {}, cannot be decoded: {}. It is kept in the batchlog and not replayed; " +
                          "the other batches are replayed as usual. Its mutations may be missing on some of their replicas; they " +
                          "write to {} (the first table of each mutation). The batch is tried again at the next start of this node; " +
@@ -898,6 +904,12 @@ public class BatchlogManager implements BatchlogManagerMBean
             if (DseCompat.isUnknownStoredDseVersion(version))
                 throw new UndecodableBatchException("it is in DSE's range of messaging versions but not a DSE 6 version (" +
                                                     DseCompat.DSE_STORED_VERSIONS_TEXT + ')', null);
+            // DSE 5.1 compatibility mode: a batch stored below Apache Cassandra 3.0's messaging version, the layout of
+            // the legacy system.batchlog of the 2.x line, reported with its own reason, not decoded
+            if (DseCompat.isDse51() && version > 0 && version < MessagingService.VERSION_30)
+                throw new UndecodableBatchException("it was stored before Apache Cassandra 3.0 (messaging version " +
+                                                    MessagingService.VERSION_30 + "), whose layout this software " +
+                                                    "does not read", null);
             int decodingVersion = DseCompat.storedDecodingVersion(version);
 
             int ret = 0;

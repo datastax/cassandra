@@ -1754,7 +1754,7 @@ public class DatabaseDescriptor
      * ({@link #isDseSSTableOutput()}) without the storage mode and paxos checks, and
      * clients, which do not read {@code cassandra.yaml}, get the {@code big} format forced instead of refused. The
      * mode still writes big sstables of version {@code nb} (offline tools, which run without the storage mode,
-     * {@code oa}) and speaks no pre-4.0 dialect.
+     * {@code oa}); a node in the mode speaks the pre-4.0 dialect of DSE 5.1 with its DSE 5.1 peers.
      */
     @VisibleForTesting
     static void applyInternodeCompatibilityMode(Config conf)
@@ -2029,8 +2029,10 @@ public class DatabaseDescriptor
             return;
         SSTableFormat<?, ?> format = getSelectedSSTableFormat();
         logger.warn("Running in internode_compatibility_mode DSE_5_1: the node writes {} {} sstables, which DSE 5.1 " +
-                    "does not read, with numeric generations, and requires paxos_variant v1; it does not connect to " +
-                    "DSE 5.1 nodes", format.name(), format.getLatestVersion().version);
+                    "does not read, with numeric generations, and requires paxos_variant v1; it speaks the pre-4.0 " +
+                    "dialect with DSE 5.1 nodes, with the schema frozen (unless allow_ddl is set; a compressor DSE " +
+                    "5.1 does not read is refused even then) and repair and topology changes refused",
+                    format.name(), format.getLatestVersion().version);
     }
 
     private static void applySSTableFormats()
@@ -5848,8 +5850,10 @@ public class DatabaseDescriptor
 
     /**
      * True while the node runs in {@code internode_compatibility_mode: DSE_6} (never for tools and clients); the gate
-     * of every DSE 6-specific code path: the on-disk format DSE reads, the pre-4.0 internode dialect spoken with DSE 6
-     * peers, and the operations refused during the upgrade (refused with {@code NONE} too while DSE 6 peers are seen).
+     * of the code paths only DSE 6 needs, among them the on-disk format DSE 6 reads, DSE's gossip ordinals and states,
+     * the TLS ports, the wire format of the views, the access-control check and the SAI version pin. The pre-4.0
+     * internode dialect and the operations refused during the upgrade are gated by {@link #isDseCompatibilityMode()},
+     * true in {@code DSE_5_1} too (the operations are refused with {@code NONE} too while DSE peers are seen).
      */
     public static boolean isDse6CompatibilityMode()
     {

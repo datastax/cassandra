@@ -330,18 +330,20 @@ public class UnfilteredSerializer
     }
 
     /**
-     * DSE 6 compatibility mode: the pre-4.0 dialect has 32-bit local deletion times, the last one early in 2038, and a
-     * DSE 6 peer would read a later one as a negative, invalid, time. The mode requires the {@code HCD_1} storage
-     * compatibility mode, under which no deletion time goes past that cap, so this never fires; it fails fast, before
-     * anything is written, if one ever does. {@link Cell#NO_DELETION_TIME} (live) is never written as a deletion time.
-     * It covers what is serialized at the peer's version (mutations, hints, batches, Paxos commits); the data of a read
-     * response is serialized once, at the current version, when the replica builds it, and is sent as is.
+     * DSE 6 and DSE 5.1 compatibility modes: the pre-4.0 dialect has 32-bit local deletion times, the last one early in
+     * 2038, and a DSE peer would read a later one as a negative, invalid, time. The text names the DSE release of the
+     * mode ({@link DseCompat#source()}). The mode requires the {@code HCD_1} storage compatibility mode, under which no
+     * deletion time goes past that cap, so this never fires; it fails fast, before anything is written, if one ever
+     * does. {@link Cell#NO_DELETION_TIME} (live) is never written as a deletion time. It covers what is serialized at
+     * the peer's version (mutations, hints, batches, Paxos commits); the data of a read response is serialized once, at
+     * the current version, when the replica builds it, and is sent as is.
      */
     static void checkPre40DeletionTime(long localDeletionTime, int version)
     {
         if (localDeletionTime > CellData.MAX_DELETION_TIME_2038_LEGACY_CAP && localDeletionTime != Cell.NO_DELETION_TIME)
-            throw new IllegalStateException("DSE 6 compatibility mode: local deletion time " + localDeletionTime + " is past 2038 and cannot be sent at messaging version " +
-                                            version + ", whose deletion times are 32-bit");
+            throw new IllegalStateException(DseCompat.source() + " compatibility mode: local deletion time " +
+                                            localDeletionTime + " is past 2038 and cannot be sent at messaging " +
+                                            "version " + version + ", whose deletion times are 32-bit");
     }
 
     private static void checkPre40DeletionTimes(Row row, int version)

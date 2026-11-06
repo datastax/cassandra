@@ -964,7 +964,7 @@ public abstract class ColumnFilter
         private static final int FETCH_ALL_STATICS_MASK = 0x08;
 
         /**
-         * The bits the pre-4.0 layout defines (DSE 6 compatibility mode, messaging version 11): the 3.0.14 header
+         * The bits the pre-4.0 layout defines (DSE modes, messaging version 11): the 3.0.14 header
          * has no FETCH_ALL_STATICS bit, and in that dialect FETCH_ALL already means all regular and all static
          * columns.
          */

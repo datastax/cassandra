@@ -128,6 +128,17 @@ public class InboundMessageHandler extends AbstractMessageHandler
     {
         ByteBuffer buf = bytes.get();
 
+        // DSE 5.1 compatibility mode: a repair message of a DSE 5.1 coordinator, whose verb this software does not have
+        Message.Pre40RepairMessage repair = DseCompat.isDse51() ? serializer.pre40RepairMessage(buf, version) : null;
+        if (repair != null)
+        {
+            refuseDse51RepairMessage(repair);
+            receivedCount++;
+            receivedBytes += repair.size;
+            bytes.skipBytes(repair.size);
+            return true;
+        }
+
         long currentTimeNanos = approxTime.now();
         Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
         long timeElapsed = currentTimeNanos - header.createdAtNanos;
@@ -179,6 +190,11 @@ public class InboundMessageHandler extends AbstractMessageHandler
             callbacks.onFailedDeserialize(size, header, e);
             noSpamLogger.info("{} incompatible schema encountered while deserializing a message", this, e);
         }
+        catch (DseRefusedMessageException e)
+        {
+            callbacks.onFailedDeserialize(size, header, e);
+            logRefused(e);
+        }
         catch (Throwable t)
         {
             JVMStabilityInspector.inspectThrowable(t);
@@ -200,6 +216,49 @@ public class InboundMessageHandler extends AbstractMessageHandler
             dispatch(new ProcessSmallMessage(message, size, messageProcessingStartTimeNanos));
     }
 
+    /**
+     * DSE 5.1 compatibility mode: refuses a repair message of a DSE 5.1 coordinator (repair is refused during the
+     * upgrade), whose bytes the caller skips, so that the connection stays open and the next message is read. A message
+     * that asks for a failure response ({@code CAL_BAC}: DSE 5.1.51 sets it on {@code ANTICOMPACTION_REQUEST},
+     * {@code PREPARE_MESSAGE} and {@code SNAPSHOT}) gets one, with which the DSE 5.1 coordinator stops the repair at
+     * once; the others get none, as DSE 5.1 expects none. Counted in {@code nodetool compatstatus} and logged at most
+     * once a minute; it has no verb of this software, so the per-verb metrics of the callbacks do not see it, the
+     * connection's counts of messages and bytes received do. A repair message too large to be held in one frame (over
+     * the large message threshold) is refused on its first frame, whose header holds the id and {@code CAL_BAC}, and
+     * the bytes of its other frames are skipped ({@link SkippedRepairMessage}).
+     */
+    private void refuseDse51RepairMessage(Message.Pre40RepairMessage repair)
+    {
+        DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_REPAIR_MESSAGE);
+        if (repair.callBackOnFailure)
+        {
+            // the repair timeout, as the repair responses of this software have (FAILURE_RSP has none of its own)
+            long expiresAtNanos = Verb.REPAIR_RSP.expiresAtNanos(approxTime.now());
+            MessagingService.instance().send(Message.pre40FailureResponse(repair.id, expiresAtNanos), peer);
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                             "{} answering with a failure the repair message {} (id {}) of the DSE 5.1 node {}: " +
+                             "repair is refused during the DSE 5.1 upgrade, run it once " +
+                             "internode_compatibility_mode is NONE on every node", id(), repair.typeName(), repair.id,
+                             peer);
+        }
+        else
+        {
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                             "{} skipping the repair message {} (id {}) of the DSE 5.1 node {}, which expects no " +
+                             "answer: repair is refused during the DSE 5.1 upgrade, run it once " +
+                             "internode_compatibility_mode is NONE on every node", id(), repair.typeName(), repair.id,
+                             peer);
+        }
+    }
+
+    /** A message refused on purpose while it was read ({@link DseRefusedMessageException}): at most once a minute. */
+    private void logRefused(DseRefusedMessageException e)
+    {
+        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
+                         "{} refusing a message of {}, answered with a failure when it asks for one: {}", id(), peer,
+                         e.getMessage());
+    }
+
     // for various reasons, it's possible for a large message to be contained in a single frame
     private void processLargeMessage(ShareableBytes bytes, int size, Header header, long handlingStartNanos)
     {
@@ -214,6 +273,18 @@ public class InboundMessageHandler extends AbstractMessageHandler
     {
         ShareableBytes bytes = frame.contents;
         ByteBuffer buf = bytes.get();
+
+        // DSE 5.1 compatibility mode: the first part of a repair message of a DSE 5.1 coordinator too large for one
+        // frame; it is refused now, and the bytes of its other frames are skipped
+        Message.Pre40RepairMessage repair = DseCompat.isDse51() ? serializer.pre40RepairMessage(buf, version) : null;
+        if (repair != null)
+        {
+            refuseDse51RepairMessage(repair);
+            receivedBytes += buf.remaining();
+            largeMessage = new SkippedRepairMessage(repair);
+            largeMessage.supply(frame);
+            return true;
+        }
 
         long currentTimeNanos = approxTime.now();
         Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
@@ -306,6 +377,27 @@ public class InboundMessageHandler extends AbstractMessageHandler
         channel.close();
     }
 
+    /**
+     * DSE 5.1 compatibility mode: a repair message of a DSE 5.1 coordinator too large for one frame, refused on its
+     * first frame ({@link #refuseDse51RepairMessage}), whose frames are consumed and dropped until all its bytes have
+     * been read: it holds no capacity (as an expired large message) and nothing is handed on.
+     */
+    private final class SkippedRepairMessage extends AbstractMessageHandler.LargeMessage<Message.Pre40RepairMessage>
+    {
+        private SkippedRepairMessage(Message.Pre40RepairMessage repair)
+        {
+            super(repair.size, repair, Long.MAX_VALUE, true);
+        }
+
+        protected void onComplete()
+        {
+        }
+
+        protected void abort()
+        {
+        }
+    }
+
     /*
      * A large-message frame-accumulating state machine.
      *
@@ -379,6 +471,11 @@ public class InboundMessageHandler extends AbstractMessageHandler
             {
                 callbacks.onFailedDeserialize(size, header, e);
                 noSpamLogger.info("{} incompatible schema encountered while deserializing a message", InboundMessageHandler.this, e);
+            }
+            catch (DseRefusedMessageException e)
+            {
+                callbacks.onFailedDeserialize(size, header, e);
+                logRefused(e);
             }
             catch (Throwable t)
             {

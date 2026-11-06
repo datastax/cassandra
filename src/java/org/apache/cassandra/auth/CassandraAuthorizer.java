@@ -132,12 +132,12 @@ public class CassandraAuthorizer implements IAuthorizer
     }
 
     /**
-     * Whether the reverse index {@code system_auth.resource_role_permissons_index} is kept up to date. In the DSE 6
-     * compatibility mode {@code system_auth} keeps the definition DSE 6 wrote (see {@code DseSystemKeyspaces}), which
-     * may lack the table (the 6.9.26 schema capture has none): then GRANT and REVOKE update the permissions only, DROP
-     * ROLE deletes them, and the roles holding permissions on a dropped resource are found by filtering the
-     * permissions. When DSE's definition has the table, it is maintained as without the mode, so that DSE's own index
-     * stays complete.
+     * Whether the reverse index {@code system_auth.resource_role_permissons_index} is kept up to date. In the DSE 6 and
+     * DSE 5.1 compatibility modes {@code system_auth} keeps the definition DSE wrote (see {@code DseSystemKeyspaces}),
+     * which may lack the table (the 6.9.26 schema capture has none, nor has a fresh DSE 5.1.51 install): then GRANT and
+     * REVOKE update the permissions only, DROP ROLE deletes them, and the roles holding permissions on a dropped
+     * resource are found by filtering the permissions. When DSE's definition has the table, it is maintained as without
+     * the mode, so that DSE's own index stays complete.
      * <p>
      * An index created at the first start with {@code internode_compatibility_mode: NONE} holds none of the grants made
      * before (on DSE or in the mode): until it is rebuilt, dropping a table, keyspace or function leaves those grants
@@ -148,7 +148,9 @@ public class CassandraAuthorizer implements IAuthorizer
      */
     private static boolean maintainsResourceIndex()
     {
-        return !DatabaseDescriptor.isDse6CompatibilityMode() || Schema.instance.getTableMetadata(SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.RESOURCE_ROLE_INDEX) != null;
+        return !DatabaseDescriptor.isDseCompatibilityMode() ||
+               Schema.instance.getTableMetadata(SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                AuthKeyspace.RESOURCE_ROLE_INDEX) != null;
     }
 
     // Returns every permission on the resource granted to the user either directly

@@ -53,10 +53,10 @@ import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
           no compression; no integrity protection
  * 4. {@link FrameDecoderLegacy}:
           no compression; no integrity protection; turns unframed streams of legacy messages (< 4.0) into frames
-          (DSE 6 compatibility mode only)
+          (DSE compatibility modes only)
  * 5. {@link FrameDecoderLegacyLZ4}:
           LZ4 compression using the legacy LZ4 block format; groups legacy messages (< 4.0) into frames
-          (DSE 6 compatibility mode only)
+          (DSE compatibility modes only)
  */
 public abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 {

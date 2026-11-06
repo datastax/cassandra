@@ -55,8 +55,8 @@ public final class ForwardingInfo implements Serializable
     /**
      * @return {@code true} if all host are to use the same message id, {@code false} otherwise. Starting with 4.0 and
      * above, we should be reusing the same id, always, but it won't always be true until 3.0/3.11 are phased out.
-     * In DSE 6 compatibility mode, a DSE 6 coordinator lists an id of its own for each target, as Cassandra 3.0
-     * did.
+     * In a DSE compatibility mode, a DSE 6 or DSE 5.1 coordinator lists an id of its own for each target, as
+     * Cassandra 3.0 did.
      */
     public boolean useSameMessageID(long id)
     {
@@ -77,7 +77,7 @@ public final class ForwardingInfo implements Serializable
     }
 
     /**
-     * Serializer; below {@link MessagingService#VERSION_40} (the pre-4.0 dialect of the DSE 6 compatibility mode)
+     * Serializer; below {@link MessagingService#VERSION_40} (the pre-4.0 dialect of the DSE compatibility modes)
      * the count and the message ids are 4-byte ints and the addresses carry no port, the {@code FWD_TO} layout of
      * Cassandra 3.0.
      */

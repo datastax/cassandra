@@ -279,9 +279,9 @@ public class InboundConnectionInitiator
         private final InboundConnectionSettings settings;
 
         private HandshakeProtocol.Initiate initiate;
-        /** The third message of a pre-4.0 handshake (DSE 6 compatibility mode), once received. */
+        /** The third message of a pre-4.0 handshake (DSE modes), once received. */
         private HandshakeProtocol.ConfirmOutboundPre40 confirmOutboundPre40;
-        /** True once our 4-byte answer (the dialect) to a pre-4.0 first message was queued (DSE 6 compatibility mode). */
+        /** True once our 4-byte answer (the dialect) to a pre-4.0 first message was queued (DSE modes). */
         private boolean pre40Answered;
         /** True once any byte of a third pre-4.0 handshake message reached this handler, even if the socket closed since. */
         private boolean pre40ConfirmStarted;
@@ -322,7 +322,7 @@ public class InboundConnectionInitiator
         }
 
         /**
-         * True when the handshake is stuck on a socket a DSE 6.8.65 node gave up on purpose (DSE 6 compatibility mode
+         * True when the handshake is stuck on a socket a DSE 6.8.65 node gave up on purpose (in the DSE modes
          * only): its pre-4.0 first message requested either 12 (a plain first message at the {@code NET_VERSION} we
          * gossip, {@link DseCompat#NET_VERSION_PUBLISHED}) or {@link DseCompat#DSE_VERSION_BYTE} (DSE's own flagged first
          * message), we answered the dialect (11) and no byte reached this handler since (on a TLS connection, no
@@ -361,7 +361,7 @@ public class InboundConnectionInitiator
         /**
          * The upstream handler does not cancel the handshake timeout when the channel closes, so a socket the peer closed
          * before the handshake completed still logs {@code Timeout handshaking with ...} when the timeout fires, and this
-         * stays so for every case but the one {@link #isAbandonedByDse} recognises (DSE 6 compatibility mode only): such a
+         * stays so for every case but the one {@link #isAbandonedByDse} recognises (in the DSE modes only): such a
          * socket that closes cancels the timeout with a debug line, since a DSE 6.8.65 node closes it to reconnect at 11.
          * <p>
          * Our handshake failures ({@link #failHandshake}, also run by the timeout) remove this handler before closing and
@@ -459,7 +459,7 @@ public class InboundConnectionInitiator
         }
 
         /**
-         * A pre-4.0 first message, only decoded in DSE 6 compatibility mode: DSE's own first message (0xFF plus its
+         * A pre-4.0 first message, only decoded in the DSE modes: DSE's own first message (0xFF plus its
          * relative version) or a plain pre-4.0 one. We answer with the 3.0.14 dialect at once, whatever was
          * requested, and wait for the third message. DSE 6.9.26 sends it on the same socket, after its own first message
          * and after a plain first message at 12, as DSE's source has it; DSE 6.8.65 gives the socket up after either and
@@ -479,8 +479,9 @@ public class InboundConnectionInitiator
             // peer stays visible while it retries, at the pace of its reconnection delay
             if (initiate.type.isStreaming())
             {
-                logger.warn("peer {} attempted a pre-4.0 streaming connection (requested version {}): streaming with DSE 6 peers is not supported in internode_compatibility_mode DSE_6",
-                            remote, requested);
+                logger.warn("peer {} attempted a pre-4.0 streaming connection (requested version {}): streaming " +
+                            "with {} peers is not supported in internode_compatibility_mode {}",
+                            remote, requested, DseCompat.source(), DseCompat.textMode());
                 failHandshake(ctx);
                 return;
             }
@@ -691,7 +692,7 @@ public class InboundConnectionInitiator
             }
 
             FrameDecoder frameDecoder;
-            boolean pre40 = useMessagingVersion < VERSION_40; // DSE 6 compatibility mode: unframed, or the pre-4.0 LZ4 block stream
+            boolean pre40 = useMessagingVersion < VERSION_40; // DSE modes: unframed, or the pre-4.0 LZ4 block stream
             switch (initiate.framing)
             {
                 case LZ4:

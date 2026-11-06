@@ -49,6 +49,7 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.Ec2Snitch;
 import org.apache.cassandra.locator.Ec2Snitches;
 import org.apache.cassandra.locator.IEndpointSnitch;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS;
@@ -318,9 +319,11 @@ public class Dse51StartupChecksTest
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode is NONE but the record of DSE 5.1 peers " + record +
                     " listing [10.0.0.2:7000, 10.0.0.3:not-a-port] is present: DSE 5.1 peers may still be in the " +
-                    "cluster. Set internode_compatibility_mode: DSE_5_1, or delete it by hand once every listed " +
-                    "peer runs this software or has left the cluster; the entries [10.0.0.3:not-a-port] are not " +
-                    "addresses with port (<ip>:<port>) and must be removed from it by hand, or start with " +
+                    "cluster. Set internode_compatibility_mode: DSE_5_1, or the record empties itself once this " +
+                    "node has seen every listed peer at messaging version 4.0 or later (run once more with " +
+                    "DSE_5_1 after the last upgrade); delete it by hand only after checking that the listed peers " +
+                    "have left the cluster; the entries [10.0.0.3:not-a-port] are not addresses with port " +
+                    "(<ip>:<port>) and must be removed from it by hand, or start with " +
                     "-Dcassandra.internode_compatibility_mode.ignore_dse_peers=true");
 
         // a record that cannot be read refuses the start too
@@ -499,9 +502,12 @@ public class Dse51StartupChecksTest
         assertThat(Dse51SystemTables.deleteRecordOfAnEarlierUpgrade()).isTrue();
     }
 
-    /** The record is not loaded in DSE_5_1, where nothing maintains it yet, and the DSE 6 record is not read either. */
+    /**
+     * The record of DSE 5.1 peers is loaded at a start in DSE_5_1, which maintains it, and the DSE 6 record is not read
+     * (its texts: {@code DsePeersRecordTest}).
+     */
     @Test
-    public void noRecordIsLoadedInDse51Mode() throws Exception
+    public void theDse51RecordIsLoadedInDse51Mode() throws Exception
     {
         try
         {
@@ -510,7 +516,7 @@ public class Dse51StartupChecksTest
             writePeersRecord(InternodeCompatibilityMode.DSE_6, "10.0.0.3:7000");
             mode(InternodeCompatibilityMode.DSE_5_1);
             StartupChecks.loadDsePeersRecord.execute(OPTIONS);
-            assertThat(DsePeersRecord.peers()).isEmpty();
+            assertThat(DsePeersRecord.peers()).containsExactly(InetAddressAndPort.getByName("10.0.0.2:7000"));
         }
         finally
         {

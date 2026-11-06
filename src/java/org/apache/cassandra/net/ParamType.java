@@ -44,7 +44,7 @@ import static org.apache.cassandra.locator.InetAddressAndPort.FwdFrmSerializer.f
  *
  * Do not re-use old, nor fill gaps in the sequence of, ids.  New IDs must be higher.
  *
- * Peers speaking the pre-4.0 dialect (DSE 6 compatibility mode, messaging version 11) name params by their
+ * Peers speaking the pre-4.0 dialect (a DSE compatibility mode, messaging version 11) name params by their
  * legacy alias string instead of the id; a param without an alias is not sent to such a peer and is unknown to it.
  * The deprecated ids 2, 3, 4 and 7 exist only for that dialect: pre-4.0 encoded the message flags and failure
  * responses as params.

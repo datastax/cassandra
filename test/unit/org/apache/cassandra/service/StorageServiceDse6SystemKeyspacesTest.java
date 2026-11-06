@@ -93,6 +93,33 @@ public class StorageServiceDse6SystemKeyspacesTest extends CQLTester
         assertThat(Schema.instance.getTableMetadata(keyspace, "a").getColumn(UTF8Type.instance.decompose("extra"))).isNotNull();
     }
 
+    /**
+     * In the DSE 5.1 compatibility mode too: a keyspace that exists keeps the definition it was loaded with (DSE 5.1's
+     * on an upgraded node, whose {@code system_schema} a rollback restores), the INFO naming the mode.
+     */
+    @Test
+    public void createdInDse51ModeThenKept() throws Throwable
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        StorageService.setUpSystemKeyspace(keyspaceOf(table("a").build()), 1);
+        assertThat(tableNames()).containsExactly("a");
+        KeyspaceMetadata later = keyspaceOf(table("a").addRegularColumn("extra", UTF8Type.instance).build(),
+                                            table("b").build());
+        withLogAppender(StorageService.class, appender -> {
+            StorageService.setUpSystemKeyspace(later, 2);
+            List<String> infos = appender.list.stream().map(ILoggingEvent::getFormattedMessage)
+                                              .collect(Collectors.toList());
+            assertThat(infos).contains("internode_compatibility_mode DSE_5_1: " + keyspace + " keeps the " +
+                                       "definition it was loaded with (DSE's on an upgraded node); this " +
+                                       "software's additions to it are made at the first start with " +
+                                       "internode_compatibility_mode NONE: [" + keyspace + ".a.extra, " + keyspace +
+                                       ".b]");
+        });
+        assertThat(tableNames()).containsExactly("a");
+        assertThat(Schema.instance.getTableMetadata(keyspace, "a").getColumn(UTF8Type.instance.decompose("extra")))
+        .isNull();
+    }
+
     private List<String> tableNames()
     {
         return Schema.instance.getKeyspaceMetadata(keyspace).tables.stream().map(t -> t.name).collect(Collectors.toList());

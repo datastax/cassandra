@@ -222,6 +222,47 @@ public class Dse6SchemaFreezeTest extends CQLTester
                                                                      .hasMessageStartingWith(DseUpgradeGuards.SCHEMA_FROZEN);
     }
 
+    /**
+     * In DSE 5.1 compatibility mode the schema is frozen as in DSE_6, the refusal naming DSE 5.1, client path included,
+     * and the property lifts it; a statement that changes nothing runs.
+     */
+    @Test
+    public void theSchemaIsFrozenInDse51ModeToo() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        String frozen = DseUpgradeGuards.schemaFrozen("DSE 5.1");
+        assertThat(frozen).isEqualTo("schema changes are frozen during the DSE 5.1 upgrade; run them after the flag " +
+                                     "is dropped");
+        String[] statements = { "CREATE KEYSPACE dse51_frozen WITH replication = " +
+                                "{'class': 'SimpleStrategy', 'replication_factor': 1}",
+                                "CREATE TABLE " + KEYSPACE + ".dse51_frozen (k int PRIMARY KEY)",
+                                "ALTER TABLE %s ADD w int",
+                                "CREATE INDEX dse51_frozen_idx ON %s (v)",
+                                "DROP TABLE %s" };
+        for (String statement : statements)
+        {
+            assertThatThrownBy(() -> execute(statement))
+            .as(statement)
+            .isInstanceOf(InvalidRequestException.class)
+            .hasMessage(frozen + " (or start the node with -Dcassandra.internode_compatibility_mode.allow_ddl=true)");
+        }
+        assertThatThrownBy(() -> executeNet("ALTER TABLE " + KEYSPACE + '.' + currentTable() + " ADD w int"))
+        .isInstanceOf(InvalidQueryException.class)
+        .hasMessageStartingWith(frozen);
+        assertThat(DseCompatRefusals.count(DseUpgradeGuards.SCHEMA_CHANGE)).isEqualTo(statements.length + 1);
+        // a statement that changes nothing runs
+        execute("CREATE TABLE IF NOT EXISTS %s (k int PRIMARY KEY, v int)");
+
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+        {
+            execute("ALTER TABLE %s ADD w int");
+        }
+        assertThat(Schema.instance.getTableMetadata(KEYSPACE, currentTable())
+                                  .getColumn(ColumnIdentifier.getInterned("w", false))).isNotNull();
+        assertThat(DseCompatRefusals.count(DseUpgradeGuards.SCHEMA_CHANGE)).isEqualTo(statements.length + 1);
+    }
+
     @Test
     public void noneModeIsUnchanged() throws Throwable
     {

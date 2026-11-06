@@ -22,6 +22,7 @@ import javax.annotation.Nullable;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.CassandraVersion;
 
@@ -40,8 +41,10 @@ import org.apache.cassandra.utils.CassandraVersion;
  * It also holds how a DataStax Enterprise 5.1 node is told from the others ({@link #isDse51Peer}), for the DSE 5.1
  * compatibility mode. DSE 5.1 speaks the Apache Cassandra 3.11 dialect, messaging version 11 (10 when started with
  * {@code -Dcassandra.force_3_0_protocol_version=true}), with no DSE flag in its handshake and no DSE version in its
- * {@code NET_VERSION}; what tells it from an Apache Cassandra 3.11 node is its release, {@code 3.11.3.<build>}, and its
- * {@code dse_version}, {@code 5.1.<patch>}, both read from DSE 5.1.51's source.
+ * {@code NET_VERSION}. In a cluster under upgrade only DSE 5.1 nodes speak a pre-4.0 version, so the messaging version
+ * identifies a DSE 5.1 peer; its release, {@code 3.11.3.<build>}, and its {@code dse_version}, {@code 5.1.<patch>}
+ * ({@code 3.11.3.5151} and {@code 5.1.51} in the captures of DSE 5.1.51), tell whether it is the release the mode
+ * supports.
  */
 public final class DseCompat
 {
@@ -82,6 +85,20 @@ public final class DseCompat
     public static final int DSE_69_VERSION = 5 << 8;
     /** DSE 6.9.7 and later, relative version 6 (see {@link #DSE_60_VERSION}). */
     public static final int DSE_697_VERSION = 6 << 8;
+
+    /**
+     * The reason under which the reads of a Thrift client that a DSE 5.1 coordinator forwards are counted, in the DSE
+     * 5.1 compatibility mode: a read command with Apache Cassandra 3.x's Thrift flag, a row filter with its Thrift
+     * dynamic column expression, or limits of its Thrift kinds. Each is refused when the message is read, which the
+     * replica answers with a failure response when the coordinator asked for one, as it does for a read.
+     */
+    public static final String REFUSED_DSE51_THRIFT_READ = "Thrift read from a DSE 5.1 peer";
+
+    /**
+     * The reason under which the repair messages of DSE 5.1 nodes are counted in the DSE 5.1 compatibility mode
+     * ({@code InboundMessageHandler.refuseDse51RepairMessage}).
+     */
+    public static final String REFUSED_DSE51_REPAIR_MESSAGE = "repair message from a DSE 5.1 peer";
 
     /** The DSE 6 messaging versions {@link #storedDecodingVersion} maps, as error messages list them. */
     public static final String DSE_STORED_VERSIONS_TEXT = String.format("%d, %d, %d, %d, %d or %d", DSE_60_VERSION, DSE_603_VERSION,
@@ -152,10 +169,15 @@ public final class DseCompat
         return configured;
     }
 
-    /** True while the node accepts DSE 6 peers: the guard of every pre-4.0 code path. */
+    /**
+     * True while the node accepts DSE peers, in {@code internode_compatibility_mode: DSE_6} or {@code DSE_5_1}: the
+     * guard of every pre-4.0 code path, of the operational guards of the upgrade and of the schema freeze. Both sources
+     * speak messaging version 11 with this software. What only DSE 6 needs (its gossip states and TLS ports, its views
+     * and access controls) is guarded by {@link #isDse6()} instead.
+     */
     public static boolean enabled()
     {
-        return DatabaseDescriptor.isDse6CompatibilityMode();
+        return DatabaseDescriptor.isDseCompatibilityMode();
     }
 
     /** True while the node runs in {@code internode_compatibility_mode: DSE_6}. */
@@ -164,13 +186,30 @@ public final class DseCompat
         return DatabaseDescriptor.isDse6CompatibilityMode();
     }
 
-    /**
-     * True while the node runs in {@code internode_compatibility_mode: DSE_5_1}. Unlike {@link #enabled()}, which stays
-     * false in that mode, it opens no pre-4.0 code path.
-     */
+    /** True while the node runs in {@code internode_compatibility_mode: DSE_5_1}; {@link #enabled()} is true then. */
     public static boolean isDse51()
     {
         return DatabaseDescriptor.isDse51CompatibilityMode();
+    }
+
+    /**
+     * The DSE release the texts of the mode name: {@code DSE 5.1} in {@code internode_compatibility_mode: DSE_5_1},
+     * {@code DSE 6} otherwise, so that a text of the DSE 6 compatibility mode comes out as it did before the DSE 5.1
+     * one existed, with {@code NONE} as well.
+     */
+    public static String source()
+    {
+        return textMode().source();
+    }
+
+    /**
+     * The value of {@code internode_compatibility_mode} the texts of the mode name, as {@link #source} chooses it:
+     * {@code DSE_5_1} in that mode, {@code DSE_6} otherwise, with {@code NONE} too. Not the mode the node runs in
+     * ({@link DatabaseDescriptor#getInternodeCompatibilityMode}).
+     */
+    public static InternodeCompatibilityMode textMode()
+    {
+        return isDse51() ? InternodeCompatibilityMode.DSE_5_1 : InternodeCompatibilityMode.DSE_6;
     }
 
     /** True for the first handshake message DSE sends to a peer whose version it does not know yet. */
@@ -216,10 +255,10 @@ public final class DseCompat
     }
 
     /**
-     * True when a payload serializer must use the pre-4.0 layout: a messaging version below 4.0 in DSE 6 compatibility
-     * mode. With the mode off such a version keeps the layout it had before the mode existed, byte for byte: messaging
-     * version 10 is still used then (the DSE to CC migration path of {@code DataLimits}), and the serializers that
-     * asserted version 4.0 keep asserting it.
+     * True when a payload serializer must use the pre-4.0 layout: a messaging version below 4.0 in a DSE compatibility
+     * mode ({@link #enabled()}). With the mode off such a version keeps the layout it had before the mode existed, byte
+     * for byte: messaging version 10 is still used then (the DSE to CC migration path of {@code DataLimits}), and the
+     * serializers that asserted version 4.0 keep asserting it.
      */
     public static boolean isPre40Layout(int version)
     {
@@ -227,7 +266,7 @@ public final class DseCompat
     }
 
     /**
-     * Refuses the pre-4.0 message codec when the mode is off: outside DSE 6 compatibility mode no peer speaks it. An
+     * Refuses the pre-4.0 message codec when the mode is off: outside a DSE compatibility mode no peer speaks it. An
      * {@link AssertionError} whether or not assertions are enabled, as for the pre-4.0 address layout of the
      * handshake: without the mode the message header has no pre-4.0 layout to fall back to.
      *
@@ -241,7 +280,10 @@ public final class DseCompat
 
     /**
      * The messaging version to decode bytes a node stored in a system table next to the messaging version they were
-     * serialized at ({@code system.paxos}, {@code system.batches}) with. A version below {@link #DSE_60_VERSION} is this
+     * serialized at ({@code system.paxos}, {@code system.batches}) with. The pre-4.0 versions 10 and 11, which DSE 5.1
+     * stores (the DSE 5.1.51 rows of {@code test/data/dse-compat/batches} and {@code paxos} are at 11), are mapped to
+     * {@link MessagingService#VERSION_40} with {@code NONE} and in {@code DSE_5_1}, and kept in {@code DSE_6}, where
+     * they take the pre-4.0 layout ({@link #isPre40Layout}). Any other version below {@link #DSE_60_VERSION} is this
      * software's and is returned as it is. A DSE 6 version, left in the table by DSE before the node was upgraded, is mapped
      * to the layout DSE wrote at that version, in every {@code internode_compatibility_mode}: the rows outlive the mode. DSE
      * serializes mutations and partition updates at the WRITES version of its messaging version (the DSE 6.8.65 rows of
@@ -256,6 +298,12 @@ public final class DseCompat
      */
     public static int storedDecodingVersion(int storedVersion)
     {
+        // DSE 5.1, as Apache Cassandra 3.x, stores its rows at 10 or 11 with the 3.0 layout of a mutation and a
+        // partition update, decoded at VERSION_40 as DSE 6.0's rows are; outside DSE_6 those versions have no pre-4.0
+        // path (after the flag drop checkPre40Layout refuses them), in DSE_6 they keep the pre-4.0 layout
+        boolean pre40 = storedVersion == MessagingService.VERSION_30 || storedVersion == MessagingService.VERSION_3014;
+        if (pre40 && !isDse6())
+            return MessagingService.VERSION_40;
         if (storedVersion < DSE_60_VERSION)
             return storedVersion;
 
@@ -294,10 +342,13 @@ public final class DseCompat
         }
     }
 
-    /** The {@code compatstatus} refusal reason of a request whose verb does not exist in the pre-4.0 dialect. */
+    /**
+     * The {@code compatstatus} refusal reason of a request whose verb does not exist in the pre-4.0 dialect, naming the
+     * DSE release of the mode ({@link #source()}).
+     */
     public static String refusedVerb(Verb verb)
     {
-        return "verb " + verb + " to a DSE 6 peer";
+        return "verb " + verb + " to a " + source() + " peer";
     }
 
     /**

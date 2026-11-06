@@ -94,13 +94,13 @@ class HandshakeProtocol
          * The version a pre-4.0 peer reads from the flags (bits 8-15); 4.0+ peers only check that it is not below 4.0.
          * <ul>
          *   <li>With {@code internode_compatibility_mode: NONE} it is always {@code acceptVersions.min}, as before.</li>
-         *   <li>In DSE 6 compatibility mode a 4.0-style first message carries the version we request, raised to at
+         *   <li>In the DSE modes a 4.0-style first message carries the version we request, raised to at
          *       least 13 ({@code VERSION_50}; the current version for an unknown peer, as HCD 1.2 does), so that a DSE
          *       peer answers with its own version ({@code relative << 8}) and we reconnect in the dialect:
          *       DSE echoes 12 as a 4-byte 12 (as the source of DSE 6.9 has it), which a 4.0 reader cannot tell from the
          *       start of a 12-byte Accept.</li>
          *   <li>Pre-4.0 first messages carry only this and no accepted range: {@link #acceptVersions} is null for them.
-         *       They exist only in DSE 6 compatibility mode: DSE sends one with {@link DseCompat#DSE_VERSION_BYTE},
+         *       They exist only in the DSE modes: DSE sends one with {@link DseCompat#DSE_VERSION_BYTE},
          *       and we send one at {@link DseCompat#DSE_DIALECT} to a peer we know to speak the dialect.</li>
          * </ul>
          */
@@ -189,7 +189,7 @@ class HandshakeProtocol
 
                 int framingBits = getBits(flags, 2, 1) | (getBits(flags, 4, 1) << 1);
 
-                // DSE 6 compatibility mode: DSE's first message (0xFF and its relative version), or a plain pre-4.0 one
+                // DSE modes: DSE 6's first message (0xFF and its relative version), or a plain pre-4.0 one
                 // (a DSE peer reconnecting with the version it learnt, or an HCD 1.2 node forced to the 3.0.14 dialect);
                 // both are 8 bytes, without address or CRC, and are answered with a 4-byte version
                 if (DseCompat.enabled() &&
@@ -280,7 +280,7 @@ class HandshakeProtocol
         final int useMessagingVersion;
         final int maxMessagingVersion;
         /**
-         * DSE 6 compatibility mode: the 4 bytes of a pre-4.0 reply as the peer sent them, before a DSE version is mapped
+         * DSE modes: the 4 bytes of a pre-4.0 reply as the peer sent them, before a DSE version is mapped
          * to the dialect in {@link #maxMessagingVersion}; 0 for a 4.0-style reply.
          */
         final int pre40PeerVersion;
@@ -308,7 +308,7 @@ class HandshakeProtocol
         }
 
         /**
-         * The pre-4.0 form of this message: the 4-byte version only, no CRC. Sent, in DSE 6 compatibility mode, to a
+         * The pre-4.0 form of this message: the 4-byte version only, no CRC. Sent, in the DSE modes, to a
          * peer whose first message was pre-4.0 (see {@link Initiate#isPre40()}).
          */
         static ByteBuf respondPre40(int messagingVersion, ByteBufAllocator allocator)
@@ -326,7 +326,7 @@ class HandshakeProtocol
 
         /**
          * @param requestMessagingVersion the version our first message requested; below 4.0 it was a pre-4.0 message
-         *                                and the peer answers with 4 bytes only (DSE 6 compatibility mode)
+         *                                and the peer answers with 4 bytes only (DSE modes)
          * @return an {@link Accept} whose {@code useMessagingVersion} is 0 for a pre-4.0 reply: {@code maxMessagingVersion}
          *         is then the dialect to use with that peer, or to reconnect with
          */
@@ -484,7 +484,7 @@ class HandshakeProtocol
         }
     }
 
-    /** The third message of a pre-4.0 handshake names an address that is neither IPv4 nor IPv6 (DSE 6 compatibility mode). */
+    /** The third message of a pre-4.0 handshake names an address that is neither IPv4 nor IPv6 (DSE modes). */
     static class InvalidPre40Address extends Exception
     {
         final int size;

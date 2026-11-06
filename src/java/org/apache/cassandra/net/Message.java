@@ -338,6 +338,17 @@ public class Message<T>
         return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, reason, ParamType.REQUEST_VERB_NAME, requestVerb.name()).build();
     }
 
+    /**
+     * The failure response to a pre-4.0 request of {@code id} whose verb this software does not have (a repair message
+     * of DSE 5.1, {@link Serializer#pre40RepairMessage}): written in the pre-4.0 layout as a failure response is, the
+     * generic {@link Verb#INTERNAL_RSP} with the request's id, the {@code FAIL} and {@code FAIL_REASON} params and no
+     * payload, and no other param.
+     */
+    static Message<RequestFailureReason> pre40FailureResponse(long id, long expiresAtNanos)
+    {
+        return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, RequestFailureReason.UNKNOWN, null, null).build();
+    }
+
     public <V> Message<V> withPayload(V newPayload)
     {
         return new Message<>(header, newPayload);
@@ -803,7 +814,7 @@ public class Message<T>
     {
         private static final int CREATION_TIME_SIZE = 4;
 
-        /** Payloads of pre-4.0 responses skipped because no callback was registered for them (DSE 6 compatibility mode). */
+        /** Payloads of pre-4.0 responses skipped because no callback was registered for them (DSE modes). */
         private static final AtomicLong skippedPayloadsPre40 = new AtomicLong();
 
         private Serializer()
@@ -856,7 +867,7 @@ public class Message<T>
          * Size of the next message in the stream. Returns -1 if there aren't sufficient bytes read yet to determine size.
          *
          * @param version the messaging version of the connection; below {@link MessagingService#VERSION_40} the
-         *                pre-4.0 layout applies (DSE 6 compatibility mode)
+         *                pre-4.0 layout applies (a DSE compatibility mode)
          */
         int inferMessageSize(ByteBuffer buf, int readerIndex, int readerLimit, int version) throws InvalidLegacyProtocolMagic
         {
@@ -1048,7 +1059,7 @@ public class Message<T>
 
         /*
          * Pre-4.0 ser/deser: the Cassandra 3.0 message layout, spoken with DSE 6 peers at messaging version 11
-         * (DSE 6 compatibility mode).
+         * (a DSE compatibility mode).
          * The header is: protocol magic, int id, int creation time (low 32 bits of the millis), the sender address
          * without port (1-byte length + address), int verb id, int param count, params (UTF-8 alias, int length,
          * value), int payload size, payload. There are no flags and no expiration: the flags travel as params
@@ -1102,6 +1113,40 @@ public class Message<T>
             size += sizeof(header.verb.toPre40Verb().id); // refuses a verb the dialect cannot carry, as serialization does
             size += serializedParamsSize(addFlagsToLegacyParams(header.params, header.flags), version);
             return Ints.checkedCast(size);
+        }
+
+        /**
+         * In the DSE 5.1 compatibility mode, the pre-4.0 message at the position of {@code buf}, held whole by the
+         * buffer or, for a message too large for one frame, its first part up to the size of its payload at least, when
+         * its verb is Apache Cassandra 3.x's {@code REPAIR_MESSAGE} ({@link Verb#PRE40_REPAIR_MESSAGE_ID}), which a DSE
+         * 5.1 repair coordinator sends and this software does not have: its id, whether it asks for a failure response
+         * ({@code CAL_BAC}), its repair message type (the first byte of its payload; -1 for an empty payload, or one
+         * whose first byte is not in the buffer) and its whole size. Null for any other verb, at 4.0 or later, or
+         * outside the mode; {@link #extractHeader} would refuse the verb id, which closes the connection.
+         */
+        @Nullable
+        Pre40RepairMessage pre40RepairMessage(ByteBuffer buf, int version) throws IOException
+        {
+            if (version >= VERSION_40 || !DseCompat.isDse51())
+                return null;
+            int start = buf.position();
+            int index = start + PRE_40_MESSAGE_PREFIX_SIZE;
+            if (index + 1 > buf.limit())
+                return null;
+            index += 1 + (buf.get(index) & 0xFF); // the sender's address, after its length
+            if (index + 4 > buf.limit() || buf.getInt(index) != Verb.PRE40_REPAIR_MESSAGE_ID)
+                return null;
+            int size = inferMessageSizePre40(buf, start, buf.limit());
+            if (size < 0)
+                return null;
+            index += 4;
+            long id = buf.getInt(start + 4);
+            Map<ParamType, Object> params = extractParams(buf, index, version);
+            boolean callBackOnFailure = params.containsKey(ParamType.FAILURE_CALLBACK);
+            index += (int) extractParamsSizePre40(buf, index, buf.limit(), start);
+            int payloadSize = buf.getInt(index);
+            int type = payloadSize > 0 && index + 4 < buf.limit() ? buf.get(index + 4) & 0xFF : -1;
+            return new Pre40RepairMessage(id, callBackOnFailure, type, size);
         }
 
         private Header extractHeaderPre40(ByteBuffer buf, InetAddressAndPort peer, long currentTimeNanos, int version) throws IOException
@@ -1704,7 +1749,7 @@ public class Message<T>
     }
 
     /**
-     * The sizes at the pre-4.0 versions 10 and 11, used in DSE 6 compatibility mode only: allocated on first use, so
+     * The sizes at the pre-4.0 versions 10 and 11, used in a DSE compatibility mode only: allocated on first use, so
      * that the mode costs a message a single reference when it is off.
      */
     private Pre40Sizes pre40Sizes;
@@ -1876,8 +1921,41 @@ public class Message<T>
         }
     }
 
+    /** A repair message of Apache Cassandra 3.x, from a DSE 5.1 node ({@link Serializer#pre40RepairMessage}). */
+    static final class Pre40RepairMessage
+    {
+        /** The names of the repair message types of Apache Cassandra 3.x and DSE 5.1, by type. */
+        private static final String[] TYPES = { "VALIDATION_REQUEST", "VALIDATION_COMPLETE", "SYNC_REQUEST",
+                                                "SYNC_COMPLETE", "ANTICOMPACTION_REQUEST", "PREPARE_MESSAGE",
+                                                "SNAPSHOT", "CLEANUP" };
+
+        final long id;
+        final boolean callBackOnFailure;
+        final int type;
+        final int size;
+
+        Pre40RepairMessage(long id, boolean callBackOnFailure, int type, int size)
+        {
+            this.id = id;
+            this.callBackOnFailure = callBackOnFailure;
+            this.type = type;
+            this.size = size;
+        }
+
+        /**
+         * The name of the type, as DSE 5.1 has it, {@code type <n>} for a type it does not define, or
+         * {@code of unknown type} when the type was not read.
+         */
+        String typeName()
+        {
+            if (type < 0)
+                return "of unknown type";
+            return type < TYPES.length ? TYPES[type] : "type " + type;
+        }
+    }
+
     /**
-     * A pre-4.0 message (DSE 6 compatibility mode) with a length or count that no valid message has: the stream cannot
+     * A pre-4.0 message (a DSE compatibility mode) with a length or count that no valid message has: the stream cannot
      * be framed any further, and the connection is closed.
      */
     static class InvalidPre40MessageException extends RuntimeException

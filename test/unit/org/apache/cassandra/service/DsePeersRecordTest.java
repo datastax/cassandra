@@ -41,6 +41,8 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.config.StartupChecksOptions;
+import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.HeartBeatState;
@@ -53,11 +55,13 @@ import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.net.MessagingService;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The record of DSE 6 peers: maintained from the messaging versions the node records (the dialect from a
  * handshake, DSE's own gossip values), loaded from the previous run at startup, persisted for the startup checks
- * (once more at a drain), and untouched with {@code internode_compatibility_mode: NONE}.
+ * (once more at a drain), and untouched with {@code internode_compatibility_mode: NONE}. The record of DSE 5.1 peers,
+ * maintained the same way in {@code DSE_5_1}, in a file of its own.
  */
 public class DsePeersRecordTest
 {
@@ -96,6 +100,8 @@ public class DsePeersRecordTest
             MessagingService.instance().versions.reset(peer);
         DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
         DsePeersRecord.clear();
+        // a gossiped NET_VERSION identifies the peer too, which the other tests do not expect
+        DsePeers.reset();
         DatabaseDescriptor.setMetadataDirectory(metadataBefore);
         new File(metadata).deleteRecursive();
     }
@@ -453,7 +459,8 @@ public class DsePeersRecordTest
 
     /**
      * The record of the upgrade from DSE 5.1: a file of its own, whose header names DSE 5.1, read apart from the DSE 6
-     * one; nothing records a peer in DSE_5_1 mode, so the node does not write it.
+     * one; in DSE_5_1 mode a peer at 10 or 11, a DSE 5.1 node, enters it, from a handshake or from its gossiped
+     * {@code NET_VERSION}, and the DSE 6 record is not written.
      */
     @Test
     public void theRecordOfTheUpgradeFromDse51IsAFileOfItsOwn() throws Exception
@@ -474,16 +481,102 @@ public class DsePeersRecordTest
         .containsExactly("127.0.0.44:7000");
         assertThat(DsePeersRecord.persistedPeers()).isEmpty();
 
-        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
-        set(dsePeer, MessagingService.VERSION_3014);
-        assertThat(DsePeersRecord.peers()).isEmpty();
-        DsePeersRecord.persistAtDrain();
-        assertThat(DsePeersRecord.path()).doesNotExist();
-        assertThat(DsePeersRecord.persistedPeers(InternodeCompatibilityMode.DSE_5_1))
-        .containsExactly("127.0.0.44:7000");
-
         // clear() deletes the files of both records
         DsePeersRecord.clear();
         assertThat(record).doesNotExist();
+    }
+
+    @Test
+    public void dse51PeersAreRecordedAndPersistedInDse51Mode() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        Path record = DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1);
+        // the handshake of a DSE 5.1 node, at 11, and the NET_VERSION 11 another one gossips
+        set(dsePeer, MessagingService.VERSION_3014);
+        gossipNetVersion(otherDsePeer, "11");
+        set(upgradedPeer, MessagingService.current_version);
+        assertThat(DsePeersRecord.peers()).containsExactly(dsePeer, otherDsePeer);
+        List<String> both = List.of("127.0.0.44:7000", "127.0.0.45:7000");
+        assertThat(DsePeersRecord.persistedPeers(InternodeCompatibilityMode.DSE_5_1)).isEqualTo(both);
+        assertThat(Files.readString(record, StandardCharsets.UTF_8))
+        .isEqualTo(DsePeersRecord.content(InternodeCompatibilityMode.DSE_5_1, both));
+        assertThat(DsePeersRecord.path()).doesNotExist();
+        assertThat(MessagingService.instance().getDsePeersOnRecord()).isEqualTo(both);
+
+        // a DSE 5.1 node upgraded to this software leaves the record once it is seen at 4.0 or later, and the drain
+        // writes the record of the mode
+        set(dsePeer, MessagingService.VERSION_40);
+        DsePeersRecord.persistAtDrain();
+        assertThat(DsePeersRecord.persistedPeers(InternodeCompatibilityMode.DSE_5_1))
+        .containsExactly("127.0.0.45:7000");
+        reset(otherDsePeer);
+        assertThat(DsePeersRecord.peers()).isEmpty();
+        assertThat(record).doesNotExist();
+    }
+
+    /**
+     * The texts of the record of DSE 5.1 peers at a DSE_5_1 start: the peers on record at INFO, an entry that is not an
+     * address with port at ERROR, kept; and an ERROR when the record cannot be written.
+     */
+    @Test
+    public void theTextsOfTheDse51Record() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        Path record = DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1);
+        Files.write(record, "# from the previous run\n127.0.0.44:7000\n127.0.0.99:not-a-port\n"
+                            .getBytes(StandardCharsets.UTF_8));
+        Logger logger = (Logger) LoggerFactory.getLogger(DsePeersRecord.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        Path notADirectory = Files.write(metadata.resolve("metadata-file"), new byte[0]);
+        try
+        {
+            DsePeersRecord.loadAtStartup();
+            assertThat(DsePeersRecord.peers()).containsExactly(dsePeer);
+            assertThat(DsePeersRecord.unparsedEntries()).containsExactly("127.0.0.99:not-a-port");
+            assertThat(messages(appender, Level.ERROR))
+            .containsExactly("Entry '127.0.0.99:not-a-port' of the record of DSE 5.1 peers " + record + " is not " +
+                             "an address with port (<ip>:<port>); it is kept in the file");
+            assertThat(messages(appender, Level.INFO))
+            .containsExactly("DSE 5.1 peers on record from the previous run: [/127.0.0.44:7000]");
+
+            appender.list.clear();
+            DatabaseDescriptor.setMetadataDirectory(new File(notADirectory));
+            set(otherDsePeer, MessagingService.VERSION_3014);
+            assertThat(DsePeersRecord.peers()).containsExactly(dsePeer, otherDsePeer);
+            assertThat(messages(appender, Level.ERROR))
+            .containsExactly("Unable to persist the record of DSE 5.1 peers to " +
+                             notADirectory.resolve(DsePeersRecord.DSE_51_FILE_NAME) + "; a later start with " +
+                             "internode_compatibility_mode: NONE will not know about them");
+        }
+        finally
+        {
+            logger.detachAppender(appender);
+            DatabaseDescriptor.setMetadataDirectory(new File(metadata));
+        }
+    }
+
+    /** A record of DSE 5.1 peers that cannot be read refuses a DSE_5_1 start, naming it. */
+    @Test
+    public void anUnreadableDse51RecordRefusesTheStart() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        Path record = DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1);
+        Files.createDirectories(record);
+        assertThatThrownBy(() -> StartupChecks.loadDsePeersRecord.execute(new StartupChecksOptions()))
+        .isInstanceOf(StartupException.class)
+        .hasMessage("Unable to read the record of DSE 5.1 peers " + record + "; make it readable (it lists the DSE " +
+                    "5.1 peers of the last run)")
+        .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_DISK_STATE));
+        Files.delete(record);
+    }
+
+    private static List<String> messages(ListAppender<ILoggingEvent> appender, Level level)
+    {
+        return appender.list.stream()
+                            .filter(e -> e.getLevel() == level)
+                            .map(ILoggingEvent::getFormattedMessage)
+                            .collect(Collectors.toList());
     }
 }

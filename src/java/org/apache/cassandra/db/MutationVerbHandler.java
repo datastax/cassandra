@@ -136,7 +136,7 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
                .withParam(ParamType.RESPOND_TO, originalMessage.from())
                .withoutParam(ParamType.FORWARD_TO);
 
-        // DSE 6 compatibility mode: a DSE 6 coordinator (at the pre-4.0 dialect) lists an id of its own for each target in
+        // DSE compatibility modes: a DSE coordinator (at the pre-4.0 dialect) lists an id of its own for each target in
         // FWD_TO and expects the target to answer under it, so each target gets the mutation with the id listed for it, as
         // the forwarders before 5.0 (HCD 1.2 included) do (mode NONE always reuses the forwarder's message, as before)
         boolean useSameMessageID = !DseCompat.enabled() || forwardTo.useSameMessageID(originalMessage.id());

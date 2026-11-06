@@ -49,7 +49,10 @@ import org.apache.cassandra.utils.FBUtilities;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
 
 /**
- * The operational guards of the in-place upgrade from DataStax Enterprise 6.
+ * The operational guards of the in-place upgrade from DataStax Enterprise 6, and from DataStax Enterprise 5.1 in
+ * {@code internode_compatibility_mode: DSE_5_1}, where they apply as in {@code DSE_6} (a single-node cluster included:
+ * the rollback restores {@code system_schema}, so its schema is frozen too), to the DSE 5.1 peers, and their texts name
+ * DSE 5.1 and that mode ({@link DseCompat#source()}); the periodic check of the DSE access controls is DSE 6's only.
  * <p>
  * While the upgrade is in progress, the cluster topology and the on-disk formats must not change: bootstrap (and
  * bootstrap resume), replace, a join of the ring by a node that has not completed a bootstrap, decommission,
@@ -93,20 +96,25 @@ public final class DseUpgradeGuards
     /** The reason under which refused schema changes are counted. */
     public static final String SCHEMA_CHANGE = "schema change";
 
-    /** The error text of a refused schema change: refused, not only warned about. */
-    public static final String SCHEMA_FROZEN = "schema changes are frozen during the DSE 6 upgrade; run them after the flag is dropped";
+    /** The error text of a refused schema change in {@code DSE_6}: refused, not only warned about. */
+    public static final String SCHEMA_FROZEN = schemaFrozen("DSE 6");
 
-    /** The error text of a repair message to or from a peer speaking the pre-4.0 dialect. */
-    public static final String REPAIR_WITH_DSE_PEER = "repair is refused during the DSE 6 upgrade: repair messages cannot be exchanged " +
-                                                      "with a peer speaking the pre-4.0 dialect (DSE 6); run repair after the flag is dropped";
+    /** The error text of a repair message to or from a peer speaking the pre-4.0 dialect, in {@code DSE_6}. */
+    public static final String REPAIR_WITH_DSE_PEER = repairWithDsePeer("DSE 6");
 
-    private static final String DSE6_REMEDY = "finish the upgrade of every node and drop the mode first";
-    private static final String NONE_REMEDY = "finish upgrading (or remove) the DSE 6 nodes first";
-    /** The remedy of a refused replacement in {@code DSE_6} mode: the removal, which needs no node to change its mode first. */
-    private static final String REPLACE_REMEDY = "a replacement cannot start in internode_compatibility_mode DSE_6; remove the node lost for " +
-                                                 "good instead, a DSE 6 node or a node of this software (nodetool removenode once every DSE 6 " +
-                                                 "node still in the cluster is lost, nodetool assassinate otherwise), and add a new node once " +
-                                                 "the upgrade is finished";
+    private static final String DSE_MODE_REMEDY = "finish the upgrade of every node and drop the mode first";
+    /**
+     * The remedy of a refused replacement in {@code DSE_6} or {@code DSE_5_1} mode: the removal, which needs no node to
+     * change its mode first.
+     */
+    private static String replaceRemedy()
+    {
+        String source = DseCompat.source();
+        return "a replacement cannot start in internode_compatibility_mode " + DseCompat.textMode() + "; remove the " +
+               "node lost for good instead, a " + source + " node or a node of this software (nodetool removenode " +
+               "once every " + source + " node still in the cluster is lost, nodetool assassinate otherwise), and " +
+               "add a new node once the upgrade is finished";
+    }
 
     /** What the removal of a lost node leaves to the operator, logged when it is allowed. */
     private static final String LOST_NODE_CAVEAT = "the guard cannot tell a node lost for good from one silent for longer (restarting slowly, " +
@@ -115,7 +123,7 @@ public final class DseUpgradeGuards
                                                    "it again there with DSE's nodetool removenode";
 
     /** The kinds of lost node ({@link #lostNodeKind}). */
-    private static final String LOST_DSE_NODE = "DSE 6 node";
+    private static final String LOST_DSE_NODE = "DSE node";
     private static final String LOST_NODE_OF_THIS_SOFTWARE = "node of this software";
 
     private static final AtomicBoolean STATUS_LOG_STARTED = new AtomicBoolean();
@@ -129,8 +137,42 @@ public final class DseUpgradeGuards
     }
 
     /**
-     * True while the upgrade is in progress from this node's point of view: the DSE 6 compatibility mode is on, or a
-     * peer is recorded at the pre-4.0 dialect (with {@code NONE}: a DSE node gossiped by an upgraded peer).
+     * The remedy of a refusal on a node without the mode, or of a new node (whose shadow round shows DSE nodes), naming
+     * the DSE release of the mode ({@link DseCompat#source}): DSE 6 with {@code NONE}.
+     */
+    private static String noneRemedy()
+    {
+        return "finish upgrading (or remove) the " + DseCompat.source() + " nodes first";
+    }
+
+    /** The error text of a refused schema change during the upgrade from {@code source} ({@link DseCompat#source}). */
+    public static String schemaFrozen(String source)
+    {
+        return "schema changes are frozen during the " + source + " upgrade; run them after the flag is dropped";
+    }
+
+    /** The error text of a refused schema change in the mode the node runs in ({@link DseCompat#source()}). */
+    public static String schemaFrozen()
+    {
+        return schemaFrozen(DseCompat.source());
+    }
+
+    /** The error text of a repair message to or from a peer speaking the pre-4.0 dialect, a node of {@code source}. */
+    public static String repairWithDsePeer(String source)
+    {
+        return "repair is refused during the " + source + " upgrade: repair messages cannot be exchanged " +
+               "with a peer speaking the pre-4.0 dialect (" + source + "); run repair after the flag is dropped";
+    }
+
+    /** {@link #repairWithDsePeer(String)} in the mode the node runs in ({@link DseCompat#source()}). */
+    public static String repairWithDsePeer()
+    {
+        return repairWithDsePeer(DseCompat.source());
+    }
+
+    /**
+     * True while the upgrade is in progress from this node's point of view: the DSE 6 or DSE 5.1 compatibility mode is
+     * on, or a peer is recorded at the pre-4.0 dialect (with {@code NONE}: a DSE node gossiped by an upgraded peer).
      */
     public static boolean upgradeInProgress()
     {
@@ -155,13 +197,15 @@ public final class DseUpgradeGuards
     }
 
     /**
-     * The DSE 6 peers this node knows of: those recorded at a pre-4.0 messaging version now, and in {@code DSE_6} mode
-     * those on record from earlier (a DSE peer that is down is only on record), and, unless they left the ring
-     * ({@link DsePeers#hasLeftTheRing}), those {@link DsePeers} identified or presumed as DSE nodes (by a handshake, a
-     * gossiped DSE {@code NET_VERSION} or a stored DSE 6 release, possibly before their version is recorded) and those
-     * whose gossip state carries a DSE {@code NET_VERSION} ({@link DsePeers#gossipedDseVersion}; the storage service does
-     * not record the version of a node that is not a ring member or is hibernating, being replaced). The entries of the
-     * record that are not addresses are not peers here ({@link DsePeersRecord#unparsedEntries}). Sorted.
+     * The DSE peers this node knows of (DSE 6 peers, or DSE 5.1 peers in {@code DSE_5_1}): those recorded at a pre-4.0
+     * messaging version now, and in {@code DSE_6} or {@code DSE_5_1} mode those on record from earlier (a DSE peer that
+     * is down is only on record), and, unless they left the ring ({@link DsePeers#hasLeftTheRing}), those
+     * {@link DsePeers} identified or presumed as DSE nodes (by a handshake, a gossiped DSE {@code NET_VERSION} or a
+     * stored DSE 6 release, possibly before their version is recorded) and those whose gossip state carries the
+     * {@code NET_VERSION} of the mode's DSE release ({@link DsePeers#gossipsDseVersion}, 10 or 11 in {@code DSE_5_1};
+     * the storage service does not record the version of a node that is not a ring member or is hibernating, being
+     * replaced). The entries of the record that are not addresses are not peers here
+     * ({@link DsePeersRecord#unparsedEntries}). Sorted.
      */
     public static Set<InetAddressAndPort> knownDsePeers()
     {
@@ -178,7 +222,8 @@ public final class DseUpgradeGuards
                     peers.add(peer);
             InetAddressAndPort self = FBUtilities.getBroadcastAddressAndPort();
             for (Map.Entry<InetAddressAndPort, EndpointState> e : Gossiper.instance.endpointStateMap.entrySet())
-                if (!e.getKey().equals(self) && !DsePeers.hasLeftTheRing(e.getValue()) && DsePeers.gossipedDseVersion(e.getValue()) >= 0)
+                if (!e.getKey().equals(self) && !DsePeers.hasLeftTheRing(e.getValue())
+                    && DsePeers.gossipsDseVersion(e.getValue()))
                     peers.add(e.getKey());
         }
         return peers;
@@ -223,28 +268,31 @@ public final class DseUpgradeGuards
     {
         if (!upgradeInProgress())
             return;
-        throw new ConfigurationException(refusalMessage("replacing a node", DseCompat.enabled() ? REPLACE_REMEDY : NONE_REMEDY), false);
+        throw new ConfigurationException(refusalMessage("replacing a node", DseCompat.enabled() ? replaceRemedy()
+                                                                                                 : noneRemedy()),
+                                         false);
     }
 
     /**
      * True when {@code endpoint} is a node lost to this node during the upgrade: a peer whose gossip state this node
-     * holds, that is not alive to this node, and of which nothing new has been heard for {@link #lostNodeSilenceNanos()}
-     * (no newer heartbeat, directly or relayed by another node, and no new generation), and that is either a DSE 6 node
-     * (it gossips a pre-4.0 {@code NET_VERSION} or is recorded at a pre-4.0 messaging version; a peer that is only on
-     * the record of DSE 6 peers or presumed is not enough) or a node of this software (it gossips a {@code NET_VERSION}
-     * of 4.0 or later: a node in {@code DSE_6} mode gossips 4.0, one without the mode its own version; in a cluster
-     * upgraded from DSE 6 no other node gossips such a value). A node that restarts, or that this node cannot talk to
-     * but others can (a DSE 6 node seen by a node without the mode, which never completes an echo with it), keeps its
-     * gossip state fresh and is not lost; neither is this node itself, a peer without a gossip state, nor a peer whose
-     * gossip state carries no {@code NET_VERSION} this check can read and that is not recorded at a pre-4.0 version,
-     * since nothing says it is down or what it runs.
+     * holds, that is not alive to this node, and of which nothing new has been heard for
+     * {@link #lostNodeSilenceNanos()} (no newer heartbeat, directly or relayed by another node, and no new generation),
+     * and that is either a DSE node (a DSE 6 node, or a DSE 5.1 node in {@code DSE_5_1}: it gossips a pre-4.0
+     * {@code NET_VERSION} or is recorded at a pre-4.0 messaging version; a peer that is only on the record of DSE peers
+     * or presumed is not enough) or a node of this software (it gossips a {@code NET_VERSION} of 4.0 or later: a node
+     * in {@code DSE_6} mode gossips 4.0, one without the mode its own version; in a cluster upgraded from DSE 6 no
+     * other node gossips such a value). A node that restarts, or that this node cannot talk to but others can (a DSE 6
+     * node seen by a node without the mode, which never completes an echo with it), keeps its gossip state fresh and is
+     * not lost; neither is this node itself, a peer without a gossip state, nor a peer whose gossip state carries no
+     * {@code NET_VERSION} this check can read and that is not recorded at a pre-4.0 version, since nothing says it is
+     * down or what it runs.
      */
     public static boolean isLostNode(InetAddressAndPort endpoint)
     {
         return lostNodeKind(endpoint) != null;
     }
 
-    /** True when {@code endpoint} is a DSE 6 node lost to this node ({@link #isLostNode}). */
+    /** True when {@code endpoint} is a DSE node (DSE 6, or DSE 5.1 in its mode) lost to this node. */
     @VisibleForTesting
     static boolean isLostDsePeer(InetAddressAndPort endpoint)
     {
@@ -270,7 +318,8 @@ public final class DseUpgradeGuards
     /** How a lost node of {@code kind} ({@link #lostNodeKind}) is named in the log lines and the refusals. */
     private static String describe(String kind, InetAddressAndPort endpoint)
     {
-        return LOST_DSE_NODE.equals(kind) ? "the DSE 6 node " + endpoint : "the node " + endpoint + " of this software";
+        return LOST_DSE_NODE.equals(kind) ? "the " + DseCompat.source() + " node " + endpoint
+                                          : "the node " + endpoint + " of this software";
     }
 
     /**
@@ -321,13 +370,17 @@ public final class DseUpgradeGuards
         long seconds = parseLostNodeSilenceSeconds(value);
         long floorMillis = lostNodeSilenceFloorMillis();
         if (seconds < TimeUnit.MILLISECONDS.toSeconds(floorMillis + 999))
-            throw new ConfigurationException(String.format("-D%s=%s is refused: the silence after which a node that is down counts as lost during " +
-                                                           "the DSE 6 upgrade must be at least %d seconds, the larger of one minute and twice the " +
-                                                           "ring delay; unset it for the default (the largest of 30 minutes, max_hint_window and " +
-                                                           "twice the ring delay)",
-                                                           CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey(),
-                                                           value, TimeUnit.MILLISECONDS.toSeconds(floorMillis + 999)),
+        {
+            String key = CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey();
+            throw new ConfigurationException(String.format("-D%s=%s is refused: the silence after which a node that " +
+                                                           "is down counts as lost during the %s upgrade must be at " +
+                                                           "least %d seconds, the larger of one minute and twice the " +
+                                                           "ring delay; unset it for the default (the largest of 30 " +
+                                                           "minutes, max_hint_window and twice the ring delay)",
+                                                           key, value, DseCompat.source(),
+                                                           TimeUnit.MILLISECONDS.toSeconds(floorMillis + 999)),
                                              false);
+        }
         return seconds;
     }
 
@@ -346,10 +399,11 @@ public final class DseUpgradeGuards
     }
 
     /**
-     * The DSE 6 nodes not known to be lost: the known DSE 6 peers and the endpoints whose gossip state carries a
-     * pre-4.0 {@code NET_VERSION} (unless they left the ring), alive, recently heard of, or of no known state (on the
-     * record of DSE 6 peers only, or presumed), less the lost nodes ({@link #isLostNode}; a peer on the record that
-     * gossips 4.0 or later was upgraded meanwhile). Those a stream could involve. Sorted.
+     * The DSE nodes not known to be lost (DSE 6 nodes, or DSE 5.1 nodes in {@code DSE_5_1}): the known DSE peers and
+     * the endpoints whose gossip state carries a pre-4.0 {@code NET_VERSION} (unless they left the ring), alive,
+     * recently heard of, or of no known state (on the record of DSE peers only, or presumed), less the lost nodes
+     * ({@link #isLostNode}; a peer on the record that gossips 4.0 or later was upgraded meanwhile). Those a stream
+     * could involve. Sorted.
      */
     public static Set<InetAddressAndPort> liveDsePeers()
     {
@@ -398,9 +452,12 @@ public final class DseUpgradeGuards
         Set<InetAddressAndPort> live = liveDsePeers();
         if (live.isEmpty())
         {
-            logger.warn("Allowing the removal of {}, silent for {} seconds, during the DSE 6 upgrade: its data is streamed from its other " +
-                        "replicas, all of this software (a DSE 6 node that comes back meanwhile takes over ranges without their data until " +
-                        "a full repair, which runs once the upgrade is finished); " + LOST_NODE_CAVEAT, describe(kind, endpoint), silenceSeconds(endpoint));
+            logger.warn("Allowing the removal of {}, silent for {} seconds, during the {} upgrade: its data is " +
+                        "streamed from its other replicas, all of this software (a {} node that comes back " +
+                        "meanwhile takes over ranges without their data until a full repair, which runs once the " +
+                        "upgrade is finished); " +
+                        LOST_NODE_CAVEAT, describe(kind, endpoint), silenceSeconds(endpoint), DseCompat.source(),
+                        DseCompat.source());
             return;
         }
         Set<InetAddressAndPort> withoutState = new TreeSet<>();
@@ -408,12 +465,18 @@ public final class DseUpgradeGuards
             if (Gossiper.instance.getEndpointStateForEndpoint(peer) == null)
                 withoutState.add(peer);
         DseCompatRefusals.refused("removenode");
-        throw new UnsupportedOperationException("removenode of " + describe(kind, endpoint) + " lost for good is refused while DSE 6 nodes not " +
-                                                "known to be lost are in the cluster (" + live +
-                                                (withoutState.isEmpty() ? "" : "; known without a gossip state (on record or presumed): " + withoutState) +
-                                                "): it streams data with the other replicas, which DSE 6 nodes cannot do with this software; " +
-                                                "upgrade those DSE 6 nodes first, or remove the lost node with nodetool assassinate " +
-                                                endpoint.getHostAddressAndPort() + " (no streaming: the data of its ranges is then held by fewer " +
+        String source = DseCompat.source();
+        String withoutStateText = withoutState.isEmpty() ? ""
+                                                         : "; known without a gossip state (on record or presumed): " +
+                                                           withoutState;
+        throw new UnsupportedOperationException("removenode of " + describe(kind, endpoint) + " lost for good is " +
+                                                "refused while " + source + " nodes not known to be lost are in the " +
+                                                "cluster (" + live + withoutStateText + "): it streams data with the " +
+                                                "other replicas, which " + source + " nodes cannot do with this " +
+                                                "software; upgrade those " + source + " nodes first, or remove the " +
+                                                "lost node with nodetool assassinate " +
+                                                endpoint.getHostAddressAndPort() +
+                                                " (no streaming: the data of its ranges is then held by fewer " +
                                                 "replicas until a full repair, which runs once the upgrade is finished)");
     }
 
@@ -434,9 +497,10 @@ public final class DseUpgradeGuards
             refuseWhileUpgrading("assassinate");
             return;
         }
-        logger.warn("Allowing the assassination of {}, silent for {} seconds, during the DSE 6 upgrade: nothing is streamed, so the data " +
-                    "of its ranges is held by fewer replicas until a full repair, which runs once the upgrade is finished; " +
-                    LOST_NODE_CAVEAT, describe(kind, endpoint), silenceSeconds(endpoint));
+        logger.warn("Allowing the assassination of {}, silent for {} seconds, during the {} upgrade: nothing is " +
+                    "streamed, so the data of its ranges is held by fewer replicas until a full repair, which runs " +
+                    "once the upgrade is finished; " + LOST_NODE_CAVEAT,
+                    describe(kind, endpoint), silenceSeconds(endpoint), DseCompat.source());
     }
 
     /**
@@ -455,9 +519,10 @@ public final class DseUpgradeGuards
             refuseWhileUpgrading("removenode force");
             return;
         }
-        logger.warn("Allowing the forced removal of the lost nodes {}, each silent for at least {} seconds, during the DSE 6 upgrade: the " +
-                    "data not yet streamed is held by fewer replicas until a full repair, which runs once the upgrade is finished; " +
-                    LOST_NODE_CAVEAT, leaving, TimeUnit.NANOSECONDS.toSeconds(lostNodeSilenceNanos()));
+        logger.warn("Allowing the forced removal of the lost nodes {}, each silent for at least {} seconds, during " +
+                    "the {} upgrade: the data not yet streamed is held by fewer replicas until a full repair, which " +
+                    "runs once the upgrade is finished; " + LOST_NODE_CAVEAT,
+                    leaving, TimeUnit.NANOSECONDS.toSeconds(lostNodeSilenceNanos()), DseCompat.source());
     }
 
     /**
@@ -494,8 +559,9 @@ public final class DseUpgradeGuards
                 dsePeers.add(e.getKey());
         if (dsePeers.isEmpty())
             return;
-        throw new ConfigurationException(operation + " is refused while the DSE 6 upgrade is in progress (DSE 6 nodes in gossip: " + dsePeers +
-                                         "); " + NONE_REMEDY, false);
+        String source = DseCompat.source();
+        throw new ConfigurationException(operation + " is refused while the " + source + " upgrade is in progress (" +
+                                         source + " nodes in gossip: " + dsePeers + "); " + noneRemedy(), false);
     }
 
     /** True when the gossip state carries a {@code NET_VERSION} that maps to a pre-4.0 messaging version (DSE's own, or the dialect). */
@@ -518,18 +584,21 @@ public final class DseUpgradeGuards
     /** The error text of a refused operation. */
     public static String refusalMessage(String operation)
     {
-        return refusalMessage(operation, DseCompat.enabled() ? DSE6_REMEDY : NONE_REMEDY);
+        return refusalMessage(operation, DseCompat.enabled() ? DSE_MODE_REMEDY : noneRemedy());
     }
 
     private static String refusalMessage(String operation, String remedy)
     {
         Set<InetAddressAndPort> peers = knownDsePeers();
-        StringBuilder message = new StringBuilder(operation).append(" is refused while the DSE 6 upgrade is in progress (internode_compatibility_mode: ");
+        String source = DseCompat.source();
+        StringBuilder message = new StringBuilder(operation).append(" is refused while the ").append(source)
+                                                            .append(" upgrade is in progress ")
+                                                            .append("(internode_compatibility_mode: ");
         if (DseCompat.enabled())
         {
-            message.append("DSE_6");
+            message.append(DseCompat.textMode());
             if (!peers.isEmpty())
-                message.append(", DSE 6 peers: ").append(peers);
+                message.append(", ").append(source).append(" peers: ").append(peers);
         }
         else
         {
@@ -539,8 +608,8 @@ public final class DseUpgradeGuards
     }
 
     /**
-     * True while the schema is frozen: in {@code DSE_6} mode, unless {@code cassandra.internode_compatibility_mode.allow_ddl}
-     * is set.
+     * True while the schema is frozen: in {@code DSE_6} or {@code DSE_5_1} mode, unless
+     * {@code cassandra.internode_compatibility_mode.allow_ddl} is set.
      */
     public static boolean schemaChangesFrozen()
     {
@@ -558,7 +627,7 @@ public final class DseUpgradeGuards
     public static void refuseSchemaChange() throws InvalidRequestException
     {
         DseCompatRefusals.refused(SCHEMA_CHANGE);
-        throw new InvalidRequestException(SCHEMA_FROZEN + " (or start the node with -D" +
+        throw new InvalidRequestException(schemaFrozen() + " (or start the node with -D" +
                                           CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL.getKey() + "=true)");
     }
 
@@ -575,16 +644,21 @@ public final class DseUpgradeGuards
         long total = 0;
         for (long count : refusals.values())
             total += count;
-        StringBuilder line = new StringBuilder("DSE 6 upgrade in progress (internode_compatibility_mode: DSE_6): ");
+        String source = DseCompat.source();
+        StringBuilder line = new StringBuilder(source).append(" upgrade in progress (internode_compatibility_mode: ")
+                                                      .append(DseCompat.textMode()).append("): ");
         if (peers.isEmpty() && unparsed.isEmpty())
             line.append("no peer speaks the pre-4.0 dialect any more and none is on record; once every node runs this software, drop the mode " +
                         "and delete the upgrade marker");
         else if (peers.isEmpty())
             line.append("no peer speaks the pre-4.0 dialect any more");
         else
-            line.append(peers.size()).append(" peer(s) speaking the pre-4.0 dialect or on record as DSE 6 peers: ").append(peers);
+            line.append(peers.size()).append(" peer(s) speaking the pre-4.0 dialect or on record as ").append(source)
+                .append(" peers: ").append(peers);
         if (!unparsed.isEmpty())
-            line.append("; the record of DSE 6 peers ").append(DsePeersRecord.path()).append(" has entries that are not addresses, which keep ")
+            line.append("; the record of ").append(source).append(" peers ")
+                .append(DsePeersRecord.path(DseCompat.textMode()))
+                .append(" has entries that are not addresses, which keep ")
                 .append("a start with internode_compatibility_mode NONE refused until they are removed by hand: ").append(unparsed);
         line.append("; requests refused so far: ").append(total);
         if (total > 0)
@@ -593,30 +667,40 @@ public final class DseUpgradeGuards
     }
 
     /**
-     * Starts the periodic tasks, once at server start in {@code DSE_6} mode (a no-op otherwise): the status line, and a
-     * new check of the DSE access controls, which a DSE node can still change after this node started. The check reads
-     * {@code system_auth} across the cluster and may block: it runs on the optional tasks executor, not on the shared
-     * scheduled tasks one. That executor also runs other background tasks of the node (the size estimates, the
-     * speculative retry thresholds, for instance), which a slow read delays for as long as it lasts, at most the read
-     * timeout and then a read of this node's replica, every {@value #STATUS_LOG_INTERVAL_MINUTES} minutes.
+     * Starts the periodic tasks, once at server start in {@code DSE_6} or {@code DSE_5_1} mode (a no-op otherwise): the
+     * status line, and, in {@code DSE_6} only, a new check of the DSE access controls, which a DSE node can still
+     * change after this node started. The check reads {@code system_auth} across the cluster and may block: it runs on
+     * the optional tasks executor, not on the shared scheduled tasks one. That executor also runs other background
+     * tasks of the node (the size estimates, the speculative retry thresholds, for instance), which a slow read delays
+     * for as long as it lasts, at most the read timeout and then a read of this node's replica, every
+     * {@value #STATUS_LOG_INTERVAL_MINUTES} minutes.
      */
     public static void startStatusLog()
     {
         if (!DseCompat.enabled() || !STATUS_LOG_STARTED.compareAndSet(false, true))
             return;
         schedulePeriodicTasks(ScheduledExecutors.scheduledTasks, ScheduledExecutors.optionalTasks);
-        logger.info("The DSE 6 upgrade status will be logged, and the DSE access controls checked again, every {} minutes; the check does not " +
-                    "see RESTRICT ROWS or UNRESTRICT ROWS run on DSE nodes during the upgrade (DSE schema changes do not reach this node): do " +
-                    "not run them until every node is upgraded", STATUS_LOG_INTERVAL_MINUTES);
+        if (DseCompat.isDse51())
+            logger.info("The DSE 5.1 upgrade status will be logged every {} minutes", STATUS_LOG_INTERVAL_MINUTES);
+        else
+            logger.info("The DSE 6 upgrade status will be logged, and the DSE access controls checked again, every " +
+                        "{} minutes; the check does not see RESTRICT ROWS or UNRESTRICT ROWS run on DSE nodes during " +
+                        "the upgrade (DSE schema changes do not reach this node): do not run them until every node " +
+                        "is upgraded", STATUS_LOG_INTERVAL_MINUTES);
     }
 
-    /** Schedules the status line on {@code statusExecutor} and the check of the DSE access controls on {@code recheckExecutor}. */
+    /**
+     * Schedules the status line on {@code statusExecutor} and the check of the DSE access controls on
+     * {@code recheckExecutor}, except in {@code DSE_5_1}, which has no DSE access control to check
+     * ({@link Dse6AccessControlCheck#recheck()} does nothing there).
+     */
     @VisibleForTesting
     static void schedulePeriodicTasks(ScheduledExecutorService statusExecutor, ScheduledExecutorService recheckExecutor)
     {
         statusExecutor.scheduleWithFixedDelay(DseUpgradeGuards::logStatus, STATUS_LOG_INTERVAL_MINUTES, STATUS_LOG_INTERVAL_MINUTES, TimeUnit.MINUTES);
-        recheckExecutor.scheduleWithFixedDelay(DseUpgradeGuards::recheckAccessControls,
-                                               STATUS_LOG_INTERVAL_MINUTES, STATUS_LOG_INTERVAL_MINUTES, TimeUnit.MINUTES);
+        if (!DseCompat.isDse51())
+            recheckExecutor.scheduleWithFixedDelay(DseUpgradeGuards::recheckAccessControls, STATUS_LOG_INTERVAL_MINUTES,
+                                                   STATUS_LOG_INTERVAL_MINUTES, TimeUnit.MINUTES);
     }
 
     /** One status line; a failure is logged and never cancels the next runs. */
@@ -629,7 +713,7 @@ public final class DseUpgradeGuards
         }
         catch (RuntimeException e)
         {
-            logger.error("Unable to compute the DSE 6 upgrade status", e);
+            logger.error("Unable to compute the {} upgrade status", DseCompat.source(), e);
         }
     }
 
