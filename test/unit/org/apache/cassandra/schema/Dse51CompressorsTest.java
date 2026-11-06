@@ -16,19 +16,23 @@
 
 package org.apache.cassandra.schema;
 
+import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import org.apache.cassandra.cache.ChunkCacheLoadingTest;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.compress.EncryptorTest;
+import org.apache.cassandra.io.compress.ICompressor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -140,7 +144,7 @@ public class Dse51CompressorsTest extends CQLTester
     @Test
     public void aCompressorOfAnotherPackageIsNamedInFull() throws Throwable
     {
-        String custom = ChunkCacheLoadingTest.ReadingNopCompressor.class.getName();
+        String custom = PassThroughCompressor.class.getName();
         String table = createTableCompressedWith("{'class': '" + custom + "'}");
         assertThat(unreadable()).containsExactly(KEYSPACE + '.' + table + " (" + custom + ')');
     }
@@ -200,5 +204,57 @@ public class Dse51CompressorsTest extends CQLTester
         .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.t (ZstdCompressor) is compressed with a " +
                    "compressor DSE 5.1 does not read, so a DSE 5.1 node could not open the sstables this node writes " +
                    "for it; ks.e (Encryptor), ks.f (Encryptor) are encrypted, which this mode does not support" + fix);
+    }
+
+    /** A compressor outside {@code org.apache.cassandra.io.compress} that copies its input; no test runs it. */
+    public static class PassThroughCompressor implements ICompressor
+    {
+        public static PassThroughCompressor create(Map<String, String> options)
+        {
+            return new PassThroughCompressor();
+        }
+
+        @Override
+        public int initialCompressedBufferLength(int chunkLength)
+        {
+            return chunkLength;
+        }
+
+        @Override
+        public int uncompress(byte[] input, int inputOffset, int inputLength, byte[] output, int outputOffset)
+        {
+            System.arraycopy(input, inputOffset, output, outputOffset, inputLength);
+            return inputLength;
+        }
+
+        @Override
+        public void compress(ByteBuffer input, ByteBuffer output)
+        {
+            output.put(input);
+        }
+
+        @Override
+        public void uncompress(ByteBuffer input, ByteBuffer output)
+        {
+            output.put(input);
+        }
+
+        @Override
+        public BufferType preferredBufferType()
+        {
+            return BufferType.ON_HEAP;
+        }
+
+        @Override
+        public boolean supports(BufferType bufferType)
+        {
+            return true;
+        }
+
+        @Override
+        public Set<String> supportedOptions()
+        {
+            return Set.of();
+        }
     }
 }

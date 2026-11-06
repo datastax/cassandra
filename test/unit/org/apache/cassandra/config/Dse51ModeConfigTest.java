@@ -153,8 +153,9 @@ public class Dse51ModeConfigTest
     }
 
     /**
-     * The daemon announces the mode once the sstable formats are loaded, with the version written: big nb on a node
-     * (this JVM loaded its formats before the test, so the text names the format it loaded).
+     * The daemon announces the mode once the sstable formats are loaded, naming the format and version written, and
+     * not in the other modes. This JVM loaded its formats before the test, so the text names the format it loaded; the
+     * in-JVM {@code Dse51CompressorsStartupTest} checks that a node in the mode names big nb.
      */
     @Test
     public void theModeIsAnnouncedWithTheVersionWritten()
