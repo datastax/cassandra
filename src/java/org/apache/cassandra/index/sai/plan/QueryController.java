@@ -132,7 +132,6 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private final NavigableSet<Clustering<?>> nextClusterings;
 
     final Plan.Factory planFactory;
-
     /**
      * Holds the primary key iterators for indexed expressions in the query (i.e. leaves of the expression tree).
      * We will construct the final iterator from those.
@@ -434,7 +433,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         // Because the orderer has a specific queue view
         if (orderer != null)
+        {
+            keysIterationPlan = orderer.isBM25() ? intersectWhereClauseWithBM25Terms(keysIterationPlan) : keysIterationPlan;
             keysIterationPlan = planFactory.sort(keysIterationPlan, orderer);
+        }
 
         // This would mean we have no WHERE nor ANN clauses at all; this can happen in case an index was dropped after the
         // query was initiated
@@ -442,6 +444,43 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             throw invalidRequest(INDEX_MAY_HAVE_BEEN_DROPPED);
 
         return keysIterationPlan;
+    }
+
+    /**
+     * BM25 ordering also acts as a filter: only the rows containing all the query terms are returned.
+     * We intersect the given WHERE clause plan with an {@code ANALYZER_MATCHES} index scan per term in the BM25 ordering.
+     * If the WHERE clause plan is already an intersection, the term scans are added to it instead of nesting intersections.
+     * <p>
+     * Those scans are regular leaves, so the optimizer is free to remove them. If it removes all of them together with
+     * the rest of the WHERE clause, the plan becomes a sort-then-filter plan with a {@link Plan.Bm25IndexScan}.
+     * <p>
+     * When there is no WHERE clause plan to sort the result of, the plan is returned as it is. It will be turned into
+     * a {@link Plan.Bm25IndexScan}, which already takes care of matching the terms.
+     */
+    private Plan.KeysIteration intersectWhereClauseWithBM25Terms(Plan.KeysIteration source)
+    {
+        // If the plan selects everything there is nothing to optimize.
+        // If the plan selects nothing we don't have a hybrid query, but only ORDER BY, so there is no prefiltering.
+        if (source == planFactory.everything || source == planFactory.nothing)
+            return source;
+
+        // don't add scans for the terms that are already explicitly present in the WHERE clause
+        Set<Expression> existing = new HashSet<>();
+        for (Plan.IndexScan scan : source.nodesOfType(Plan.IndexScan.class))
+            if (scan.predicate != null)
+                existing.add(scan.predicate);
+
+        List<Plan.KeysIteration> termScans = new ArrayList<>();
+        for (ByteBuffer term : orderer.getQueryTerms())
+        {
+            Expression expression = new Expression(orderer.context).add(Operator.ANALYZER_MATCHES, term);
+            if (existing.contains(expression))
+                continue;
+            long expectedMatchingRowCount = Math.min(estimateMatchingRowCount(expression), planFactory.tableMetrics.rows);
+            termScans.add(planFactory.indexScan(expression, expectedMatchingRowCount));
+        }
+
+        return termScans.isEmpty() ? source : planFactory.intersection(source, termScans);
     }
 
     public Iterator<? extends PrimaryKey> buildIterator(Plan plan)

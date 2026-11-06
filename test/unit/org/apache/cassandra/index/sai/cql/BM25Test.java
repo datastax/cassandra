@@ -1176,58 +1176,51 @@ public class BM25Test extends SAITester
 
         // Verify BM25-only queries
 
-        assertQueryHasSubplan("SELECT c FROM %s ORDER BY s BM25 OF 'apple' LIMIT 5",
-                              Plan.Bm25IndexScan.class,
-                              row(0), row(1), row(2));
-        assertQueryHasSubplan("SELECT c FROM %s ORDER BY s BM25 OF 'orange' LIMIT 5",
-                              Plan.Bm25IndexScan.class,
-                              row(3), row(4), row(5), row(6), row(7));
-        assertQueryHasSubplan("SELECT c FROM %s ORDER BY s BM25 OF 'banana' LIMIT 5",
-                              Plan.Bm25IndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s ORDER BY s BM25 OF 'apple' LIMIT 5", row(0), row(1), row(2))
+                .uses(Plan.Bm25IndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s ORDER BY s BM25 OF 'orange' LIMIT 5", row(3), row(4), row(5), row(6), row(7))
+                .uses(Plan.Bm25IndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s ORDER BY s BM25 OF 'banana' LIMIT 5")
+                .uses(Plan.Bm25IndexScan.class);
 
         // Verify numeric-only queries
 
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 LIMIT 5",
-                              Plan.NumericIndexScan.class,
-                              row(0), row(1), row(2), row(3), row(4));
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 LIMIT 5",
-                              Plan.NumericIndexScan.class,
-                              row(8), row(9));
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 LIMIT 5",
-                              Plan.NumericIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 1 LIMIT 5", row(0), row(1), row(2), row(3), row(4))
+                .uses(Plan.NumericIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 0 LIMIT 5", row(8), row(9))
+                .uses(Plan.NumericIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = -1 LIMIT 5")
+                .uses(Plan.NumericIndexScan.class);
 
         // Verify hybrid queries
 
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5",
-                              Plan.Bm25IndexScan.class,
-                              row(0), row(1), row(2));
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'orange' LIMIT 5",
-                              Plan.Bm25IndexScan.class,
-                              row(3), row(4), row(5), row(6), row(7));
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'banana' LIMIT 5",
-                              Plan.Bm25IndexScan.class);
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'apple' LIMIT 5",
-                              Plan.NumericIndexScan.class);
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5",
-                              Plan.NumericIndexScan.class,
-                              row(8), row(9));
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'banana' LIMIT 5",
-                              Plan.Bm25IndexScan.class);
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'apple' LIMIT 5",
-                              Plan.NumericIndexScan.class);
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'orange' LIMIT 5",
-                              Plan.NumericIndexScan.class);
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'banana' LIMIT 5",
-                              Plan.NumericIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5", row(0), row(1), row(2))
+                .uses(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'orange' LIMIT 5", row(3), row(4), row(5), row(6), row(7))
+                .uses(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'banana' LIMIT 5")
+                .uses(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'apple' LIMIT 5")
+                .uses(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5", row(8), row(9))
+                .uses(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'banana' LIMIT 5")
+                .uses(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'apple' LIMIT 5")
+                .uses(Plan.NumericIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'orange' LIMIT 5")
+                .uses(Plan.NumericIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = -1 ORDER BY s BM25 OF 'banana' LIMIT 5")
+                .uses(Plan.NumericIndexScan.class);
 
         // Verify index hints with a hybrid query that would use the sort-then-filter index without hints
 
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH included_indexes = {" + numericIndex + '}',
-                              Plan.NumericIndexScan.class,
-                              row(0), row(1), row(2));
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH included_indexes = {" + literalIndex + '}',
-                              Plan.Bm25IndexScan.class,
-                              row(0), row(1), row(2));
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH included_indexes = {" + numericIndex + '}',
+                          row(0), row(1), row(2))
+                .uses(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH included_indexes = {" + literalIndex + '}',
+                          row(0), row(1), row(2))
+                .uses(Plan.Bm25IndexScan.class);
         assertInvalidMessage(IndexContext.MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE,
                              "SELECT c FROM %s WHERE n = 1 ORDER BY s BM25 OF 'apple' LIMIT 5 WITH included_indexes = {" + numericIndex + ',' + literalIndex + '}');
         assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
@@ -1239,12 +1232,10 @@ public class BM25Test extends SAITester
 
         // Verify index hints with a hybrid query that would use filter-then-sort without hints
 
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH included_indexes = {" + numericIndex + '}',
-                              Plan.NumericIndexScan.class,
-                              row(8), row(9));
-        assertQueryHasSubplan("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH included_indexes = {" + literalIndex + '}',
-                              Plan.Bm25IndexScan.class,
-                              row(8), row(9));
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH included_indexes = {" + numericIndex + '}', row(8), row(9))
+                .uses(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+        assertThatPlanFor("SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH included_indexes = {" + literalIndex + '}', row(8), row(9))
+                .uses(Plan.Bm25IndexScan.class);
         assertInvalidMessage(IndexContext.MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE,
                              "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH included_indexes = {" + numericIndex + ',' + literalIndex + '}');
         assertInvalidMessage(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
@@ -1253,6 +1244,47 @@ public class BM25Test extends SAITester
                              "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH excluded_indexes = {" + literalIndex + '}');
         assertInvalidMessage(String.format(StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, 's'),
                              "SELECT c FROM %s WHERE n = 0 ORDER BY s BM25 OF 'orange' LIMIT 5 WITH excluded_indexes = {" + numericIndex + ',' + literalIndex + '}');
+    }
+
+    @Test
+    public void testPlanningOnHybridQueriesWithIntersection()
+    {
+        assertPlanningOnHybridQueriesWithIntersection(false);
+    }
+
+    @Test
+    public void testPlanningOnHybridQueriesWithIntersectionFlushing()
+    {
+        assertPlanningOnHybridQueriesWithIntersection(true);
+    }
+
+    private void assertPlanningOnHybridQueriesWithIntersection(boolean flush)
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, a int, b int, s text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(a) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+
+        // insert enough rows to stablilize index openining cost and stats
+        for (int i = 0; i < 1000; i++)
+            execute("INSERT INTO %s (k, a, b, s) VALUES (?, ?, ?, ?)", i, i, i, String.valueOf(i % 10));
+
+        if (flush)
+            flush();
+
+        // BM25 with better selectivity than the intersection; we use sort-then-filter
+        assertThatPlanFor("SELECT k FROM %s WHERE a >= 0 AND b >= 0 ORDER BY s BM25 OF '0' LIMIT 1", 1)
+                .uses(Plan.Bm25IndexScan.class);
+
+        // Intersection is better than BM25 but the individual intersected filters are not better;
+        // we use filter-then-sort including BM25 as a filter
+        assertThatPlanFor("SELECT k FROM %s WHERE a < 200 AND b < 200 ORDER BY s BM25 OF '0' LIMIT 10", 10)
+                .uses(Plan.NumericIndexScan.class, Plan.LiteralIndexScan.class);
+
+        // Intersection and its components are better than BM25;
+        // we use filter-then-sort without including BM25 as a filter
+        assertThatPlanFor("SELECT k FROM %s WHERE a < 1 AND b < 1 ORDER BY s BM25 OF '0' LIMIT 10", 1)
+                .uses(Plan.NumericIndexScan.class);
     }
 
     private void assertCannotBeRestrictedByClustering(String query, String column)
