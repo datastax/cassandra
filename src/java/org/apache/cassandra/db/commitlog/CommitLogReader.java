@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.commitlog.CommitLogReadHandler.CommitLogReadErrorReason;
 import org.apache.cassandra.db.commitlog.CommitLogReadHandler.CommitLogReadException;
@@ -43,6 +44,7 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.FileDataInput;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.io.util.RebufferingInputStream;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
@@ -59,6 +61,10 @@ public class CommitLogReader
     private final CRC32 checksum;
     private final Map<TableId, AtomicInteger> invalidMutations; // if we can't find a table for a mutation, we count it here
     private final Set<String> segmentsWithInvalidMutations;
+    // DSE 5.1 compatibility: the replayed mutations of the segment being read that name the columns DSE 5.1 adds to
+    // system.local and system.peers, and the names of those columns
+    private int dse51Mutations;
+    private final Set<String> dse51Columns = new TreeSet<>();
 
     private byte[] buffer;
 
@@ -195,6 +201,8 @@ public class CommitLogReader
     {
         // just transform from the file name (no reading of headers) to determine version
         CommitLogDescriptor desc = CommitLogDescriptor.fromFileName(file.name());
+        dse51Mutations = 0;
+        dse51Columns.clear();
 
         try(RandomAccessReader reader = RandomAccessReader.open(file))
         {
@@ -275,6 +283,11 @@ public class CommitLogReader
                     throw (IOException) re.getCause();
                 throw re;
             }
+            if (dse51Mutations > 0)
+                logger.info("DSE 5.1 compatibility mode: mutations of system.local or system.peers naming the " +
+                            "columns {} DSE 5.1 adds to those tables, read in {}: {}; those not yet in an sstable " +
+                            "are replayed without the values of those columns, which this software reads as " +
+                            "dropped columns", dse51Columns, file, dse51Mutations);
             logger.info("Finished reading {}", file);
         }
     }
@@ -498,8 +511,27 @@ public class CommitLogReader
             logger.trace("Read mutation for {}.{}: {}", mutation.getKeyspaceName(), mutation.key(),
                          "{" + StringUtils.join(mutation.getPartitionUpdates().iterator(), ", ") + "}");
 
+        if (shouldReplay
+            && DatabaseDescriptor.isDse51CompatibilityMode()
+            && desc.getMessagingVersion() == MessagingService.VERSION_30)
+            countDse51Columns(mutation);
+
         if (shouldReplay)
             handler.handleMutation(mutation, size, entryLocation, desc);
+    }
+
+    /** Counts {@code mutation} if it names a column DSE 5.1 adds to {@code system.local} or {@code system.peers}. */
+    private void countDse51Columns(Mutation mutation)
+    {
+        boolean names = false;
+        for (PartitionUpdate update : mutation.getPartitionUpdates())
+        {
+            List<String> columns = Dse51SystemTables.dse51ColumnsOf(update);
+            names |= !columns.isEmpty();
+            dse51Columns.addAll(columns);
+        }
+        if (names)
+            dse51Mutations++;
     }
 
     /**

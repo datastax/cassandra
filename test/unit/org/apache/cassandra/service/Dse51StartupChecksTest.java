@@ -38,6 +38,7 @@ import ch.qos.logback.core.read.ListAppender;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.config.StartupChecksOptions;
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
@@ -443,7 +444,59 @@ public class Dse51StartupChecksTest
         .startsWith("Unable to write the DSE 5.1 upgrade marker " +
                     notADirectory.resolve(DseUpgradeMarker.DSE_51_FILE_NAME) + ": unless the file exists, a later " +
                     "start with internode_compatibility_mode NONE will not be refused while DSE 5.1 peers may " +
-                    "remain; create it by hand");
+                    "remain; create it by hand. Until it exists, every start also discards the record of the values " +
+                    "of DSE 5.1's columns of system.local and system.peers");
+    }
+
+    /**
+     * The start that writes the DSE 5.1 upgrade marker begins a new upgrade: it deletes the record of the values of
+     * DSE 5.1's columns of system.local and system.peers an earlier one left; a later start, the marker present, keeps
+     * the record. A start with NONE or DSE_6 does neither.
+     */
+    @Test
+    public void theStartThatWritesTheDse51MarkerDeletesTheRecordOfAnEarlierUpgrade() throws Exception
+    {
+        Path record = Dse51SystemTables.recordPath();
+        Files.write(record, List.of("an earlier upgrade"));
+        mode(InternodeCompatibilityMode.NONE);
+        verifyArtefacts();
+        assertThat(record).exists();
+        assertThat(DseUpgradeMarker.exists(InternodeCompatibilityMode.DSE_5_1)).isFalse();
+        mode(InternodeCompatibilityMode.DSE_6);
+        verifyArtefacts();
+        assertThat(record).exists();
+        DseUpgradeMarker.delete(InternodeCompatibilityMode.DSE_6);
+
+        mode(InternodeCompatibilityMode.DSE_5_1);
+        verifyArtefacts();
+        assertThat(DseUpgradeMarker.exists(InternodeCompatibilityMode.DSE_5_1)).isTrue();
+        assertThat(record).doesNotExist();
+
+        Files.write(record, List.of("this upgrade"));
+        verifyArtefacts();
+        assertThat(Files.readAllLines(record)).containsExactly("this upgrade");
+    }
+
+    /** When the record of an earlier upgrade cannot be deleted, the DSE 5.1 upgrade marker is not written. */
+    @Test
+    public void theDse51MarkerIsNotWrittenWhenTheRecordOfAnEarlierUpgradeCannotBeDeleted() throws Exception
+    {
+        Path record = Files.createDirectories(Dse51SystemTables.recordPath());
+        Path inTheWay = Files.write(record.resolve("in-the-way"), new byte[0]);
+        try
+        {
+            mode(InternodeCompatibilityMode.DSE_5_1);
+            verifyArtefacts();
+            assertThat(DseUpgradeMarker.exists(InternodeCompatibilityMode.DSE_5_1)).isFalse();
+        }
+        finally
+        {
+            Files.deleteIfExists(inTheWay);
+            Files.deleteIfExists(record);
+            // clears the refusal of the start this test left
+            Dse51SystemTables.deleteRecordOfAnEarlierUpgrade();
+        }
+        assertThat(Dse51SystemTables.deleteRecordOfAnEarlierUpgrade()).isTrue();
     }
 
     /** The record is not loaded in DSE_5_1, where nothing maintains it yet, and the DSE 6 record is not read either. */

@@ -17,6 +17,7 @@
 package org.apache.cassandra.dsecompat;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -26,7 +27,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -36,6 +39,7 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import com.google.common.net.InetAddresses;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.AfterClass;
@@ -46,14 +50,18 @@ import org.junit.rules.TemporaryFolder;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLogReadHandler;
@@ -62,6 +70,7 @@ import org.apache.cassandra.db.commitlog.CommitLogReplayer;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
 import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog.HiddenColumn;
@@ -69,20 +78,28 @@ import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaTransformations;
 import org.apache.cassandra.schema.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JVMKiller;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.KillerForTests;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * A former DSE node that was not drained before the switch (a crash, a killed process) leaves the active
@@ -106,10 +123,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * at messaging version 10. The segments DSE 5.1.51 wrote with entries (the active one,
  * {@link Dse51Fixtures#commitLogSegmentGz()}, and the older one of {@link Dse51Fixtures#killedCommitLogDirectory()},
  * which continues it) hold, beside the collection table's mutations, the writes of DSE's endpoint state persister
- * to {@code system.local} and {@code system.peers}, which name columns those tables do not have here, so that their
- * replay stops on them: their headers are checked against the one built here, and the tests of {@code DSE_5_1}
+ * to {@code system.local} and {@code system.peers}, which name the columns DSE 5.1 adds to those tables
+ * ({@link Dse51SystemTables}): their headers are checked against the one built here. The tests of {@code DSE_5_1}
  * replay a segment of version 6 built here ({@code segment}), holding mutations this software serializes at
- * version 12.
+ * version 12; so do the tests of the persister's writes ({@code persisterMutations}), serialized from the
+ * definitions of those tables with the five columns ({@link Dse51SystemTables#withDse51Columns}).
  */
 public class DseCommitLogReplayTest extends CQLTester
 {
@@ -147,6 +165,11 @@ public class DseCommitLogReplayTest extends CQLTester
     private static final Logger REPLAYER_LOGGER = (Logger) LoggerFactory.getLogger(CommitLogReplayer.class);
     /** The logger of the WARN saying why a view update DSE stored is not translated. */
     private static final Logger TRANSLATION_LOGGER = (Logger) LoggerFactory.getLogger(DseViewWireFormat.class);
+    /** The logger of the INFO line of the mutations naming the columns DSE 5.1 adds to system.local and peers. */
+    private static final Logger READER_LOGGER = (Logger) LoggerFactory.getLogger(CommitLogReader.class);
+    /** The peer of the writes of DSE 5.1's endpoint state persister ({@code persisterMutations}). */
+    private static final InetAddress DSE_51_PEER = InetAddresses.forString("10.0.51.2");
+    private static final UUID DSE_51_HOST_ID = UUID.fromString("5a5a5a5a-0000-4000-8000-000000005151");
     private static Level replayerLevel;
 
     @Rule
@@ -749,6 +772,256 @@ public class DseCommitLogReplayTest extends CQLTester
         }
         mutations.add(DseFixtures.mutation40(new RowUpdateBuilder(unknown, timestamp, 0).add("v", "x").build()));
         return segment(folder.newFolder().toPath(), CommitLogDescriptor.VERSION_30, mutations);
+    }
+
+    /**
+     * In {@code DSE_5_1}, the writes of DSE 5.1's endpoint state persister to {@code system.peers} and
+     * {@code system.local}, which name the columns DSE 5.1 adds to those tables, are replayed without the values of
+     * those columns, the other cells of their mutations applied, with one INFO line for the segment; the segment is
+     * then moved aside.
+     */
+    @Test
+    public void dse51ModeReplaysThePersisterWritesWithoutTheColumnsDse51Adds() throws Throwable
+    {
+        Path segment = segment(folder.newFolder().toPath(), CommitLogDescriptor.VERSION_30, persisterMutations());
+        // the format the mode selects, which the reader of the five columns reads
+        SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
+        DatabaseDescriptor.setSelectedSSTableFormat(BigFormat.getInstance());
+        try
+        {
+            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
+                List<String> info = new ArrayList<>();
+                Map<Keyspace, Integer> replayed = replayCollecting(segment, READER_LOGGER, Level.INFO, info, null);
+                assertThat(replayed.get(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME))).isEqualTo(3);
+                assertThat(info).contains("DSE 5.1 compatibility mode: mutations of system.local or system.peers " +
+                                          "naming the columns [dse_version, graph, server_id, workload, " +
+                                          "workloads] DSE 5.1 adds to those tables, read in " + segment + ": 3; " +
+                                          "those not yet in an sstable are replayed without the values of those " +
+                                          "columns, which this software reads as dropped columns");
+            });
+            assertMovedAside(segment);
+            // the replayed rows hold no value of the five columns, as the sstable written from them shows
+            ColumnFamilyStore peers = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
+                                              .getColumnFamilyStore(SystemKeyspace.LEGACY_PEERS);
+            peers.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+            TableMetadata withDse51Columns = Dse51SystemTables.withDse51Columns(SystemKeyspace.LegacyPeers);
+            List<Row> rows = new ArrayList<>();
+            for (SSTableReader sstable : peers.getLiveSSTables())
+            {
+                for (PartitionUpdate update : Dse51SystemTables.partitions(sstable, withDse51Columns))
+                    rows.add(update.getRow(Clustering.EMPTY));
+            }
+            assertThat(rows).isNotEmpty().doesNotContainNull();
+            for (Row row : rows)
+            {
+                for (ColumnMetadata column : withDse51Columns.regularColumns())
+                {
+                    if (Dse51SystemTables.COLUMNS.containsKey(column.name.toString()))
+                        assertThat(row.getColumnData(column)).as("%s", column).isNull();
+                }
+            }
+            assertRows(execute("SELECT data_center, rack, host_id, release_version FROM system.peers WHERE peer = ?",
+                               DSE_51_PEER),
+                       row("dc1", "r1", DSE_51_HOST_ID, "3.11.3.5151"));
+            assertRows(execute("SELECT cluster_name FROM system.local WHERE key = 'local'"),
+                       row(DatabaseDescriptor.getClusterName()));
+        }
+        finally
+        {
+            DatabaseDescriptor.setSelectedSSTableFormat(format);
+            execute("TRUNCATE system.peers");
+        }
+    }
+
+    /**
+     * In the other modes the replay of such a write fails on the unknown column, as before; here the replay errors
+     * are ignored, as with {@code -Dcassandra.commitlog.ignorereplayerrors=true}, rather than stop the replay, and the
+     * copy of the mutation the replay saves is deleted. The same for a mutation of {@code system.peers} naming a
+     * column unknown here that DSE 5.1 does not add, in every mode.
+     */
+    @Test
+    public void theOtherModesFailTheReplayOfThePersisterWritesAsBefore() throws Throwable
+    {
+        TableMetadata withUnknown = SystemKeyspace.LegacyPeers.unbuild()
+                                                              .droppedColumns(Map.of())
+                                                              .addRegularColumn("foo", UTF8Type.instance)
+                                                              .build();
+        Mutation unknownColumn = new RowUpdateBuilder(withUnknown, FBUtilities.timestampMicros(), DSE_51_PEER)
+                                 .add("foo", "x")
+                                 .build();
+        ByteBuffer unknown = DseFixtures.mutation40(unknownColumn);
+        String savedPrefix = "Unexpected error deserializing mutation; saved to ";
+        CassandraRelevantProperties ignore = CassandraRelevantProperties.COMMITLOG_IGNORE_REPLAY_ERRORS;
+        try (WithProperties ignoreErrors = new WithProperties().set(ignore, true))
+        {
+            for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+            {
+                List<String> expected = new ArrayList<>();
+                List<ByteBuffer> mutations = new ArrayList<>();
+                if (mode != InternodeCompatibilityMode.DSE_5_1)
+                {
+                    mutations.addAll(persisterMutations());
+                    expected.add("Unknown column dse_version during deserialization of system.peers");
+                    expected.add("Unknown column dse_version during deserialization of system.peers");
+                    expected.add("Unknown column workloads during deserialization of system.local");
+                }
+                mutations.add(unknown);
+                expected.add("Unknown column foo during deserialization of system.peers");
+                Path segment = segment(folder.newFolder().toPath(), CommitLogDescriptor.VERSION_30, mutations);
+                List<String> errors = new ArrayList<>();
+                List<String> info = new ArrayList<>();
+                withModes(mode, DatabaseDescriptor.getStorageCompatibilityMode(), () -> {
+                    Map<Keyspace, Integer> replayed = collecting(READER_LOGGER, Level.INFO, info,
+                                                                 () -> replayCollecting(segment, REPLAYER_LOGGER,
+                                                                                        Level.ERROR, null, errors));
+                    assertThat(replayed.get(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)))
+                    .as("mutations replayed in %s", mode)
+                    .isNull();
+                });
+                assertThat(info).as("INFO lines in %s", mode).noneMatch(line -> line.startsWith("DSE 5.1"));
+                assertThat(errors).as("replay errors in %s", mode).hasSize(expected.size());
+                for (int i = 0; i < expected.size(); i++)
+                {
+                    assertThat(errors.get(i)).startsWith(savedPrefix)
+                                             .endsWith("Exception follows: java.lang.RuntimeException: " +
+                                                       expected.get(i));
+                    String saved = errors.get(i).substring(savedPrefix.length());
+                    Files.delete(Path.of(saved.substring(0, saved.indexOf(".  "))));
+                }
+                assertRows(execute("SELECT peer FROM system.peers WHERE peer = ?", DSE_51_PEER));
+            }
+        }
+    }
+
+    /**
+     * In {@code DSE_5_1}, without {@code -Dcassandra.commitlog.ignorereplayerrors=true}, a mutation of
+     * {@code system.peers} naming a column unknown here that DSE 5.1 does not add stops the start: the JVM is killed
+     * (here a killer that only records it) and the replay stops (here with the {@code stop_commit} policy, which does
+     * not stop the transports of the test server). The copy of the mutation the replay saves is deleted.
+     */
+    @Test
+    public void dse51ModeStopsTheReplayOnAnotherUnknownColumnOfSystemPeers() throws Throwable
+    {
+        TableMetadata withUnknown = SystemKeyspace.LegacyPeers.unbuild()
+                                                              .droppedColumns(Map.of())
+                                                              .addRegularColumn("foo", UTF8Type.instance)
+                                                              .build();
+        Mutation unknownColumn = new RowUpdateBuilder(withUnknown, FBUtilities.timestampMicros(), DSE_51_PEER)
+                                 .add("foo", "x")
+                                 .build();
+        Path segment = segment(folder.newFolder().toPath(), CommitLogDescriptor.VERSION_30,
+                               List.of(DseFixtures.mutation40(unknownColumn)));
+        File[] segments = { new File(segment) };
+        String savedPrefix = "Unexpected error deserializing mutation; saved to ";
+        Config.CommitFailurePolicy policy = DatabaseDescriptor.getCommitFailurePolicy();
+        DatabaseDescriptor.setCommitFailurePolicy(Config.CommitFailurePolicy.stop_commit);
+        KillerForTests killer = new KillerForTests();
+        JVMKiller previousKiller = JVMStabilityInspector.replaceKiller(killer);
+        try
+        {
+            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
+                ColumnFamilyStore.FlushReason startup = ColumnFamilyStore.FlushReason.STARTUP;
+                assertThatThrownBy(() -> CommitLog.instance.recoverSegmentsOnDiskNoArchive(startup, segments))
+                .isInstanceOf(CommitLogReplayer.CommitLogReplayException.class)
+                .hasMessageStartingWith(savedPrefix)
+                .hasMessageEndingWith("Exception follows: java.lang.RuntimeException: " +
+                                      "Unknown column foo during deserialization of system.peers")
+                .satisfies(e -> {
+                    String saved = e.getMessage().substring(savedPrefix.length());
+                    Files.delete(Path.of(saved.substring(0, saved.indexOf(".  "))));
+                });
+            });
+            assertThat(killer.wasKilled()).isTrue();
+        }
+        finally
+        {
+            JVMStabilityInspector.replaceKiller(previousKiller);
+            DatabaseDescriptor.setCommitFailurePolicy(policy);
+        }
+        assertRows(execute("SELECT peer FROM system.peers WHERE peer = ?", DSE_51_PEER));
+    }
+
+    /**
+     * Writes of DSE 5.1's endpoint state persister, serialized at version 12, laid out as at 10 and 11: a mutation
+     * of the row of {@link #DSE_51_PEER} in {@code system.peers} naming the five columns DSE 5.1 adds and some of its
+     * own (the persister writes one column at a time, other writers the others: this mutation holds both), one naming
+     * only {@code dse_version}, as the persister writes it, and one of the row {@code local} of {@code system.local}
+     * naming only {@code workloads}, at timestamp 1, below that of every write of this test server.
+     */
+    private static List<ByteBuffer> persisterMutations() throws IOException
+    {
+        TableMetadata peers = Dse51SystemTables.withDse51Columns(SystemKeyspace.LegacyPeers);
+        TableMetadata local = Dse51SystemTables.withDse51Columns(SystemKeyspace.Local);
+        long timestamp = FBUtilities.timestampMicros();
+        return List.of(DseFixtures.mutation40(new RowUpdateBuilder(peers, timestamp, DSE_51_PEER)
+                                              .add("data_center", "dc1")
+                                              .add("rack", "r1")
+                                              .add("host_id", DSE_51_HOST_ID)
+                                              .add("release_version", "3.11.3.5151")
+                                              .add("workload", "Cassandra")
+                                              .add("workloads", Set.of("Cassandra"))
+                                              .add("graph", false)
+                                              .add("dse_version", "5.1.51")
+                                              .add("server_id", "02-42-AC-11-00-02")
+                                              .build()),
+                       DseFixtures.mutation40(new RowUpdateBuilder(peers, timestamp + 1, DSE_51_PEER)
+                                              .add("dse_version", "5.1.51")
+                                              .build()),
+                       DseFixtures.mutation40(new RowUpdateBuilder(local, 1, SystemKeyspace.LOCAL)
+                                              .add("workloads", Set.of("Cassandra"))
+                                              .build()));
+    }
+
+    /**
+     * Replays {@code segment} through the start-up path, collecting the events of {@code logger} at {@code level}:
+     * their messages into {@code messages} and the messages of their exceptions into {@code exceptions}, each when
+     * not null.
+     */
+    private static Map<Keyspace, Integer> replayCollecting(Path segment, Logger logger, Level level,
+                                                           List<String> messages, List<String> exceptions)
+    throws IOException
+    {
+        return collecting(logger, level, messages, exceptions,
+                          () -> CommitLog.instance.recoverSegmentsOnDiskNoArchive(ColumnFamilyStore.FlushReason.STARTUP,
+                                                                                  new File[]{ new File(segment) }));
+    }
+
+    private interface Replay
+    {
+        Map<Keyspace, Integer> run() throws IOException;
+    }
+
+    /** Runs {@code replay}, collecting the messages of {@code logger} at {@code level} into {@code messages}. */
+    private static Map<Keyspace, Integer> collecting(Logger logger, Level level, List<String> messages, Replay replay)
+    throws IOException
+    {
+        return collecting(logger, level, messages, null, replay);
+    }
+
+    private static Map<Keyspace, Integer> collecting(Logger logger, Level level, List<String> messages,
+                                                     List<String> exceptions, Replay replay) throws IOException
+    {
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try
+        {
+            return replay.run();
+        }
+        finally
+        {
+            logger.detachAppender(appender);
+            appender.stop();
+            for (ILoggingEvent event : appender.list)
+            {
+                if (event.getLevel() != level)
+                    continue;
+                if (messages != null)
+                    messages.add(event.getFormattedMessage());
+                if (exceptions != null && event.getThrowableProxy() != null)
+                    exceptions.add(event.getThrowableProxy().getMessage());
+            }
+        }
     }
 
     /**

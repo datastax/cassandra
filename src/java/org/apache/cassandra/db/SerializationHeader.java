@@ -576,7 +576,8 @@ public class SerializationHeader
 
                         // If we don't find the definition, it could be we have data for a dropped column, and we shouldn't
                         // fail deserialization because of that. So we grab a "fake" ColumnDefinition that ensure proper
-                        // deserialization. The column will be ignored later on anyway.
+                        // deserialization. The column will be ignored later on anyway. The columns DSE 5.1 adds to
+                        // system.local and system.peers are read that way, in every mode (Dse51SystemTables).
                         ColumnMetadata droppedColumn = metadata.getDroppedColumn(name, isStatic);
                         if (droppedColumn == null)
                         {
@@ -744,8 +745,10 @@ public class SerializationHeader
             if (selection == null)
             {
                 statics = hasStatic ? Columns.serializer.deserialize(in, metadata) : Columns.NONE;
+                boolean storedByDse51 = Dse51SystemTables.readsStoredDse51Columns(metadata, version);
                 regulars = Columns.serializer.deserialize(in, metadata, DseViewWireFormat.translates(metadata, version),
-                                                           DseViewWireFormat.translatesStored(metadata, version));
+                                                           DseViewWireFormat.translatesStored(metadata, version),
+                                                           storedByDse51);
             }
             else
             {

@@ -1273,6 +1273,17 @@ public class TableMetadata implements SchemaElement
             return this;
         }
 
+        /**
+         * Records deprecated columns for a system table, as {@link #recordDeprecatedSystemColumn}, in the order of
+         * {@code columns}, a map from their names to their types.
+         */
+        public Builder recordDeprecatedSystemColumns(Map<String, AbstractType<?>> columns)
+        {
+            for (Map.Entry<String, AbstractType<?>> column : columns.entrySet())
+                recordDeprecatedSystemColumn(column.getKey(), column.getValue());
+            return this;
+        }
+
         public Builder recordColumnDrop(ColumnMetadata column, long timeMicros)
         {
             return recordColumnDrop(new DroppedColumn(column.asDropped(), timeMicros));

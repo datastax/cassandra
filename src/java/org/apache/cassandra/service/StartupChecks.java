@@ -64,6 +64,7 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.commitlog.CommitLogDescriptor;
 import org.apache.cassandra.db.compaction.LeveledCompactionStrategy;
@@ -764,7 +765,10 @@ public class StartupChecks
      * with a non-numeric identifier; commit log segments of a version above the 4.0 line, DSE's {@code 680} included
      * (DSE 5.1 writes version 6, the node in the mode version 7). Every file listed is one DSE 5.1 could not read after
      * a rollback. Once every check has passed, the post action writes the marker of the upgrade from DSE 5.1, which a
-     * later start in {@code NONE} is refused by.
+     * later start in {@code NONE} is refused by. When that marker does not exist yet (a new upgrade), the post action
+     * first deletes the record of the values of DSE 5.1's columns of {@code system.local} and {@code system.peers} an
+     * earlier upgrade left ({@link Dse51SystemTables#deleteRecordOfAnEarlierUpgrade}); when that record cannot be
+     * deleted, the marker is not written, and the start is refused ({@link Dse51SystemTables#loadOrReadAtStart}).
      */
     public static final StartupCheck checkDse6Artefacts = new StartupCheck()
     {
@@ -812,6 +816,11 @@ public class StartupChecks
         public void postAction(StartupChecksOptions options)
         {
             InternodeCompatibilityMode mode = DatabaseDescriptor.getInternodeCompatibilityMode();
+            // a new upgrade from DSE 5.1 (its marker absent) does not use the values of DSE 5.1's columns recorded
+            // by an earlier one: the record is deleted before the marker is written; when it cannot be, the marker is
+            // not written and the start is refused (Dse51SystemTables.loadOrReadAtStart)
+            if (mode.isDse51() && !DseUpgradeMarker.exists(mode) && !Dse51SystemTables.deleteRecordOfAnEarlierUpgrade())
+                return;
             if (mode.isDse())
                 writeUpgradeMarker(mode, () -> DseUpgradeMarker.writeIfAbsent(mode));
         }
@@ -851,6 +860,12 @@ public class StartupChecks
                 logger.warn("Unable to write the content of the {} upgrade marker {}; the file exists, which is all " +
                             "that matters: a later start with internode_compatibility_mode NONE is refused while it does",
                             source, path, e);
+            else if (mode.isDse51())
+                logger.error("Unable to write the {} upgrade marker {}: unless the file exists, a later start with " +
+                             "internode_compatibility_mode NONE will not be refused while {} peers may remain; " +
+                             "create it by hand. Until it exists, every start also discards the record of the values " +
+                             "of DSE 5.1's columns of system.local and system.peers",
+                             source, path, source, e);
             else
                 logger.error("Unable to write the {} upgrade marker {}: unless the file exists, a later start with " +
                              "internode_compatibility_mode NONE will not be refused while {} peers may remain; " +
