@@ -1,0 +1,31 @@
+Now Expanded output is enabled
+
+@ Row 1
+----------------------------------+------------------------------------------------------------------------------------------
+ row_key                          | 0x00000001
+ cf_id                            | ff56c801-d9c8-11f1-9d05-ff904c15f3ab
+ in_progress_ballot               | 0f529400-d9c9-11f1-d9d8-3c5ce79cf81c
+ proposal_ballot                  | null
+ proposal                         | null
+ proposal_version                 | 11
+ most_recent_commit_at            | 0f529400-d9c9-11f1-d9d8-3c5ce79cf81c
+ most_recent_commit               | 0xff56c801d9c811f19d05ff904c15f3ab040000000110fd3f4e04eda2000000010176012000000000000201
+ most_recent_commit_version       | 11
+ writetime(most_recent_commit_at) | 1793959299392000
+ ttl(most_recent_commit_at)       | 864000
+
+@ Row 2
+----------------------------------+------------------------------------------------------------------------------------------
+ row_key                          | 0x00000002
+ cf_id                            | ff56c801-d9c8-11f1-9d05-ff904c15f3ab
+ in_progress_ballot               | 0f53cc80-d9c9-11f1-1899-200770fa63bd
+ proposal_ballot                  | null
+ proposal                         | null
+ proposal_version                 | 11
+ most_recent_commit_at            | 0f53cc80-d9c9-11f1-1899-200770fa63bd
+ most_recent_commit               | 0xff56c801d9c811f19d05ff904c15f3ab040000000210fd3f4e04edc1400000010176012400080000000101
+ most_recent_commit_version       | 11
+ writetime(most_recent_commit_at) | 1793959299400000
+ ttl(most_recent_commit_at)       | 864000
+
+(2 rows)
