@@ -313,7 +313,8 @@ public class UdtCollectionFieldQueryTest extends SAITester
     /**
      * The u_list queries of the DSE Search reference run, with the {@code solr_query} of each CQL query, on a
      * collection of the given kind. In DSE the AND inside one tuple query is on the same element; the CQL AND is
-     * independent (the DSE separate {@code q} and {@code fq}), the same element is P4's {@code CONTAINS ELEMENT}.
+     * independent (the DSE separate {@code q} and {@code fq}), the same element is {@code CONTAINS ELEMENT} (see
+     * {@code UdtElementMatchQueryTest}).
      */
     private void testCollectionOfUDTs(Kind kind) throws Throwable
     {
@@ -1033,8 +1034,8 @@ public class UdtCollectionFieldQueryTest extends SAITester
         // IS NOT NULL (P5)
         assertInvalidMessage("IS NOT NULL restrictions on fields are not yet supported",
                              "SELECT id FROM %s WHERE addrs.city IS NOT NULL ALLOW FILTERING");
-        // the same element (P4)
-        assertInvalidSyntax("SELECT id FROM %s WHERE addrs CONTAINS ELEMENT (city = 'Rome') ALLOW FILTERING");
+        // the same element: CONTAINS ELEMENT (P4, see UdtElementMatchQueryTest)
+        assertEmpty(execute("SELECT id FROM %s WHERE addrs CONTAINS ELEMENT (city = 'Rome')"));
         // only in SELECT
         assertInvalidMessage(String.format(StatementRestrictions.FIELD_RESTRICTIONS_ONLY_IN_SELECT_MESSAGE, "addrs.city = 'a'"),
                              "DELETE FROM %s WHERE id = 1 AND addrs.city = 'a'");
