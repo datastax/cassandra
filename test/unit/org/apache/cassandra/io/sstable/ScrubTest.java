@@ -104,6 +104,7 @@ import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.memory.BufferPoolExhaustedException;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
@@ -116,12 +117,17 @@ import static org.apache.cassandra.SchemaLoader.standardCFMD;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_INVALID_LEGACY_SSTABLE_ROOT;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_UTIL_ALLOW_TOOL_REINIT_FOR_TEST;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeFalse;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.spy;
 
 @RunWith(BMUnitRunner.class)
 public class ScrubTest
@@ -198,6 +204,35 @@ public class ScrubTest
 
         // check data is still there
         assertOrderedAll(cfs, 1);
+    }
+
+    @Test
+    public void testScrubBufferPoolExhaustedException()
+    {
+        CompactionManager.instance.disableAutoCompaction();
+        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(CF);
+
+        // insert data and verify we get it back w/ range query
+        fillCF(cfs, 2);
+        assertOrderedAll(cfs, 2);
+
+        Set<SSTableReader> liveSSTables = cfs.getLiveSSTables();
+        assertEquals(1, liveSSTables.size());
+        SSTableReader sstable = liveSSTables.iterator().next();
+
+        SSTableReader spySstable = spy(sstable);
+        doThrow(new BufferPoolExhaustedException("Simulated buffer pool exhaustion")).when(spySstable).decorateKey(any());
+
+        try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.SCRUB, spySstable);
+             IScrubber scrubber = spySstable.descriptor.getFormat().getScrubber(cfs, txn, new OutputHandler.LogOutput(), IScrubber.options().checkData(true).build()))
+        {
+            assertThatThrownBy(scrubber::scrub)
+                .isInstanceOf(BufferPoolExhaustedException.class)
+                .isNotInstanceOf(CorruptSSTableException.class);
+        }
+
+        assertFalse("SSTable must not be marked suspect on buffer pool exhaustion", sstable.isMarkedSuspect());
+        assertOrderedAll(cfs, 2);
     }
 
     @Test
