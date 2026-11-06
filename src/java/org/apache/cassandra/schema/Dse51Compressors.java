@@ -83,7 +83,7 @@ public final class Dse51Compressors
 
     /**
      * Every table and view of {@code keyspaces} encrypted by this software, as {@code keyspace.table (Class)},
-     * sorted.
+     * sorted, the class named as in {@link #unreadable}.
      */
     @VisibleForTesting
     static List<String> encrypted(Iterable<KeyspaceMetadata> keyspaces)

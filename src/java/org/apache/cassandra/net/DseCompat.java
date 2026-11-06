@@ -121,7 +121,7 @@ public final class DseCompat
 
     /**
      * A DSE 5.1 {@code dse_version}: {@code 5.1.<patch>}, three numeric parts and no suffix, the patch of one or two
-     * digits without a leading zero ({@code 5.1.51}; not {@code 5.1.051}), as the build number of the release has it
+     * digits without a leading zero ({@code 5.1.51}; not {@code 5.1.05}), as the build number of the release has it
      * ({@link #dse51Patch}).
      */
     private static final Pattern DSE51_DSE_VERSION = Pattern.compile("5\\.1\\.(0|[1-9]\\d?)");
@@ -327,7 +327,7 @@ public final class DseCompat
 
     /**
      * True for a {@code dse_version} of DSE 5.1, {@code 5.1.<patch>}, as DSE 5.1 writes it in gossip and in its system
-     * tables.
+     * tables: the patch of one or two digits without a leading zero ({@code 5.1.51}; not {@code 5.1.05}).
      */
     public static boolean isDse51DseVersion(@Nullable String dseVersion)
     {
