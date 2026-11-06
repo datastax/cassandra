@@ -46,6 +46,8 @@ public class ColumnIndexesSystemView extends AbstractVirtualTable
     static final String INDEX_NAME = "index_name";
     static final String TABLE_NAME = "table_name";
     static final String COLUMN_NAME = "column_name";
+    static final String FIELD_PATH = "field_path";
+    static final String TARGET = "target";
     static final String IS_QUERYABLE = "is_queryable";
     static final String IS_BUILDING = "is_building";
     static final String IS_STRING = "is_string";
@@ -61,6 +63,8 @@ public class ColumnIndexesSystemView extends AbstractVirtualTable
                            .addClusteringColumn(INDEX_NAME, UTF8Type.instance)
                            .addRegularColumn(TABLE_NAME, UTF8Type.instance)
                            .addRegularColumn(COLUMN_NAME, UTF8Type.instance)
+                           .addRegularColumn(FIELD_PATH, UTF8Type.instance)
+                           .addRegularColumn(TARGET, UTF8Type.instance)
                            .addRegularColumn(IS_QUERYABLE, BooleanType.instance)
                            .addRegularColumn(IS_BUILDING, BooleanType.instance)
                            .addRegularColumn(IS_STRING, BooleanType.instance)
@@ -100,6 +104,8 @@ public class ColumnIndexesSystemView extends AbstractVirtualTable
                         dataset.row(ks, indexName)
                                .column(TABLE_NAME, cfs.name)
                                .column(COLUMN_NAME, context.getColumnName())
+                               .column(FIELD_PATH, context.getFieldPathName())
+                               .column(TARGET, context.getIndexTarget())
                                .column(IS_QUERYABLE, manager.isIndexQueryable(index))
                                .column(IS_BUILDING, manager.isIndexBuilding(indexName))
                                .column(IS_STRING, context.isLiteral())
