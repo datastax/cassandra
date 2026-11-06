@@ -1434,10 +1434,11 @@ public class StatementRestrictions
             {
                 for (Index index : indexRegistry.listNotExcludedIndexes(indexHints))
                 {
-                    // If a column restriction has an index which was not picked up by hasSupportingIndex, it means it's an unsupported restriction
+                    // If a column restriction has an index which was not picked up by hasSupportingIndex, it means it's an unsupported restriction.
+                    // The indexes on the fields of a column never serve the restrictions on the whole column.
                     for (ColumnMetadata column : restriction.getColumnDefs())
                     {
-                        if (index.dependsOn(column))
+                        if (index.dependsOn(column) && !index.isOnFieldOf(column))
                         {
                             if (index instanceof NoopIndex)
                                 throw invalidRequest(((NoopIndex) index).getUnsupportedMessage());

@@ -898,11 +898,21 @@ createIndexStatement returns [CreateIndexStatement.Raw stmt]
     ;
 
 indexIdent [List<IndexTarget.Raw> targets]
-    : c=cident                   { $targets.add(IndexTarget.Raw.simpleIndexOn(c)); }
-    | K_VALUES '(' c=cident ')'  { $targets.add(IndexTarget.Raw.valuesOf(c)); }
-    | K_KEYS '(' c=cident ')'    { $targets.add(IndexTarget.Raw.keysOf(c)); }
-    | K_ENTRIES '(' c=cident ')' { $targets.add(IndexTarget.Raw.keysAndValuesOf(c)); }
-    | K_FULL '(' c=cident ')'    { $targets.add(IndexTarget.Raw.fullCollection(c)); }
+    : c=cident p=indexFieldPath?                                    { $targets.add(IndexTarget.Raw.simpleIndexOn(c, p)); }
+    | K_VALUES '(' c=cident p=indexFieldPath? ')' e=indexFieldPath? { $targets.add(IndexTarget.Raw.valuesOf(c, p, e)); }
+    | K_KEYS '(' c=cident ')'                                       { $targets.add(IndexTarget.Raw.keysOf(c)); }
+    | K_ENTRIES '(' c=cident ')'                                    { $targets.add(IndexTarget.Raw.keysAndValuesOf(c)); }
+    | K_FULL '(' c=cident p=indexFieldPath? ')'                     { $targets.add(IndexTarget.Raw.fullCollection(c, p)); }
+    ;
+
+/**
+ * The path to a field of a UDT or tuple column (tuple components are named field1, field2, ...), for example
+ * the '.home.city' of 'CREATE INDEX ON t (p.home.city)'.
+ */
+indexFieldPath returns [List<FieldIdentifier> path]
+    @init { List<FieldIdentifier> names = new ArrayList<>(); }
+    @after { $path = names; }
+    : ('.' f=fident { names.add(f); })+
     ;
 
 /**
