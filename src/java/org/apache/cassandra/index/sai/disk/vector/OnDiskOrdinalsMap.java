@@ -45,6 +45,15 @@ public interface OnDiskOrdinalsMap extends AutoCloseable
     V5VectorPostingsWriter.Structure getStructure();
 
     /**
+     * Returns true if the views of this map read from disk on each lookup, which is slower than using in-memory
+     * structures. Used to gate a warning at load time.
+     */
+    default boolean requiresDiskReads()
+    {
+        return false;
+    }
+
+    /**
      * Ignoring the constant overhead of the object, return the variable overhead of the object. This helps
      * identify the cost of caching.
      */

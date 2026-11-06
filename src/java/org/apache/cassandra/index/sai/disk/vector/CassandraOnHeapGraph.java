@@ -85,8 +85,8 @@ import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorPostingsWriter;
+ import org.apache.cassandra.index.sai.disk.v5.RemappedPostings;
 import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
-import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
@@ -422,7 +422,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         // compute the remapping of old ordinals to new (to fill in holes from deletion and/or to create a
         // closer correspondance to rowids, simplifying postings lookups later)
-        V5VectorPostingsWriter.RemappedPostings remappedPostings;
+        RemappedPostings remappedPostings;
         if (V5OnDiskFormat.writeV5VectorPostings(perIndexComponents.version()))
         {
             // remove postings corresponding to marked-deleted vectors
@@ -442,7 +442,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
             deletedOrdinals.clear();
             builder.cleanup();
-            remappedPostings = V5VectorPostingsWriter.remapForMemtable(postingsMap, perIndexComponents.version());
+            remappedPostings = RemappedPostings.remapForMemtable(postingsMap, perIndexComponents.version());
         }
         else
         {
@@ -479,8 +479,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
             if (V5OnDiskFormat.writeV5VectorPostings(perIndexComponents.version()))
             {
                 assert deletedOrdinals.isEmpty(); // V5 format does not support recording deleted ordinals
-                postingsPosition = new V5VectorPostingsWriter<T>(remappedPostings)
-                                   .writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap);
+                // memtable row ids are in insertion order (not ascending per vector), so the writer sorts them
+                postingsPosition = remappedPostings.writer(vectorValues, postingsMap)
+                                                   .writeTo(postingsOutput.asSequentialWriter());
             }
             else
             {
@@ -507,7 +508,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 var start = nanoTime();
                 indexWriter.write(suppliers(view, compressor, nvq, writeFusedPQ));
                 SAICodecUtils.writeFooter(indexWriter.getOutput(), indexWriter.checksum());
-                logger.info("Writing graph took {}ms", (nanoTime() - start) / 1_000_000);
+                logger.info("Writing graph took {} ms", (nanoTime() - start) / 1_000_000);
                 long termsLength = indexWriter.getOutput().position() - termsOffset;
 
                 // write remaining footers/checksums
@@ -625,7 +626,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
     }
 
-    private VectorCompressor<?> writePQ(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, IndexContext indexContext, boolean writeFusedPQ) throws IOException
+    private VectorCompressor<?> writePQ(SequentialWriter writer, RemappedPostings remapped, IndexContext indexContext, boolean writeFusedPQ) throws IOException
     {
         var preferredCompression = sourceModel.compressionProvider.apply(vectorValues.dimension());
 
@@ -745,11 +746,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
      */
     private static class RemappedVectorValues implements RandomAccessVectorValues
     {
-        final V5VectorPostingsWriter.RemappedPostings remapped;
+        final RemappedPostings remapped;
         final int maxNewOrdinal;
         final RandomAccessVectorValues vectorValues;
 
-        RemappedVectorValues(V5VectorPostingsWriter.RemappedPostings remapped, int maxNewOrdinal, RandomAccessVectorValues vectorValues)
+        RemappedVectorValues(RemappedPostings remapped, int maxNewOrdinal, RandomAccessVectorValues vectorValues)
         {
             this.remapped = remapped;
             this.maxNewOrdinal = maxNewOrdinal;

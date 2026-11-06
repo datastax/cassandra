@@ -71,6 +71,7 @@ public class CassandraDiskAnn
 
     private final SSTableId<?> source;
     private final FileHandle graphHandle;
+    private final FileHandleReaderSupplier graphReaderSupplier;
     private final OnDiskOrdinalsMap ordinalsMap;
     private final Set<FeatureId> features;
     private final ImmutableGraphIndex graph;
@@ -96,7 +97,13 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata termsMetadata = this.componentMetadatas.get(IndexComponentType.TERMS_DATA);
         graphHandle = indexFiles.termsData();
-        var rawGraph = OnDiskGraphIndex.load(graphHandle::createReader, termsMetadata.offset, false);
+        // NOT graphHandle::createReader. ReaderSupplier is a functional interface whose
+        // prefetch()/willNeed() are default NO-OPS, so a method reference silently disables
+        // every cache-warming path jvector has -- the source pretouch, FrontierPrefetchingView,
+        // and the cross-source seed hint all became no-ops on the graph compaction reads.
+        // See FileHandleReaderSupplier for the measurement that exposed this.
+        graphReaderSupplier = new FileHandleReaderSupplier(graphHandle);
+        var rawGraph = OnDiskGraphIndex.load(graphReaderSupplier, termsMetadata.offset, false);
         features = rawGraph.getFeatureSet();
         graph = rawGraph;
         usesNVQ = features.contains(FeatureId.NVQ_VECTORS);
@@ -155,9 +162,9 @@ public class CassandraDiskAnn
 
         SegmentMetadata.ComponentMetadata postingListsMetadata = this.componentMetadatas.get(IndexComponentType.POSTING_LISTS);
         ordinalsMap = omFactory.create(indexFiles.postingLists(), postingListsMetadata.offset, postingListsMetadata.length);
-        if (ordinalsMap.getStructure() == Structure.ZERO_OR_ONE_TO_MANY)
-            logger.warn("Index {} has structure ZERO_OR_ONE_TO_MANY, which requires on reading the on disk row id" +
-                        " to ordinal mapping for each search. This will be slower.", source);
+        if (ordinalsMap.requiresDiskReads())
+            logger.warn("Index {} has structure ZERO_OR_ONE_TO_MANY but could not build an in-memory index," +
+                        " so it will read the row id to ordinal mapping from disk on each search. This will be slower.", source);
 
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
 
@@ -306,10 +313,17 @@ public class CassandraDiskAnn
 
     public void close() throws IOException
     {
-        FileUtils.close(ordinalsMap, searchers, graph, graphHandle);
+        // graphReaderSupplier before graphHandle: it only owns the private advice channel, but
+        // closing it after the handle would leave an fd open if the handle's close threw.
+        FileUtils.close(ordinalsMap, searchers, graph, graphReaderSupplier, graphHandle);
         columnQueryMetrics.onGraphClosed(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
                                          ordinalsMap.cachedBytesUsed(),
                                          graph.size(0));
+    }
+
+    public OnDiskOrdinalsMap getOrdinalsMap()
+    {
+        return ordinalsMap;
     }
 
     public OrdinalsView getOrdinalsView()
@@ -328,6 +342,16 @@ public class CassandraDiskAnn
     }
 
     public boolean containsUnitVectors()
+    {
+        return pqUnitVectors;
+    }
+
+    public io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex getOnDiskGraph()
+    {
+        return (io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex) graph;
+    }
+
+    public boolean isPqUnitVectors()
     {
         return pqUnitVectors;
     }

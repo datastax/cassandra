@@ -1740,6 +1740,16 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
     }
 
     /**
+     * Give every registered index a chance to install any per-thread compaction state (e.g.
+     * row-source tag rings) before the compaction iterator pulls its first row.
+     */
+    public void prepareCompactionRowSourceTagging()
+    {
+        for (Index index : listIndexes())
+            index.prepareCompactionRowSourceTagging();
+    }
+
+    /**
      * A single use transaction for processing a partition update on the regular write path
      */
     private static final class WriteTimeTransaction implements UpdateTransaction
