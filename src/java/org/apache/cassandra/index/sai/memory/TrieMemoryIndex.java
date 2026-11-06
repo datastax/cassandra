@@ -899,10 +899,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
         Trie<PrimaryKeys> subtrie = queryLower == null && queryUpper == null
                                     ? data
-                                    : data.slice(queryLower == null ? ByteComparable.EMPTY : queryLower,
-                                                 queryLower != null && !lowerExclusive,
-                                                 queryUpper,
-                                                 queryUpper != null && !upperExclusive);
+                                    : slice(queryLower, !lowerExclusive, queryUpper, !upperExclusive);
         long countedRows = 0;
         int countedTerms = 0;
         boolean complete = true;
@@ -1023,34 +1020,29 @@ public class TrieMemoryIndex extends MemoryIndex
         if (expression.getOp() == Expression.Op.AUTOMATON)
             return prefixSubtrie(expression.getAutomatonCommonPrefix());
 
-        ByteComparable lowerBound, upperBound;
-        boolean lowerInclusive, upperInclusive;
-        if (expression.lower != null)
-        {
-            lowerBound = expression.getEncodedLowerBoundByteComparable(version);
-            lowerInclusive = expression.lower.inclusive;
-        }
-        else
-        {
-            lowerBound = ByteComparable.EMPTY;
-            lowerInclusive = false;
-        }
+        return slice(expression.lower == null ? null : expression.getEncodedLowerBoundByteComparable(version),
+                     expression.lower != null && expression.lower.inclusive,
+                     expression.upper == null ? null : expression.getEncodedUpperBoundByteComparable(version),
+                     expression.upper != null && expression.upper.inclusive);
+    }
 
-        if (expression.upper != null)
-        {
-            upperBound = expression.getEncodedUpperBoundByteComparable(version);
-            upperInclusive = expression.upper.inclusive;
-        }
-        else
-        {
-            upperBound = null;
-            upperInclusive = false;
-        }
-
-        if (isEmptyRange(lowerBound, lowerInclusive, upperBound, upperInclusive))
+    /**
+     * The terms of the given range, a {@code null} bound being unbounded. An empty range has no terms.
+     */
+    private Trie<PrimaryKeys> slice(@Nullable ByteComparable lower, boolean lowerInclusive,
+                                    @Nullable ByteComparable upper, boolean upperInclusive)
+    {
+        if (isEmptyRange(lower, lowerInclusive, upper, upperInclusive))
             return Trie.empty(data.byteComparableVersion());
 
-        return data.slice(lowerBound, lowerInclusive, upperBound, upperInclusive);
+        if (lower == null)
+        {
+            // inclusive, so that the empty term of an indexed empty string value, if any, is part of the range
+            lower = ByteComparable.EMPTY;
+            lowerInclusive = true;
+        }
+
+        return data.slice(lower, lowerInclusive, upper, upperInclusive);
     }
 
     /**
