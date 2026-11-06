@@ -19,6 +19,8 @@
 package accord.utils;
 
 import java.lang.reflect.Array;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -33,6 +35,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 
 public class Gens {
@@ -86,6 +89,93 @@ public class Gens {
                     return w.value;
             }
             return list.get(list.size() - 1).value;
+        };
+    }
+
+    public static <T> Gen<T> pickZipf(List<T> array)
+    {
+        if (array == null || array.isEmpty())
+            throw new IllegalArgumentException("Empty array given");
+        if (array.size() == 1)
+            return ignore -> array.get(0);
+        BigDecimal[] weights = new BigDecimal[array.size()];
+        BigDecimal base = BigDecimal.valueOf(Math.pow(2, array.size()));
+        weights[0] = base;
+        for (int i = 1; i < array.size(); i++)
+            weights[i] = base.divide(BigDecimal.valueOf(i + 1), RoundingMode.UP);
+        BigDecimal totalWeights = Stream.of(weights).reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return rs -> {
+            BigDecimal value = BigDecimal.valueOf(rs.nextDouble()).multiply(totalWeights);
+            for (int i = 0; i < weights.length; i++)
+            {
+                value = value.subtract(weights[i]);
+                if (value.compareTo(BigDecimal.ZERO) <= 0)
+                    return array.get(i);
+            }
+            return array.get(array.size() - 1);
+        };
+    }
+
+    public static <T> Gen<Gen<T>> randomWeights(List<T> array)
+    {
+        return rs -> {
+            float[] weights = randomWeights(rs, array.size());
+            return r -> array.get(index(r, weights));
+        };
+    }
+
+    private static float[] randomWeights(RandomSource random, int length)
+    {
+        float[] weights = new float[length - 1];
+        float sum = 0;
+        for (int i = 0 ; i < weights.length ; ++i)
+            weights[i] = sum += random.nextFloat();
+        sum += random.nextFloat();
+        for (int i = 0 ; i < weights.length ; ++i)
+            weights[i] /= sum;
+        return weights;
+    }
+
+    private static int index(RandomSource rs, float[] weights)
+    {
+        int i = Arrays.binarySearch(weights, rs.nextFloat());
+        if (i < 0) i = -1 - i;
+        return i;
+    }
+
+    /**
+     * Creates a generator that uses different distribution strategies for selecting items from a list.
+     * <p>
+     * When the top level generator is called it selects what distribution to use, and returns a generator of {@code T}
+     * that selects from the input using that distribution.
+     */
+    public static <T> Gen<Gen<T>> mixedDistribution(List<T> list)
+    {
+        Invariants.checkArgument(!list.isEmpty(), "can not pick from an empty collection");
+        if (list.size() == 1)
+            return i -> constant(list.get(0));
+        return rs -> {
+            switch (rs.nextInt(0, 4))
+            {
+                case 0: // uniform
+                    return r -> list.get(rs.nextInt(0, list.size()));
+                case 1: // median biased
+                    int median = rs.nextInt(0, list.size());
+                    return r -> list.get(r.nextBiasedInt(0, median, list.size()));
+                case 2: // zipf
+                    List<T> array = list;
+                    if (rs.nextBoolean())
+                    {
+                        array = new ArrayList<>(list);
+                        Collections.reverse(array);
+                    }
+                    return pickZipf(array);
+                case 3: // random weight
+                    return randomWeights(list).next(rs);
+                default:
+                    throw new AssertionError();
+            }
         };
     }
 
@@ -210,6 +300,28 @@ public class Gens {
                     }
                     falseCount++;
                     return false;
+                }
+            };
+        }
+
+        public Gen<Gen<Boolean>> mixedDistribution()
+        {
+            return rs -> {
+                int selection = rs.nextInt(0, 4);
+                switch (selection)
+                {
+                    case 0: // uniform 50/50
+                        return RandomSource::nextBoolean;
+                    case 1: // variable frequency
+                        var freq = rs.nextFloat();
+                        return r -> r.decide(freq);
+                    case 2: // fixed result
+                        boolean result = rs.nextBoolean();
+                        return ignore -> result;
+                    case 3: // biased repeating runs
+                        return runs(rs.nextDouble(), rs.nextInt(1, 100));
+                    default:
+                        throw new IllegalStateException("Unexpected int for bool selection: " + selection);
                 }
             };
         }

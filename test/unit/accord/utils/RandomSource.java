@@ -75,6 +75,25 @@ public interface RandomSource
         return result;
     }
 
+    default int nextBiasedInt(int minInclusive, int median, int maxExclusive)
+    {
+        checkBiasedUniform(minInclusive, median, maxExclusive);
+
+        int range = Math.max(maxExclusive - median, median - minInclusive) * 2;
+        int next = nextInt(range) - range/2;
+        next += median;
+        return next >= median ? next <  maxExclusive ? next : nextInt(median, maxExclusive)
+                              : next >= minInclusive ? next : minInclusive == median ? median : nextInt(minInclusive, median);
+    }
+
+    static void checkBiasedUniform(long minInclusive, long median, long maxExclusive)
+    {
+        if (minInclusive > median)
+            throw new IllegalArgumentException(String.format("Min (%s) should be equal to or less than median (%d).", minInclusive, median));
+        if (median >= maxExclusive)
+            throw new IllegalArgumentException(String.format("Median (%s) should be less than max (%d).", median, maxExclusive));
+    }
+
     default IntStream ints()
     {
         return IntStream.generate(this::nextInt);
