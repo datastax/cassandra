@@ -361,10 +361,11 @@ public class AllowFilteringTest extends SAITester
     @Test
     public void testUnsupportedIndexRestrictions()
     {
+        // tokenizing indexes don't support range restrictions (see LiteralRangeQueryTest for the non-tokenizing ones)
         createTable("CREATE TABLE %s (a text, b text, c text, d text, PRIMARY KEY (a, b))");
-        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s'", StorageAttachedIndex.class.getName()));
-        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s'", StorageAttachedIndex.class.getName()));
-        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(d) USING '%s'", StorageAttachedIndex.class.getName()));
+        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s' WITH OPTIONS = { 'index_analyzer' : 'whitespace' }", StorageAttachedIndex.class.getName()));
+        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s' WITH OPTIONS = { 'index_analyzer' : 'whitespace' }", StorageAttachedIndex.class.getName()));
+        createIndex(String.format("CREATE CUSTOM INDEX ON %%s(d) USING '%s' WITH OPTIONS = { 'index_analyzer' : 'whitespace' }", StorageAttachedIndex.class.getName()));
 
         execute("INSERT INTO %s (a, b, c, d) VALUES ('Test1', 'Test1', 'Test1', 'Test1')");
         execute("INSERT INTO %s (a, b, c, d) VALUES ('Test2', 'Test2', 'Test2', 'Test2')");
