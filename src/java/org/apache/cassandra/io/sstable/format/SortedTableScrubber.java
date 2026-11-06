@@ -230,11 +230,21 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
     private void outputSummary(List<SSTableReader> finished)
     {
+        /*
+         * As discussed in PR {@link https://github.com/datastax/cassandra/pull/2614},
+         * retrying running {@code tryAppend} for the same partition will result in iterating
+         * over the same rows with {@code computeNext()} and the static row more than once
+         * in constructor of {@code FixNegativeLocalDeletionTimeIterator}, thus incrementing
+         * fields in {@code negativeLocalDeletionInfoMetrics} multiple times upon the same trigger (same row/same static row).
+         */
         if (!finished.isEmpty())
         {
             outputHandler.output("Scrub of %s complete: %d partitions in new sstable and %d empty (tombstoned) partitions dropped", sstable, goodPartitions, emptyPartitions);
             if (negativeLocalDeletionInfoMetrics.fixedRows > 0)
                 outputHandler.output("Fixed %d rows with overflowed local deletion time.", negativeLocalDeletionInfoMetrics.fixedRows);
+            if (negativeLocalDeletionInfoMetrics.partitionsWithFixedStaticRow > 0)
+                outputHandler.output("Fixed static columns with overflowed local deletion time in " + negativeLocalDeletionInfoMetrics.partitionsWithFixedStaticRow + " partitions.");
+
             if (badPartitions > 0)
                 outputHandler.warn("Unable to recover %d partitions that were skipped.  You can attempt manual recovery from the pre-scrub snapshot.  You can also run nodetool repair to transfer the data from a healthy replica, if any", badPartitions);
         }
@@ -696,6 +706,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
 
         private final OutputHandler outputHandler;
         private final NegativeLocalDeletionInfoMetrics negativeLocalExpirationTimeMetrics;
+        private final Row fixedStaticRow;
 
         public FixNegativeLocalDeletionTimeIterator(UnfilteredRowIterator iterator, OutputHandler outputHandler,
                                                     NegativeLocalDeletionInfoMetrics negativeLocalDeletionInfoMetrics)
@@ -703,6 +714,21 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             this.iterator = iterator;
             this.outputHandler = outputHandler;
             this.negativeLocalExpirationTimeMetrics = negativeLocalDeletionInfoMetrics;
+            
+            // Fixing static row at construction time
+            Row staticRow = iterator.staticRow();
+            if (hasNegativeLocalExpirationTime(staticRow))
+            {
+                staticRow = fixNegativeLocalExpirationTime(staticRow);
+                this.negativeLocalExpirationTimeMetrics.partitionsWithFixedStaticRow++;
+            }
+            this.fixedStaticRow = staticRow;
+        }
+
+        @Override
+        public Row staticRow()
+        {
+            return fixedStaticRow;
         }
 
         private static <C extends CellData<?, C>> C fixCellExpirationTime(C cell)
@@ -775,7 +801,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             return false;
         }
 
-        private Unfiltered fixNegativeLocalExpirationTime(Row row)
+        private Row fixNegativeLocalExpirationTime(Row row)
         {
             return row.transformAndFilter(FixNegativeLocalDeletionTimeIterator::fixLivenessInfoExpirationTime,
                                           FixNegativeLocalDeletionTimeIterator::fixCellExpirationTime)
@@ -787,6 +813,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     static class NegativeLocalDeletionInfoMetrics
     {
         public volatile int fixedRows = 0;
+        public volatile int partitionsWithFixedStaticRow = 0;
         public volatile int droppedRows = 0;
     }
 }
