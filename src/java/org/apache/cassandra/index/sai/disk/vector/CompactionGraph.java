@@ -154,6 +154,8 @@ public class CompactionGraph implements Closeable, Accountable
     // not final; will be updated to different objects after fine-tuning
     private VectorCompressor<?> compressor;
     private MutableCompressedVectors compressedVectors;
+    // tracks compressedVectors.ramBytesUsed() without calling it for every inserted vector
+    private CompressedVectorsBytesTracker compressedVectorsBytes;
     private GraphIndexBuilder builder;
 
     private final VectorFloat<?> globalMean;
@@ -211,6 +213,7 @@ public class CompactionGraph implements Closeable, Accountable
         if (compressor instanceof ProductQuantization)
         {
             compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
+            compressedVectorsBytes = new CompressedVectorsBytesTracker(compressedVectors);
             bsp = BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors);
         }
         else
@@ -373,7 +376,8 @@ public class CompactionGraph implements Closeable, Accountable
 
                         // Update bytes to account for new encoding. This isn't expected to change, but just
                         // in case it does, we track it here.
-                        bytesUsed += (compressedVectors.ramBytesUsed() - originalBytesUsed);
+                        compressedVectorsBytes = new CompressedVectorsBytesTracker(compressedVectors);
+                        bytesUsed += (compressedVectorsBytes.bytesUsed() - originalBytesUsed);
 
                         // Keep the existing edges but recompute their scores
                         builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
@@ -394,15 +398,14 @@ public class CompactionGraph implements Closeable, Accountable
                 // is only needed during index build. It is a temp file.
                 onDiskVectorValuesWriter.write(ordinal, vector);
 
-                // Track the bytes used as a result of this operation
-                long compressedVectorsBytesUsed = compressedVectors.ramBytesUsed();
                 // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
                 while (compressedVectors.count() < ordinal)
                     compressedVectors.setZero(compressedVectors.count());
                 compressedVectors.encodeAndSet(ordinal, vector);
 
+                // Track the bytes used as a result of this operation
                 bytesUsed += postings.ramBytesUsed();
-                bytesUsed += (compressedVectors.ramBytesUsed() - compressedVectorsBytesUsed);
+                bytesUsed += compressedVectorsBytes.refreshBytesUsedDelta();
                 return new InsertionResult(bytesUsed, ordinal, vector);
             }
 
