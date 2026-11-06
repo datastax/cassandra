@@ -94,7 +94,12 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
         if (merged.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW))
             processRowDeletionUpdate(existing != null ? existing.applicableToPointForward() : null, merged.applicableToPointForward());
         else if (update.isBoundary())
-            processMarkerBoundary(merged);
+        {
+            // Report the incoming deletion as given, including the complex deletion passed to onComplexColumnDeletion.
+            // The merged marker also carries existing deletions, whose own boundaries come here with a covering
+            // update and are not reported, so its sides would not pair up.
+            processMarkerBoundary(update);
+        }
 
         return merged;
     }
@@ -122,9 +127,6 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
         TrieTombstoneMarker.Kind leftKind = leftSide != null ? leftSide.deletionKind() : null;
         TrieTombstoneMarker.Kind rightKind = rightSide != null ? rightSide.deletionKind() : null;
 
-        assert leftKind != TrieTombstoneMarker.Kind.ROW && rightKind != TrieTombstoneMarker.Kind.ROW
-            : "Row deletion without row level marker: " + update;
-
         // We need to report column deletions. Do so by issuing it on the open side.
         // Indexer ignores existing deletions, so we don't need to report them here.
         if (rightKind == TrieTombstoneMarker.Kind.COLUMN)
@@ -138,6 +140,11 @@ public final class TriePartitionUpdaterLegacyIndex extends TriePartitionUpdater
         // that include a lower-level change.
         if (leftKind == TrieTombstoneMarker.Kind.COLUMN)
             return;
+
+        // The update's row deletion can be on the other side of one of its newer column deletions, handled above. It
+        // was reported with the row's level marker, which every other row deletion boundary carries.
+        assert leftKind != TrieTombstoneMarker.Kind.ROW && rightKind != TrieTombstoneMarker.Kind.ROW
+            : "Row deletion without row level marker: " + update;
 
         // We should also skip the sides that switch to or from the partition deletion.
         if (leftKind == TrieTombstoneMarker.Kind.PARTITION)
