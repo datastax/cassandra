@@ -534,6 +534,8 @@ public class DatabaseDescriptor
 
         verifyDse6SSTableFormat();
 
+        announceDse51Mode();
+
         applyCryptoProvider();
 
         applySimpleConfig();
@@ -1790,9 +1792,6 @@ public class DatabaseDescriptor
             if (!isDsePaxosVariant(paxosVariant))
                 throw new ConfigurationException(dsePaxosVariantRefusal(mode, paxosVariant), false);
             applyDse51SSTableOutput(conf);
-            logger.warn("Running in internode_compatibility_mode DSE_5_1: the node writes big nb sstables with " +
-                        "numeric generations, which DSE 5.1 does not read, and requires paxos_variant v1; it does " +
-                        "not connect to DSE 5.1 nodes");
         }
 
         internodeCompatibilityMode = mode;
@@ -2013,6 +2012,21 @@ public class DatabaseDescriptor
                         "and requires paxos_variant v1; it speaks with DSE 6 peers the pre-4.0 internode dialect DSE uses with non-DSE " +
                         "peers, until the flag is dropped",
                         effective);
+    }
+
+    /**
+     * On the daemon path, once the sstable formats are loaded, announces the DSE_5_1 mode with a WARN naming the
+     * sstable version the node writes, as the DSE_6 mode is announced by {@link #verifyDse6SSTableFormat()}.
+     */
+    @VisibleForTesting
+    static void announceDse51Mode()
+    {
+        if (!internodeCompatibilityMode.isDse51())
+            return;
+        SSTableFormat<?, ?> format = getSelectedSSTableFormat();
+        logger.warn("Running in internode_compatibility_mode DSE_5_1: the node writes {} {} sstables, which DSE 5.1 " +
+                    "does not read, with numeric generations, and requires paxos_variant v1; it does not connect to " +
+                    "DSE 5.1 nodes", format.name(), format.getLatestVersion().version);
     }
 
     private static void applySSTableFormats()

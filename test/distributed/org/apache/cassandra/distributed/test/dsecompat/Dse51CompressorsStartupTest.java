@@ -63,6 +63,10 @@ public class Dse51CompressorsStartupTest extends TestBaseImpl
                                                   compressor + "'}"));
             IInvokableInstance node = restartedInTheMode(cluster, true);
             assertThat(node.callOnInstance(DatabaseDescriptor::isDse51CompatibilityMode)).isTrue();
+            // announced once, at the start in the mode, with the version the node writes
+            assertThat(node.logs().grep("Running in internode_compatibility_mode DSE_5_1: the node writes big nb " +
+                                        "sstables, which DSE 5.1 does not read, with numeric generations").getResult())
+            .hasSize(1);
         }
     }
 

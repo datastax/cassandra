@@ -69,9 +69,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The startup checks of the DSE 6 compatibility mode: what {@code DSE_6} refuses to find on disk, the upgrade marker
- * it writes once every check has passed, the refusal of {@code NONE} while the marker or the record of DSE 6 peers
- * exists, the DSE version {@code DSE_6} gossips to DSE nodes (with the state it starts gossiping with), and the silence
- * after which a node that is down counts as lost during the upgrade.
+ * it writes once every check has passed, the refusal of {@code NONE} (and {@code DSE_5_1}) while the marker or the
+ * record of DSE 6 peers exists, the DSE version {@code DSE_6} gossips to DSE nodes (with the state it starts gossiping
+ * with), and the silence after which a node that is down counts as lost during the upgrade.
  * <p>
  * The JVM of this class (unit tests fork per class) initialises the trie format at version {@code bb}, as
  * {@code DSE_6} does on a real node, so that {@link StartupChecks#checkSSTablesFormat} rejects newer trie files the
@@ -506,6 +506,8 @@ public class Dse6StartupChecksTest
         .isInstanceOf(StartupException.class)
         .hasMessageContaining("internode_compatibility_mode is DSE_5_1 but the DSE 6 upgrade marker")
         .hasMessageContaining(DseUpgradeMarker.FILE_NAME + " is present: DSE 6 peers may still be in the cluster")
+        .hasMessageContaining("once every node runs this software, delete the marker")
+        .hasMessageContaining("ignore_dse_peers=true")
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
     }
 

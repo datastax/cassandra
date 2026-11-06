@@ -119,8 +119,12 @@ public final class DseCompat
      */
     private static final Pattern GOSSIPED_DSE_VERSION = Pattern.compile("6\\.8\\.[01]");
 
-    /** A DSE 5.1 {@code dse_version}: {@code 5.1.<patch>}, three numeric parts and no suffix ({@code 5.1.51}). */
-    private static final Pattern DSE51_DSE_VERSION = Pattern.compile("5\\.1\\.(0|[1-9]\\d{0,3})");
+    /**
+     * A DSE 5.1 {@code dse_version}: {@code 5.1.<patch>}, three numeric parts and no suffix, the patch of one or two
+     * digits without a leading zero ({@code 5.1.51}; not {@code 5.1.051}), as the build number of the release has it
+     * ({@link #dse51Patch}).
+     */
+    private static final Pattern DSE51_DSE_VERSION = Pattern.compile("5\\.1\\.(0|[1-9]\\d?)");
 
     private DseCompat()
     {
@@ -356,8 +360,9 @@ public final class DseCompat
 
     /**
      * The patch of a DSE 5.1 node's release, {@code 51} for DSE 5.1.51: read from its {@code dse_version} when that
-     * is a DSE 5.1 one ({@link #isDse51DseVersion}), else from the build number of its release, {@code 51<patch>}
-     * ({@code 3.11.3.5151} is 5.1.51, {@code 3.11.3.5118} 5.1.18, {@code 3.11.3.513} 5.1.3). Null when neither tells
+     * is a DSE 5.1 one ({@link #isDse51DseVersion}), else from the build number of its release, {@code 51<patch>},
+     * the patch without leading zeros ({@code 3.11.3.5151} is 5.1.51, {@code 3.11.3.5118} 5.1.18, {@code 3.11.3.513}
+     * 5.1.3; {@code 3.11.3.5105} names no release). Null when neither tells
      * it: no DSE 5.1 value, or a build number of another form.
      */
     @Nullable

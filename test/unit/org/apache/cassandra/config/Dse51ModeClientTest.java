@@ -61,6 +61,9 @@ public class Dse51ModeClientTest
             }
             assertThat(appender.list).noneMatch(e -> e.getLevel() == Level.WARN &&
                                                      e.getFormattedMessage().contains("internode_compatibility_mode"));
+            // the mode is announced by a node only
+            assertThat(appender.list).noneMatch(e -> e.getFormattedMessage()
+                                                      .startsWith("Running in internode_compatibility_mode DSE_5_1"));
             String format = "internode_compatibility_mode DSE_5_1 selects sstable.selected_format big in place of " +
                             "bti: DSE 5.1 only reads the big format";
             assertThat(appender.list).anyMatch(e -> e.getLevel() == Level.INFO &&
