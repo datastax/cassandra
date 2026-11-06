@@ -38,8 +38,10 @@ public class VectorIndexMixedVersionTest extends VectorTester
 
     private static List<Version> getVersions()
     {
+        // FA is excluded: it always has FusedPQ on and is superseded by FB.
         var versions = Version.ALL.stream()
                           .filter(v -> v.onOrAfter(Version.JVECTOR_EARLIEST))
+                          .filter(v -> !v.equals(Version.FA))
                           .collect(Collectors.toList());
         Collections.shuffle(versions, getRandom().getRandom());
         logger.info("Running mixed version test with versions: {}", versions);

@@ -100,7 +100,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void endToEndTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -149,7 +149,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         execute("INSERT INTO %s (pk, str_val, val) VALUES (3, 'D', [4.0, 5.0, 6.0])");
 
         flush();
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         UntypedResultSet result = execute("SELECT * FROM %s ORDER BY val ann of [2.5, 3.5, 4.5] LIMIT 3");
         assertThat(result).hasSize(3);
@@ -176,7 +176,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     {
         createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "v");
 
         execute("INSERT INTO %s (pk, b, v) VALUES (0, true, [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, b, v) VALUES (1, true, [2.0, 3.0, 4.0])");
@@ -202,7 +202,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         setMaxBruteForceRows(0);
         createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "v");
 
         execute("INSERT INTO %s (pk, b, v) VALUES (1, true, [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, b, v) VALUES (2, true, [2.0, 3.0, 4.0])");
@@ -232,7 +232,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testTwoPredicatesWithUnnecessaryAllowFiltering()
     {
         createTable("CREATE TABLE %s (pk int, b int, v vector<float, 3>, PRIMARY KEY(pk, b))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "v");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
 
         execute("INSERT INTO %s (pk, b, v) VALUES (0, 0, [1.0, 2.0, 3.0])");
@@ -250,7 +250,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     {
         createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "v");
 
         for (int i = 0; i < 100; i++)
             execute("INSERT INTO %s (pk, b, v) VALUES (?, true, ?)",
@@ -271,7 +271,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     {
         createTable("CREATE TABLE %s (pk int, b boolean, v vector<float, 3>, str text, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "v");
         createIndex("CREATE CUSTOM INDEX ON %s(str) USING 'StorageAttachedIndex'");
 
         execute("INSERT INTO %s (pk, b, v, str) VALUES (0, true, [1.0, 2.0, 3.0], 'A')");
@@ -294,7 +294,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testSameVectorMultipleRows()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'A', [1.0, 2.0, 3.0])");
@@ -314,7 +314,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testQueryEmptyTable()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         var result = execute("SELECT * FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 1");
         assertThat(result).hasSize(0);
@@ -324,7 +324,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testQueryTableWithNulls()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', null)");
         var result = execute("SELECT * FROM %s ORDER BY val ANN OF [2.5, 3.5, 4.5] LIMIT 1");
@@ -339,7 +339,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testLimitLessThanInsertedRowCount()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         // Insert more rows than the query limit
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
@@ -355,7 +355,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testQueryMoreRowsThanInserted()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
 
@@ -367,8 +367,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void changingOptionsTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = " +
-                    "{'maximum_node_connections' : 10, 'construction_beam_width' : 200, 'similarity_function' : 'euclidean' }");
+        createVectorIndex("%s", "val", Map.of("maximum_node_connections", "10", "construction_beam_width", "200", "similarity_function", "euclidean"));
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -398,7 +397,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void defaultOptionsTest()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "v");
 
         var sim = getCurrentColumnFamilyStore().indexManager;
         var index = (StorageAttachedIndex) sim.listIndexes().iterator().next();
@@ -422,7 +421,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void obsoleteOptionsTest()
     {
         createTable("CREATE TABLE %s (pk int, v vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = {'optimize_for' : 'recall' }");
+        createVectorIndex("%s", "v", Map.of("optimize_for", "recall"));
         // as long as CREATE doesn't error out, we're good
     }
 
@@ -430,7 +429,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void bindVariablesTest()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vectorOf(1, 2, 3));
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', ?)", vectorOf(2, 3, 4));
@@ -448,7 +447,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         // the closest rows to the query vector
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vectorOf(1, 2, 3));
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', ?)", vectorOf(2, 3, 4));
@@ -469,7 +468,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
         createIndex("CREATE CUSTOM INDEX ON %s(str_val) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', ?)", vectorOf(1, 2, 3));
         execute("INSERT INTO %s (pk, str_val) VALUES (1, 'B')"); // no vector
@@ -496,7 +495,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void lwtTest()
     {
         createTable("CREATE TABLE %s (p int, c int, v text, vec vector<float, 2>, PRIMARY KEY(p, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "vec");
 
         execute("INSERT INTO %s (p, c, v) VALUES (?, ?, ?)", 0, 0, "test");
         execute("INSERT INTO %s (p, c, v) VALUES (?, ?, ?)", 0, 1, "00112233445566");
@@ -512,15 +511,15 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void twoVectorFieldsTest()
     {
         createTable("CREATE TABLE %s (pk int, v2 vector<float, 2>, v3 vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(v2) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(v3) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "v2");
+        createVectorIndex("%s", "v3");
     }
 
     @Test
     public void primaryKeySearchTest()
     {
         createTable("CREATE TABLE %s (pk int, val vector<float, 3>, i int, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         var N = 5;
         for (int i = 0; i < N; i++)
@@ -546,7 +545,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void partitionKeySearchTest()
     {
         createTable("CREATE TABLE %s (partition int, row int, val vector<float, 2>, PRIMARY KEY(partition, row))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        createVectorIndex("%s", "val", Map.of("similarity_function", "euclidean"));
 
         var nPartitions = 5;
         var rowsPerPartition = 10;
@@ -613,7 +612,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void selectSimilarityWithAnn()
     {
         createTable("CREATE TABLE %s (pk int, str_val text, val vector<float, 3>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "val");
 
         execute("INSERT INTO %s (pk, str_val, val) VALUES (0, 'A', [1.0, 2.0, 3.0])");
         execute("INSERT INTO %s (pk, str_val, val) VALUES (1, 'B', [2.0, 3.0, 4.0])");
@@ -683,7 +682,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
         // Use euclidean distance to more easily verify correctness of caching
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
+        createVectorIndex("%s", "vec", Map.of("similarity_function", "euclidean"));
 
         // Put one row in the first ss table to guarantee brute force method. This vector is also the most similar.
         execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vectorOf(1, 1));
@@ -704,7 +703,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
         // Use euclidean distance to more easily verify correctness of caching
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = { 'similarity_function' : 'euclidean' }");
+        createVectorIndex("%s", "vec", Map.of("similarity_function", "euclidean"));
 
         // Put one row in the first ss table to guarantee brute force method. This vector is also the most similar.
         execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 10, vectorOf(1, 1));
@@ -725,7 +724,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testRowWithMissingVectorThatMatchesQueryPredicates()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "vec");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // There was an edge case where we failed because there was just a single row in the table.
@@ -740,7 +739,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testMultipleVectorsInMemoryWithPredicate()
     {
         createTable(KEYSPACE, "CREATE TABLE %s (pk int, val text, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "vec");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
         // When we search the memtable, we filter out PKs outside the memtable's bounrdaries.
@@ -759,7 +758,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testNestedANNQuery()
     {
         createTable("CREATE TABLE %s (pk int, name text, body text, vals vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vals) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "vals");
         createIndex("CREATE CUSTOM INDEX ON %s(name) USING 'StorageAttachedIndex'");
         execute("INSERT INTO %s (pk, name, body, vals) VALUES (1, 'Ann', 'A lizard said bad things to the snakes', [0.1, 0.1])");
         execute("INSERT INTO %s (pk, name, body, vals) VALUES (2, 'Bea', 'Please wear protective gear before operating the machine', [0.2, -0.3])");
@@ -775,7 +774,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         createTable("CREATE TABLE %s (pk int, a int, b int, c int, vec vector<float, 2>, PRIMARY KEY(pk, a))");
         createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "vec");
 
         // This row is created so that it matches the query parameters, and so that the PK is before the other PKs.
         // The token for 5 is -7509452495886106294 and the token for 1 is -4069959284402364209.
@@ -820,7 +819,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         }
 
         // create indexes on existing sstable to produce multiple segments
-        createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex' WITH OPTIONS = {'similarity_function' : 'euclidean'}");
+        createVectorIndex("%s", "val", Map.of("similarity_function", "euclidean"));
         createIndex("CREATE CUSTOM INDEX ON %s(constant) USING 'StorageAttachedIndex'");
 
         // query multiple on-disk indexes
@@ -862,7 +861,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testEnsureIndexQueryableAfterTransientFailure() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "vec");
 
         var injection = Injections.newCustom("fail_on_searcher_search")
                                   .add(InvokePointBuilder.newInvokePoint().onClass(GraphSearcher.class).onMethod("search").atEntry())
@@ -885,7 +884,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testCompactionWithEnoughRowsForPQAndDeleteARow()
     {
         createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "vec");
 
         disableCompaction();
 
@@ -909,7 +908,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testCompactionWithEnoughRowsForPQAndARowWithAMissingVector() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "vec");
 
         disableCompaction();
 
@@ -932,7 +931,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testFilterThenSortQueryWithConcurrentVectorDeletion() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v vector<float, 2>, c int)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "v");
         createIndex("CREATE CUSTOM INDEX ON %s(c) USING 'StorageAttachedIndex'");
 
         // write into memtable
@@ -1073,8 +1072,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testMemtableInsertSearchInsertSearchHandling()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, embedding vector<float, 5>)");
-        createIndex("CREATE CUSTOM INDEX ON %s(embedding) USING 'StorageAttachedIndex' " +
-                    "WITH OPTIONS = {'similarity_function': 'dot_product', 'source_model': 'OTHER'}");
+        createVectorIndex("%s", "embedding", Map.of("similarity_function", "dot_product", "source_model", "OTHER"));
 
         // Insert initial data
         execute("INSERT INTO %s (id, embedding) VALUES ('row1', [0.1, 0.1, 0.1, 0.1, 0.1])");
@@ -1108,7 +1106,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testUpdateRowScoreToWorsePositionButIncludeInBatch()
     {
         createTable("CREATE TABLE %s (k int, c int, r vector<float, 2>, v int, PRIMARY KEY(k, c))");
-        createIndex("CREATE CUSTOM INDEX ON %s(r) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "r");
 
         String insert = "INSERT INTO %s (k, c, r, v) VALUES (?, ?, ?, ?)";
         execute(insert, row(0, 1, vectorOf(0.1f, 0.1f), 0));
@@ -1126,7 +1124,7 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
     public void testRowIdIteratorClosedOnHasNextFailure() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, vec vector<float, 2>, PRIMARY KEY(pk))");
-        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex'");
+        createVectorIndex("%s", "vec");
 
         // Track if the rowIdIterator's close method is called
         Injections.Counter closeCounter = Injections.newCounter("rowIdIteratorCloseCounter")
