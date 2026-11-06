@@ -421,6 +421,19 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             ParentRepairSessionListener.instance.onRemoved(e.getKey(), e.getValue());
     }
 
+    /**
+     * Force-shutdown all RepairSessions (Merkle tree, streaming, sync) belonging to
+     * the given parent repair session, then remove the parent session record.
+     */
+    public synchronized void abortSession(UUID parentSessionId)
+    {
+        Throwable cause = new IOException("Repair session aborted: " + parentSessionId);
+        sessions.values().stream()
+                .filter(s -> parentSessionId.equals(s.parentRepairSession))
+                .forEach(s -> s.forceShutdown(cause));
+        removeParentRepairSession(parentSessionId);
+    }
+
     public void recordRepairStatus(int cmd, ParentRepairStatus parentRepairStatus, List<String> messages)
     {
         repairStatusByCmd.put(cmd, Pair.create(parentRepairStatus, messages));
