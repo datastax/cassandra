@@ -44,6 +44,7 @@ import static org.apache.cassandra.config.InternodeCompatibilityMode.DSE_5_1;
 import static org.apache.cassandra.config.InternodeCompatibilityMode.DSE_6;
 import static org.apache.cassandra.config.InternodeCompatibilityMode.NONE;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
@@ -144,7 +145,7 @@ public class Dse51ModeConfigTest
         // nothing of the on-disk half of DSE_6: no trie version, no DSE 6 transaction logs or histograms
         assertThat(DatabaseDescriptor.isDse6SSTableOutput()).isFalse();
         assertThat(TRIE_INDEX_FORMAT_VERSION.isPresent()).isFalse();
-        DatabaseDescriptor.verifyDse6SSTableFormat();
+        assertThatCode(DatabaseDescriptor::verifyDse6SSTableFormat).doesNotThrowAnyException();
         // and no pre-4.0 dialect: the gate of every pre-4.0 code path stays closed
         assertThat(DseCompat.enabled()).isFalse();
         assertThat(DseCompat.isPre40Layout(MessagingService.VERSION_3014)).isFalse();
@@ -412,9 +413,13 @@ public class Dse51ModeConfigTest
             Config bti = dse51Config();
             bti.sstable.selected_format = "bti";
             bti.paxos_variant = Config.PaxosVariant.v2;
+            bti.uuid_sstable_identifiers_enabled = true;
             apply(bti);
             assertThat(mode()).isEqualTo(NONE);
             assertThat(DatabaseDescriptor.isDseCompatibilityMode()).isFalse();
+            // and nothing is forced
+            assertThat(bti.sstable.selected_format).isEqualTo("bti");
+            assertThat(bti.uuid_sstable_identifiers_enabled).isTrue();
         }
     }
 

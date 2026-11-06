@@ -691,13 +691,16 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 }
 
                 // as CassandraDaemon.setup: the DSE 5.1 check of the compressors of the tables
-                try
+                if (DatabaseDescriptor.isDse51CompatibilityMode())
                 {
-                    Dse51Compressors.verifyAtStartup();
-                }
-                catch (StartupException e)
-                {
-                    throw new RuntimeException(e.getMessage(), e);
+                    try
+                    {
+                        Dse51Compressors.verifyAtStartup();
+                    }
+                    catch (StartupException e)
+                    {
+                        throw new RuntimeException(e.getMessage(), e);
+                    }
                 }
 
                 // Start up virtual table support

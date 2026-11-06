@@ -1744,9 +1744,10 @@ public class DatabaseDescriptor
      * writes.
      * <p>
      * For {@link InternodeCompatibilityMode#DSE_5_1} it checks the same settings, with the {@code big} sstable
-     * format in place of {@code bti} and no trie version, and forces numeric sstable generations; tools inherit those
-     * checks too, and clients, which do not read {@code cassandra.yaml}, get the {@code big} format forced instead of
-     * refused. The mode still writes big sstables of version {@code nb} and speaks no pre-4.0 dialect.
+     * format in place of {@code bti} and no trie version, and forces numeric sstable generations; tools inherit the
+     * on-disk checks (the format, the compressors, the generations) without the storage mode and paxos checks, and
+     * clients, which do not read {@code cassandra.yaml}, get the {@code big} format forced instead of refused. The
+     * mode still writes big sstables of version {@code nb} and speaks no pre-4.0 dialect.
      */
     @VisibleForTesting
     static void applyInternodeCompatibilityMode(Config conf)
@@ -1909,11 +1910,11 @@ public class DatabaseDescriptor
      */
     private static void applyDse51SSTableOutput(Config conf)
     {
-        String selectedFormat = conf == null || StringUtils.isBlank(conf.sstable.selected_format)
-                                ? BtiFormat.NAME : conf.sstable.selected_format;
+        boolean noFormat = conf == null || conf.sstable == null || StringUtils.isBlank(conf.sstable.selected_format);
+        String selectedFormat = noFormat ? BtiFormat.NAME : conf.sstable.selected_format;
         if (!BigFormat.NAME.equals(selectedFormat))
         {
-            if (conf == null || !isClientInitialized())
+            if (conf == null || conf.sstable == null || !isClientInitialized())
             {
                 String message = String.format("internode_compatibility_mode DSE_5_1 requires " +
                                                "sstable.selected_format %s, found %s: DSE 5.1 only reads the big " +
@@ -5825,8 +5826,8 @@ public class DatabaseDescriptor
 
     /**
      * True while the node runs in {@code internode_compatibility_mode: DSE_6} (never for tools and clients); the gate
-     * of every DSE-specific code path: the on-disk format DSE reads, the pre-4.0 internode dialect spoken with DSE 6 peers,
-     * and the operations refused during the upgrade (refused with {@code NONE} too while DSE 6 peers are seen).
+     * of every DSE 6-specific code path: the on-disk format DSE reads, the pre-4.0 internode dialect spoken with DSE 6
+     * peers, and the operations refused during the upgrade (refused with {@code NONE} too while DSE 6 peers are seen).
      */
     public static boolean isDse6CompatibilityMode()
     {

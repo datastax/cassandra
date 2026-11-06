@@ -332,9 +332,11 @@ public final class DseCompat
 
     /**
      * True for a peer that is a DSE 5.1 node by the rule of the DSE 5.1 compatibility mode: the peer gossips a
-     * {@code NET_VERSION} of 10 or 11, or answers or opens a handshake at 10 or 11 ({@code messagingVersion}), or,
-     * before any gossip or handshake, its release is a DSE 5.1 one ({@link #isDse51ReleaseVersion}) or its
-     * {@code dse_version} is ({@link #isDse51DseVersion}). The rule takes any pre-4.0 peer for a DSE 5.1 node, which
+     * {@code NET_VERSION} of 10 or 11, or answers or opens a handshake at 10 or 11 ({@code messagingVersion}); while
+     * no messaging version is known, before any gossip or handshake, its release is a DSE 5.1 one
+     * ({@link #isDse51ReleaseVersion}) or its {@code dse_version} is ({@link #isDse51DseVersion}). A known messaging
+     * version decides alone, so a saved row of a peer upgraded since (a DSE 5.1 release, a version of 4.0 or later)
+     * does not make it a DSE 5.1 node. The rule takes any pre-4.0 peer for a DSE 5.1 node, which
      * holds only in a cluster of DSE 5.1 nodes and nodes of this software, so it applies in the DSE 5.1 mode only, and
      * the DSE 6 rule is no part of it. A pure function: each argument may be unknown (null).
      *
@@ -347,9 +349,8 @@ public final class DseCompat
                                       @Nullable CassandraVersion release,
                                       @Nullable String dseVersion)
     {
-        if (messagingVersion != null
-            && (messagingVersion == MessagingService.VERSION_30 || messagingVersion == MessagingService.VERSION_3014))
-            return true;
+        if (messagingVersion != null)
+            return messagingVersion == MessagingService.VERSION_30 || messagingVersion == MessagingService.VERSION_3014;
         return isDse51ReleaseVersion(release) || isDse51DseVersion(dseVersion);
     }
 

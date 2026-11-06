@@ -302,13 +302,16 @@ public class CassandraDaemon
         }
 
         // DSE 5.1 compatibility: refuse to start while a table is compressed with a compressor DSE 5.1 does not read
-        try
+        if (DatabaseDescriptor.isDse51CompatibilityMode())
         {
-            Dse51Compressors.verifyAtStartup();
-        }
-        catch (StartupException e)
-        {
-            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+            try
+            {
+                Dse51Compressors.verifyAtStartup();
+            }
+            catch (StartupException e)
+            {
+                exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+            }
         }
 
         setupVirtualKeyspaces();

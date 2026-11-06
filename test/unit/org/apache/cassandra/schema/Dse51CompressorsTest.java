@@ -27,6 +27,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.io.compress.EncryptorTest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -71,6 +72,11 @@ public class Dse51CompressorsTest extends CQLTester
         return Dse51Compressors.unreadable(List.of(keyspaceMetadata()));
     }
 
+    private List<String> encrypted()
+    {
+        return Dse51Compressors.encrypted(List.of(keyspaceMetadata()));
+    }
+
     /** A table of two int columns compressed as {@code compression} says. */
     private String createTableCompressedWith(String compression)
     {
@@ -86,6 +92,7 @@ public class Dse51CompressorsTest extends CQLTester
         String none = createTableCompressedWith("{'enabled': false}");
         String byDefault = createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         assertThat(unreadable()).isEmpty();
+        assertThat(encrypted()).isEmpty();
         for (String table : new String[]{ lz4, snappy, deflate, none, byDefault })
             assertThat(keyspaceMetadata().getTableOrViewNullable(table)).as(table).isNotNull();
 
@@ -116,7 +123,7 @@ public class Dse51CompressorsTest extends CQLTester
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
         assertThatThrownBy(Dse51Compressors::verifyAtStartup)
         .isInstanceOf(StartupException.class)
-        .hasMessage(Dse51Compressors.refusal(unreadable()))
+        .hasMessage(Dse51Compressors.refusal(unreadable(), List.of()))
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
 
         // altered to a compressor DSE 5.1 reads, or dropped: the start is accepted
@@ -137,21 +144,48 @@ public class Dse51CompressorsTest extends CQLTester
         assertThat(unreadable()).containsExactly(KEYSPACE + '.' + view + " (ZstdCompressor)");
     }
 
+    /** A table encrypted by this software is refused with its own reason, not as a compressor DSE 5.1 lacks. */
+    @Test
+    public void anEncryptedTableIsRefusedAsSuch() throws Throwable
+    {
+        String encrypted = createTableCompressedWith("{'class': 'Encryptor', " +
+                                                     "'cipher_algorithm': 'AES/ECB/PKCS5Padding', " +
+                                                     "'secret_key_strength': 128, 'key_provider': '" +
+                                                     EncryptorTest.KeyProviderFactoryStub.class.getName() + "'}");
+        String zstd = createTableCompressedWith("{'class': 'ZstdCompressor'}");
+        assertThat(encrypted()).containsExactly(KEYSPACE + '.' + encrypted + " (Encryptor)");
+        assertThat(unreadable()).containsExactly(KEYSPACE + '.' + zstd + " (ZstdCompressor)");
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertThatThrownBy(Dse51Compressors::verifyAtStartup)
+        .isInstanceOf(StartupException.class)
+        .hasMessage(Dse51Compressors.refusal(unreadable(), encrypted()))
+        .hasMessageContaining(KEYSPACE + '.' + encrypted + " (Encryptor) is encrypted, which this mode does not " +
+                              "support");
+    }
+
     @Test
     public void theRefusalNamesEveryTableAndTheFix()
     {
-        assertThat(Dse51Compressors.refusal(List.of("ks.t (ZstdCompressor)")))
+        String fix = ". DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor. Start this node without " +
+                     "the mode, keeping sstable.selected_format: big and with uuid_sstable_identifiers_enabled: " +
+                     "false, change the compression of the tables named to one of them, rewrite their sstables " +
+                     "(nodetool upgradesstables -a), then start the node in the mode again";
+        assertThat(Dse51Compressors.refusal(List.of("ks.t (ZstdCompressor)"), List.of()))
         .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.t (ZstdCompressor) is compressed with a " +
                    "compressor DSE 5.1 does not read, so a DSE 5.1 node could not open the sstables this node writes " +
-                   "for it; DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor. Start this node " +
-                   "without the mode, change the compression of that table to one of them, rewrite its sstables " +
-                   "(nodetool upgradesstables -a), then start the node in the mode again");
-        assertThat(Dse51Compressors.refusal(List.of("ks.a (NoopCompressor)", "ks.b (ZstdCompressor)")))
+                   "for it" + fix);
+        assertThat(Dse51Compressors.refusal(List.of("ks.a (NoopCompressor)", "ks.b (ZstdCompressor)"), List.of()))
         .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.a (NoopCompressor), ks.b (ZstdCompressor) " +
                    "are compressed with a compressor DSE 5.1 does not read, so a DSE 5.1 node could not open the " +
-                   "sstables this node writes for them; DSE 5.1 reads LZ4Compressor, SnappyCompressor and " +
-                   "DeflateCompressor. Start this node without the mode, change the compression of those tables to " +
-                   "one of them, rewrite their sstables (nodetool upgradesstables -a), then start the node in the " +
-                   "mode again");
+                   "sstables this node writes for them" + fix);
+        assertThat(Dse51Compressors.refusal(List.of(), List.of("ks.e (Encryptor)")))
+        .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.e (Encryptor) is encrypted, which this mode " +
+                   "does not support" + fix);
+        List<String> twoEncrypted = List.of("ks.e (Encryptor)", "ks.f (Encryptor)");
+        assertThat(Dse51Compressors.refusal(List.of("ks.t (ZstdCompressor)"), twoEncrypted))
+        .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.t (ZstdCompressor) is compressed with a " +
+                   "compressor DSE 5.1 does not read, so a DSE 5.1 node could not open the sstables this node writes " +
+                   "for it; ks.e (Encryptor), ks.f (Encryptor) are encrypted, which this mode does not support" + fix);
     }
 }
