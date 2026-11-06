@@ -104,6 +104,15 @@ public final class DseFixtures
     {
     }
 
+    /**
+     * The artefacts of real DSE 5.1.51 nodes (the directories named {@code dse-5.1.51*}), kept apart from
+     * {@link DseVersion}, whose values the DSE 6 tests iterate.
+     */
+    public static Dse51Fixtures dse51()
+    {
+        return Dse51Fixtures.INSTANCE;
+    }
+
     /** {@code nodes/local} of a node of the given version (a msgpack map). */
     public static Path nodesLocal(DseVersion version)
     {

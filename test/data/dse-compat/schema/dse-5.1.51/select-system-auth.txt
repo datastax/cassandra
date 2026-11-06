@@ -1,0 +1,26 @@
+
+ role      | resource                       | permissions
+-----------+--------------------------------+----------------------------------------------------------------
+ cassandra |              data/test_ks/rlac |             {'ALTER', 'AUTHORIZE', 'DROP', 'MODIFY', 'SELECT'}
+ cassandra |                   roles/reader | {'ALTER', 'AUTHORIZE', 'DROP', 'PROXY.EXECUTE', 'PROXY.LOGIN'}
+ cassandra |                   roles/writer | {'ALTER', 'AUTHORIZE', 'DROP', 'PROXY.EXECUTE', 'PROXY.LOGIN'}
+    writer |                   data/test_ks |                                                     {'SELECT'}
+    writer |                 data/test_ks/t |                                                     {'MODIFY'}
+    reader |      rows/EU/data/test_ks/rlac |                                                     {'SELECT'}
+    reader | rows/EU/data/test_ks/rlac_by_v |                                                     {'SELECT'}
+
+(7 rows)
+qa.cql:3:InvalidRequest: Error from server: code=2200 [Invalid query] message="unconfigured table resource_role_permissons_index"
+
+ role | member
+------+--------
+
+(0 rows)
+
+ role      | is_superuser | can_login | member_of
+-----------+--------------+-----------+-----------
+ cassandra |         True |      True |      null
+    writer |        False |     False |      null
+    reader |        False |      True |      null
+
+(3 rows)

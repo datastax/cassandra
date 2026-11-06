@@ -1,0 +1,1091 @@
+=== compact_dense-72b5ea81d9c711f19bf335f92a6d7d8d/me-1-big-Data.db
+SSTable: test_ks/compact_dense-72b5ea81d9c711f19bf335f92a6d7d8d/me-1-big
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.010000
+Minimum timestamp: 1793958609519670
+Maximum timestamp: 1793958609552833
+SSTable min local deletion time: 2147483647
+SSTable max local deletion time: 2147483647
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.6046511627906976
+TTL min: 0
+TTL max: 0
+First token: -7509452495886106294 (key=5)
+Last token: 9010454139840013625 (key=3)
+minClustringValues: [1]
+maxClustringValues: [2]
+Estimated droppable tombstones: 0.0
+SSTable Level: 0
+Repaired at: 0
+Replay positions covered: {CommitLogPosition(segmentId=1793958236846, position=116275)=CommitLogPosition(segmentId=1793958236846, position=178822)}
+totalColumnsSet: 10
+totalRows: 10
+Estimated tombstone drop times:
+Count               Row Size        Cell Count
+1                          0                 0
+2                          0                 5
+3                          0                 0
+4                          0                 0
+5                          0                 0
+6                          0                 0
+7                          0                 0
+8                          0                 0
+10                         0                 0
+12                         0                 0
+14                         0                 0
+17                         0                 0
+20                         0                 0
+24                         0                 0
+29                         0                 0
+35                         0                 0
+42                         0                 0
+50                         1                 0
+60                         4                 0
+72                         0                 0
+86                         0                 0
+103                        0                 0
+124                        0                 0
+149                        0                 0
+179                        0                 0
+215                        0                 0
+258                        0                 0
+310                        0                 0
+372                        0                 0
+446                        0                 0
+535                        0                 0
+642                        0                 0
+770                        0                 0
+924                        0                 0
+1109                       0                 0
+1331                       0                 0
+1597                       0                 0
+1916                       0                 0
+2299                       0                 0
+2759                       0                 0
+3311                       0                 0
+3973                       0                 0
+4768                       0                 0
+5722                       0                 0
+6866                       0                 0
+8239                       0                 0
+9887                       0                 0
+11864                      0                 0
+14237                      0                 0
+17084                      0                 0
+20501                      0                 0
+24601                      0                 0
+29521                      0                 0
+35425                      0                 0
+42510                      0                 0
+51012                      0                 0
+61214                      0                 0
+73457                      0                 0
+88148                      0                 0
+105778                     0                 0
+126934                     0                 0
+152321                     0                 0
+182785                     0                 0
+219342                     0                 0
+263210                     0                 0
+315852                     0                 0
+379022                     0                 0
+454826                     0                 0
+545791                     0                 0
+654949                     0                 0
+785939                     0                 0
+943127                     0                 0
+1131752                    0                 0
+1358102                    0                 0
+1629722                    0                 0
+1955666                    0                 0
+2346799                    0                 0
+2816159                    0                 0
+3379391                    0                 0
+4055269                    0                 0
+4866323                    0                 0
+5839588                    0                 0
+7007506                    0                 0
+8409007                    0                 0
+10090808                   0                 0
+12108970                   0                 0
+14530764                   0                 0
+17436917                   0                 0
+20924300                   0                 0
+25109160                   0                 0
+30130992                   0                 0
+36157190                   0                 0
+43388628                   0                 0
+52066354                   0                 0
+62479625                   0                 0
+74975550                   0                 0
+89970660                   0                 0
+107964792                  0                 0
+129557750                  0                 0
+155469300                  0                 0
+186563160                  0                 0
+223875792                  0                 0
+268650950                  0                 0
+322381140                  0                 0
+386857368                  0                 0
+464228842                  0                 0
+557074610                  0                 0
+668489532                  0                 0
+802187438                  0                 0
+962624926                  0                 0
+1155149911                 0                 0
+1386179893                 0                 0
+1663415872                 0                 0
+1996099046                 0                 0
+2395318855                 0                 0
+2874382626                 0                  
+3449259151                 0                  
+4139110981                 0                  
+4966933177                 0                  
+5960319812                 0                  
+7152383774                 0                  
+8582860529                 0                  
+10299432635                 0                  
+12359319162                 0                  
+14831182994                 0                  
+17797419593                 0                  
+21356903512                 0                  
+25628284214                 0                  
+30753941057                 0                  
+36904729268                 0                  
+44285675122                 0                  
+53142810146                 0                  
+63771372175                 0                  
+76525646610                 0                  
+91830775932                 0                  
+110196931118                 0                  
+132236317342                 0                  
+158683580810                 0                  
+190420296972                 0                  
+228504356366                 0                  
+274205227639                 0                  
+329046273167                 0                  
+394855527800                 0                  
+473826633360                 0                  
+568591960032                 0                  
+682310352038                 0                  
+818772422446                 0                  
+982526906935                 0                  
+1179032288322                 0                  
+1414838745986                 0                  
+Estimated cardinality: 5
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1442880000
+EncodingStats minTimestamp: 1793958609519670
+KeyType: org.apache.cassandra.db.marshal.Int32Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: {}
+RegularColumns: {v:org.apache.cassandra.db.marshal.UTF8Type}
+=== compact_static-72ffc4c0d9c711f19bf335f92a6d7d8d/me-1-big-Data.db
+SSTable: test_ks/compact_static-72ffc4c0d9c711f19bf335f92a6d7d8d/me-1-big
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.010000
+Minimum timestamp: 1793958609523668
+Maximum timestamp: 1793958609554715
+SSTable min local deletion time: 2147483647
+SSTable max local deletion time: 2147483647
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.6868131868131868
+TTL min: 0
+TTL max: 0
+First token: -7509452495886106294 (key=5)
+Last token: 9010454139840013625 (key=3)
+Estimated droppable tombstones: 0.0
+SSTable Level: 0
+Repaired at: 0
+Replay positions covered: {CommitLogPosition(segmentId=1793958236846, position=117773)=CommitLogPosition(segmentId=1793958236846, position=178822)}
+totalColumnsSet: 10
+totalRows: 5
+Estimated tombstone drop times:
+Count               Row Size        Cell Count
+1                          0                 0
+2                          0                 5
+3                          0                 0
+4                          0                 0
+5                          0                 0
+6                          0                 0
+7                          0                 0
+8                          0                 0
+10                         0                 0
+12                         0                 0
+14                         0                 0
+17                         0                 0
+20                         0                 0
+24                         0                 0
+29                         0                 0
+35                         1                 0
+42                         4                 0
+50                         0                 0
+60                         0                 0
+72                         0                 0
+86                         0                 0
+103                        0                 0
+124                        0                 0
+149                        0                 0
+179                        0                 0
+215                        0                 0
+258                        0                 0
+310                        0                 0
+372                        0                 0
+446                        0                 0
+535                        0                 0
+642                        0                 0
+770                        0                 0
+924                        0                 0
+1109                       0                 0
+1331                       0                 0
+1597                       0                 0
+1916                       0                 0
+2299                       0                 0
+2759                       0                 0
+3311                       0                 0
+3973                       0                 0
+4768                       0                 0
+5722                       0                 0
+6866                       0                 0
+8239                       0                 0
+9887                       0                 0
+11864                      0                 0
+14237                      0                 0
+17084                      0                 0
+20501                      0                 0
+24601                      0                 0
+29521                      0                 0
+35425                      0                 0
+42510                      0                 0
+51012                      0                 0
+61214                      0                 0
+73457                      0                 0
+88148                      0                 0
+105778                     0                 0
+126934                     0                 0
+152321                     0                 0
+182785                     0                 0
+219342                     0                 0
+263210                     0                 0
+315852                     0                 0
+379022                     0                 0
+454826                     0                 0
+545791                     0                 0
+654949                     0                 0
+785939                     0                 0
+943127                     0                 0
+1131752                    0                 0
+1358102                    0                 0
+1629722                    0                 0
+1955666                    0                 0
+2346799                    0                 0
+2816159                    0                 0
+3379391                    0                 0
+4055269                    0                 0
+4866323                    0                 0
+5839588                    0                 0
+7007506                    0                 0
+8409007                    0                 0
+10090808                   0                 0
+12108970                   0                 0
+14530764                   0                 0
+17436917                   0                 0
+20924300                   0                 0
+25109160                   0                 0
+30130992                   0                 0
+36157190                   0                 0
+43388628                   0                 0
+52066354                   0                 0
+62479625                   0                 0
+74975550                   0                 0
+89970660                   0                 0
+107964792                  0                 0
+129557750                  0                 0
+155469300                  0                 0
+186563160                  0                 0
+223875792                  0                 0
+268650950                  0                 0
+322381140                  0                 0
+386857368                  0                 0
+464228842                  0                 0
+557074610                  0                 0
+668489532                  0                 0
+802187438                  0                 0
+962624926                  0                 0
+1155149911                 0                 0
+1386179893                 0                 0
+1663415872                 0                 0
+1996099046                 0                 0
+2395318855                 0                 0
+2874382626                 0                  
+3449259151                 0                  
+4139110981                 0                  
+4966933177                 0                  
+5960319812                 0                  
+7152383774                 0                  
+8582860529                 0                  
+10299432635                 0                  
+12359319162                 0                  
+14831182994                 0                  
+17797419593                 0                  
+21356903512                 0                  
+25628284214                 0                  
+30753941057                 0                  
+36904729268                 0                  
+44285675122                 0                  
+53142810146                 0                  
+63771372175                 0                  
+76525646610                 0                  
+91830775932                 0                  
+110196931118                 0                  
+132236317342                 0                  
+158683580810                 0                  
+190420296972                 0                  
+228504356366                 0                  
+274205227639                 0                  
+329046273167                 0                  
+394855527800                 0                  
+473826633360                 0                  
+568591960032                 0                  
+682310352038                 0                  
+818772422446                 0                  
+982526906935                 0                  
+1179032288322                 0                  
+1414838745986                 0                  
+Estimated cardinality: 5
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1442880000
+EncodingStats minTimestamp: 1793958609523668
+KeyType: org.apache.cassandra.db.marshal.Int32Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.UTF8Type]
+StaticColumns: {a:org.apache.cassandra.db.marshal.Int32Type, b:org.apache.cassandra.db.marshal.UTF8Type}
+RegularColumns: {}
+=== sasi_t-71b56a71d9c711f19bf335f92a6d7d8d/me-1-big-Data.db
+SSTable: test_ks/sasi_t-71b56a71d9c711f19bf335f92a6d7d8d/me-1-big
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.010000
+Minimum timestamp: 1793958609451064
+Maximum timestamp: 1793958609516525
+SSTable min local deletion time: 2147483647
+SSTable max local deletion time: 2147483647
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.46687211093990755
+TTL min: 0
+TTL max: 0
+First token: -7509452495886106294 (key=5)
+Last token: 9010454139840013625 (key=3)
+minClustringValues: []
+maxClustringValues: []
+Estimated droppable tombstones: 0.0
+SSTable Level: 0
+Repaired at: 0
+Replay positions covered: {CommitLogPosition(segmentId=1793958236846, position=114878)=CommitLogPosition(segmentId=1793958236846, position=178822)}
+totalColumnsSet: 20
+totalRows: 20
+Estimated tombstone drop times:
+Count               Row Size        Cell Count
+1                          0                20
+2                          0                 0
+3                          0                 0
+4                          0                 0
+5                          0                 0
+6                          0                 0
+7                          0                 0
+8                          0                 0
+10                         0                 0
+12                         0                 0
+14                         0                 0
+17                         0                 0
+20                         0                 0
+24                         0                 0
+29                         0                 0
+35                        20                 0
+42                         0                 0
+50                         0                 0
+60                         0                 0
+72                         0                 0
+86                         0                 0
+103                        0                 0
+124                        0                 0
+149                        0                 0
+179                        0                 0
+215                        0                 0
+258                        0                 0
+310                        0                 0
+372                        0                 0
+446                        0                 0
+535                        0                 0
+642                        0                 0
+770                        0                 0
+924                        0                 0
+1109                       0                 0
+1331                       0                 0
+1597                       0                 0
+1916                       0                 0
+2299                       0                 0
+2759                       0                 0
+3311                       0                 0
+3973                       0                 0
+4768                       0                 0
+5722                       0                 0
+6866                       0                 0
+8239                       0                 0
+9887                       0                 0
+11864                      0                 0
+14237                      0                 0
+17084                      0                 0
+20501                      0                 0
+24601                      0                 0
+29521                      0                 0
+35425                      0                 0
+42510                      0                 0
+51012                      0                 0
+61214                      0                 0
+73457                      0                 0
+88148                      0                 0
+105778                     0                 0
+126934                     0                 0
+152321                     0                 0
+182785                     0                 0
+219342                     0                 0
+263210                     0                 0
+315852                     0                 0
+379022                     0                 0
+454826                     0                 0
+545791                     0                 0
+654949                     0                 0
+785939                     0                 0
+943127                     0                 0
+1131752                    0                 0
+1358102                    0                 0
+1629722                    0                 0
+1955666                    0                 0
+2346799                    0                 0
+2816159                    0                 0
+3379391                    0                 0
+4055269                    0                 0
+4866323                    0                 0
+5839588                    0                 0
+7007506                    0                 0
+8409007                    0                 0
+10090808                   0                 0
+12108970                   0                 0
+14530764                   0                 0
+17436917                   0                 0
+20924300                   0                 0
+25109160                   0                 0
+30130992                   0                 0
+36157190                   0                 0
+43388628                   0                 0
+52066354                   0                 0
+62479625                   0                 0
+74975550                   0                 0
+89970660                   0                 0
+107964792                  0                 0
+129557750                  0                 0
+155469300                  0                 0
+186563160                  0                 0
+223875792                  0                 0
+268650950                  0                 0
+322381140                  0                 0
+386857368                  0                 0
+464228842                  0                 0
+557074610                  0                 0
+668489532                  0                 0
+802187438                  0                 0
+962624926                  0                 0
+1155149911                 0                 0
+1386179893                 0                 0
+1663415872                 0                 0
+1996099046                 0                 0
+2395318855                 0                 0
+2874382626                 0                  
+3449259151                 0                  
+4139110981                 0                  
+4966933177                 0                  
+5960319812                 0                  
+7152383774                 0                  
+8582860529                 0                  
+10299432635                 0                  
+12359319162                 0                  
+14831182994                 0                  
+17797419593                 0                  
+21356903512                 0                  
+25628284214                 0                  
+30753941057                 0                  
+36904729268                 0                  
+44285675122                 0                  
+53142810146                 0                  
+63771372175                 0                  
+76525646610                 0                  
+91830775932                 0                  
+110196931118                 0                  
+132236317342                 0                  
+158683580810                 0                  
+190420296972                 0                  
+228504356366                 0                  
+274205227639                 0                  
+329046273167                 0                  
+394855527800                 0                  
+473826633360                 0                  
+568591960032                 0                  
+682310352038                 0                  
+818772422446                 0                  
+982526906935                 0                  
+1179032288322                 0                  
+1414838745986                 0                  
+Estimated cardinality: 20
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1442880000
+EncodingStats minTimestamp: 1793958609451064
+KeyType: org.apache.cassandra.db.marshal.Int32Type
+ClusteringTypes: []
+StaticColumns: {}
+RegularColumns: {v:org.apache.cassandra.db.marshal.UTF8Type}
+=== t-6facf040d9c711f19bf335f92a6d7d8d/me-1-big-Data.db
+SSTable: test_ks/t-6facf040d9c711f19bf335f92a6d7d8d/me-1-big
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.010000
+Minimum timestamp: 1793958603182651
+Maximum timestamp: 1793958603529255
+SSTable min local deletion time: 1793958603
+SSTable max local deletion time: 2147483647
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.3886697015680324
+TTL min: 0
+TTL max: 0
+First token: -9157060164899361011 (key=23)
+Last token: 9010454139840013625 (key=3)
+minClustringValues: [ck1]
+maxClustringValues: [ck2]
+Estimated droppable tombstones: 0.0
+SSTable Level: 0
+Repaired at: 0
+Replay positions covered: {CommitLogPosition(segmentId=1793958236846, position=54921)=CommitLogPosition(segmentId=1793958236846, position=178822)}
+totalColumnsSet: 1471
+totalRows: 295
+Estimated tombstone drop times:
+1793958660:       592
+Count               Row Size        Cell Count
+1                          0                 2
+2                          0                 0
+3                          0                 0
+4                          0                 0
+5                          0                 0
+6                          0                 0
+7                          0                 0
+8                          0                 0
+10                         0                 0
+12                         0                 0
+14                         0                 0
+17                         0                 0
+20                         0                 0
+24                         1                98
+29                         0                 0
+35                         0                 0
+42                         0                 0
+50                         0                 0
+60                         0                 0
+72                         1                 0
+86                         0                 0
+103                        0                 0
+124                        0                 0
+149                        0                 0
+179                        0                 0
+215                        0                 0
+258                        0                 0
+310                        0                 0
+372                        0                 0
+446                       98                 0
+535                        0                 0
+642                        0                 0
+770                        0                 0
+924                        0                 0
+1109                       0                 0
+1331                       0                 0
+1597                       0                 0
+1916                       0                 0
+2299                       0                 0
+2759                       0                 0
+3311                       0                 0
+3973                       0                 0
+4768                       0                 0
+5722                       0                 0
+6866                       0                 0
+8239                       0                 0
+9887                       0                 0
+11864                      0                 0
+14237                      0                 0
+17084                      0                 0
+20501                      0                 0
+24601                      0                 0
+29521                      0                 0
+35425                      0                 0
+42510                      0                 0
+51012                      0                 0
+61214                      0                 0
+73457                      0                 0
+88148                      0                 0
+105778                     0                 0
+126934                     0                 0
+152321                     0                 0
+182785                     0                 0
+219342                     0                 0
+263210                     0                 0
+315852                     0                 0
+379022                     0                 0
+454826                     0                 0
+545791                     0                 0
+654949                     0                 0
+785939                     0                 0
+943127                     0                 0
+1131752                    0                 0
+1358102                    0                 0
+1629722                    0                 0
+1955666                    0                 0
+2346799                    0                 0
+2816159                    0                 0
+3379391                    0                 0
+4055269                    0                 0
+4866323                    0                 0
+5839588                    0                 0
+7007506                    0                 0
+8409007                    0                 0
+10090808                   0                 0
+12108970                   0                 0
+14530764                   0                 0
+17436917                   0                 0
+20924300                   0                 0
+25109160                   0                 0
+30130992                   0                 0
+36157190                   0                 0
+43388628                   0                 0
+52066354                   0                 0
+62479625                   0                 0
+74975550                   0                 0
+89970660                   0                 0
+107964792                  0                 0
+129557750                  0                 0
+155469300                  0                 0
+186563160                  0                 0
+223875792                  0                 0
+268650950                  0                 0
+322381140                  0                 0
+386857368                  0                 0
+464228842                  0                 0
+557074610                  0                 0
+668489532                  0                 0
+802187438                  0                 0
+962624926                  0                 0
+1155149911                 0                 0
+1386179893                 0                 0
+1663415872                 0                 0
+1996099046                 0                 0
+2395318855                 0                 0
+2874382626                 0                  
+3449259151                 0                  
+4139110981                 0                  
+4966933177                 0                  
+5960319812                 0                  
+7152383774                 0                  
+8582860529                 0                  
+10299432635                 0                  
+12359319162                 0                  
+14831182994                 0                  
+17797419593                 0                  
+21356903512                 0                  
+25628284214                 0                  
+30753941057                 0                  
+36904729268                 0                  
+44285675122                 0                  
+53142810146                 0                  
+63771372175                 0                  
+76525646610                 0                  
+91830775932                 0                  
+110196931118                 0                  
+132236317342                 0                  
+158683580810                 0                  
+190420296972                 0                  
+228504356366                 0                  
+274205227639                 0                  
+329046273167                 0                  
+394855527800                 0                  
+473826633360                 0                  
+568591960032                 0                  
+682310352038                 0                  
+818772422446                 0                  
+982526906935                 0                  
+1179032288322                 0                  
+1414838745986                 0                  
+Estimated cardinality: 100
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1793958603
+EncodingStats minTimestamp: 1793958603164719
+KeyType: org.apache.cassandra.db.marshal.Int32Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.UTF8Type]
+StaticColumns: {s:org.apache.cassandra.db.marshal.Int32Type}
+RegularColumns: {u:org.apache.cassandra.db.marshal.UserType(test_ks,61646472,737472656574:org.apache.cassandra.db.marshal.UTF8Type,7a6970:org.apache.cassandra.db.marshal.Int32Type), v:org.apache.cassandra.db.marshal.UTF8Type, l:org.apache.cassandra.db.marshal.ListType(org.apache.cassandra.db.marshal.Int32Type), tp:org.apache.cassandra.db.marshal.TupleType(org.apache.cassandra.db.marshal.Int32Type,org.apache.cassandra.db.marshal.UTF8Type), m:org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.Int32Type), n:org.apache.cassandra.db.marshal.LongType, fu:org.apache.cassandra.db.marshal.FrozenType(org.apache.cassandra.db.marshal.UserType(test_ks,61646472,737472656574:org.apache.cassandra.db.marshal.UTF8Type,7a6970:org.apache.cassandra.db.marshal.Int32Type))}
+=== wide-70c51702d9c711f19bf335f92a6d7d8d/me-1-big-Data.db
+SSTable: test_ks/wide-70c51702d9c711f19bf335f92a6d7d8d/me-1-big
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.010000
+Minimum timestamp: 1793958608519991
+Maximum timestamp: 1793958609449506
+SSTable min local deletion time: 2147483647
+SSTable max local deletion time: 2147483647
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.6510931806350859
+TTL min: 0
+TTL max: 0
+First token: -7509452495886106294 (key=5)
+Last token: 9010454139840013625 (key=3)
+minClustringValues: [0]
+maxClustringValues: [49]
+Estimated droppable tombstones: 0.0
+SSTable Level: 0
+Repaired at: 0
+Replay positions covered: {CommitLogPosition(segmentId=1793958236846, position=108087)=CommitLogPosition(segmentId=1793958236846, position=178822)}
+totalColumnsSet: 500
+totalRows: 500
+Estimated tombstone drop times:
+Count               Row Size        Cell Count
+1                          0                 0
+2                          0                 0
+3                          0                 0
+4                          0                 0
+5                          0                 0
+6                          0                 0
+7                          0                 0
+8                          0                 0
+10                         0                 0
+12                         0                 0
+14                         0                 0
+17                         0                 0
+20                         0                 0
+24                         0                 0
+29                         0                 0
+35                         0                 0
+42                         0                 0
+50                         0                10
+60                         0                 0
+72                         0                 0
+86                         0                 0
+103                        0                 0
+124                        0                 0
+149                        0                 0
+179                        0                 0
+215                        0                 0
+258                        0                 0
+310                        0                 0
+372                        0                 0
+446                        0                 0
+535                        0                 0
+642                        0                 0
+770                       10                 0
+924                        0                 0
+1109                       0                 0
+1331                       0                 0
+1597                       0                 0
+1916                       0                 0
+2299                       0                 0
+2759                       0                 0
+3311                       0                 0
+3973                       0                 0
+4768                       0                 0
+5722                       0                 0
+6866                       0                 0
+8239                       0                 0
+9887                       0                 0
+11864                      0                 0
+14237                      0                 0
+17084                      0                 0
+20501                      0                 0
+24601                      0                 0
+29521                      0                 0
+35425                      0                 0
+42510                      0                 0
+51012                      0                 0
+61214                      0                 0
+73457                      0                 0
+88148                      0                 0
+105778                     0                 0
+126934                     0                 0
+152321                     0                 0
+182785                     0                 0
+219342                     0                 0
+263210                     0                 0
+315852                     0                 0
+379022                     0                 0
+454826                     0                 0
+545791                     0                 0
+654949                     0                 0
+785939                     0                 0
+943127                     0                 0
+1131752                    0                 0
+1358102                    0                 0
+1629722                    0                 0
+1955666                    0                 0
+2346799                    0                 0
+2816159                    0                 0
+3379391                    0                 0
+4055269                    0                 0
+4866323                    0                 0
+5839588                    0                 0
+7007506                    0                 0
+8409007                    0                 0
+10090808                   0                 0
+12108970                   0                 0
+14530764                   0                 0
+17436917                   0                 0
+20924300                   0                 0
+25109160                   0                 0
+30130992                   0                 0
+36157190                   0                 0
+43388628                   0                 0
+52066354                   0                 0
+62479625                   0                 0
+74975550                   0                 0
+89970660                   0                 0
+107964792                  0                 0
+129557750                  0                 0
+155469300                  0                 0
+186563160                  0                 0
+223875792                  0                 0
+268650950                  0                 0
+322381140                  0                 0
+386857368                  0                 0
+464228842                  0                 0
+557074610                  0                 0
+668489532                  0                 0
+802187438                  0                 0
+962624926                  0                 0
+1155149911                 0                 0
+1386179893                 0                 0
+1663415872                 0                 0
+1996099046                 0                 0
+2395318855                 0                 0
+2874382626                 0                  
+3449259151                 0                  
+4139110981                 0                  
+4966933177                 0                  
+5960319812                 0                  
+7152383774                 0                  
+8582860529                 0                  
+10299432635                 0                  
+12359319162                 0                  
+14831182994                 0                  
+17797419593                 0                  
+21356903512                 0                  
+25628284214                 0                  
+30753941057                 0                  
+36904729268                 0                  
+44285675122                 0                  
+53142810146                 0                  
+63771372175                 0                  
+76525646610                 0                  
+91830775932                 0                  
+110196931118                 0                  
+132236317342                 0                  
+158683580810                 0                  
+190420296972                 0                  
+228504356366                 0                  
+274205227639                 0                  
+329046273167                 0                  
+394855527800                 0                  
+473826633360                 0                  
+568591960032                 0                  
+682310352038                 0                  
+818772422446                 0                  
+982526906935                 0                  
+1179032288322                 0                  
+1414838745986                 0                  
+Estimated cardinality: 10
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1442880000
+EncodingStats minTimestamp: 1793958608519991
+KeyType: org.apache.cassandra.db.marshal.Int32Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: {}
+RegularColumns: {v:org.apache.cassandra.db.marshal.UTF8Type}
+=== wide_by_v-712d4eb0d9c711f19bf335f92a6d7d8d/me-1-big-Data.db
+SSTable: test_ks/wide_by_v-712d4eb0d9c711f19bf335f92a6d7d8d/me-1-big
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.010000
+Minimum timestamp: 1793958608519991
+Maximum timestamp: 1793958609449506
+SSTable min local deletion time: 2147483647
+SSTable max local deletion time: 2147483647
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.6755549717588336
+TTL min: 0
+TTL max: 0
+First token: -7329697292252079701 (key=v3)
+Last token: 8883853216615550592 (key=v5)
+minClustringValues: [0, 0]
+maxClustringValues: [9, 49]
+Estimated droppable tombstones: 0.0
+SSTable Level: 0
+Repaired at: 0
+Replay positions covered: {CommitLogPosition(segmentId=1793958236846, position=109582)=CommitLogPosition(segmentId=1793958236846, position=178822)}
+totalColumnsSet: 0
+totalRows: 500
+Estimated tombstone drop times:
+Count               Row Size        Cell Count
+1                          0                 7
+2                          0                 0
+3                          0                 0
+4                          0                 0
+5                          0                 0
+6                          0                 0
+7                          0                 0
+8                          0                 0
+10                         0                 0
+12                         0                 0
+14                         0                 0
+17                         0                 0
+20                         0                 0
+24                         0                 0
+29                         0                 0
+35                         0                 0
+42                         0                 0
+50                         0                 0
+60                         0                 0
+72                         0                 0
+86                         0                 0
+103                        0                 0
+124                        0                 0
+149                        0                 0
+179                        0                 0
+215                        0                 0
+258                        0                 0
+310                        0                 0
+372                        0                 0
+446                        0                 0
+535                        0                 0
+642                        0                 0
+770                        0                 0
+924                        0                 0
+1109                       6                 0
+1331                       1                 0
+1597                       0                 0
+1916                       0                 0
+2299                       0                 0
+2759                       0                 0
+3311                       0                 0
+3973                       0                 0
+4768                       0                 0
+5722                       0                 0
+6866                       0                 0
+8239                       0                 0
+9887                       0                 0
+11864                      0                 0
+14237                      0                 0
+17084                      0                 0
+20501                      0                 0
+24601                      0                 0
+29521                      0                 0
+35425                      0                 0
+42510                      0                 0
+51012                      0                 0
+61214                      0                 0
+73457                      0                 0
+88148                      0                 0
+105778                     0                 0
+126934                     0                 0
+152321                     0                 0
+182785                     0                 0
+219342                     0                 0
+263210                     0                 0
+315852                     0                 0
+379022                     0                 0
+454826                     0                 0
+545791                     0                 0
+654949                     0                 0
+785939                     0                 0
+943127                     0                 0
+1131752                    0                 0
+1358102                    0                 0
+1629722                    0                 0
+1955666                    0                 0
+2346799                    0                 0
+2816159                    0                 0
+3379391                    0                 0
+4055269                    0                 0
+4866323                    0                 0
+5839588                    0                 0
+7007506                    0                 0
+8409007                    0                 0
+10090808                   0                 0
+12108970                   0                 0
+14530764                   0                 0
+17436917                   0                 0
+20924300                   0                 0
+25109160                   0                 0
+30130992                   0                 0
+36157190                   0                 0
+43388628                   0                 0
+52066354                   0                 0
+62479625                   0                 0
+74975550                   0                 0
+89970660                   0                 0
+107964792                  0                 0
+129557750                  0                 0
+155469300                  0                 0
+186563160                  0                 0
+223875792                  0                 0
+268650950                  0                 0
+322381140                  0                 0
+386857368                  0                 0
+464228842                  0                 0
+557074610                  0                 0
+668489532                  0                 0
+802187438                  0                 0
+962624926                  0                 0
+1155149911                 0                 0
+1386179893                 0                 0
+1663415872                 0                 0
+1996099046                 0                 0
+2395318855                 0                 0
+2874382626                 0                  
+3449259151                 0                  
+4139110981                 0                  
+4966933177                 0                  
+5960319812                 0                  
+7152383774                 0                  
+8582860529                 0                  
+10299432635                 0                  
+12359319162                 0                  
+14831182994                 0                  
+17797419593                 0                  
+21356903512                 0                  
+25628284214                 0                  
+30753941057                 0                  
+36904729268                 0                  
+44285675122                 0                  
+53142810146                 0                  
+63771372175                 0                  
+76525646610                 0                  
+91830775932                 0                  
+110196931118                 0                  
+132236317342                 0                  
+158683580810                 0                  
+190420296972                 0                  
+228504356366                 0                  
+274205227639                 0                  
+329046273167                 0                  
+394855527800                 0                  
+473826633360                 0                  
+568591960032                 0                  
+682310352038                 0                  
+818772422446                 0                  
+982526906935                 0                  
+1179032288322                 0                  
+1414838745986                 0                  
+Estimated cardinality: 7
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1442880000
+EncodingStats minTimestamp: 1793958608519991
+KeyType: org.apache.cassandra.db.marshal.UTF8Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type, org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: {}
+RegularColumns: {}

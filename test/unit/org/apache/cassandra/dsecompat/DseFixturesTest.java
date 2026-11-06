@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.dsecompat;
 
+import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -25,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -32,6 +34,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.CRC32;
@@ -41,6 +45,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -49,6 +54,7 @@ import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.dsecompat.DseFixtures.Handshake;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.JsonUtils;
 import org.msgpack.jackson.dataformat.MessagePackFactory;
 
@@ -861,5 +867,596 @@ public class DseFixturesTest
         }
         assertNotNull("a damaged hints file of " + cut.length + " bytes was read", failure);
         assertTrue(failure.getMessage(), failure.getMessage().startsWith(prefix) && failure.getMessage().contains(suffix));
+    }
+
+    // DSE 5.1.51 (DseFixtures.dse51(): the directories named dse-5.1.51*, provenance in the README)
+
+    /** The components every sstable DSE 5.1.51 writes lists in its TOC. */
+    private static final Set<String> DSE51_COMPONENTS = ImmutableSet.of("CompressionInfo.db", "Data.db", "Digest.crc32",
+                                                                        "Filter.db", "Index.db", "Statistics.db",
+                                                                        "Summary.db", "TOC.txt");
+
+    /** The type bytes of the repair messages, as DSE 5.1.51 names them. */
+    private static final List<String> DSE51_REPAIR_TYPES = Arrays.asList("VALIDATION_REQUEST", "VALIDATION_COMPLETE",
+                                                                         "SYNC_REQUEST", "SYNC_COMPLETE",
+                                                                         "ANTICOMPACTION_REQUEST", "PREPARE_MESSAGE",
+                                                                         "SNAPSHOT");
+
+    /** The id of {@code system.peers}, the same in every release. */
+    private static final UUID DSE51_PEERS_TABLE_ID = UUID.fromString("37f71aca-7dc2-383b-a706-72528af04d4f");
+
+    /** The ordinals DSE 5.1.51 gives the verbs of the captured messages. */
+    private static final Map<String, Integer> DSE51_VERBS = ImmutableMap.of("READ", 3, "RANGE_SLICE", 9,
+                                                                            "GOSSIP_DIGEST_SYN", 14,
+                                                                            "GOSSIP_DIGEST_ACK", 15,
+                                                                            "REPAIR_MESSAGE", 32);
+
+    /**
+     * Every sstable of the DSE 5.1.51 fixtures is a complete big {@code me} set with a numeric generation: its TOC
+     * lists the eight components present (a SASI index file beside them is not listed), and its {@code Digest.crc32}
+     * is the CRC32 of its {@code Data.db}.
+     */
+    @Test
+    public void dse51SSTablesAreCompleteBigMeSetsWithNumericGenerations() throws IOException
+    {
+        Dse51Fixtures f = DseFixtures.dse51();
+        List<Path> roots = Arrays.asList(f.systemSSTables(false), f.systemSSTables(true),
+                                         f.searchGraphSystemSSTables(false), f.searchGraphSystemSSTables(true),
+                                         f.userSSTables(), f.schemaDataDirectory(), f.batchesSSTableDirectory(),
+                                         f.paxosSSTableDirectory());
+        Pattern name = Pattern.compile("([a-z]{2})-([^-]+)-big-(.+)");
+        int sstables = 0;
+        for (Path root : roots)
+        {
+            Map<Path, Set<String>> bySSTable = new HashMap<>();
+            for (Path component : f.sstableComponents(root))
+            {
+                Matcher m = name.matcher(component.getFileName().toString());
+                assertTrue(component + " is not named <version>-<generation>-big-<component>", m.matches());
+                assertEquals(component + ": version", Dse51Fixtures.SSTABLE_VERSION, m.group(1));
+                assertTrue(component + ": generation", m.group(2).matches("[1-9][0-9]*"));
+                Path sstable = component.resolveSibling(m.group(1) + '-' + m.group(2) + "-big-");
+                bySSTable.computeIfAbsent(sstable, k -> new HashSet<>()).add(m.group(3));
+            }
+            assertFalse("no sstable under " + root, bySSTable.isEmpty());
+            for (Map.Entry<Path, Set<String>> e : bySSTable.entrySet())
+            {
+                String prefix = e.getKey().getFileName().toString();
+                Set<String> toc = new HashSet<>(Files.readAllLines(e.getKey().resolveSibling(prefix + "TOC.txt")));
+                assertEquals(prefix + " under " + root + ": TOC", DSE51_COMPONENTS, toc);
+                Set<String> unlisted = new HashSet<>(e.getValue());
+                unlisted.removeAll(DSE51_COMPONENTS);
+                assertTrue(prefix + " under " + root + ": " + unlisted,
+                           unlisted.isEmpty() || unlisted.equals(ImmutableSet.of("SI_sasi_t_v.db")));
+                assertTrue(prefix + " under " + root + " lacks components", e.getValue().containsAll(DSE51_COMPONENTS));
+                CRC32 crc = new CRC32();
+                crc.update(Files.readAllBytes(e.getKey().resolveSibling(prefix + "Data.db")));
+                String digest = new String(Files.readAllBytes(e.getKey().resolveSibling(prefix + "Digest.crc32")),
+                                           StandardCharsets.US_ASCII).trim();
+                assertEquals(prefix + " under " + root + ": digest", Long.parseLong(digest), crc.getValue());
+                sstables++;
+            }
+        }
+        assertEquals(34, sstables);
+    }
+
+    /** The sstables of {@code system.local} and {@code system.peers}, flushed then compacted, as the README says. */
+    @Test
+    public void dse51SystemSSTablesAreWhatTheReadmeSays() throws IOException
+    {
+        Dse51Fixtures f = DseFixtures.dse51();
+        assertEquals(ImmutableSet.of("27", "28"), generations(f.tableDirectory(f.systemSSTables(false), "local")));
+        assertEquals(ImmutableSet.of("1", "2"), generations(f.tableDirectory(f.systemSSTables(false), "peers")));
+        assertEquals(ImmutableSet.of("29"), generations(f.tableDirectory(f.systemSSTables(true), "local")));
+        assertEquals(ImmutableSet.of("3"), generations(f.tableDirectory(f.systemSSTables(true), "peers")));
+        Path searchGraphFlushed = f.searchGraphSystemSSTables(false);
+        assertEquals(ImmutableSet.of("13", "14"), generations(f.tableDirectory(searchGraphFlushed, "local")));
+        assertEquals(ImmutableSet.of("1"), generations(f.tableDirectory(searchGraphFlushed, "peers")));
+        assertEquals(ImmutableSet.of("15"), generations(f.tableDirectory(f.searchGraphSystemSSTables(true), "local")));
+        assertEquals(1, fileNames(f.searchGraphSystemSSTables(true)).size());
+
+        // the flushed header of the newer local sstable names only the columns its row wrote, the compacted one all
+        String flushed = dumpOf(f.sstableMetadataDump(f.systemSSTables(false)), "local", "28");
+        String compacted = dumpOf(f.sstableMetadataDump(f.systemSSTables(true)), "local", "29");
+        String compactedPeers = dumpOf(f.sstableMetadataDump(f.systemSSTables(true)), "peers", "3");
+        for (String column : Arrays.asList("dse_version", "graph", "server_id", "workload", "workloads"))
+        {
+            assertTrue(column, flushed.contains(column + ':'));
+            assertTrue(column, compacted.contains(column + ':'));
+            assertTrue(column, compactedPeers.contains(column + ':'));
+        }
+        assertFalse(flushed.contains("release_version:"));
+        assertTrue(compacted.contains("release_version:"));
+        assertTrue(compactedPeers.contains("release_version:"));
+        // the first peers sstable of each node holds only a partition deletion of the node's own address
+        assertOwnAddressDeletion(dumpOf(f.sstableMetadataDump(f.systemSSTables(false)), "peers", "1"), "127.0.51.11");
+        assertOwnAddressDeletion(dumpOf(f.sstableMetadataDump(searchGraphFlushed), "peers", "1"), "127.0.51.21");
+
+        for (int node = 1; node <= Dse51Fixtures.CLUSTER_NODES; node++)
+        {
+            String select = text(f.systemSelect(node));
+            assertTrue(select.contains(" release_version         | " + Dse51Fixtures.RELEASE_VERSION));
+            assertTrue(select.contains(" dse_version             | " + Dse51Fixtures.DSE_VERSION));
+            assertTrue(select.contains(" host_id                 | " + Dse51Fixtures.HOST_IDS.get(node - 1)));
+            assertTrue(select.contains("(2 rows)"));
+        }
+        String searchGraph = text(f.searchGraphSystemSelect());
+        assertTrue(searchGraph.contains(" workloads               | {'Cassandra', 'Graph', 'Search'}"));
+        assertTrue(searchGraph.contains(" host_id                 | " + Dse51Fixtures.SEARCH_GRAPH_HOST_ID));
+    }
+
+    /** What a DSE 5.1.51 node gossips: its release, messaging version, host id and DSE state. */
+    @Test
+    public void dse51GossipStatesAreWhatTheReadmeSays() throws IOException
+    {
+        Dse51Fixtures f = DseFixtures.dse51();
+        for (int node = 1; node <= Dse51Fixtures.CLUSTER_NODES; node++)
+        {
+            for (int peer = 1; peer <= Dse51Fixtures.CLUSTER_NODES; peer++)
+            {
+                Map<String, String> states = new HashMap<>();
+                for (DseFixtures.GossipState s : f.gossipStates(f.gossipInfo(node), "/127.0.51.1" + peer))
+                    assertNull(s.name, states.put(s.name, s.value));
+                assertEquals(Dse51Fixtures.RELEASE_VERSION, states.get("RELEASE_VERSION"));
+                assertEquals(String.valueOf(Dse51Fixtures.MESSAGING_VERSION), states.get("NET_VERSION"));
+                assertEquals(Dse51Fixtures.HOST_IDS.get(peer - 1).toString(), states.get("HOST_ID"));
+                assertEquals("Cassandra", states.get("DC"));
+                JsonNode dse = JsonUtils.JSON_OBJECT_MAPPER.readTree(states.get("X_11_PADDING"));
+                assertEquals(Dse51Fixtures.DSE_VERSION, dse.get("dse_version").asText());
+                assertEquals("Cassandra", dse.get("workload").textValue());
+                assertEquals("Cassandra", dse.get("workloads").textValue());
+                assertTrue(dse.get("graph").isBoolean());
+                assertFalse(dse.get("graph").booleanValue());
+                assertEquals("true", dse.get("active").textValue());
+            }
+        }
+        Map<String, String> states = new HashMap<>();
+        for (DseFixtures.GossipState s : f.gossipStates(f.searchGraphGossipInfo(), "/127.0.51.21"))
+            states.put(s.name, s.value);
+        assertEquals("SearchGraph", states.get("DC"));
+        JsonNode dse = JsonUtils.JSON_OBJECT_MAPPER.readTree(states.get("X_11_PADDING"));
+        assertEquals("Search", dse.get("workload").textValue());
+        assertEquals("SearchGraphCassandra", dse.get("workloads").textValue());
+        assertTrue(dse.get("graph").booleanValue());
+    }
+
+    /** The storage-port handshake of DSE 5.1.51: the Apache 3.11 one, at messaging version 11. */
+    @Test
+    public void dse51HandshakesAreAtMessagingVersion11() throws IOException
+    {
+        List<Dse51Fixtures.Handshake> handshakes = DseFixtures.dse51().handshakes();
+        assertEquals(Arrays.asList("127.0.51.11 -> 127.0.51.13", "127.0.51.13 -> 127.0.51.11"),
+                     handshakes.stream().map(h -> h.client + " -> " + h.server).collect(Collectors.toList()));
+        for (Dse51Fixtures.Handshake h : handshakes)
+        {
+            // the magic, then the header: the version in bits 8-15, no compression, no streaming
+            assertArrayEquals(new byte[]{ HANDSHAKE_MAGIC[0], HANDSHAKE_MAGIC[1], HANDSHAKE_MAGIC[2],
+                                          HANDSHAKE_MAGIC[3], 0, 0, Dse51Fixtures.MESSAGING_VERSION, 0 },
+                              h.msg1);
+            assertArrayEquals(new byte[]{ 0, 0, 0, Dse51Fixtures.MESSAGING_VERSION }, h.msg2);
+            // msg3: the version, then the 1-byte-length IPv4 address of the client, nothing else
+            ByteBuffer msg3 = ByteBuffer.wrap(h.msg3);
+            assertEquals(Dse51Fixtures.MESSAGING_VERSION, msg3.getInt());
+            assertEquals(h.client, dse51Address(msg3));
+            assertFalse(msg3.hasRemaining());
+            // the first message: a gossip SYN of the test cluster
+            Set<String> parameters = new HashSet<>();
+            ByteBuffer message = dse51Message(h.message1, h.client, "GOSSIP_DIGEST_SYN", parameters);
+            assertEquals(Collections.emptySet(), parameters);
+            String payload = new String(message.array(), message.position(), message.remaining(),
+                                        StandardCharsets.ISO_8859_1);
+            // the cluster name and the partitioner, each with its 2-byte length
+            String partitioner = "org.apache.cassandra.dht.Murmur3Partitioner";
+            assertTrue(payload.startsWith("" + (char) 0 + (char) 12 + "Test Cluster" + (char) 0
+                                          + (char) partitioner.length() + partitioner));
+        }
+    }
+
+    /**
+     * The captured messages parse as DSE 5.1.51 frames them, each with its verb and sender: the repair messages of an
+     * incremental and of a full sequential repair (every type but CLEANUP), the reads carrying DSE's row-level access
+     * control expression, and a gossip ACK.
+     */
+    @Test
+    public void dse51MessagesAreWhatTheReadmeSays() throws IOException
+    {
+        Dse51Fixtures f = DseFixtures.dse51();
+        Map<String, Set<String>> repairTypes = new HashMap<>();
+        Map<String, Integer> counts = new HashMap<>();
+        Set<String> repairPairs = new HashSet<>();
+        for (String file : Dse51Fixtures.MESSAGE_FILES)
+        {
+            for (Dse51Fixtures.Message m : f.messages(file))
+            {
+                Set<String> parameters = new HashSet<>();
+                ByteBuffer payload = dse51Message(m.bytes, m.from, m.verb, parameters);
+                counts.merge(file, 1, Integer::sum);
+                if (m.verb.equals("REPAIR_MESSAGE"))
+                {
+                    assertEquals(m.name, DSE51_REPAIR_TYPES.get(payload.get(payload.position())));
+                    repairTypes.computeIfAbsent(file, k -> new HashSet<>()).add(m.name);
+                    repairPairs.add(m.from + " -> " + m.to);
+                    // the requests a coordinator answers by a callback carry CAL_BAC, the others no parameter
+                    boolean callback = ImmutableSet.of("PREPARE_MESSAGE", "SNAPSHOT", "ANTICOMPACTION_REQUEST")
+                                                   .contains(m.name);
+                    assertEquals(m.name, callback ? ImmutableSet.of("CAL_BAC") : Collections.emptySet(), parameters);
+                }
+                else if (file.equals("rlac-read"))
+                {
+                    assertEquals(m.name, ImmutableSet.of("CAL_BAC"), parameters);
+                }
+            }
+        }
+        assertEquals(ImmutableMap.of("repair-incremental", 12, "repair-full-sequential", 14, "rlac-read", 2,
+                                     "gossip-digest-ack", 1),
+                     counts);
+        assertEquals(ImmutableSet.of("repair-incremental", "repair-full-sequential"), repairTypes.keySet());
+        assertEquals(new HashSet<>(DSE51_REPAIR_TYPES.subList(0, 6)), repairTypes.get("repair-incremental"));
+        assertEquals(new HashSet<>(DSE51_REPAIR_TYPES), repairTypes.get("repair-full-sequential"));
+        // node 1 coordinates, nodes 2 and 3 answer
+        assertEquals(ImmutableSet.of("127.0.51.11 -> 127.0.51.12", "127.0.51.11 -> 127.0.51.13",
+                                     "127.0.51.12 -> 127.0.51.11", "127.0.51.13 -> 127.0.51.11"),
+                     repairPairs);
+
+        List<Dse51Fixtures.Message> reads = f.messages("rlac-read");
+        assertEquals(Arrays.asList("READ", "RANGE_SLICE"),
+                     reads.stream().map(m -> m.verb).collect(Collectors.toList()));
+        // a user expression (kind 4), the id of its registered class (0: DSE registers it first), its length 18,
+        // then the role and its authentication scheme
+        String expression = "" + (char) 4 + (char) 0 + (char) 0 + (char) 0 + (char) 0 + (char) 0 + (char) 18
+                            + (char) 0 + (char) 6 + "reader" + (char) 0 + (char) 8 + "INTERNAL";
+        byte[] role = expression.getBytes(StandardCharsets.US_ASCII);
+        for (Dse51Fixtures.Message m : reads)
+        {
+            assertEquals(m.name, "127.0.51.11 -> 127.0.51.12", m.from + " -> " + m.to);
+            assertTrue(m.name, contains(m.bytes, uuidBytes(Dse51Fixtures.RLAC_TABLE_ID)));
+            assertTrue(m.name, contains(m.bytes, role));
+        }
+
+        Dse51Fixtures.Message ack = Iterables.getOnlyElement(f.messages("gossip-digest-ack"));
+        String states = new String(ack.bytes, StandardCharsets.ISO_8859_1);
+        assertEquals(3, states.split(Dse51Fixtures.RELEASE_VERSION, -1).length - 1);
+        assertEquals(3, states.split("\\{\"dse_version\":\"" + Dse51Fixtures.DSE_VERSION + '"', -1).length - 1);
+    }
+
+    /**
+     * The commit log segments of DSE 5.1.51 are at version 6; the active segment, copied after the writes with node 3
+     * down, is a prefix of the same segment copied after the kill, which then also holds the writes of DSE's persister
+     * to {@code system.peers}.
+     */
+    @Test
+    public void dse51CommitLogSegmentsAreAtVersion6() throws IOException
+    {
+        Dse51Fixtures f = DseFixtures.dse51();
+        Path active = Iterables.getOnlyElement(f.unpackCommitLogSegments(f.commitLogSegmentGz().getParent(),
+                                                                         folder.newFolder().toPath()));
+        List<Path> killed = f.unpackCommitLogSegments(f.killedCommitLogDirectory(), folder.newFolder().toPath());
+        assertEquals(2, killed.size());
+        for (Path segment : Iterables.concat(Collections.singleton(active), killed))
+        {
+            String name = segment.getFileName().toString();
+            try (DataInputStream header = new DataInputStream(Files.newInputStream(segment)))
+            {
+                assertEquals(name, Dse51Fixtures.COMMIT_LOG_VERSION, header.readInt());
+                long id = Long.parseLong(name.substring("CommitLog-6-".length(), name.length() - ".log".length()));
+                assertEquals(name, id, header.readLong());
+            }
+        }
+        byte[] before = Files.readAllBytes(active);
+        byte[] after = Files.readAllBytes(killed.get(0));
+        assertEquals(active.getFileName(), killed.get(0).getFileName());
+        int used = usedLength(before);
+        assertArrayEquals(Arrays.copyOf(before, used), Arrays.copyOf(after, used));
+        byte[] tail = Arrays.copyOfRange(after, used, usedLength(after));
+        assertTrue(contains(tail, uuidBytes(DSE51_PEERS_TABLE_ID)));
+        assertTrue(contains(tail, Dse51Fixtures.DSE_VERSION.getBytes(StandardCharsets.US_ASCII)));
+        // the next segment holds its header only
+        assertEquals(20, usedLength(Files.readAllBytes(killed.get(1))));
+    }
+
+    /** The hints file of DSE 5.1.51: version 1, the target and timestamp of its name, the 203 hints of the table. */
+    @Test
+    public void dse51HintsFileIsAtVersion1() throws IOException
+    {
+        Path file = DseFixtures.dse51().hintsFile();
+        String name = file.getFileName().toString();
+        long timestamp = Long.parseLong(name.substring(37, name.length() - "-1.hints".length()));
+        ByteBuffer header = ByteBuffer.wrap(Files.readAllBytes(file));
+        assertEquals(Dse51Fixtures.HINTS_VERSION, header.getInt());
+        assertEquals(timestamp, header.getLong());
+        assertEquals(Dse51Fixtures.HOST_IDS.get(2), new UUID(header.getLong(), header.getLong()));
+        List<byte[]> hints = DseFixtures.hintsRecords(file);
+        assertEquals(Dse51Fixtures.FIXTURE_HINTS, hints.size());
+        for (byte[] hint : hints)
+            assertTrue(contains(hint, uuidBytes(Dse51Fixtures.FIXTURE_TABLE_ID)));
+    }
+
+    /** The rows DSE 5.1.51 left in {@code system.batches} and {@code system.paxos} are at messaging version 11. */
+    @Test
+    public void dse51BatchesAndPaxosRowsAreAtVersion11() throws IOException
+    {
+        Dse51Fixtures f = DseFixtures.dse51();
+        List<Map<String, String>> batches = expandedRows(f.batchesSelect());
+        assertEquals(2, batches.size());
+        for (Map<String, String> row : batches)
+        {
+            assertEquals("11", row.get("version"));
+            assertTrue(row.get("mutations"), row.get("mutations").contains(uuidHex(Dse51Fixtures.BATCH_TABLE_ID)));
+        }
+        List<Map<String, String>> paxos = expandedRows(f.paxosSelect());
+        assertEquals(2, paxos.size());
+        for (Map<String, String> row : paxos)
+        {
+            assertEquals(Dse51Fixtures.LWT_TABLE_ID.toString(), row.get("cf_id"));
+            assertEquals("11", row.get("proposal_version"));
+            assertEquals("11", row.get("most_recent_commit_version"));
+            assertEquals("null", row.get("proposal"));
+            assertEquals(row.get("in_progress_ballot"), row.get("most_recent_commit_at"));
+        }
+    }
+
+    /**
+     * The transaction logs of a DSE 5.1.51 compaction, in progress and committed: each record carries the checksum
+     * Apache 3.11 computes over the path, the type, the update time (low then high half) and the number of files.
+     */
+    @Test
+    public void dse51TransactionLogsAreWhatTheReadmeSays() throws IOException
+    {
+        Dse51Fixtures f = DseFixtures.dse51();
+        List<String> inProgress = Files.readAllLines(f.transactionLog(false));
+        List<String> committed = Files.readAllLines(f.transactionLog(true));
+        assertEquals(1, inProgress.size());
+        assertEquals(6, committed.size());
+        assertEquals(inProgress, committed.subList(0, 1));
+        Pattern record = Pattern.compile("(ADD|REMOVE|COMMIT):\\[([^,]*),(\\d+),(\\d+)\\]\\[(\\d+)\\]");
+        List<String> types = new ArrayList<>();
+        for (String line : committed)
+        {
+            Matcher m = record.matcher(line);
+            assertTrue(line, m.matches());
+            types.add(m.group(1));
+            CRC32 crc = new CRC32();
+            crc.update(m.group(2).getBytes(StandardCharsets.UTF_8));
+            crc.update(m.group(1).getBytes(StandardCharsets.UTF_8));
+            long updateTime = Long.parseLong(m.group(3));
+            updateChecksumInt(crc, (int) updateTime);
+            updateChecksumInt(crc, (int) (updateTime >>> 32));
+            updateChecksumInt(crc, Integer.parseInt(m.group(4)));
+            assertEquals(line, Long.parseLong(m.group(5)), crc.getValue() & Long.MAX_VALUE);
+            if (!m.group(1).equals("COMMIT"))
+            {
+                assertTrue(line, m.group(2).matches(".*/txn_ks/txn-0a90f7d0d9ca11f197644fa0c9d7f524/me-[1-5]-big"));
+                assertEquals(line, "8", m.group(4));
+            }
+        }
+        assertEquals(Arrays.asList("ADD", "REMOVE", "REMOVE", "REMOVE", "REMOVE", "COMMIT"), types);
+    }
+
+    /**
+     * The schema of DSE 5.1.51 with row-level access control: the restricted table and view carry the column name in
+     * their {@code DSE_RLACA} extension; after {@code UNRESTRICT ROWS} on the view, the node holds a table row named
+     * after the view and keeps the view's extension. The data directory has DSE's {@code system_schema} and
+     * {@code system_auth.role_permissions} and nothing else.
+     */
+    @Test
+    public void dse51SchemaIsWhatTheReadmeSays() throws IOException
+    {
+        Dse51Fixtures f = DseFixtures.dse51();
+        String restricted = text(f.schemaFile("extensions-restricted.txt"));
+        String rlaca = "{'DSE_RLACA': 0x" + Hex.bytesToHex("region".getBytes(StandardCharsets.US_ASCII)) + '}';
+        assertTrue(restricted.contains("       test_ks |           rlac | " + rlaca));
+        assertTrue(restricted.contains("       test_ks | rlac_by_v | " + rlaca));
+        String after = text(f.schemaFile("extensions-after-unrestrict.txt"));
+        assertTrue(after.contains("       test_ks |      rlac_by_v |                              {}"));
+        assertTrue(after.contains("       test_ks | rlac_by_v | " + rlaca));
+        // the restriction of the view stayed on node 1, where it ran; the one of the table reached every node
+        String[] nodes = text(f.schemaFile("extensions-per-node.txt")).split("--- node ");
+        assertEquals(4, nodes.length);
+        assertTrue(nodes[1].contains(" rlac_by_v | " + Dse51Fixtures.RLAC_VIEW_ID + " | " + rlaca));
+        for (int node = 2; node <= Dse51Fixtures.CLUSTER_NODES; node++)
+        {
+            assertTrue(nodes[node].contains("       rlac | " + Dse51Fixtures.RLAC_TABLE_ID + " | " + rlaca));
+            assertTrue(nodes[node].contains(" rlac_by_v | " + Dse51Fixtures.RLAC_VIEW_ID + " |           {}"));
+        }
+
+        String auth = text(f.schemaFile("select-system-auth.txt"));
+        for (String grant : Arrays.asList("rows/EU/data/test_ks/rlac |", "rows/EU/data/test_ks/rlac_by_v |",
+                                          "'PROXY.EXECUTE', 'PROXY.LOGIN'",
+                                          "unconfigured table resource_role_permissons_index"))
+            assertTrue(grant, auth.contains(grant));
+
+        Path data = f.schemaDataDirectory();
+        assertEquals(ImmutableSet.of("system_auth", "system_schema"), fileNames(data));
+        assertEquals(ImmutableSet.of("role_permissions-3afbe79f219431a7add7f5ab90d8ec9c"),
+                     fileNames(data.resolve("system_auth")));
+        assertEquals(ImmutableSet.of("aggregates", "columns", "dropped_columns", "functions", "indexes", "keyspaces",
+                                     "tables", "triggers", "types", "views"),
+                     fileNames(data.resolve("system_schema")).stream().map(n -> n.substring(0, n.lastIndexOf('-')))
+                                                             .collect(Collectors.toSet()));
+    }
+
+    /** The user sstables: one table directory per table of the README, the SASI one with its index file. */
+    @Test
+    public void dse51UserSSTablesAreWhatTheReadmeSays() throws IOException
+    {
+        Dse51Fixtures f = DseFixtures.dse51();
+        Path keyspace = f.userSSTables().resolve("test_ks");
+        assertEquals(ImmutableSet.of("compact_dense", "compact_static", "sasi_t", "t", "wide", "wide_by_v"),
+                     fileNames(keyspace).stream()
+                                        .map(n -> n.substring(0, n.lastIndexOf('-')))
+                                        .collect(Collectors.toSet()));
+        assertTrue(fileNames(f.tableDirectory(keyspace, "sasi_t")).contains("me-1-big-SI_sasi_t_v.db"));
+        String select = text(f.userSSTables().resolve("select.txt"));
+        assertTrue(select.contains("   " + DseFixtures.COLLECTION_TABLE_COUNT_STAR + '\n'));
+        assertTrue(select.contains("   500\n"));
+        for (String rows : Arrays.asList("(11 rows)", "(10 rows)", "(5 rows)"))
+            assertTrue(rows, select.contains(rows));
+        String dumps = text(f.sstableMetadataDump(f.userSSTables()));
+        for (String table : Arrays.asList("compact_dense", "compact_static", "sasi_t", "t", "wide", "wide_by_v"))
+        {
+            Path directory = f.tableDirectory(keyspace, table).getFileName();
+            assertTrue(table, dumps.contains("\nSSTable: test_ks/" + directory + "/me-1-big\n"));
+        }
+    }
+
+    /** The configuration as installed and as running, without an absolute path of the machine that ran the nodes. */
+    @Test
+    public void dse51ConfigurationIsWhatTheReadmeSays() throws IOException
+    {
+        Dse51Fixtures f = DseFixtures.dse51();
+        Set<String> files = ImmutableSet.of("cassandra.yaml", "jvm.options", "cassandra-rackdc.properties", "dse.yaml");
+        assertEquals(files, fileNames(f.confDirectory(false)));
+        assertEquals(files, fileNames(f.confDirectory(true)));
+        List<String> installed = Files.readAllLines(f.confDirectory(false).resolve("cassandra.yaml"));
+        assertTrue(installed.contains("start_rpc: true"));
+        assertTrue(installed.contains("listen_address: localhost"));
+        List<String> running = Files.readAllLines(f.confDirectory(true).resolve("cassandra.yaml"));
+        assertTrue(running.contains("start_rpc: true"));
+        assertTrue(running.contains("listen_address: 127.0.51.1"));
+        assertTrue(running.contains("broadcast_address: 127.0.51.11"));
+        assertTrue(running.contains("    - <node directory>/data"));
+        List<String> dseYaml = Files.readAllLines(f.confDirectory(true).resolve("dse.yaml"));
+        assertTrue(dseYaml.contains("    allow_row_level_security: true"));
+        for (String file : Arrays.asList("jvm.options", "cassandra-rackdc.properties"))
+            assertArrayEquals(file, Files.readAllBytes(f.confDirectory(false).resolve(file)),
+                              Files.readAllBytes(f.confDirectory(true).resolve(file)));
+        // the running files differ from the installed ones only in the lines the README names
+        assertEquals(ImmutableSet.of("listen_address", "broadcast_address", "rpc_address", "- seeds",
+                                     "- <node directory>/data", "commitlog_directory", "saved_caches_directory",
+                                     "hints_directory", "cdc_raw_directory"),
+                     changedKeys(f, "cassandra.yaml"));
+        assertEquals(ImmutableSet.of("authentication_options", "enabled", "default_scheme", "role_management_options",
+                                     "mode", "authorization_options", "transitional_mode",
+                                     "allow_row_level_security"),
+                     changedKeys(f, "dse.yaml"));
+    }
+
+    /** The keys of the lines of a configuration file that differ between its installed and its running copy. */
+    private static Set<String> changedKeys(Dse51Fixtures f, String file) throws IOException
+    {
+        List<String> installed = Files.readAllLines(f.confDirectory(false).resolve(file));
+        List<String> running = Files.readAllLines(f.confDirectory(true).resolve(file));
+        assertEquals(file, installed.size(), running.size());
+        Set<String> keys = new HashSet<>();
+        for (int i = 0; i < running.size(); i++)
+            if (!installed.get(i).equals(running.get(i)))
+                keys.add(running.get(i).trim().split(":")[0]);
+        return keys;
+    }
+
+    private static String text(Path file) throws IOException
+    {
+        return new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
+    }
+
+    private static Set<String> generations(Path tableDirectory) throws IOException
+    {
+        return fileNames(tableDirectory).stream().map(n -> n.split("-")[1]).collect(Collectors.toSet());
+    }
+
+    private static void assertOwnAddressDeletion(String dump, String address)
+    {
+        assertTrue(dump, dump.contains("(key=" + address + ")\n"));
+        assertTrue(dump, dump.contains("\ntotalColumnsSet: 0\ntotalRows: 0\n"));
+        assertTrue(dump, dump.contains("\nEstimated droppable tombstones: 1.0\n"));
+    }
+
+    /** The lines of a {@code sstablemetadata} dump file that follow the header of one sstable of a table. */
+    private static String dumpOf(Path dumps, String table, String generation) throws IOException
+    {
+        StringBuilder out = new StringBuilder();
+        boolean in = false;
+        for (String line : Files.readAllLines(dumps))
+        {
+            if (line.startsWith("=== "))
+                in = line.matches("=== ((flushed|compacted)/)?" + table + "-[0-9a-f]{32}/me-" + generation
+                                  + "-big-Data\\.db");
+            else if (in)
+                out.append(line).append('\n');
+        }
+        assertTrue(dumps + " has no dump of " + table + ' ' + generation, out.length() > 0);
+        return out.toString();
+    }
+
+    /** The rows of cqlsh's expanded output ({@code @ Row n}, then {@code  name | value} lines). */
+    private static List<Map<String, String>> expandedRows(Path select) throws IOException
+    {
+        List<Map<String, String>> rows = new ArrayList<>();
+        for (String line : Files.readAllLines(select))
+        {
+            if (line.startsWith("@ Row "))
+                rows.add(new HashMap<>());
+            else if (!rows.isEmpty() && line.startsWith(" ") && line.contains(" | "))
+                rows.get(rows.size() - 1).put(line.substring(0, line.indexOf(" | ")).trim(),
+                                              line.substring(line.indexOf(" | ") + 3).trim());
+        }
+        return rows;
+    }
+
+    /**
+     * Checks the frame of a DSE 5.1.51 message (magic, id, timestamp, the sender's address, the verb, the
+     * parameters, the payload size), adds the names of its parameters to {@code parameterNames} and returns its
+     * payload.
+     */
+    private static ByteBuffer dse51Message(byte[] bytes, String from, String verb, Set<String> parameterNames)
+    {
+        ByteBuffer m = ByteBuffer.wrap(bytes);
+        assertEquals(ByteBuffer.wrap(HANDSHAKE_MAGIC).getInt(), m.getInt());
+        m.getInt(); // id
+        m.getInt(); // timestamp
+        assertEquals(from, dse51Address(m));
+        assertEquals(verb, (int) DSE51_VERBS.get(verb), m.getInt());
+        int parameters = m.getInt();
+        for (int i = 0; i < parameters; i++)
+        {
+            byte[] name = new byte[m.getShort() & 0xFFFF];
+            m.get(name);
+            parameterNames.add(new String(name, StandardCharsets.UTF_8));
+            int value = m.getInt();
+            m.position(m.position() + value);
+        }
+        assertEquals(verb + " from " + from + ": payload size", m.remaining() - 4, m.getInt());
+        return m;
+    }
+
+    private static String dse51Address(ByteBuffer in)
+    {
+        assertEquals(4, in.get());
+        return (in.get() & 0xFF) + "." + (in.get() & 0xFF) + "." + (in.get() & 0xFF) + "." + (in.get() & 0xFF);
+    }
+
+    /** The length of a segment without the zeros that follow its last written byte. */
+    private static int usedLength(byte[] segment)
+    {
+        int end = segment.length;
+        while (end > 0 && segment[end - 1] == 0)
+            end--;
+        return end;
+    }
+
+    private static byte[] uuidBytes(UUID id)
+    {
+        return ByteBuffer.allocate(16)
+                         .putLong(id.getMostSignificantBits())
+                         .putLong(id.getLeastSignificantBits())
+                         .array();
+    }
+
+    private static String uuidHex(UUID id)
+    {
+        return Hex.bytesToHex(uuidBytes(id));
+    }
+
+    private static boolean contains(byte[] haystack, byte[] needle)
+    {
+        outer:
+        for (int i = 0; i + needle.length <= haystack.length; i++)
+        {
+            for (int j = 0; j < needle.length; j++)
+                if (haystack[i + j] != needle[j])
+                    continue outer;
+            return true;
+        }
+        return false;
     }
 }
