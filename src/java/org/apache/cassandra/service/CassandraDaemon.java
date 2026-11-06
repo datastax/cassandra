@@ -41,6 +41,7 @@ import com.codahale.metrics.MetricRegistryListener;
 import com.codahale.metrics.SharedMetricRegistries;
 import org.apache.cassandra.audit.AuditLogManager;
 import org.apache.cassandra.auth.AuthCacheService;
+import org.apache.cassandra.concurrent.ExecutorLivenessWatchdog;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -348,6 +349,8 @@ public class CassandraDaemon
             logger.warn("Unable to start GCInspector (currently only supported on the Sun JVM)");
         }
 
+        startExecutorLivenessWatchdog();
+
         // Replay any CommitLogSegments found on disk
         PaxosState.initializeTrackers();
 
@@ -471,6 +474,20 @@ public class CassandraDaemon
         PaxosState.startAutoRepairs();
 
         completeSetup();
+    }
+
+    @VisibleForTesting
+    static void startExecutorLivenessWatchdog()
+    {
+        try
+        {
+            ExecutorLivenessWatchdog.start();
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            logger.warn("Unable to start the executor liveness watchdog", t);
+        }
     }
 
     public void runStartupChecks()

@@ -32,7 +32,7 @@ import org.apache.cassandra.utils.MBeanWrapper;
  * Only its rejected execution handler is updated, and a shutdown listener is registered.
  */
 @VisibleForTesting
-public class ThreadPoolExecutorJMXAdapter implements Runnable, ResizableThreadPoolMXBean
+public class ThreadPoolExecutorJMXAdapter implements Runnable, ResizableThreadPoolMXBean, RunningTaskSource
 {
     /**
      * A builder wrapper that delegates all methods except {@link Builder#build()}
@@ -243,6 +243,12 @@ public class ThreadPoolExecutorJMXAdapter implements Runnable, ResizableThreadPo
     public String getLongestRunningTaskClass()
     {
         return executor.getLongestRunningTaskClass();
+    }
+
+    @Override
+    public RunningTaskSnapshot longestRunningTask()
+    {
+        return executor.longestRunningTask();
     }
 
     static RejectedExecutionHandler rejectedExecutionHandler(ThreadPoolMetrics metrics, RejectedExecutionHandler wrap)
