@@ -87,7 +87,7 @@ public class CommitLog implements CommitLogMBean
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 10, TimeUnit.SECONDS);
 
     /**
-     * Suffix of a DSE 6 commit log segment this software replayed and moved aside (see
+     * Suffix of a DSE 6 or DSE 5.1 commit log segment this software replayed and moved aside (see
      * {@link #moveAsideReplayedDseSegment}).
      */
     public static final String REPLAYED_DSE_SEGMENT_SUFFIX = ".replayed";
@@ -318,6 +318,12 @@ public class CommitLog implements CommitLogMBean
      * name (a copy of the same segment moved aside before) is replaced. If the rename fails, the segment is left to the
      * usual handling too: the default segment handler deletes it unless mutations of unknown tables were skipped in it;
      * a segment kept that way is replayed again at the next start, and the WARN says so.
+     * <p>
+     * In {@code internode_compatibility_mode: DSE_5_1} the same holds for the segments DataStax Enterprise 5.1 writes,
+     * of version {@link CommitLogDescriptor#VERSION_30} (6, the version of Apache Cassandra 3.x, which DSE 5.1.51
+     * writes with no version of its own), whose mutations of DSE 5.1's own tables are skipped as unknown tables: every
+     * such segment read at the start without failed mutations is renamed, and none of version 680. This software writes
+     * neither version.
      *
      * @param hasInvalidMutations whether the reader flagged the segment for skipped mutations of unknown tables: only
      *                            used to tell what the default segment handler does with it when the rename fails
@@ -326,9 +332,11 @@ public class CommitLog implements CommitLogMBean
     @VisibleForTesting
     static boolean moveAsideReplayedDseSegment(File segment, boolean hasInvalidMutations, boolean hasFailedMutations)
     {
-        if (!DatabaseDescriptor.isDse6CompatibilityMode() || hasFailedMutations)
+        if (!DatabaseDescriptor.isDseCompatibilityMode() || hasFailedMutations)
             return false;
-        if (CommitLogDescriptor.fromFileName(segment.name()).version() != CommitLogDescriptor.VERSION_DSE_68)
+        int dseVersion = DatabaseDescriptor.isDse51CompatibilityMode() ? CommitLogDescriptor.VERSION_30
+                                                                       : CommitLogDescriptor.VERSION_DSE_68;
+        if (CommitLogDescriptor.fromFileName(segment.name()).version() != dseVersion)
             return false;
         File target = new File(segment.parent(), segment.name() + REPLAYED_DSE_SEGMENT_SUFFIX);
         try
@@ -351,12 +359,14 @@ public class CommitLog implements CommitLogMBean
         SyncUtil.trySyncDir(target.parent());
         // WARN, not INFO: the segment's writes to tables unknown here are not applied, and the renamed file must be
         // known to whoever rolls the node back or drops the mode
-        logger.warn("Commit log segment {} was written by DataStax Enterprise 6 and read at the start (replayed, or skipped as empty); " +
-                    "its mutations of tables unknown to this software (DSE-only tables, listed by the \"Skipped ... mutations from " +
-                    "unknown\" lines above), if any, were skipped. Renamed to {} so that it is not replayed again. Removing the {} " +
-                    "suffix replays it at the next start, which brings back any row of it whose deletion was purged since: do so only " +
-                    "to recover from a failed replay.",
-                    segment, target.name(), REPLAYED_DSE_SEGMENT_SUFFIX);
+        logger.warn("Commit log segment {} was written by DataStax Enterprise {} and read at the start (replayed, or " +
+                    "skipped as empty); its mutations of tables unknown to this software (DSE-only tables, listed by " +
+                    "the \"Skipped ... mutations from unknown\" lines above), if any, were skipped. Renamed to {} so " +
+                    "that it is not replayed again. Removing the {} suffix replays it at the next start, which " +
+                    "brings back any row of it whose deletion was purged since: do so only to recover from a failed " +
+                    "replay.",
+                    segment, DatabaseDescriptor.isDse51CompatibilityMode() ? "5.1" : "6", target.name(),
+                    REPLAYED_DSE_SEGMENT_SUFFIX);
         return true;
     }
 

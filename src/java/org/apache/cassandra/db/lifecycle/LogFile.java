@@ -211,6 +211,11 @@ final class LogFile implements AutoCloseable
             {
                 String key = record.absolutePath.get();
                 existingFiles = recordFiles.getOrDefault(key, Collections.emptyList());
+                // DSE 5.1 compatibility: DSE 5.1 records the absolute path of an sstable, its files are found by its
+                // URI (DseTransactionLogs)
+                if (existingFiles.isEmpty() && DatabaseDescriptor.isDse51SSTableOutput())
+                    existingFiles = recordFiles.getOrDefault(DseTransactionLogs.uriOfRecordPath(key),
+                                                             Collections.emptyList());
             }
             LogFile.verifyRecord(record, existingFiles);
         }
@@ -279,8 +284,9 @@ final class LogFile implements AutoCloseable
         // we can have transaction files with mismatching updateTime resolutions due to switching between jdk8 and jdk11, truncate both to be consistent:
         if (truncateMillis(record.updateTime) != truncateMillis(record.status.onDiskRecord.updateTime) && record.status.onDiskRecord.updateTime > 0)
         {
-            // DSE 6 compatibility: the remove records written in this mode take the stats file's time (DseTransactionLogs)
-            if (DatabaseDescriptor.isDse6SSTableOutput() && DseTransactionLogs.isDse6RemoveRecord(record, existingFiles))
+            // DSE compatibility: the remove records written in DSE_6 or DSE_5_1 take the stats file's time
+            // (DseTransactionLogs)
+            if (DatabaseDescriptor.isDseSSTableOutput() && DseTransactionLogs.isDseRemoveRecord(record, existingFiles))
                 return;
 
             // handle the case where we have existing broken transaction file on disk, where the update time is
@@ -516,8 +522,8 @@ final class LogFile implements AutoCloseable
     {
         StringBuilder str = new StringBuilder();
         str.append('[');
-        // DSE 6 compatibility: the name on disk, which differs from getFileName() for a log written in another mode
-        str.append(DatabaseDescriptor.isDse6SSTableOutput() ? nameOnDisk() : getFileName());
+        // DSE compatibility: the name on disk, which differs from getFileName() for a log written in another mode
+        str.append(DatabaseDescriptor.isDseSSTableOutput() ? nameOnDisk() : getFileName());
         str.append(" in ");
         str.append(replicas.getDirectories());
         str.append(']');
@@ -558,8 +564,8 @@ final class LogFile implements AutoCloseable
     @VisibleForTesting
     static String fileName(Version version, OperationType type, TimeUUID id)
     {
-        // DSE 6 compatibility: while the node, or a tool, writes the sstables DSE 6 reads, the name DSE 6 reads too
-        if (DatabaseDescriptor.isDse6SSTableOutput())
+        // DSE compatibility: in DSE_6 or DSE_5_1, for the node or a tool, the name the DSE release of the mode reads
+        if (DatabaseDescriptor.isDseSSTableOutput())
             return DseTransactionLogs.fileName(version, type, id);
 
         // For pre-5.0 versions, only BigFormat is supported, and the file name includes only the version string.

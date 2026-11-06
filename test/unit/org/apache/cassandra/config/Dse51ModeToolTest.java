@@ -84,6 +84,9 @@ public class Dse51ModeToolTest
             assertThat(DatabaseDescriptor.isDse51CompatibilityMode()).isFalse();
             // nothing of DSE 6's on-disk half
             assertThat(DatabaseDescriptor.isDse6SSTableOutput()).isFalse();
+            // the transaction logs and the statistics of DSE_5_1
+            assertThat(DatabaseDescriptor.isDseSSTableOutput()).isTrue();
+            assertThat(DatabaseDescriptor.isDse51SSTableOutput()).isTrue();
             assertThat(TRIE_INDEX_FORMAT_VERSION.isPresent()).isFalse();
             assertThat(DatabaseDescriptor.getSelectedSSTableFormat().name()).isEqualTo(BigFormat.NAME);
             assertThat(DatabaseDescriptor.isUUIDSSTableIdentifiersEnabled()).isFalse();

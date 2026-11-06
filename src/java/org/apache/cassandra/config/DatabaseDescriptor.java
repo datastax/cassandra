@@ -250,8 +250,11 @@ public class DatabaseDescriptor
     private static volatile SSTableFormat<?, ?> selectedSSTableFormat;
     private static StorageCompatibilityMode storageCompatibilityMode = CassandraRelevantProperties.TEST_STORAGE_COMPATIBILITY_MODE.getEnum(true, StorageCompatibilityMode.class);
     private static InternodeCompatibilityMode internodeCompatibilityMode = InternodeCompatibilityMode.NONE;
-    /** True when DSE_6 was requested, for the node and for tools alike: sstables are written in the format DSE 6 reads. */
-    private static boolean dse6SSTableOutput = false;
+    /**
+     * The internode compatibility mode requested, for the node and for tools alike (see {@link #isDse6SSTableOutput()}
+     * and {@link #isDseSSTableOutput()}); {@code NONE} without one.
+     */
+    private static InternodeCompatibilityMode sstableOutputMode = InternodeCompatibilityMode.NONE;
 
     private static Function<CommitLog, AbstractCommitLogSegmentManager> commitLogSegmentMgrProvider = c -> DatabaseDescriptor.isCDCEnabled()
                                                                                                            ? new CommitLogSegmentManagerCDC(c, DatabaseDescriptor.getCommitLogLocation())
@@ -1747,7 +1750,8 @@ public class DatabaseDescriptor
      * <p>
      * For {@link InternodeCompatibilityMode#DSE_5_1} it checks the same settings, with the {@code big} sstable
      * format in place of {@code bti} and no trie version, and forces numeric sstable generations; tools inherit the
-     * on-disk checks (the format, the compressors, the generations) without the storage mode and paxos checks, and
+     * on-disk checks (the format, the compressors, the generations) and the transaction logs and statistics of the mode
+     * ({@link #isDseSSTableOutput()}) without the storage mode and paxos checks, and
      * clients, which do not read {@code cassandra.yaml}, get the {@code big} format forced instead of refused. The
      * mode still writes big sstables of version {@code nb} (offline tools, which run without the storage mode,
      * {@code oa}) and speaks no pre-4.0 dialect.
@@ -1764,7 +1768,7 @@ public class DatabaseDescriptor
             else if (mode.isDse51())
                 applyDse51SSTableOutput(conf);
             internodeCompatibilityMode = InternodeCompatibilityMode.NONE;
-            dse6SSTableOutput = mode.isDse6();
+            sstableOutputMode = mode;
             return;
         }
 
@@ -1795,7 +1799,7 @@ public class DatabaseDescriptor
         }
 
         internodeCompatibilityMode = mode;
-        dse6SSTableOutput = mode.isDse6();
+        sstableOutputMode = mode;
     }
 
     private static InternodeCompatibilityMode requestedInternodeCompatibilityMode(Config conf)
@@ -1998,7 +2002,7 @@ public class DatabaseDescriptor
     @VisibleForTesting
     static void verifyDse6SSTableFormat()
     {
-        if (!dse6SSTableOutput)
+        if (!sstableOutputMode.isDse6())
             return;
         String trieVersion = InternodeCompatibilityMode.DSE_6_TRIE_INDEX_FORMAT_VERSION;
         String effective = getSelectedSSTableFormat().getLatestVersion().version;
@@ -5859,14 +5863,33 @@ public class DatabaseDescriptor
      */
     public static boolean isDse6SSTableOutput()
     {
-        return dse6SSTableOutput;
+        return sstableOutputMode.isDse6();
+    }
+
+    /**
+     * True when {@code internode_compatibility_mode: DSE_6} or {@code DSE_5_1} was requested, for the node and for
+     * tools alike (unlike {@link #isDseCompatibilityMode()}): what the two sources share of the on-disk half of the
+     * mode, the transaction logs and the statistics a DSE node reads after a rollback.
+     */
+    public static boolean isDseSSTableOutput()
+    {
+        return sstableOutputMode.isDse();
+    }
+
+    /**
+     * True when {@code internode_compatibility_mode: DSE_5_1} was requested, for the node and for tools alike (unlike
+     * {@link #isDse51CompatibilityMode()}): where the on-disk half of the mode differs from that of {@code DSE_6}.
+     */
+    public static boolean isDse51SSTableOutput()
+    {
+        return sstableOutputMode.isDse51();
     }
 
     @VisibleForTesting
     public static void setInternodeCompatibilityMode(InternodeCompatibilityMode mode)
     {
         internodeCompatibilityMode = mode;
-        dse6SSTableOutput = mode.isDse6();
+        sstableOutputMode = mode;
     }
 
     public static ParameterizedClass getDefaultCompaction()

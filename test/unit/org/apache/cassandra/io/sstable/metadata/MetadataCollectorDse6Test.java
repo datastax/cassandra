@@ -47,7 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * DSE's 114; with {@code NONE} it keeps this software's 118 (CASSANDRA-15164). The partition size histogram has 150
  * buckets in both modes, as DSE's. The mode is switched at runtime, which changes the histogram but not the sstable
  * version this test's node writes: only the histograms are under test here (InternodeCompatibilityModeToolTest and
- * Dse6ModeSmokeTest cover the {@code bb} side).
+ * Dse6ModeSmokeTest cover the {@code bb} side). {@code DSE_5_1} writes DSE's 114 buckets too.
  */
 public class MetadataCollectorDse6Test extends CQLTester
 {
@@ -110,6 +110,21 @@ public class MetadataCollectorDse6Test extends CQLTester
         StatsMetadata none = flushAndReadStats(noneTable);
         assertThat(none.estimatedCellPerPartitionCount.getBuckets(false)).hasSize(119);
         assertThat(none.estimatedPartitionSize.getBuckets(false)).hasSize(151);
+    }
+
+    /** DSE 5.1.51 asks for the same 114 buckets as DSE 6: DSE_5_1 writes them too, at a flush as in a new histogram. */
+    @Test
+    public void theCellCountHistogramHasDsesBucketsInDse51Mode() throws Throwable
+    {
+        String table = createTable("CREATE TABLE %s (pk int, ck int, v text, PRIMARY KEY (pk, ck))");
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        EstimatedHistogram dse51 = MetadataCollector.defaultCellPerPartitionCountHistogram();
+        assertThat(dse51.getBucketOffsets()).hasSize(MetadataCollector.DSE_6_CELL_COUNT_BUCKETS);
+        assertThat(dse51.getLargestBucketOffset()).isEqualTo(1996099046L);
+
+        StatsMetadata flushed = flushAndReadStats(table);
+        assertThat(flushed.estimatedCellPerPartitionCount.getBuckets(false)).hasSize(115);
+        assertThat(flushed.estimatedPartitionSize.getBuckets(false)).hasSize(151);
     }
 
     @Test

@@ -27,8 +27,10 @@ import java.nio.file.StandardOpenOption;
 import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.SyncUtil;
@@ -43,10 +45,20 @@ import org.apache.cassandra.utils.SyncUtil;
  * cluster runs this software, before dropping the mode. No release-version heuristics are used to detect
  * DSE peers at startup: the marker and the record of DSE 6 peers ({@link DsePeersRecord}) are the only
  * evidence the check of a start with {@code NONE} uses.
+ * <p>
+ * The upgrade from DataStax Enterprise 5.1 has a marker of its own,
+ * {@code <metadata_directory>/dse51-upgrade-in-progress}, which the node writes on its first start in
+ * {@code internode_compatibility_mode: DSE_5_1}: the name says which upgrade a marker is of, whatever its content (the
+ * content is only informative, and may be empty or partial), so that a start in the mode of that upgrade is not refused
+ * by it, and a start in {@code NONE} is; the DSE 6 marker also refuses a start in {@code DSE_5_1}. The methods without
+ * a mode are those of the DSE 6 marker.
  */
 public final class DseUpgradeMarker
 {
+    /** The marker of the upgrade from DSE 6. */
     public static final String FILE_NAME = "dse-upgrade-in-progress";
+    /** The marker of the upgrade from DSE 5.1. */
+    public static final String DSE_51_FILE_NAME = "dse51-upgrade-in-progress";
 
     private DseUpgradeMarker()
     {
@@ -54,7 +66,15 @@ public final class DseUpgradeMarker
 
     public static Path path()
     {
-        return DatabaseDescriptor.getMetadataDirectory().toPath().resolve(FILE_NAME);
+        return path(InternodeCompatibilityMode.DSE_6);
+    }
+
+    /** The marker of the upgrade of {@code mode}, {@code DSE_6} or {@code DSE_5_1}. */
+    public static Path path(InternodeCompatibilityMode mode)
+    {
+        Preconditions.checkArgument(mode.isDse(), "no upgrade marker for %s", mode);
+        String name = mode.isDse51() ? DSE_51_FILE_NAME : FILE_NAME;
+        return DatabaseDescriptor.getMetadataDirectory().toPath().resolve(name);
     }
 
     /**
@@ -64,7 +84,13 @@ public final class DseUpgradeMarker
      */
     public static boolean exists()
     {
-        return !Files.notExists(path());
+        return exists(InternodeCompatibilityMode.DSE_6);
+    }
+
+    /** Whether the marker of the upgrade of {@code mode} is present, as {@link #exists()}. */
+    public static boolean exists(InternodeCompatibilityMode mode)
+    {
+        return !Files.notExists(path(mode));
     }
 
     /**
@@ -75,12 +101,19 @@ public final class DseUpgradeMarker
      */
     public static boolean writeIfAbsent() throws IOException
     {
+        return writeIfAbsent(InternodeCompatibilityMode.DSE_6);
+    }
+
+    /** Creates the marker of the upgrade of {@code mode} if it is absent, as {@link #writeIfAbsent()}. */
+    public static boolean writeIfAbsent(InternodeCompatibilityMode mode) throws IOException
+    {
         // built only after CREATE_NEW succeeded: a failure to build it leaves the created file in place and is thrown,
         // like a failure to write it
-        Supplier<String> content = () -> "DSE 6 in-place upgrade in progress on this node since " + FBUtilities.now() + " (" +
-                                         FBUtilities.getBroadcastAddressAndPort() + "). Delete this file only after every node " +
-                                         "of the cluster runs this software, before restarting with internode_compatibility_mode: NONE.\n";
-        return writeIfAbsent(content, (channel, bytes) -> {
+        Supplier<String> content = () -> mode.source() + " in-place upgrade in progress on this node since " +
+                                         FBUtilities.now() + " (" + FBUtilities.getBroadcastAddressAndPort() + "). " +
+                                         "Delete this file only after every node of the cluster runs this software, " +
+                                         "before restarting with internode_compatibility_mode: NONE.\n";
+        return writeIfAbsent(mode, content, (channel, bytes) -> {
             while (bytes.hasRemaining())
                 channel.write(bytes);
             SyncUtil.force(channel, true);
@@ -97,7 +130,14 @@ public final class DseUpgradeMarker
     @VisibleForTesting
     static boolean writeIfAbsent(Supplier<String> content, ContentWriter writer) throws IOException
     {
-        Path path = path();
+        return writeIfAbsent(InternodeCompatibilityMode.DSE_6, content, writer);
+    }
+
+    @VisibleForTesting
+    static boolean writeIfAbsent(InternodeCompatibilityMode mode, Supplier<String> content, ContentWriter writer)
+    throws IOException
+    {
+        Path path = path(mode);
         Files.createDirectories(path.getParent());
         FileChannel channel;
         try
@@ -124,6 +164,12 @@ public final class DseUpgradeMarker
     @VisibleForTesting
     public static boolean delete() throws IOException
     {
-        return Files.deleteIfExists(path());
+        return delete(InternodeCompatibilityMode.DSE_6);
+    }
+
+    @VisibleForTesting
+    public static boolean delete(InternodeCompatibilityMode mode) throws IOException
+    {
+        return Files.deleteIfExists(path(mode));
     }
 }

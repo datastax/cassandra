@@ -38,11 +38,18 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -57,6 +64,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 public class DseHintsFileTest
 {
+    /** The gc grace seconds of the hint of {@code dse51Hint}: the default of a table. */
+    private static final int GC_GRACE_SECONDS = 864000;
+
     @Rule
     public TemporaryFolder folder = new TemporaryFolder();
 
@@ -88,6 +98,73 @@ public class DseHintsFileTest
     public void dse6926HintsFileIsNeitherLoadedNorTouchedByTheCatalogInDse6Mode() throws IOException
     {
         assertDseFileUntouched(InternodeCompatibilityMode.DSE_6, DseVersion.DSE_6_9_26);
+    }
+
+    @Test
+    public void dseHintsFileIsNeitherLoadedNorTouchedInDse51Mode() throws IOException
+    {
+        assertDseFileUntouched(InternodeCompatibilityMode.DSE_5_1, DseVersion.DSE_6_8_65);
+    }
+
+    /**
+     * A hints file DSE 5.1 writes (version 1, the Cassandra 3.0 layout, generated here as DSE 5.1.51 writes it by its
+     * source) is a hints file of this software: the catalog loads it in every mode, logs nothing about it and leaves it
+     * as it is, and nothing takes it for a DSE 6 file to convert; its hints are read at messaging version 10
+     * ({@code DseHintsContentTest} decodes them).
+     */
+    @Test
+    public void dse51HintsFileIsLoadedAsAHintsFileOfThisSoftwareInEveryMode() throws IOException
+    {
+        for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+        {
+            File directory = new File(folder.newFolder());
+            UUID hostId = UUID.randomUUID();
+            long timestamp = Clock.Global.currentTimeMillis();
+            List<byte[]> hints = List.of(dse51Hint(timestamp));
+            Path file = DseFixtures.writeDse51HintsFile(directory.toPath(), hostId, timestamp, hints);
+            byte[] before = Files.readAllBytes(file);
+
+            assertThat(file.getFileName().toString()).isEqualTo(hostId + "-" + timestamp + "-1.hints");
+            assertThat(HintsDescriptor.isHintFileName(file)).isTrue();
+            assertThat(HintsCatalog.dseHintsFiles(directory)).isEmpty();
+            HintsDescriptor descriptor = HintsDescriptor.readFromFileQuietly(file).orElseThrow();
+            assertThat(descriptor.version).isEqualTo(HintsDescriptor.VERSION_30);
+            assertThat(descriptor.messagingVersion()).isEqualTo(MessagingService.VERSION_30);
+            assertThat(descriptor.hostId).isEqualTo(hostId);
+            assertThat(descriptor.parameters).isEmpty();
+
+            // nothing logged by the catalog, nor by the descriptor, which reads the statistics file too
+            Logger descriptorLogger = (Logger) LoggerFactory.getLogger(HintsDescriptor.class);
+            ListAppender<ILoggingEvent> descriptorEvents = new ListAppender<>();
+            descriptorEvents.start();
+            descriptorLogger.addAppender(descriptorEvents);
+            try
+            {
+                assertThat(loadAndCollectEvents(directory, mode, 1)).as("log of the catalog load in " + mode).isEmpty();
+            }
+            finally
+            {
+                descriptorLogger.detachAppender(descriptorEvents);
+            }
+            assertThat(descriptorEvents.list).filteredOn(e -> e.getLevel().isGreaterOrEqual(Level.WARN))
+                                             .as("WARN and ERROR of the descriptors in " + mode).isEmpty();
+            assertThat(Files.readAllBytes(file)).isEqualTo(before);
+            assertThat(DseFixtures.hintsRecords(file)).hasSize(1);
+            assertThat(list(directory)).containsExactlyInAnyOrder(file.getFileName().toString(),
+                                                                  hostId + "-" + timestamp + "-1.crc32",
+                                                                  hostId + "-" + timestamp + "-1-Statistics.hints");
+        }
+    }
+
+    /** A hint of one row of a table of its own, as DSE 5.1 writes it: its mutation in the layout of version 12. */
+    private static byte[] dse51Hint(long creationTime) throws IOException
+    {
+        TableMetadata table = TableMetadata.builder("ks", "t")
+                                           .addPartitionKeyColumn("k", Int32Type.instance)
+                                           .addRegularColumn("v", UTF8Type.instance)
+                                           .build();
+        Mutation mutation = new RowUpdateBuilder(table, FBUtilities.timestampMicros(), 1).add("v", "x").build();
+        return DseFixtures.dseHint(creationTime, GC_GRACE_SECONDS, DseFixtures.mutation40(mutation));
     }
 
     @Test

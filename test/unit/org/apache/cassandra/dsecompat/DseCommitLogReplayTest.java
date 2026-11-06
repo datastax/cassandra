@@ -18,8 +18,11 @@ package org.apache.cassandra.dsecompat;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,12 +53,14 @@ import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogDescriptor;
 import org.apache.cassandra.db.commitlog.CommitLogReadHandler;
 import org.apache.cassandra.db.commitlog.CommitLogReader;
 import org.apache.cassandra.db.commitlog.CommitLogReplayer;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
@@ -95,6 +100,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * is not exercised here, where the test drives the replay directly: the in-JVM {@code Dse6RollbackArtefactsTest}
  * covers it. No DSE-written segment holds the update of a materialized view: the tests of such updates replay a segment
  * of version 680 built here ({@code dseSegment}), holding an update built in DSE's layout.
+ * <p>
+ * DSE 5.1 writes segments of version 6, the Cassandra 3.x layout (the header, the sync markers and the entries as in a
+ * segment of this software, the mutations at messaging version 11, laid out as at 10 and 12), which the replay reads
+ * at messaging version 10. No segment written by DSE 5.1 is among the fixtures yet: the tests of {@code DSE_5_1} replay
+ * a segment of version 6 built here ({@code segment}), holding mutations this software serializes at version 12.
  */
 public class DseCommitLogReplayTest extends CQLTester
 {
@@ -103,6 +113,10 @@ public class DseCommitLogReplayTest extends CQLTester
     private static final int FIXTURE_MUTATIONS = DseFixtures.FIXTURE_MUTATIONS_PER_RUN;
     /** The 6.9.26 segment holds the fixture writes of two runs of the workload: the same values, later timestamps. */
     private static final int FIXTURE_MUTATIONS_6_9_26 = 2 * FIXTURE_MUTATIONS;
+    /** The table {@code dse51Segment} writes to, in the fixture keyspace, which each test drops. */
+    private static final String DSE_51_TABLE = FIXTURE_KEYSPACE + ".dse51";
+    /** The rows {@code dse51Segment} writes to {@link #DSE_51_TABLE}. */
+    private static final int DSE_51_ROWS = 3;
 
     /**
      * The tables of this software the 6.8.65 segment writes to, with the number of partition updates: the
@@ -565,6 +579,131 @@ public class DseCommitLogReplayTest extends CQLTester
         byte[] bytes = new byte[buffer.remaining()];
         buffer.get(bytes);
         return Files.write(directory.resolve(descriptor.fileName()), bytes);
+    }
+
+    /**
+     * A segment of {@code version} holding {@code mutations} in one sync section, framed as {@link #dseSegment} frames
+     * its mutation: the header, a sync marker, each mutation with its size and CRC32s, then an empty sync marker. The
+     * segments of DSE 5.1 (version 6) are built with it.
+     */
+    private static Path segment(Path directory, int version, List<ByteBuffer> mutations) throws IOException
+    {
+        long id = CommitLog.instance.getCurrentPosition().segmentId + 1000;
+        CommitLogDescriptor descriptor = new CommitLogDescriptor(version, id, null, new EncryptionContext());
+        int entries = 0;
+        for (ByteBuffer mutation : mutations)
+            entries += 4 + 4 + mutation.remaining() + 4;
+        ByteBuffer buffer = ByteBuffer.allocate(4096 + entries);
+        CommitLogDescriptor.writeHeader(buffer, descriptor);
+        int markerPosition = buffer.position();
+        int end = markerPosition + 8 + entries;
+        CRC32 crc = new CRC32();
+        FBUtilities.updateChecksumInt(crc, (int) (descriptor.id & 0xFFFFFFFFL));
+        FBUtilities.updateChecksumInt(crc, (int) (descriptor.id >>> 32));
+        FBUtilities.updateChecksumInt(crc, markerPosition);
+        buffer.putInt(end).putInt((int) crc.getValue());
+        for (ByteBuffer mutation : mutations)
+        {
+            crc.reset();
+            FBUtilities.updateChecksumInt(crc, mutation.remaining());
+            buffer.putInt(mutation.remaining()).putInt((int) crc.getValue());
+            crc.update(mutation.duplicate());
+            buffer.put(mutation.duplicate()).putInt((int) crc.getValue());
+        }
+        assertThat(buffer.position()).isEqualTo(end);
+        buffer.putInt(0).putInt(0);
+        buffer.flip();
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(bytes);
+        return Files.write(directory.resolve(descriptor.fileName()), bytes);
+    }
+
+    @Test
+    public void segmentVersion6MapsToMessagingVersion10()
+    {
+        CommitLogDescriptor descriptor = CommitLogDescriptor.fromFileName("CommitLog-6-1790248906231.log");
+        assertThat(descriptor.getMessagingVersion()).isEqualTo(MessagingService.VERSION_30);
+    }
+
+    /**
+     * The header of the segments of version 6 built here is the one DSE 5.1.51 writes, by its source: the version (an
+     * int), the id (a long), the length of the parameters (an unsigned short), the parameters (a JSON map, empty
+     * here), then the CRC32 of the version, of the id as two ints (low half first), of the length as an int and of the
+     * parameters, all big endian; then the first sync marker. Built here byte by byte, apart from this software's
+     * writer.
+     */
+    @Test
+    public void theHeaderOfAVersion6SegmentIsTheOneDse51Writes() throws Throwable
+    {
+        Path segment = segment(folder.newFolder().toPath(), CommitLogDescriptor.VERSION_30, List.of());
+        long id = CommitLogDescriptor.fromFileName(segment.getFileName().toString()).id;
+        byte[] parameters = "{}".getBytes(StandardCharsets.UTF_8);
+        ByteBuffer expected = ByteBuffer.allocate(4 + 8 + 2 + parameters.length + 4);
+        expected.putInt(6).putLong(id).putShort((short) parameters.length).put(parameters);
+        CRC32 crc = new CRC32();
+        crc.update(ByteBuffer.allocate(16).putInt(6).putInt((int) id).putInt((int) (id >>> 32))
+                             .putInt(parameters.length).array());
+        crc.update(parameters);
+        expected.putInt((int) crc.getValue());
+        byte[] bytes = Files.readAllBytes(segment);
+        assertThat(Arrays.copyOf(bytes, expected.capacity())).isEqualTo(expected.array());
+    }
+
+    /**
+     * In {@code DSE_5_1}, a segment of DSE 5.1 (version 6) read at the start is replayed, its mutations of a table
+     * unknown here (one of DSE 5.1's own) skipped, and renamed so that it is not replayed again.
+     */
+    @Test
+    public void dse51ModeReplaysADse51SegmentAndMovesItAside() throws Throwable
+    {
+        Path segment = dse51Segment();
+        withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
+            List<String> warnings = replayAtStartupCollectingWarnings(segment, DSE_51_ROWS);
+            assertMovedAside(segment);
+            assertThat(warnings).anyMatch(w -> w.startsWith("Commit log segment " + segment + " was written by " +
+                                                            "DataStax Enterprise 5.1 and read at the start"));
+        });
+        assertRows(execute("SELECT count(*) FROM " + DSE_51_TABLE), row((long) DSE_51_ROWS));
+        assertRows(execute("SELECT id, v FROM " + DSE_51_TABLE + " WHERE id = 2"), row(2, "v2"));
+    }
+
+    /** Without the mode the same segment is replayed and, its mutations of an unknown table skipped, kept. */
+    @Test
+    public void noneModeKeepsADse51SegmentWithUnknownTableMutations() throws Throwable
+    {
+        Path segment = dse51Segment();
+        withModes(InternodeCompatibilityMode.NONE, StorageCompatibilityMode.NONE, () -> {
+            List<String> warnings = replayAtStartupCollectingWarnings(segment, DSE_51_ROWS);
+            assertThat(warnings).noneMatch(w -> w.contains("was written by DataStax Enterprise"));
+        });
+        assertKept(segment);
+        assertRows(execute("SELECT count(*) FROM " + DSE_51_TABLE), row((long) DSE_51_ROWS));
+    }
+
+    /**
+     * A segment of version 6 holding a mutation of each of {@link #DSE_51_ROWS} rows of {@link #DSE_51_TABLE}, created
+     * here, and one of a table unknown here; the mutations are serialized at version 12, laid out as at 10 and 11.
+     */
+    private Path dse51Segment() throws Throwable
+    {
+        execute("CREATE KEYSPACE " + FIXTURE_KEYSPACE + " WITH replication = {'class': 'SimpleStrategy', " +
+                "'replication_factor': 1}");
+        execute("CREATE TABLE " + DSE_51_TABLE + " (id int PRIMARY KEY, v text)");
+        TableMetadata metadata = Schema.instance.getTableMetadata(FIXTURE_KEYSPACE, "dse51");
+        TableMetadata unknown = TableMetadata.builder(FIXTURE_KEYSPACE, "dse51_only")
+                                             .id(TableId.generate())
+                                             .addPartitionKeyColumn("id", Int32Type.instance)
+                                             .addRegularColumn("v", UTF8Type.instance)
+                                             .build();
+        List<ByteBuffer> mutations = new ArrayList<>();
+        long timestamp = FBUtilities.timestampMicros();
+        for (int id = 0; id < DSE_51_ROWS; id++)
+        {
+            Mutation mutation = new RowUpdateBuilder(metadata, timestamp, id).add("v", "v" + id).build();
+            mutations.add(DseFixtures.mutation40(mutation));
+        }
+        mutations.add(DseFixtures.mutation40(new RowUpdateBuilder(unknown, timestamp, 0).add("v", "x").build()));
+        return segment(folder.newFolder().toPath(), CommitLogDescriptor.VERSION_30, mutations);
     }
 
     /**
