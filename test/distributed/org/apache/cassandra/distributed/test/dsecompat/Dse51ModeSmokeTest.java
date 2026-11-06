@@ -17,6 +17,7 @@
 package org.apache.cassandra.distributed.test.dsecompat;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -41,8 +42,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * A cluster of nodes of this software in {@code internode_compatibility_mode: DSE_5_1}, on the storage settings the
  * mode requires, starts, writes, flushes and restarts: each node writes big {@code nb} sstables with numeric
  * generations, writes the DSE 5.1 upgrade marker once, at its first start, and is not refused by it when it starts
- * again in the mode, and replays its own commit log segments at the restart without moving them aside. The nodes talk
- * to each other as nodes of this software: the mode speaks no pre-4.0 dialect yet.
+ * again in the mode, reads and records the values of DSE 5.1's columns of {@code system.local} and
+ * {@code system.peers} at its first start and loads them from that record at the restart, and replays its own commit
+ * log segments at the restart without moving them aside. Its saved definitions of {@code system.local} and
+ * {@code system.peers} list the columns DSE 5.1 adds as dropped columns. The nodes talk to each other as nodes of
+ * this software: the mode speaks no pre-4.0 dialect yet.
  */
 public class Dse51ModeSmokeTest extends TestBaseImpl
 {
@@ -75,6 +79,17 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
                                      .allMatch(f -> f.matches("nb-[0-9]+-big-Data\\.db"),
                                                "big nb, numeric generation: " + dataFiles);
                 assertMarkers(instance);
+                // the definitions of the local system keyspaces saved at the start list the columns DSE 5.1 adds to
+                // system.local and system.peers as dropped columns, as in every mode
+                for (String table : List.of("local", "peers"))
+                {
+                    Object[][] rows = instance.executeInternal("SELECT column_name FROM " +
+                                                               "system_schema.dropped_columns WHERE " +
+                                                               "keyspace_name = 'system' AND table_name = ?", table);
+                    assertThat(Arrays.stream(rows).map(row -> (String) row[0]))
+                    .as("dropped columns of system.%s", table)
+                    .contains("workload", "workloads", "graph", "dse_version", "server_id");
+                }
             }
 
             for (int node = 1; node <= NODES; node++)
@@ -85,6 +100,19 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
                 assertMarkers(instance);
                 // written at the first start only
                 assertThat(instance.logs().grep("Wrote the DSE 5.1 upgrade marker ").getResult()).hasSize(1);
+                // the values of DSE 5.1's columns of system.local and system.peers read and recorded at the first
+                // start only (these nodes never ran DSE 5.1, so none is found), loaded from the record at the restart
+                assertThat(instance.logs().grep("DSE 5.1 compatibility mode: recorded the values of DSE 5.1's " +
+                                                "columns of system.local and system.peers in ").getResult())
+                .hasSize(1);
+                String summary = "DSE 5.1 compatibility mode: values of DSE 5.1's columns " +
+                                 "\\[workload, workloads, graph, dse_version\\] of system.local and " +
+                                 "system.peers ";
+                assertThat(instance.logs().grep(summary + "read from their sstables; rows holding a value: 0")
+                                   .getResult())
+                .hasSize(1);
+                assertThat(instance.logs().grep(summary + "loaded from .*; rows holding a value: 0").getResult())
+                .hasSize(1);
                 // the segments the node wrote in the mode (version 7) are replayed as its own, not moved aside
                 assertThat(instance.logs().grep("was written by DataStax Enterprise").getResult()).isEmpty();
                 assertThat(instance.callOnInstance(() -> {
