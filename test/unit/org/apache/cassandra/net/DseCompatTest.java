@@ -228,7 +228,7 @@ public class DseCompatTest
         for (String dse51 : new String[]{ "5.1.51", "5.1.18", "5.1.0" })
             assertThat(DseCompat.isDse51DseVersion(dse51)).as(dse51).isTrue();
         for (String other : new String[]{ "6.8.1", "6.9.26", "5.0.15", "5.1", "5.1.51.0", "5.1.51-SNAPSHOT",
-                                          "5.1.051", "5.1.00", "5.1.100", "3.11.3.5151", "", "none" })
+                                          "5.1.051", "5.1.05", "5.1.00", "5.1.100", "3.11.3.5151", "", "none" })
             assertThat(DseCompat.isDse51DseVersion(other)).as(other).isFalse();
         assertThat(DseCompat.isDse51DseVersion(null)).isFalse();
     }
@@ -280,6 +280,12 @@ public class DseCompatTest
         assertThat(DseCompat.dse51Patch(new CassandraVersion("3.11.3.5118"), null)).isEqualTo(18);
         assertThat(DseCompat.dse51Patch(new CassandraVersion("3.11.3.513"), null)).isEqualTo(3);
         assertThat(DseCompat.dse51Patch(null, "5.1.51")).isEqualTo(51);
+        // the first release of the line, on both paths
+        assertThat(DseCompat.dse51Patch(null, "5.1.0")).isEqualTo(0);
+        assertThat(DseCompat.dse51Patch(new CassandraVersion("3.11.3.510"), null)).isEqualTo(0);
+        // a dse_version that is no DSE 5.1 one: nothing, or the build number when there is one
+        assertThat(DseCompat.dse51Patch(null, "5.1.100")).isNull();
+        assertThat(DseCompat.dse51Patch(new CassandraVersion("3.11.3.5118"), "5.1.100")).isEqualTo(18);
         // the dse_version wins over the build number
         assertThat(DseCompat.dse51Patch(new CassandraVersion("3.11.3.5118"), "5.1.51")).isEqualTo(51);
         // a DSE 5.1 release whose build number names no 5.1 release, and other releases
