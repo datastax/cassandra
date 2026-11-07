@@ -43,11 +43,17 @@ import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.service.DseUpgradeMarker;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
+import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -64,7 +70,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * this software, at their own messaging version: GROUP BY queries with paging, logged batches and lightweight
  * transactions run between them, while the schema is frozen as in {@code DSE_6} and the property lifts the freeze. A
  * node in the mode also starts on the {@code system.local} and {@code system.peers} sstables a DSE 5.1.51 node wrote,
- * and reads and records their values.
+ * and reads and records their values. Each node publishes in gossip what DSE 5.1 nodes read of it: the states drivers
+ * learn a node by, at DSE 5.1's ordinals, and its DSE state in DSE 5.1's form.
  */
 public class Dse51ModeSmokeTest extends TestBaseImpl
 {
@@ -137,6 +144,38 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
             ClusterUtils.awaitRingStatus(cluster.get(1), cluster.get(2), "Up");
             assertThat(cluster.coordinator(2).execute(withKeyspace("SELECT count(*) FROM %s.t"), ConsistencyLevel.ALL))
             .isDeepEqualTo(new Object[][]{ { (long) ROWS } });
+
+            // what node 1 publishes in gossip (its own state; the nodes of this software drop the legacy states of each
+            // other's while no node of major version 3 is in gossip): the states DSE 5.1 nodes announce a node to
+            // drivers with, STATUS normal, RPC_ADDRESS (the broadcast native address, not the any-address) and
+            // RPC_READY true, at DSE 5.1's ordinals 0, 8 and 14; its DSE state in DSE 5.1's form at 9; no ordinal above
+            // DSE 5.1's last, 24
+            String rpcAddress = "127.0.0.101"; // the broadcast_rpc_address of node 1 (upgradedNodes)
+            String dseState = cluster.get(1).callOnInstance(() -> new VersionedValue.VersionedValueFactory(DatabaseDescriptor.getPartitioner())
+                                                                  .dse51State(Dse51Fixtures.DSE_VERSION).value);
+            Map<Integer, String> gossiped = Map.of();
+            for (int attempt = 0; attempt < 60 && !"true".equals(gossiped.get(ApplicationState.RPC_READY.ordinal())); attempt++)
+            {
+                if (attempt > 0)
+                    Thread.sleep(500);
+                gossiped = cluster.get(1).callOnInstance(() -> {
+                    EndpointState state = Gossiper.instance.getEndpointStateForEndpoint(FBUtilities.getBroadcastAddressAndPort());
+                    Map<Integer, String> byOrdinal = new HashMap<>();
+                    for (Map.Entry<ApplicationState, VersionedValue> e : state.states())
+                        byOrdinal.put(e.getKey().ordinal(), e.getValue().value);
+                    return byOrdinal;
+                });
+            }
+            assertThat(ApplicationState.STATUS.ordinal()).isZero();
+            assertThat(ApplicationState.RPC_ADDRESS.ordinal()).isEqualTo(8);
+            assertThat(ApplicationState.X_11_PADDING.ordinal()).isEqualTo(9);
+            assertThat(ApplicationState.RPC_READY.ordinal()).isEqualTo(14);
+            assertThat(gossiped.get(0)).startsWith("NORMAL,");
+            assertThat(gossiped).containsEntry(8, rpcAddress)
+                                .containsEntry(9, dseState)
+                                .containsEntry(14, "true");
+            assertThat(cluster.get(1).config().getString("rpc_address")).isEqualTo("0.0.0.0");
+            assertThat(gossiped.keySet()).allMatch(ordinal -> ordinal <= ApplicationState.INDEX_STATUS.ordinal());
         }
     }
 
@@ -202,7 +241,11 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
     {
         Cluster cluster = Cluster.build(nodes)
                                  .withDynamicPortAllocation(true)
-                                 .withConfig(c -> c.with(NETWORK, GOSSIP)
+                                 .withConfig(c -> c.with(NETWORK, GOSSIP, NATIVE_PROTOCOL)
+                                                   // the any-address, so that the broadcast one is what gossip carries
+                                                   .set("rpc_address", "0.0.0.0")
+                                                   // advertised only, distinct from the internode address
+                                                   .set("broadcast_rpc_address", "127.0.0." + (100 + c.num()))
                                                    .set("storage_compatibility_mode", "HCD_1")
                                                    .set("uuid_sstable_identifiers_enabled", false)
                                                    .set("sstable", Map.of("selected_format", "big")))

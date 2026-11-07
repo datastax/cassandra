@@ -1322,14 +1322,20 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     }
 
     /**
-     * DSE 6 compatibility mode: adds to the states this node starts gossiping with DSE's {@code DSE_GOSSIP_STATE}, at the
-     * ordinal of {@code X_11_PADDING}, which this software never uses, unless the gossiped DSE version is
-     * {@link DseCompat#NO_DSE_VERSION} (see {@link DseCompat#gossipedDseVersion}). Outside the mode, in the DSE 5.1 one
-     * too, nothing is added and the property is not read.
+     * DSE 6 compatibility mode: adds to the states this node starts gossiping with DSE's {@code DSE_GOSSIP_STATE}, at
+     * the ordinal of {@code X_11_PADDING}, which this software never uses, unless the gossiped DSE version is
+     * {@link DseCompat#NO_DSE_VERSION} (see {@link DseCompat#gossipedDseVersion}). In the DSE 5.1 compatibility mode
+     * the DSE state in the form DSE 5.1 writes it, with the DSE version 5.1.51
+     * ({@code Dse51GossipStates.publishedState}). Outside the modes nothing is added and the property is not read.
      */
     @VisibleForTesting
     static void addDseState(Map<ApplicationState, VersionedValue> appStates, VersionedValue.VersionedValueFactory valueFactory)
     {
+        if (DseCompat.isDse51())
+        {
+            appStates.put(ApplicationState.X_11_PADDING, valueFactory.dse51State(DseCompat.gossipedDseVersion()));
+            return;
+        }
         if (!DseCompat.isDse6())
             return;
         String dseVersion = DseCompat.gossipedDseVersion();

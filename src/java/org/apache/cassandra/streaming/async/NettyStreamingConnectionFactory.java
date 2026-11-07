@@ -60,7 +60,7 @@ public class NettyStreamingConnectionFactory implements StreamingChannel.Factory
         Throwable cause = null;
         for (final SslFallbackConnectionType sslFallbackConnectionType : sslFallbacks)
         {
-            // DSE 6 compatibility mode: no plain-text retry of an encrypted connection to a peer not known at 4.0 or
+            // DSE compatibility modes: no plain-text retry of an encrypted connection to a peer not known at 4.0 or
             // later; NO_SSL is the last strategy, and the configured TLS one was tried first (DseTlsPorts; a no-op otherwise)
             if (DseTlsPorts.sslFallback(settings, messagingVersion, sslFallbackConnectionType) != sslFallbackConnectionType)
                 break;
