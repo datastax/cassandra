@@ -214,7 +214,8 @@ final class LogRecord
      * <p>
      * In DSE 5.1 compatibility mode the record names the sstable as DSE 5.1 writes and reads it, by its absolute path
      * without the trailing component separator ({@link DseTransactionLogs#recordPath}), and the update time of a remove
-     * record is cut to the second ({@link DseTransactionLogs#removeRecordTime}).
+     * record is the files' time as they give it, in milliseconds: DSE 5.1.51 wrote it so on the Java 8 of the logs it
+     * was seen writing, and compares it with the files' times exactly (see {@link DseTransactionLogs}).
      */
     private static LogRecord makeForSSTable(Type type, List<File> files, int minFiles, String uri)
     {
@@ -222,10 +223,7 @@ final class LogRecord
         if (type == Type.REMOVE && DatabaseDescriptor.isDseSSTableOutput() && !INCLUDE_STATS_FOR_TESTS)
         {
             List<File> withoutTemporaryFiles = files.stream().filter(f -> !f.name().endsWith(TMP_EXT)).collect(Collectors.toList());
-            LogRecord record = make(type, withoutTemporaryFiles, minFiles, absolutePath, true);
-            long updateTime = DseTransactionLogs.removeRecordTime(record.updateTime);
-            return updateTime == record.updateTime ? record
-                                                   : new LogRecord(type, absolutePath, updateTime, record.numFiles);
+            return make(type, withoutTemporaryFiles, minFiles, absolutePath, true);
         }
         return make(type, files, minFiles, absolutePath);
     }

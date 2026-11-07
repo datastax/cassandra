@@ -60,18 +60,22 @@ import org.apache.cassandra.utils.TimeUUID;
  * sstable's files; a record whose sstable had its stats file written again after the record, which this mode accepts
  * ({@link #isDseRemoveRecord}), is then refused as any log whose files changed. Drop the flag on a drained node.
  * <p>
- * In {@code internode_compatibility_mode: DSE_5_1}, for the node and for the tools that read it, the logs are named
- * and their remove records written as DSE 5.1.51 reads them, by its source. Its logs share some rules with DSE 6's: the
+ * In {@code internode_compatibility_mode: DSE_5_1}, for the node and for the tools that read it, the logs are named and
+ * their remove records written as DSE 5.1.51 reads them, by its source. Its logs share some rules with DSE 6's: the
  * name of the 4.0 line, whose first two characters it does not read; a type it does not know refuses its start with the
- * same exception; the update time of a remove record taken over every file of the sstable, the stats file included.
- * Three differ: it knows 20 types, those of {@link #DSE_OPERATION_TYPES} without {@code restore}
- * ({@link #DSE_51_OPERATION_TYPES}); a record names the sstable by its path without the trailing component separator,
- * where this software records its URI ({@link #recordPath}); and it compares the update time of a remove record with
- * that of the files exactly, at the second resolution of the Java 8 it runs on ({@link #removeRecordTime}). The start
- * finds the files of a record naming a path by its URI ({@link #uriOfRecordPath}), so that it checks a log DSE 5.1
- * left, or one the mode wrote, as it checks its own. Once the flag is dropped such a record is no longer matched to its
- * files: its log is completed without the check of the update time, as any log whose records name paths, unless its
- * last record is corrupt, which then refuses it (its files being counted as none).
+ * same exception; the update time of a remove record taken over every file of the sstable, the stats file included, and
+ * compared exactly with the files' times as Java's {@code File.lastModified} gives them, where this software compares
+ * both times cut to the second: the mode writes the time as the files give it, in milliseconds
+ * ({@link LogRecord#make(LogRecord.Type, org.apache.cassandra.io.sstable.SSTable)}), as DSE 5.1.51 wrote it on the
+ * Java 8 of the logs it was seen writing. A Java 8 build without the fix of JDK-8177809 gives whole seconds on Linux,
+ * so a DSE 5.1.51 running on one would refuse such a record; it reads the records only at a start after a rollback,
+ * which the rollback procedure makes on a drained node with no transaction log left. Two rules differ: it knows 20
+ * types, those of {@link #DSE_OPERATION_TYPES} without {@code restore} ({@link #DSE_51_OPERATION_TYPES}); and a record
+ * names the sstable by its path without the trailing component separator, where this software records its URI
+ * ({@link #recordPath}). The start finds the files of a record naming a path by its URI ({@link #uriOfRecordPath}), so
+ * that it checks a log DSE 5.1 left, or one the mode wrote, as it checks its own. Once the flag is dropped such a
+ * record is no longer matched to its files: its log is completed without the check of the update time, as any log whose
+ * records name paths, unless its last record is corrupt, which then refuses it (its files being counted as none).
  */
 final class DseTransactionLogs
 {
@@ -198,17 +202,6 @@ final class DseTransactionLogs
             return uri;
         String path = PathUtils.getPath(uri).toString();
         return path.endsWith(String.valueOf(Component.SEPARATOR)) ? path.substring(0, path.length() - 1) : path;
-    }
-
-    /**
-     * The update time of a remove record: in {@code DSE_5_1} cut to the second, otherwise as it is. DSE 5.1.51 compares
-     * it, by its source, with the latest modification time of the sstable's files as it reads them, exactly; it runs on
-     * Java 8, whose {@code File.lastModified} has a resolution of a second on Linux. This software compares both times
-     * cut to the second.
-     */
-    static long removeRecordTime(long updateTime)
-    {
-        return DatabaseDescriptor.isDse51SSTableOutput() ? LogFile.truncateMillis(updateTime) : updateTime;
     }
 
     /**
