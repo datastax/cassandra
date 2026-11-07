@@ -97,7 +97,7 @@ public class GossipDigestAckVerbHandler extends GossipVerbHandler<GossipDigestAc
     /**
      * The states {@code from} asks for with the digests of its ack.
      * <p>
-     * In DSE 6 compatibility mode a DSE node is sent only the states of this node it asks for
+     * In the DSE compatibility modes a DSE node (DSE 6, or DSE 5.1) is sent only the states of this node it asks for
      * ({@link DseGossipStates#sendsAllOwnStates}).
      */
     @VisibleForTesting
@@ -110,7 +110,7 @@ public class GossipDigestAckVerbHandler extends GossipVerbHandler<GossipDigestAc
         {
             InetAddressAndPort addr = gDigest.getEndpoint();
             // reply everything regardless of heartbeat if remote is asking about me, adding the flag check so we have the ability to rollback to OSS behavior
-            // (DSE 6 compatibility mode: not to a DSE node, see DseGossipStates.sendsAllOwnStates)
+            // (DSE compatibility modes: not to a DSE node, see DseGossipStates.sendsAllOwnStates)
             int maxVersion = allOwnStates && FBUtilities.getBroadcastAddressAndPort().equals(addr) ? HeartBeatState.EMPTY_VERSION : gDigest.getMaxVersion();
             EndpointState localEpStatePtr = Gossiper.instance.getStateForVersionBiggerThan(addr, maxVersion);
             if (localEpStatePtr != null)

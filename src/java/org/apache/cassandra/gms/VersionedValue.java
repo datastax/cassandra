@@ -332,7 +332,9 @@ public class VersionedValue implements Comparable<VersionedValue>
         /**
          * The {@code NET_VERSION} this node gossips. In DSE 6 compatibility mode it is
          * {@link DseCompat#NET_VERSION_PUBLISHED}: DSE cannot parse this software's messaging version, and the
-         * peers of this software negotiate the real version in the handshake anyway.
+         * peers of this software negotiate the real version in the handshake anyway. In the DSE 5.1 compatibility mode
+         * it is this software's messaging version, as without a mode: DSE 5.1 parses any number there and speaks 11 to
+         * a peer gossiping more, and it exchanges no schema with a peer whose stored version is neither 10 nor 11.
          */
         public VersionedValue networkVersion()
         {
@@ -347,6 +349,15 @@ public class VersionedValue implements Comparable<VersionedValue>
         public VersionedValue dseState(String dseVersion)
         {
             return new VersionedValue(DseGossipStates.publishedDseState(dseVersion));
+        }
+
+        /**
+         * DSE 5.1 compatibility mode: the DSE state this node gossips to DSE 5.1 nodes, with the DSE version
+         * {@code dseVersion}, at the ordinal of {@code X_11_PADDING} ({@link Dse51GossipStates#publishedState}).
+         */
+        public VersionedValue dse51State(String dseVersion)
+        {
+            return new VersionedValue(Dse51GossipStates.publishedState(dseVersion));
         }
 
         public VersionedValue internalIP(InetAddress private_ip)

@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.net;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.nio.file.Files;
@@ -45,7 +46,10 @@ import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.db.Dse51SystemTables;
+import org.apache.cassandra.db.Dse51SystemTablesRecords;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
@@ -67,6 +71,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.InstanceOfAssertFactories.STRING;
 
 /**
  * DSE 6 compatibility mode: the saved peers stored with a DSE 6 release are recorded at the pre-4.0 dialect, and
@@ -75,7 +80,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * handshake as soon as its version of 4.0 or later is known, whichever way; a pre-4.0 handshake from a peer gossiping 4.0
  * or later does not lower its version, unless its first message is one only DSE sends. With the mode off nothing is
  * seeded and no connection corrects its version. The bytes of the first messages, and the retries, are asserted over
- * sockets in {@link DseHandshakeTest}.
+ * sockets in {@link DseHandshakeTest}. In DSE 5.1 compatibility mode the saved peers stored with a DSE 5.1 release or
+ * dse_version are recorded at the dialect the same way, without a presumption.
  */
 public class DseDialectVersionsTest
 {
@@ -164,7 +170,116 @@ public class DseDialectVersionsTest
         assertThat(DsePeers.isPresumed(dseKnown)).isFalse();
     }
 
-    /** The messaging service seeds the saved peers (system.peers) when it starts listening, in DSE_6 mode only. */
+    /**
+     * DSE_5_1 mode: a saved peer stored with a DSE 5.1 release (3.11.3.&lt;build&gt;), or stored without a release and
+     * with a DSE 5.1 dse_version in DSE 5.1's system.peers, is assumed at the dialect, so that its first connection is
+     * the pre-4.0 one, which DSE 5.1 answers with 11, and not the 4.0-style probe it answers and then closes; it is not
+     * presumed to be a DSE node. A DSE 6 release, a release of this software (whatever dse_version DSE 5.1 stored for
+     * the peer before it was upgraded), a peer known already and a peer with neither value are not seeded; nor is a
+     * peer by the dse_version stored for another address.
+     */
+    @Test
+    public void dse51PeersStoredWithADse51ReleaseOrDseVersionAreSeededInDse51Mode() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        InetAddressAndPort byRelease = InetAddressAndPort.getByName("127.0.51.11:7000");
+        InetAddressAndPort byDseVersion = InetAddressAndPort.getByName("127.0.51.12:7000");
+        InetAddressAndPort otherPatch = InetAddressAndPort.getByName("127.0.51.13:7000");
+        InetAddressAndPort known = InetAddressAndPort.getByName("127.0.51.14:7000");
+        InetAddressAndPort dse6 = InetAddressAndPort.getByName("127.0.51.15:7000");
+        InetAddressAndPort upgraded = InetAddressAndPort.getByName("127.0.51.16:7000");
+        InetAddressAndPort neither = InetAddressAndPort.getByName("127.0.51.17:7000");
+        EndpointMessagingVersions versions = new EndpointMessagingVersions();
+        versions.set(known, current_version);
+        InetAddress elsewhere = InetAddressAndPort.getByName("127.0.51.99").getAddress();
+        Map<InetAddress, String> storedDseVersions = Map.of(byDseVersion.getAddress(), Dse51Fixtures.DSE_VERSION,
+                                                            neither.getAddress(), "6.8.1",
+                                                            // upgraded since DSE 5.1 stored it: the release decides
+                                                            upgraded.getAddress(), Dse51Fixtures.DSE_VERSION,
+                                                            elsewhere, Dse51Fixtures.DSE_VERSION);
+
+        assertThat(DseDialectVersions.seedDse51(Stream.of(peer(byRelease, Dse51Fixtures.RELEASE_VERSION), peer(byDseVersion, null),
+                                                          peer(otherPatch, "3.11.3.5118"), peer(known, Dse51Fixtures.RELEASE_VERSION),
+                                                          peer(dse6, DSE_RELEASE), peer(upgraded, "5.0.7.0"), peer(neither, null)),
+                                                storedDseVersions, versions))
+        .containsExactly(byRelease, byDseVersion, otherPatch);
+        for (InetAddressAndPort seeded : List.of(byRelease, byDseVersion, otherPatch))
+        {
+            assertThat(versions.getRaw(seeded)).isEqualTo(DSE_DIALECT);
+            assertThat(DsePeers.isPresumed(seeded)).isFalse();
+        }
+        assertThat(versions.getRaw(known)).isEqualTo(current_version);
+        assertThat(versions.knows(dse6)).isFalse();
+        assertThat(versions.knows(upgraded)).isFalse();
+        assertThat(versions.knows(neither)).isFalse();
+
+        // a DSE 5.1 release is not seeded in DSE_6 mode, whose rule is DSE 6's
+        dse6();
+        EndpointMessagingVersions inDse6 = new EndpointMessagingVersions();
+        assertThat(DseDialectVersions.seed(Stream.of(peer(byRelease, Dse51Fixtures.RELEASE_VERSION)), inDse6)).isEmpty();
+        assertThat(inDse6.knows(byRelease)).isFalse();
+    }
+
+    /**
+     * The messaging service seeds the saved peers (system.peers) when it starts listening in DSE_5_1 mode too, with the
+     * DSE 5.1 rule, and logs them: a peer saved with a DSE 5.1 release, and one saved without a release, of which the
+     * record of the values DSE 5.1 stored (the one the first start in the mode writes) holds a DSE 5.1 dse_version;
+     * the record's row of the node itself names no peer.
+     */
+    @Test
+    public void theSavedDse51PeersAreSeededInDse51Mode() throws Exception
+    {
+        InetAddressAndPort dse51 = InetAddressAndPort.getByName("127.0.51.18:7000");
+        InetAddressAndPort dse6 = InetAddressAndPort.getByName("127.0.51.19:7000");
+        InetAddressAndPort noRelease = InetAddressAndPort.getByName("127.0.51.20:7000");
+        Nodes.peers().update(dse51, p -> p.setReleaseVersion(new CassandraVersion(Dse51Fixtures.RELEASE_VERSION)), true);
+        Nodes.peers().update(dse6, p -> p.setReleaseVersion(new CassandraVersion(DSE_RELEASE)), true);
+        Nodes.peers().update(noRelease, p -> p.setRack("rack1"), true);
+        // the record of the values DSE 5.1 stored in system.local and system.peers, as the first start in the mode
+        // writes it (Dse51SystemTables): the node's own row, and a dse_version for the peer saved without a release
+        File metadataBefore = DatabaseDescriptor.getMetadataDirectory();
+        Path metadata = Files.createTempDirectory("dse51-seeding");
+        DatabaseDescriptor.setMetadataDirectory(new File(metadata));
+        Dse51SystemTablesRecords.writeDseVersions(Dse51Fixtures.DSE_VERSION, Map.of(noRelease.getAddress(), Dse51Fixtures.DSE_VERSION));
+        Logger dialectLogger = (Logger) LoggerFactory.getLogger(DseDialectVersions.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        dialectLogger.addAppender(appender);
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            Dse51SystemTables.loadOrReadAtStart();
+            assertThat(Dse51SystemTables.stored()).hasSize(2);
+            MessagingService withDse51 = new MessagingService(true);
+            withDse51.seedDseDialectPeers();
+            assertThat(withDse51.versions.getRaw(dse51)).isEqualTo(DSE_DIALECT);
+            assertThat(withDse51.versions.getRaw(noRelease)).isEqualTo(DSE_DIALECT);
+            assertThat(withDse51.versions.knows(dse6)).isFalse();
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                                     .singleElement(STRING)
+                                     .startsWith("DSE 5.1 compatibility mode: [")
+                                     .endsWith("] stored with a DSE 5.1 release (3.11.3.<build>) or dse_version (5.1.<patch>); " +
+                                               "connecting to them with the pre-4.0 handshake at version 11")
+                                     .contains(dse51.toString(), noRelease.toString());
+        }
+        finally
+        {
+            dialectLogger.detachAppender(appender);
+            // the values are kept in DSE_5_1 only: emptied for the other tests of the JVM
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            Dse51SystemTables.loadOrReadAtStart();
+            DatabaseDescriptor.setMetadataDirectory(metadataBefore);
+            new File(metadata).deleteRecursive();
+            Nodes.peers().remove(dse51, true, true);
+            Nodes.peers().remove(dse6, true, true);
+            Nodes.peers().remove(noRelease, true, true);
+        }
+    }
+
+    /**
+     * The messaging service seeds the saved peers (system.peers) when it starts listening: nothing with NONE, the DSE 6
+     * peers in DSE_6 mode (DSE_5_1 mode, by the DSE 5.1 rule: {@link #theSavedDse51PeersAreSeededInDse51Mode}).
+     */
     @Test
     public void theSavedDsePeersAreSeededOnlyInDse6Mode() throws Exception
     {

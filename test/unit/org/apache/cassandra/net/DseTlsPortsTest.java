@@ -38,11 +38,13 @@ import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions.InternodeEncryption;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.OutboundConnectionInitiator.SslFallbackConnectionType;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
@@ -61,7 +63,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 6.9.7 always, DSE 6.9.7+ once it has stored a messaging version below DSE 6.9.7's for the node); it dials a DSE 6
  * peer on {@code ssl_storage_port} below DSE 6.9.7 and on {@code storage_port} from 6.9.7 on, by the DSE version gossip
  * or the stored release gives, and by {@code legacy_ssl_storage_port_enabled} when neither does. With {@code NONE} the
- * sockets and the ports are the upstream ones.
+ * sockets and the ports are the upstream ones. In {@code DSE_5_1} mode the node listens on {@code ssl_storage_port} in
+ * the same cases and dials every DSE 5.1 peer it encrypts there, the rule of Apache Cassandra 3.11.
  */
 public class DseTlsPortsTest
 {
@@ -420,6 +423,127 @@ public class DseTlsPortsTest
         }
     }
 
+    /*
+     * DSE_5_1 mode: the port rule of Apache Cassandra 3.11, which DSE 5.1 has
+     */
+
+    private static final String DSE51_INFO_PREFIX = "DSE 5.1 compatibility mode: also listening for TLS-only internode connections on ";
+
+    /**
+     * DSE_5_1 mode: a DSE 5.1 node dials a peer it encrypts on ssl_storage_port only, so the node also listens there,
+     * TLS only, with internode encryption on and the legacy port setting false, and logs why once.
+     */
+    @Test
+    public void theExtraSocketIsBoundInDse51ModeWithEncryptionAndNoLegacyPort()
+    {
+        int storage = DatabaseDescriptor.getStoragePort();
+        int ssl = DatabaseDescriptor.getSSLStoragePort();
+        mode(InternodeCompatibilityMode.DSE_5_1);
+        for (InternodeEncryption internodeEncryption : InternodeEncryption.values())
+        {
+            for (boolean legacyPort : new boolean[]{ false, true })
+            {
+                for (Boolean optional : OPTIONAL)
+                {
+                    ServerEncryptionOptions options = encryption(internodeEncryption, legacyPort, optional);
+                    boolean forDse = internodeEncryption != InternodeEncryption.none && !legacyPort;
+                    String as = "internode_encryption " + internodeEncryption + ", legacy_ssl_storage_port_enabled " + legacyPort +
+                                ", optional " + optional;
+                    assertThat(DseTlsPorts.listensOnSslStoragePortForDse(options)).as(as).isEqualTo(forDse);
+                    assertThat(boundPorts(options)).as(as).isEqualTo(legacyPort || forDse ? List.of(storage, ssl) : List.of(storage));
+                }
+            }
+        }
+
+        Logger logger = (Logger) LoggerFactory.getLogger(InboundSockets.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try
+        {
+            boundPorts(encryption(InternodeEncryption.all, false));
+            assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().startsWith(INFO_PREFIX))
+                                     .filteredOn(e -> e.getFormattedMessage().startsWith(DSE51_INFO_PREFIX))
+                                     .singleElement()
+                                     .satisfies(e -> {
+                                         assertThat(e.getLevel()).isEqualTo(Level.INFO);
+                                         assertThat(e.getFormattedMessage())
+                                         .isEqualTo(DSE51_INFO_PREFIX + FBUtilities.getLocalAddressAndPort().withPort(ssl) + " (ssl_storage_port) " +
+                                                    "although legacy_ssl_storage_port_enabled is false, because DSE 5.1 nodes connect to this " +
+                                                    "node on ssl_storage_port only, for the connections internode_encryption (all) encrypts");
+                                     });
+        }
+        finally
+        {
+            logger.detachAppender(appender);
+        }
+    }
+
+    /**
+     * DSE_5_1 mode: every encrypted connection at a pre-4.0 version, to a DSE 5.1 node, goes to ssl_storage_port,
+     * whatever the peer's release or gossip and the legacy port setting, since DSE 5.1 accepts TLS there only; a
+     * connection at 4.0 or later and an unencrypted one keep storage_port.
+     */
+    @Test
+    public void aDse51PeerIsDialledOnSslStoragePort() throws Exception
+    {
+        int storage = DatabaseDescriptor.getStoragePort();
+        int ssl = DatabaseDescriptor.getSSLStoragePort();
+        InetAddressAndPort gossiped = InetAddressAndPort.getByName("127.0.0.251:" + storage);
+        InetAddressAndPort stored = InetAddressAndPort.getByName("127.0.0.252:" + storage);
+        InetAddressAndPort unknown = InetAddressAndPort.getByName("127.0.0.253:" + storage);
+        try
+        {
+            Gossiper.instance.initializeNodeUnsafe(gossiped, UUID.randomUUID(), DSE_DIALECT, 1);
+            Nodes.peers().update(stored, p -> p.setReleaseVersion(new CassandraVersion(Dse51Fixtures.RELEASE_VERSION)), true);
+            mode(InternodeCompatibilityMode.DSE_5_1);
+            for (boolean legacyPort : new boolean[]{ false, true })
+            {
+                ServerEncryptionOptions options = encryption(InternodeEncryption.all, legacyPort);
+                for (InetAddressAndPort peer : List.of(gossiped, stored, unknown))
+                {
+                    assertThat(DseTlsPorts.dialsSslStoragePort(peer, legacyPort)).as(peer + ", legacy " + legacyPort).isTrue();
+                    assertThat(port(peer, options, DSE_DIALECT)).as(peer + ", legacy " + legacyPort).isEqualTo(ssl);
+                    assertThat(port(peer, options, MessagingService.VERSION_30)).as(peer + ", legacy " + legacyPort).isEqualTo(ssl);
+                    // a connection at 4.0 or later, the 4.0-style probe of a peer not known yet: storage_port, which a
+                    // DSE 5.1 node does not accept TLS on; such a peer is dialled on ssl_storage_port once known at 11
+                    assertThat(port(peer, options, current_version)).as(peer + ", legacy " + legacyPort).isEqualTo(storage);
+                    assertThat(port(peer, null, DSE_DIALECT)).as(peer + ", legacy " + legacyPort).isEqualTo(storage);
+                }
+            }
+        }
+        finally
+        {
+            Gossiper.instance.unsafeAnnulEndpoint(gossiped);
+            Nodes.peers().remove(stored, true, true);
+        }
+    }
+
+    /**
+     * DSE_5_1 mode: an encrypted connection to a peer not known at 4.0 or later is not retried in plain text, as in
+     * DSE_6 mode, with the texts naming DSE 5.1; a peer known at 4.0 or later keeps the upstream fallback.
+     */
+    @Test
+    public void theUnencryptedFallbackIsRefusedTowardsDse51Peers() throws Exception
+    {
+        InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.254:" + DatabaseDescriptor.getStoragePort());
+        OutboundConnectionSettings settings = settings(peer, encryption(InternodeEncryption.all, false));
+        EndpointMessagingVersions connection = new EndpointMessagingVersions();
+        EndpointMessagingVersions node = new EndpointMessagingVersions();
+        mode(InternodeCompatibilityMode.DSE_5_1);
+        assertThat(DseTlsPorts.plainFallbackRefusal(settings, current_version, connection, node))
+        .isEqualTo("its messaging version is not known yet (it may be a DSE 5.1 node)");
+        node.set(peer, DSE_DIALECT);
+        assertThat(DseTlsPorts.plainFallbackRefusal(settings, current_version, connection, node))
+        .isEqualTo("it is at messaging version 11, below 4.0 (DSE 5.1 nodes are at 11)");
+        assertThat(DseTlsPorts.plainFallbackRefusal(settings, DSE_DIALECT, connection, node))
+        .isEqualTo("it is at messaging version 11, below 4.0 (DSE 5.1 nodes are at 11)");
+        EndpointMessagingVersions upgraded = new EndpointMessagingVersions();
+        upgraded.set(peer, current_version);
+        assertThat(DseTlsPorts.plainFallbackRefusal(settings, current_version, upgraded, upgraded)).isNull();
+        assertThat(DseTlsPorts.plainFallbackRefusal(settings(peer, null), DSE_DIALECT, connection, node)).isNull();
+    }
+
     private static OutboundConnectionSettings settings(InetAddressAndPort peer, ServerEncryptionOptions encryption)
     {
         OutboundConnectionSettings settings = new OutboundConnectionSettings(peer).withConnectTo(peer);
@@ -429,5 +553,76 @@ public class DseTlsPortsTest
     private static int port(InetAddressAndPort peer, ServerEncryptionOptions encryption, int messagingVersion)
     {
         return settings(peer, encryption).withLegacyPortIfNecessary(messagingVersion).connectTo().getPort();
+    }
+
+    /**
+     * DSE_5_1 mode: the unencrypted fallback of an encrypted connection to a DSE 5.1 peer is replaced by the configured
+     * TLS strategy, with one WARN per peer naming DSE 5.1; the encrypted strategies are kept.
+     */
+    @Test
+    public void theUnencryptedFallbackToADse51PeerIsReplacedWithOneWarn() throws Exception
+    {
+        InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.249:" + DatabaseDescriptor.getStoragePort());
+        OutboundConnectionSettings settings = settings(peer, encryption(InternodeEncryption.all, false));
+        Logger logger = (Logger) LoggerFactory.getLogger(DseTlsPorts.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        DseTlsPorts.resetPlainFallbackRefusalLog();
+        try
+        {
+            mode(InternodeCompatibilityMode.DSE_5_1);
+            for (int i = 0; i < 2; i++)
+                assertThat(DseTlsPorts.sslFallback(settings, DSE_DIALECT, SslFallbackConnectionType.NO_SSL))
+                .isEqualTo(SslFallbackConnectionType.SERVER_CONFIG);
+            for (SslFallbackConnectionType encrypted : new SslFallbackConnectionType[]{ SslFallbackConnectionType.SERVER_CONFIG,
+                                                                                        SslFallbackConnectionType.MTLS,
+                                                                                        SslFallbackConnectionType.SSL })
+                assertThat(DseTlsPorts.sslFallback(settings, DSE_DIALECT, encrypted)).isEqualTo(encrypted);
+            assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                                     .containsExactly("DSE 5.1 compatibility mode: refusing the unencrypted fallback of the internode " +
+                                                      "connections to " + peer + ": internode_encryption (all) encrypts the connections " +
+                                                      "to this peer and its messaging version is not known yet (it may be a DSE 5.1 " +
+                                                      "node), so a failed TLS connection is not retried in plain text: the connections to " +
+                                                      "it keep failing while the peer does not accept TLS on port " + peer.getPort() +
+                                                      "; check the peer's internode_encryption and ssl_storage_port, and the " +
+                                                      "certificates and truststores of both nodes");
+        }
+        finally
+        {
+            logger.detachAppender(appender);
+            DseTlsPorts.resetPlainFallbackRefusalLog();
+        }
+    }
+
+    /**
+     * DSE_5_1 mode: a connection created while a DSE 5.1 peer was not known yet (its 4.0-style probe on storage_port)
+     * requests 11 once the node knows the peer at 11 and has identified it, and is then dialled on ssl_storage_port.
+     */
+    @Test
+    public void aConnectionToADse51PeerKnownSinceMovesToSslStoragePort() throws Exception
+    {
+        InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.248:" + DatabaseDescriptor.getStoragePort());
+        ServerEncryptionOptions options = encryption(InternodeEncryption.all, false);
+        mode(InternodeCompatibilityMode.DSE_5_1);
+        EndpointMessagingVersions connectionVersions = new EndpointMessagingVersions();
+        EndpointMessagingVersions nodeVersions = new EndpointMessagingVersions();
+        try
+        {
+            int unknown = DseDialectVersions.connectionVersion(peer, current_version, connectionVersions, nodeVersions);
+            assertThat(unknown).isEqualTo(current_version);
+            assertThat(port(peer, options, unknown)).isEqualTo(DatabaseDescriptor.getStoragePort());
+
+            nodeVersions.set(peer, DSE_DIALECT);
+            DsePeers.fromGossipedNetVersion(peer, String.valueOf(DSE_DIALECT));
+            assertThat(DsePeers.isDse(peer)).isTrue();
+            int known = DseDialectVersions.connectionVersion(peer, current_version, connectionVersions, nodeVersions);
+            assertThat(known).isEqualTo(DSE_DIALECT);
+            assertThat(port(peer, options, known)).isEqualTo(DatabaseDescriptor.getSSLStoragePort());
+        }
+        finally
+        {
+            DsePeers.reset();
+        }
     }
 }

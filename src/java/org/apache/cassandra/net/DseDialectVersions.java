@@ -16,8 +16,11 @@
 
 package org.apache.cassandra.net;
 
+import java.net.InetAddress;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -27,6 +30,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
@@ -34,6 +38,7 @@ import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.nodes.IPeerInfo;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
@@ -41,7 +46,8 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
 /**
  * The messaging version this node opens a connection to a peer with, in a DSE compatibility mode, where some peers
  * speak only the pre-4.0 dialect (messaging version 11). Every method is only called in those modes; the seeding from
- * the saved peers ({@link #seedFromSavedPeers}) only in {@code DSE_6}.
+ * the saved peers ({@link #seedFromSavedPeers}) has a rule of each mode, the DSE 6 one below and the DSE 5.1 one in
+ * {@link #seedDse51}.
  * <p>
  * A peer whose version this node does not know gets the 4.0-style first handshake message. DSE answers it with its own
  * version and then reads the rest of that 19-byte message as a third handshake message, which fails with an error and a
@@ -86,7 +92,8 @@ public final class DseDialectVersions
      * Assumes the dialect for every saved peer whose stored release is a DSE 6 one, unless {@code versions} knows it
      * already, and presumes it to be a DSE node; called when the node is about to listen, before any connection to a
      * peer. The saved peers are read first: a failure to read them is logged and every peer is left unknown (each then
-     * gets the 4.0-style probe, as without this seeding).
+     * gets the 4.0-style probe, as without this seeding). In the DSE 5.1 compatibility mode the peers assumed at the
+     * dialect are those {@link #seed} identifies as DSE 5.1 nodes, and none is presumed.
      */
     public static void seedFromSavedPeers(EndpointMessagingVersions versions)
     {
@@ -104,15 +111,21 @@ public final class DseDialectVersions
         }
         catch (RuntimeException e)
         {
-            logger.warn("DSE 6 compatibility mode: could not read the saved peers to find the DSE 6 nodes; " +
-                        "each peer is first connected to with the 4.0-style handshake", e);
+            logger.warn("{} compatibility mode: could not read the saved peers to find the {} nodes; " +
+                        "each peer is first connected to with the 4.0-style handshake", DseCompat.source(), DseCompat.source(), e);
         }
     }
 
-    /** As {@link #seedFromSavedPeers}, for the given peers; returns the peers assumed at the dialect. */
+    /**
+     * As {@link #seedFromSavedPeers}, for the given peers; returns the peers assumed at the dialect. In the DSE 5.1
+     * compatibility mode, with the {@code dse_version} DSE 5.1 stored for each peer in its {@code system.peers}
+     * ({@link Dse51SystemTables#stored}, read at the start before the node listens).
+     */
     @VisibleForTesting
     public static List<InetAddressAndPort> seed(Stream<? extends IPeerInfo> peers, EndpointMessagingVersions versions)
     {
+        if (DseCompat.isDse51())
+            return seedDse51(peers, storedDseVersions(Dse51SystemTables.stored()), versions);
         List<InetAddressAndPort> seeded = new ArrayList<>();
         peers.forEach(peer -> {
             InetAddressAndPort address = peer.getPeerAddressAndPort();
@@ -126,6 +139,57 @@ public final class DseDialectVersions
         });
         if (!seeded.isEmpty())
             logger.info("DSE 6 compatibility mode: {} stored with a DSE 6 release (4.0.0.<build>); connecting to them with the pre-4.0 handshake at version {}",
+                        seeded, DseCompat.DSE_DIALECT);
+        return seeded;
+    }
+
+    /** The {@code dse_version} of each peer among {@code stored}; the node's own row and rows without one left out. */
+    private static Map<InetAddress, String> storedDseVersions(List<Dse51SystemTables.StoredColumns> stored)
+    {
+        Map<InetAddress, String> versions = new HashMap<>();
+        for (Dse51SystemTables.StoredColumns columns : stored)
+            if (columns.peer != null && columns.dseVersion != null)
+                versions.put(columns.peer, columns.dseVersion);
+        return versions;
+    }
+
+    /**
+     * The seeding of the DSE 5.1 compatibility mode: a saved peer is assumed at the dialect, unless {@code versions}
+     * knows it already, when it is a DSE 5.1 node by the rule of the mode before any gossip or handshake: its stored
+     * release is {@code 3.11.3.<build>} ({@link DseCompat#isDse51ReleaseVersion}) or, only for a peer stored without a
+     * release, the {@code dse_version} DSE 5.1 stored for it ({@code storedDseVersions}, by address) is
+     * {@code 5.1.<patch>} ({@link DseCompat#isDse51DseVersion}). The release decides when there is one, since gossip
+     * keeps it up to date, while that {@code dse_version} was read once, at the first start in the mode, and stays
+     * {@code 5.1.51} for a peer that runs this software since (it gossips that version to DSE 5.1 nodes). A DSE 5.1
+     * node answers the 4.0-style first message with 11 and then closes the socket, so the first connection to such a
+     * peer would be made twice; with the dialect assumed it gets the pre-4.0 first message at 11 at once, which it
+     * answers with 11, and the answer identifies it ({@link DsePeers#fromPre40Reply}). It is not presumed to be a DSE
+     * node: gossip with DSE 5.1 keeps this software's ordinals, which it reads. The failure mode is the DSE 6 one
+     * ({@link DseDialectVersions}): a stored release that is stale, of a peer upgraded while this node was down, until
+     * the peer gossips its version, which ends the dialect.
+     */
+    @VisibleForTesting
+    static List<InetAddressAndPort> seedDse51(Stream<? extends IPeerInfo> peers, Map<InetAddress, String> storedDseVersions,
+                                              EndpointMessagingVersions versions)
+    {
+        List<InetAddressAndPort> seeded = new ArrayList<>();
+        peers.forEach(peer -> {
+            InetAddressAndPort address = peer.getPeerAddressAndPort();
+            if (address == null || versions.knows(address))
+                return;
+            // the stored release, which gossip keeps up to date, decides when there is one; the dse_version DSE 5.1
+            // stored, which nothing updates once the node runs this software, only when there is none
+            CassandraVersion release = peer.getReleaseVersion();
+            if (release != null ? !DseCompat.isDse51ReleaseVersion(release)
+                                : !DseCompat.isDse51DseVersion(storedDseVersions.get(address.getAddress())))
+                return;
+            // assumed, not seen: the record of DSE 5.1 peers the startup checks read is left alone
+            if (versions.assume(address, DseCompat.DSE_DIALECT))
+                seeded.add(address);
+        });
+        if (!seeded.isEmpty())
+            logger.info("DSE 5.1 compatibility mode: {} stored with a DSE 5.1 release (3.11.3.<build>) or dse_version (5.1.<patch>); " +
+                        "connecting to them with the pre-4.0 handshake at version {}",
                         seeded, DseCompat.DSE_DIALECT);
         return seeded;
     }

@@ -174,7 +174,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
     /* Inflight echo requests. */
     private final Map<InetAddressAndPort, EndpointState> inflightEcho = new ConcurrentHashMap<>();
 
-    /* DSE 6 compatibility mode: the echo requests of inflightEcho, so that one a peer leaves unanswered, or answers with a failure, is sent again. */
+    /* DSE compatibility modes: the echo requests of inflightEcho, so that one a peer leaves unanswered, or answers with
+       a failure, is sent again. */
     @VisibleForTesting
     final DseEchoRetries dseEchoRetries = new DseEchoRetries();
 
@@ -785,7 +786,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         expireTimeEndpointMap.remove(endpoint);
         IFailureDetector.instance.remove(endpoint);
         DsePeers.forget(endpoint);
-        if (DseCompat.isDse6())
+        if (DseCompat.enabled())
             dseEchoRetries.forget(endpoint);
         quarantineEndpoint(endpoint);
         if (logger.isDebugEnabled())
@@ -813,7 +814,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         }
 
         inflightEcho.remove(endpoint);
-        if (DseCompat.isDse6())
+        if (DseCompat.enabled())
             dseEchoRetries.forget(endpoint);
         if (disableEndpointRemoval)
             return;
@@ -1643,8 +1644,9 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
 
         EndpointState prevState = inflightEcho.put(addr, localState);
         boolean sendEcho = !localState.equals(prevState);
-        // DSE 6 compatibility mode: the echo request a peer left unanswered, or answered with a failure, is sent again (DseEchoRetries)
-        boolean dse = DseCompat.isDse6();
+        // DSE compatibility modes: the echo request a peer left unanswered, or answered with a failure, is sent again
+        // (DseEchoRetries)
+        boolean dse = DseCompat.enabled();
         if (!sendEcho && dse)
             sendEcho = dseEchoRetries.isDue(addr, localState);
         if (sendEcho)
@@ -1668,7 +1670,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
     }
 
     /**
-     * DSE 6 compatibility mode: records the echo request {@code echoMessage} about to be sent to {@code addr} for
+     * DSE compatibility modes: records the echo request {@code echoMessage} about to be sent to {@code addr} for
      * {@code localState} and returns its callback. An answer marks the peer up, as upstream; a failure is recorded, so
      * that the request can be sent again ({@link DseEchoRetries}); it leaves the pending echo request in place. The
      * request asks for a failure response (the failure-callback flag), to every peer, as HCD 1.2's echo requests do.
@@ -1751,7 +1753,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
     {
         localState.markDead();
         inflightEcho.remove(addr);
-        if (DseCompat.isDse6())
+        if (DseCompat.enabled())
             dseEchoRetries.forget(addr);
         if (!disableEndpointRemoval)
         {
@@ -2180,8 +2182,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
      *
      * When a {@link EndpointState} is "empty" then it is filtered out and not added to the delta state (see CASSANDRA-16213).
      *
-     * @param from the peer that sent the digests; in DSE 6 compatibility mode a DSE node is sent only the states of this
-     *             node it asks for ({@link DseGossipStates#sendsAllOwnStates})
+     * @param from the peer that sent the digests; in the DSE compatibility modes a DSE node (DSE 6, or DSE 5.1) is sent
+     *             only the states of this node it asks for ({@link DseGossipStates#sendsAllOwnStates})
      */
     void examineGossiper(List<GossipDigest> gDigestList, List<GossipDigest> deltaGossipDigestList, Map<InetAddressAndPort, EndpointState> deltaEpStateMap,
                          InetAddressAndPort from)
@@ -2213,8 +2215,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
                     /* we request everything from the gossiper */
                     requestAll(gDigest, deltaGossipDigestList, remoteGeneration);
                 }
-                // all of this node's states when the peer asks about it (CASSANDRA-19983); DSE 6 compatibility mode: not to a
-                // DSE node, see DseGossipStates.sendsAllOwnStates
+                // all of this node's states when the peer asks about it (CASSANDRA-19983); DSE compatibility modes: not
+                // to a DSE node, see DseGossipStates.sendsAllOwnStates
                 else if (remoteGeneration < localGeneration || (allOwnStates && FBUtilities.getBroadcastAddressAndPort().equals(gDigest.getEndpoint())))
                 {
                     /* send all data with generation = localgeneration and version > -1 */
