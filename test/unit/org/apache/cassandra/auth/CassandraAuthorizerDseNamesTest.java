@@ -70,4 +70,30 @@ public class CassandraAuthorizerDseNamesTest
         assertThat(CassandraAuthorizer.isKnownResourceName("search/ks/t")).isFalse();
         assertThat(CassandraAuthorizer.isKnownResourceName("data/ks/t/extra")).as("a data name that does not parse").isFalse();
     }
+
+    /**
+     * DataStax Enterprise 5.1's names: no {@code UPDATE} or {@code TRUNCATE}, so nothing is granted alone; its
+     * {@code PROXY.*} and {@code SEARCH.*} permissions are unknown names, and its {@code search}, {@code rows},
+     * {@code rpc}, {@code authentication_schemes}, {@code any_work_pool} and {@code any_submission} resources are not
+     * resources of this software, so their rows grant nothing.
+     */
+    @Test
+    public void theNamesOfDse51ReadAsNoGrant()
+    {
+        assertThat(CassandraAuthorizer.dseLoneWriteGrantName("data/ks/t", Set.of("MODIFY", "SELECT"))).isNull();
+        Set<String> proxy = Set.of("ALTER", "PROXY.EXECUTE", "PROXY.LOGIN");
+        assertThat(CassandraAuthorizer.unknownPermissionNames("roles/r", proxy))
+        .containsExactly("PROXY.EXECUTE", "PROXY.LOGIN");
+        Set<String> search = Set.of("AUTHORIZE", "SEARCH.CREATE", "SEARCH.ALTER", "SEARCH.DROP", "SEARCH.RELOAD",
+                                    "SEARCH.REBUILD", "SEARCH.COMMIT");
+        assertThat(CassandraAuthorizer.unknownPermissionNames("search/ks.t", search))
+        .containsExactly("SEARCH.ALTER", "SEARCH.COMMIT", "SEARCH.CREATE", "SEARCH.DROP", "SEARCH.REBUILD",
+                         "SEARCH.RELOAD");
+        String[] resources = { "search", "search/ks", "search/ks.t", "rows/EU/data/ks/t", "rpc", "rpc/DseClientTool",
+                               "rpc/DseClientTool/getData", "authentication_schemes", "authentication_schemes/internal",
+                               "any_work_pool", "any_work_pool/default", "any_submission",
+                               "any_submission/default/submission1" };
+        for (String resource : resources)
+            assertThat(CassandraAuthorizer.isKnownResourceName(resource)).as(resource).isFalse();
+    }
 }

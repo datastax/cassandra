@@ -40,13 +40,27 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
+import org.apache.cassandra.db.Dse51SystemTables;
+import org.apache.cassandra.db.Dse51SystemTablesRecords;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.Dse51GossipStates;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.gms.HeartBeatState;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.locator.LocalStrategy;
+import org.apache.cassandra.locator.NetworkTopologyStrategy;
+import org.apache.cassandra.locator.SimpleStrategy;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.nodes.CC4UpgradeNodesPersistence;
 import org.apache.cassandra.nodes.DseNodeWorkloads;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -57,6 +71,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.service.Dse6NonCoreTraces.Kind;
 import org.apache.cassandra.service.Dse6NonCoreTraces.Traces;
+import org.apache.cassandra.utils.FBUtilities;
 import org.msgpack.jackson.dataformat.MessagePackFactory;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEER_WORKLOADS;
@@ -68,7 +83,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * The startup check of {@code internode_compatibility_mode: DSE_6} that refuses any trace of the DSE features this
  * software does not support ({@link Dse6NonCoreTraces}): each kind of trace, the DSE core keyspaces that are not traces,
  * the workloads of DSE's {@code nodes/local} and {@code nodes/peers} (the fixtures written by DSE, and copies of them with
- * other workloads), the override of the entries of {@code nodes/peers}, and {@code NONE}, which reads nothing.
+ * other workloads), the override of the entries of {@code nodes/peers}, and {@code NONE}, which reads nothing. In
+ * {@code DSE_5_1} the traces DSE 5.1.51 leaves: the workloads it stored and gossips (those of the Search and Graph
+ * node of its fixtures), and the rows of {@code system_schema} read before the schema is loaded.
  */
 public class Dse6NonCoreTracesTest extends CQLTester
 {
@@ -83,6 +100,18 @@ public class Dse6NonCoreTracesTest extends CQLTester
                                               "nodes/peers, so keep the option until the flag drop)";
     private static final String FOUND = "internode_compatibility_mode DSE_6 refused: found traces of DSE features that this software does " +
                                         "not support; only DSE core (the Cassandra workload) can be upgraded. ";
+
+    private static final String FOUND_DSE51 = "internode_compatibility_mode DSE_5_1 refused: found traces of DSE " +
+                                              "features that this software does not support; only DSE core (the " +
+                                              "Cassandra workload) can be upgraded. ";
+    private static final String NO_TRACE_DSE51 = "DSE 5.1 compatibility mode: no trace of DSE Search, Graph, " +
+                                                 "Analytics, DSEFS, CFS, Advanced Replication, tiered storage or " +
+                                                 "in-memory tables found";
+    /** The Search and Graph node of the DSE 5.1.51 fixtures. */
+    private static final String SEARCH_GRAPH_NODE = "127.0.51.21";
+    /** What DSE 5.1.51 stored for the Search and Graph node, as the refusals list it. */
+    private static final String SEARCH_GRAPH_WORKLOADS = "workloads [Cassandra, Graph, Search], graph true, " +
+                                                         "workload Search";
 
     private InternodeCompatibilityMode modeBefore;
     private File metadataBefore;
@@ -673,5 +702,378 @@ public class Dse6NonCoreTracesTest extends CQLTester
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
         assertThat(logsOf(Level.INFO, Dse6NonCoreTraces::verifyAtStartup)).containsExactly(NO_TRACE);
         assertThat(Dse6NonCoreTraces.status()).isEqualTo("none");
+    }
+
+    // ---- DSE 5.1 ----
+
+    /**
+     * The values DSE 5.1.51 stored for the node started with Search and Graph, as its {@code system.local} holds them
+     * ({@code select-local-peers.txt} of the fixtures, checked here), recorded as this node records them at its first
+     * start in {@code DSE_5_1}, for the node itself ({@code peer} null) or for a peer.
+     */
+    private static Dse51SystemTables.StoredColumns searchGraphColumns(InetAddress peer) throws Exception
+    {
+        List<String> select = Files.readAllLines(DseFixtures.dse51().searchGraphSystemSelect());
+        assertThat(select).anyMatch(line -> line.matches(" graph +\\| True"))
+                          .anyMatch(line -> line.matches(" workload +\\| Search"))
+                          .anyMatch(line -> line.matches(" workloads +\\| \\{'Cassandra', 'Graph', 'Search'}"));
+        return Dse51SystemTablesRecords.workloads(peer, List.of("Cassandra", "Graph", "Search"), "Search", true,
+                                                  Dse51Fixtures.DSE_VERSION);
+    }
+
+    /** The values DSE 5.1.51 stored for a node of the Cassandra workload alone, as the three-node cluster has them. */
+    private static Dse51SystemTables.StoredColumns cassandraColumns()
+    {
+        return Dse51SystemTablesRecords.workloads(null, List.of("Cassandra"), "Cassandra", false,
+                                                  Dse51Fixtures.DSE_VERSION);
+    }
+
+    /**
+     * Loads the record of the values of DSE 5.1's columns into {@code Dse51SystemTables.stored()}, as a start in
+     * DSE_5_1 does.
+     */
+    private static void loadStored(Dse51SystemTables.StoredColumns... rows) throws Exception
+    {
+        Dse51SystemTablesRecords.write(rows);
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        Dse51SystemTables.loadOrReadAtStart();
+    }
+
+    /** Empties {@code Dse51SystemTables.stored()} again, as a start outside DSE_5_1 does, and deletes the record. */
+    private static void clearStored() throws Exception
+    {
+        InternodeCompatibilityMode mode = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        Dse51SystemTables.loadOrReadAtStart();
+        DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+        Files.deleteIfExists(Dse51SystemTables.recordPath());
+    }
+
+    /**
+     * The workloads DSE 5.1.51 stored for the Search and Graph node: in its own {@code system.local} they refuse its
+     * start; in the {@code system.peers} of another node they refuse that node's start too, unless the override
+     * ignores the entries of the peers, with a warning. The values are those of the fixture, read once at the first
+     * start in the mode and kept, as the texts say.
+     */
+    @Test
+    public void dse51TheWorkloadsDse51StoredAreTraces() throws Throwable
+    {
+        try
+        {
+            loadStored(searchGraphColumns(null));
+            assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
+            .isInstanceOfSatisfying(StartupException.class,
+                                    e -> assertThat(e.returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG))
+            .hasMessage(FOUND_DSE51 + "DSE workloads other than Cassandra: this node (system.local): " +
+                        SEARCH_GRAPH_WORKLOADS + REMEDY_PREFIX + "restart this node as a plain Cassandra node (dse " +
+                        "cassandra without -s, -k, -c or -g; for a package install, every workload of " +
+                        "/etc/default/dse set to 0)" + REMEDY_SUFFIX + ". " + rollbackDeletes());
+            assertThat(Dse6NonCoreTraces.status()).isNull();
+            // the next start in the mode loads the record of the first one, with the same workloads, until the
+            // record is deleted (the rollback deletes it with the marker of the upgrade): then they are read again
+            // (here from the system tables of this test node, which hold none)
+            Dse51SystemTables.loadOrReadAtStart();
+            assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup).hasMessageContaining(SEARCH_GRAPH_WORKLOADS);
+            Files.delete(Dse51SystemTables.recordPath());
+            Dse51SystemTables.loadOrReadAtStart();
+            assertThat(logsOf(Level.INFO, Dse6NonCoreTraces::verifyDse51AtStartup)).containsExactly(NO_TRACE_DSE51);
+
+            loadStored(cassandraColumns(), searchGraphColumns(InetAddress.getByName(SEARCH_GRAPH_NODE)));
+            String entry = "peer " + SEARCH_GRAPH_NODE + " (system.peers): " + SEARCH_GRAPH_WORKLOADS;
+            assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
+            .hasMessage(FOUND_DSE51 + "DSE workloads other than Cassandra: " + entry + REMEDY_PREFIX + "restart the " +
+                        "peers listed as plain Cassandra nodes while this node runs DSE 5.1, so that its " +
+                        "system.peers records their new workloads" + REMEDY_SUFFIX + ". " + rollbackDeletes() +
+                        ". An entry of system.peers is " +
+                        "stale when that node has since been restarted as a Cassandra-only node or has left the " +
+                        "cluster: if every entry listed from system.peers is stale, start with -D" + OVERRIDE_KEY +
+                        "=true instead (it warns at every start; this node keeps the values it read at its first " +
+                        "start in DSE_5_1 mode, so keep the option until the flag drop)");
+            try (WithProperties override = new WithProperties()
+                                           .set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEER_WORKLOADS, true))
+            {
+                List<String> logged = logsOf(null, Dse6NonCoreTraces::verifyDse51AtStartup);
+                assertThat(logged).containsExactly("The DSE workloads other than Cassandra recorded for peers in " +
+                                                   "system.peers are ignored (" + OVERRIDE_KEY + "=true): " + entry +
+                                                   "; this node keeps the values it read at its first start in " +
+                                                   "DSE_5_1 mode, and supports none of these workloads: remove the " +
+                                                   "option unless each of these entries is stale (the node was since " +
+                                                   "restarted as a Cassandra-only node, or has left the cluster)",
+                                                   NO_TRACE_DSE51 + " apart from what of system.peers is ignored");
+                assertThat(Dse6NonCoreTraces.status())
+                .isEqualTo("none but system.peers ignored (" + OVERRIDE_KEY + "=true): " + entry);
+            }
+
+            // the Cassandra workload alone, as the three-node cluster of the fixtures stored it: no trace
+            loadStored(cassandraColumns());
+            assertThat(logsOf(Level.INFO, Dse6NonCoreTraces::verifyDse51AtStartup)).containsExactly(NO_TRACE_DSE51);
+            assertThat(Dse6NonCoreTraces.status()).isEqualTo("none");
+        }
+        finally
+        {
+            clearStored();
+        }
+    }
+
+    /**
+     * The traces DSE 5.1 leaves in the schema, read from the rows of {@code system_schema} as stored, before the schema
+     * is loaded: the keyspaces of DSE 6's list, {@code spark_system} and {@code solr_admin} (which only DSE Search
+     * creates on DSE 5.1), the three keyspaces of a graph, an index of a DSE Search class, a {@code solr.data}
+     * directory and the compaction classes of DSE 5.1's tiered storage and in-memory tables, which this software
+     * cannot load; the rows of the index and of the compaction are written directly to {@code system_schema}, as DSE
+     * wrote them, since this software would refuse their statements. Without {@code solr_admin}, its remedy is left
+     * out.
+     */
+    @Test
+    public void dse51TheTracesInTheSchemaRowsAreRefused() throws Throwable
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        String simple = " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}";
+        String graph = createKeyspace("CREATE KEYSPACE %s" + simple);
+        List<String> created = List.of("\"HiveMetaStore\"", "cfs", "cfs_archive", "dsefs", "spark_system", "dse_advrep",
+                                       "solr_admin", graph + "_system", graph + "_pvt");
+        for (String keyspace : created)
+            schemaChange("CREATE KEYSPACE IF NOT EXISTS " + keyspace + simple);
+        String tiered = createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        String inMemory = createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        String tieredClass = "org.apache.cassandra.db.compaction.TieredCompactionStrategy";
+        File solrData = new File(DatabaseDescriptor.getAllDataFileLocations()[0], "solr.data");
+        solrData.createDirectoriesIfNotExists();
+        try
+        {
+            executeOnceInternal("UPDATE system_schema.tables SET compaction = {'class': '" + tieredClass + "', " +
+                                "'config': 'strategy1'} WHERE keyspace_name = ? AND table_name = ?", KEYSPACE, tiered);
+            executeOnceInternal("UPDATE system_schema.tables SET compaction = {'class': 'MemoryOnlyStrategy'} " +
+                                "WHERE keyspace_name = ? AND table_name = ?", KEYSPACE, inMemory);
+            executeOnceInternal("INSERT INTO system_schema.indexes (keyspace_name, table_name, index_name, kind, " +
+                                "options) VALUES (?, ?, ?, 'CUSTOM', ?)", KEYSPACE, tiered, "solr_query_index",
+                                Map.of(IndexTarget.CUSTOM_INDEX_OPTION_NAME, SOLR_INDEX, "target", "solr_query"));
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            String index = "index " + KEYSPACE + '.' + tiered + ".solr_query_index (" + SOLR_INDEX + ")";
+            String graphs = "DSE Graph: keyspace " + graph + " (a keyspace of the graph " + graph + "), keyspace " +
+                            graph + "_pvt (a keyspace of the graph " + graph + "), keyspace " + graph + "_system (a " +
+                            "keyspace of the graph " + graph + "); DSE Analytics, DSEFS and CFS: keyspace " +
+                            "HiveMetaStore, keyspace cfs, keyspace cfs_archive, keyspace dsefs, keyspace " +
+                            "spark_system; DSE Advanced Replication: keyspace dse_advrep; DSE tiered storage and " +
+                            "in-memory tables: table " +
+                            KEYSPACE + '.' + tiered + " (compaction " + tieredClass + "), table " + KEYSPACE + '.' +
+                            inMemory + " (compaction MemoryOnlyStrategy)";
+            String otherRemedies = "migrate the data of the graph keyspaces elsewhere and drop them; migrate the " +
+                                   "data of the Analytics, DSEFS and CFS keyspaces elsewhere if it is needed and " +
+                                   "drop them, empty or not; stop Advanced Replication, migrate what its keyspace " +
+                                   "holds if it is needed and drop it, empty or not; alter the tables listed to a " +
+                                   "compaction strategy of Apache Cassandra (ALTER TABLE ... WITH compaction)";
+            assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
+            .hasMessage(FOUND_DSE51 + "DSE Search: keyspace solr_admin, " + index + ", directory " + solrData + "; " +
+                        graphs + REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON " +
+                        "<keyspace>.<table>); delete the solr.data directories once no search index is left; drop " +
+                        "the keyspace solr_admin once no node runs DSE Search; " + otherRemedies + REMEDY_SUFFIX);
+
+            // without solr_admin, the search index is no reason to drop it
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            schemaChange("DROP KEYSPACE solr_admin");
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
+            .hasMessage(FOUND_DSE51 + "DSE Search: " + index + ", directory " + solrData + "; " + graphs +
+                        REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON <keyspace>.<table>); delete " +
+                        "the solr.data directories once no search index is left; " + otherRemedies + REMEDY_SUFFIX);
+
+            // the same keyspaces and rows are not read with NONE or DSE_6, whose check reads the loaded schema
+            for (InternodeCompatibilityMode mode : List.of(InternodeCompatibilityMode.NONE,
+                                                           InternodeCompatibilityMode.DSE_6))
+            {
+                DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+                assertThat(logsOf(null, Dse6NonCoreTraces::verifyDse51AtStartup)).as("%s", mode).isEmpty();
+            }
+        }
+        finally
+        {
+            solrData.deleteRecursive();
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            executeOnceInternal("DELETE FROM system_schema.indexes WHERE keyspace_name = ? AND table_name = ? AND " +
+                                "index_name = ?", KEYSPACE, tiered, "solr_query_index");
+            schemaChange("DROP TABLE " + KEYSPACE + '.' + tiered);
+            schemaChange("DROP TABLE " + KEYSPACE + '.' + inMemory);
+            for (String keyspace : created)
+                schemaChange("DROP KEYSPACE IF EXISTS " + keyspace);
+        }
+    }
+
+    /**
+     * The keyspaces of a graph of DSE 5.1: the three keyspaces of a graph, {@code <graph>}, {@code <graph>_system} and
+     * {@code <graph>_pvt}, and a {@code <graph>_pvt} of {@code LocalStrategy} even alone; a pair of user keyspaces
+     * such as {@code orders} and {@code orders_system}, or a keyspace with one of those suffixes alone (a
+     * {@code _pvt} of {@code LocalStrategy} apart), is no trace.
+     */
+    @Test
+    public void dse51TheKeyspacesOfAGraph()
+    {
+        Map<String, String> keyspaces = new TreeMap<>();
+        keyspaces.put("g", SimpleStrategy.class.getName());
+        keyspaces.put("g_system", NetworkTopologyStrategy.class.getName());
+        keyspaces.put("g_pvt", LocalStrategy.class.getName());
+        keyspaces.put("alone_pvt", LocalStrategy.class.getName());
+        keyspaces.put("orders", SimpleStrategy.class.getName());
+        keyspaces.put("orders_system", SimpleStrategy.class.getName());
+        keyspaces.put("history_pvt", SimpleStrategy.class.getName());
+        keyspaces.put("_pvt", SimpleStrategy.class.getName());
+        // a graph whose name ends with a suffix of DSE 5.1's Graph
+        keyspaces.put("x_system", SimpleStrategy.class.getName());
+        keyspaces.put("x_system_system", SimpleStrategy.class.getName());
+        keyspaces.put("x_system_pvt", LocalStrategy.class.getName());
+        Traces traces = new Traces();
+        Dse6NonCoreTraces.addDse51KeyspaceTraces(traces, keyspaces);
+        assertThat(descriptions(traces))
+        .containsExactly("GRAPH keyspace alone_pvt (LocalStrategy, as DSE Graph creates it)",
+                         "GRAPH keyspace g (a keyspace of the graph g)",
+                         "GRAPH keyspace g_pvt (a keyspace of the graph g)",
+                         "GRAPH keyspace g_system (a keyspace of the graph g)",
+                         "GRAPH keyspace x_system (a keyspace of the graph x_system)",
+                         "GRAPH keyspace x_system_pvt (a keyspace of the graph x_system)",
+                         "GRAPH keyspace x_system_system (a keyspace of the graph x_system)");
+    }
+
+    /**
+     * The DSE state the Search and Graph node of the fixtures gossips ({@code gossipinfo.txt}) refuses the start once
+     * the node has joined, with what removes it on that peer; the one of node 1 of the three-node cluster, the
+     * Cassandra workload, is no trace.
+     */
+    @Test
+    public void dse51TheWorkloadsADse51PeerGossipsAreTraces() throws Throwable
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        InetAddressAndPort searchGraphNode = InetAddressAndPort.getByName(SEARCH_GRAPH_NODE);
+        DseNodeWorkloads searchGraph = Dse51GossipStates.gossipedWorkloads(searchGraphNode, searchGraphState());
+        assertThatThrownBy(() -> Dse6NonCoreTraces.verifyGossipedWorkloads(List.of(searchGraph)))
+        .isInstanceOfSatisfying(StartupException.class,
+                                e -> assertThat(e.returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG))
+        .hasMessage(FOUND_DSE51 + "DSE workloads other than Cassandra: peer " + SEARCH_GRAPH_NODE + " (gossip): " +
+                    SEARCH_GRAPH_WORKLOADS + ". Restart the DSE 5.1 peers listed from gossip as plain Cassandra " +
+                    "nodes (dse cassandra without -s, -k, -c or -g), then start this node again");
+
+        EndpointState node1 = gossipedState(DseFixtures.dse51().gossipInfo(1), "127.0.51.11");
+        DseNodeWorkloads cassandra = Dse51GossipStates.gossipedWorkloads(InetAddressAndPort.getByName("127.0.51.11"),
+                                                                         node1);
+        assertThat(logsOf(Level.INFO, () -> Dse6NonCoreTraces.verifyGossipedWorkloads(List.of(cassandra))))
+        .containsExactly("DSE 5.1 compatibility mode: no DSE 5.1 peer gossips a DSE workload other than Cassandra " +
+                         "(1 DSE 5.1 peer(s) gossiping their DSE state)");
+        // with NONE nothing is read
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        assertThat(logsOf(null, Dse6NonCoreTraces::verifyDse51GossipedWorkloads)).isEmpty();
+    }
+
+    /**
+     * Which peers of gossip the check of {@code DSE_5_1} reads, at the start and periodically: those gossiping a DSE
+     * 5.1 messaging version and a DSE state, not this node, nor a peer that left the ring, nor a node of this software;
+     * the periodic check logs at ERROR and records what it finds, and refuses nothing.
+     */
+    @Test
+    public void dse51TheGossipOfTheDse51PeersIsReadAtTheStartAndPeriodically() throws Throwable
+    {
+        InetAddressAndPort searchGraph = InetAddressAndPort.getByName(SEARCH_GRAPH_NODE);
+        InetAddressAndPort left = InetAddressAndPort.getByName("127.0.51.22");
+        InetAddressAndPort unknown = InetAddressAndPort.getByName("127.0.51.23");
+        InetAddressAndPort ours = InetAddressAndPort.getByName("127.0.51.24");
+        InetAddressAndPort self = FBUtilities.getBroadcastAddressAndPort();
+        EndpointState leftState = searchGraphState();
+        leftState.addApplicationState(ApplicationState.STATUS_WITH_PORT,
+                                      VersionedValue.unsafeMakeVersionedValue(VersionedValue.STATUS_LEFT + ",0,0", 10));
+        EndpointState unknownState = new EndpointState(new HeartBeatState(1, 1));
+        unknownState.addApplicationState(ApplicationState.NET_VERSION,
+                                         VersionedValue.unsafeMakeVersionedValue("11", 1));
+        EndpointState oursState = searchGraphState();
+        String ourVersion = String.valueOf(MessagingService.current_version);
+        oursState.addApplicationState(ApplicationState.NET_VERSION,
+                                      VersionedValue.unsafeMakeVersionedValue(ourVersion, 20));
+        EndpointState selfState = Gossiper.instance.endpointStateMap.get(self);
+        Map<InetAddressAndPort, EndpointState> added = Map.of(searchGraph, searchGraphState(), left, leftState,
+                                                              unknown, unknownState, ours, oursState);
+        Gossiper.instance.endpointStateMap.putAll(added);
+        Gossiper.instance.endpointStateMap.put(self, searchGraphState());
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            assertThat(Dse6NonCoreTraces.gossipedWorkloads()).extracting(w -> w.peer)
+                                                              .containsExactly(searchGraph.getAddress());
+            assertThatThrownBy(Dse6NonCoreTraces::verifyDse51GossipedWorkloads)
+            .hasMessageContaining("peer " + SEARCH_GRAPH_NODE + " (gossip): " + SEARCH_GRAPH_WORKLOADS);
+
+            String trace = "peer " + SEARCH_GRAPH_NODE + " (gossip): " + SEARCH_GRAPH_WORKLOADS;
+            List<String> errors = logsOf(Level.ERROR,
+                                         () -> assertThat(Dse6NonCoreTraces.recheckDse51GossipedWorkloads())
+                                               .containsExactly(trace));
+            assertThat(errors).containsExactly("The periodic check found DSE 5.1 peers gossiping DSE workloads other " +
+                                               "than Cassandra, which this software does not support: peer " +
+                                               SEARCH_GRAPH_NODE + " (gossip): " + SEARCH_GRAPH_WORKLOADS + "; " +
+                                               "restart them as plain Cassandra nodes (dse cassandra without -s, -k, " +
+                                               "-c or -g): this node refuses its next start while they run them");
+            assertThat(Dse6NonCoreTraces.status())
+            .isEqualTo("found by the periodic check in gossip: peer " + SEARCH_GRAPH_NODE + " (gossip): " +
+                       SEARCH_GRAPH_WORKLOADS);
+
+            // added to the status of the startup check, and forgotten once the peer gossips no such workload
+            Dse6NonCoreTraces.verify(new Traces(), false);
+            assertThat(Dse6NonCoreTraces.status()).isEqualTo("none; found by the periodic check in gossip: " + trace);
+            Gossiper.instance.endpointStateMap.remove(searchGraph);
+            assertThat(Dse6NonCoreTraces.recheckDse51GossipedWorkloads()).isEmpty();
+            assertThat(Dse6NonCoreTraces.status()).isEqualTo("none");
+
+            // in the other modes nothing is read or logged
+            Gossiper.instance.endpointStateMap.put(searchGraph, searchGraphState());
+            for (InternodeCompatibilityMode mode : List.of(InternodeCompatibilityMode.NONE,
+                                                           InternodeCompatibilityMode.DSE_6))
+            {
+                DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+                assertThat(logsOf(null, () -> assertThat(Dse6NonCoreTraces.recheckDse51GossipedWorkloads()).isEmpty()))
+                .as("%s", mode).isEmpty();
+            }
+        }
+        finally
+        {
+            for (InetAddressAndPort peer : added.keySet())
+                Gossiper.instance.endpointStateMap.remove(peer);
+            if (selfState == null)
+                Gossiper.instance.endpointStateMap.remove(self);
+            else
+                Gossiper.instance.endpointStateMap.put(self, selfState);
+        }
+    }
+
+    /**
+     * What the refusals of the workloads DSE 5.1 stored say of the record of the upgrade: the rollback must delete it
+     * with the marker.
+     */
+    private static String rollbackDeletes()
+    {
+        return "The rollback must delete " + DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1) + " and " +
+               Dse51SystemTables.recordPath() + ", which hold what this node read of system.local and system.peers " +
+               "at its first start in DSE_5_1 mode, or the next start reads the same workloads again";
+    }
+
+    /** The gossip states of the Search and Graph node of the fixtures: its DSE state and its {@code NET_VERSION}. */
+    private static EndpointState searchGraphState() throws Exception
+    {
+        EndpointState state = gossipedState(DseFixtures.dse51().searchGraphGossipInfo(), SEARCH_GRAPH_NODE);
+        assertThat(state.getApplicationState(ApplicationState.NET_VERSION).value).isEqualTo("11");
+        return state;
+    }
+
+    /**
+     * The DSE state, at ordinal 9, and the {@code NET_VERSION} that {@code endpoint} gossips in a gossipinfo file of
+     * the DSE 5.1.51 fixtures.
+     */
+    private static EndpointState gossipedState(Path gossipInfo, String endpoint) throws Exception
+    {
+        EndpointState state = new EndpointState(new HeartBeatState(1, 1));
+        for (DseFixtures.GossipState s : DseFixtures.dse51().gossipStates(gossipInfo, '/' + endpoint))
+        {
+            for (ApplicationState kept : List.of(ApplicationState.X_11_PADDING, ApplicationState.NET_VERSION))
+            {
+                if (s.name.equals(kept.name()))
+                    state.addApplicationState(kept, VersionedValue.unsafeMakeVersionedValue(s.value, s.version));
+            }
+        }
+        assertThat(state.getApplicationState(ApplicationState.X_11_PADDING)).as(endpoint).isNotNull();
+        return state;
     }
 }

@@ -27,8 +27,9 @@ import com.google.common.annotations.VisibleForTesting;
 /**
  * Counts the requests this node refused because of the DSE 6 or DSE 5.1 compatibility mode, by reason: the message
  * features that cannot be sent to a DSE peer (verbs and reads the pre-4.0 dialect lacks), the messages of a DSE 5.1
- * peer this software does not serve (its repair messages, the reads of its Thrift clients, its schema changes) and
- * the upgrade's operational guards (topology changes, repair, sstable rewrites, the schema freeze). The counters are
+ * peer this software does not serve (its repair messages, the reads of its Thrift clients and those with row-level
+ * access control, its schema changes), the SAI indexes not created in the DSE 5.1 one and the upgrade's operational
+ * guards (topology changes, repair, sstable rewrites, the schema freeze). The counters are
  * shown by {@code nodetool compatstatus} and in the periodic status line of the upgrade, so that an operator sees what
  * the upgrade window is holding back.
  * <p>

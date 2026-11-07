@@ -368,8 +368,8 @@ public class CompatStatusTest extends CQLTester
     }
 
     /**
-     * In DSE_5_1 mode the mode line names it, the DSE 5.1 peers and their record are reported, and nothing only the DSE
-     * 6 upgrade keeps (the SAI pin, the non-core traces, the access controls) is checked.
+     * In DSE_5_1 mode the mode line names it, the DSE 5.1 peers and their record are reported, the non-core traces and
+     * the access controls are checked (here not yet), and the SAI pin, which only the DSE 6 upgrade keeps, is not.
      */
     @Test
     public void printsTheModeInDse51Mode()
@@ -386,8 +386,8 @@ public class CompatStatusTest extends CQLTester
                                        "DSE peers                    : 0",
                                        "DSE 5.1 peers on record      : 0",
                                        "SAI version pinned           : not checked" + inTheMode,
-                                       "Non-core DSE traces          : not checked" + inTheMode,
-                                       "DSE access controls ignored  : not checked" + inTheMode);
+                                       "Non-core DSE traces          : unknown (not checked yet)",
+                                       "DSE access controls ignored  : unknown (not checked yet)");
         }
         finally
         {

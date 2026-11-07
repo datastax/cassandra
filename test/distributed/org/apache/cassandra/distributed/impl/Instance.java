@@ -670,6 +670,19 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     throw new RuntimeException(e.getMessage(), e);
                 }
 
+                // as CassandraDaemon.setup: the DSE 5.1 checks of the DSE features this software does not support and
+                // of the row a failed UNRESTRICT ROWS on a view leaves, on the rows of system_schema before the schema
+                // is loaded
+                try
+                {
+                    Dse6NonCoreTraces.verifyDse51AtStartup();
+                    Dse6AccessControlCheck.verifyDse51SchemaRowsAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
+
                 // We need to persist this as soon as possible after startup checks.
                 // This should be the first write to SystemKeyspace (CASSANDRA-11742)
                 SystemKeyspace.persistLocalMetadata(config::hostId);
@@ -798,6 +811,16 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     JVMStabilityInspector.removeShutdownHooks();
 
                     Gossiper.waitToSettle();
+
+                    // as CassandraDaemon.setup: the DSE 5.1 check of the workloads the DSE 5.1 peers gossip
+                    try
+                    {
+                        Dse6NonCoreTraces.verifyDse51GossipedWorkloads();
+                    }
+                    catch (StartupException e)
+                    {
+                        throw new RuntimeException(e.getMessage(), e);
+                    }
 
                     // as CassandraDaemon.setup: the cluster-wide pass of the DSE 6 access-control check, after the node joined (here
                     // before the auth setup of postStartup, which the daemon runs first: the pass reads system_auth without it)

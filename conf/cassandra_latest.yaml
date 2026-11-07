@@ -2302,12 +2302,16 @@ storage_compatibility_mode: NONE
 # and neither sends its schema to DSE 5.1 nodes nor applies theirs. It gossips its DSE state in the
 # form DSE 5.1 writes it, with the dse_version 5.1.51 (the only value the system property
 # cassandra.internode_compatibility_mode.dse_version takes in this mode), sends DSE 5.1 nodes only
-# the gossip states they ask for, and dials those it encrypts on ssl_storage_port. The node still
-# writes big sstables of version nb, which DSE 5.1 does not read. Offline tools that read this file
-# inherit the checks of the sstable format, the compression selector and flush_compression, the
-# numeric generations and the transaction logs and statistics of the mode (they write big oa
-# sstables, without the storage mode); clients that set the system property below get the big
-# format selected instead of refused.
+# the gossip states they ask for, and dials those it encrypts on ssl_storage_port. It refuses to
+# start while DSE access controls it does not enforce exist (row-level grants, tables and
+# materialized views restricted to rows), or any trace of DSE Search, Graph, Analytics, DSEFS, CFS,
+# Advanced Replication, tiered storage or in-memory tables; it creates no SAI index, even with
+# allow_ddl, and refuses the reads of DSE 5.1 nodes that carry row-level access control. The node
+# still writes big sstables of version nb, which DSE 5.1 does not read. Offline tools that read
+# this file inherit the checks of the sstable format, the compression selector and
+# flush_compression, the numeric generations and the transaction logs and statistics of the mode
+# (they write big oa sstables, without the storage mode); clients that set the system property
+# below get the big format selected instead of refused.
 # The system property cassandra.internode_compatibility_mode overrides this setting.
 # Possible values: NONE (default), DSE_6, DSE_5_1.
 #

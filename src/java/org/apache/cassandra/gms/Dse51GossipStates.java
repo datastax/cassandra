@@ -85,8 +85,9 @@ public final class Dse51GossipStates
     /**
      * The workloads a DSE 5.1 node gossips in its DSE state, the state at the ordinal of {@code X_11_PADDING}, in the
      * form of the workloads DSE 5.1 stored in its system tables
-     * ({@code Dse51SystemTables.StoredColumns#nodeWorkloads}), for the check of the non-core DSE workloads, which reads
-     * both (nothing reads it yet), or null when {@code state} is null or has no such state. As DSE 5.1 reads it:
+     * ({@code Dse51SystemTables.StoredColumns#nodeWorkloads}), for the checks of the non-core DSE workloads, which read
+     * both ({@code Dse6NonCoreTraces}, once gossip has settled at the start, then periodically), or null when
+     * {@code state} is null or has no such state. As DSE 5.1 reads it:
      * {@code workloads} is the names concatenated ({@link #splitWorkloads}), {@code graph} a boolean or its text, and a
      * value that is not a JSON object is the old form of the state (a node started with
      * {@code -Denable-old-dse-state=true}), a bare workload name taken as both {@code workload} and {@code workloads}.
