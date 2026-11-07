@@ -37,6 +37,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
@@ -47,6 +48,8 @@ import javax.management.ObjectName;
 
 import com.google.common.base.Predicates;
 import com.google.common.collect.Sets;
+
+import org.apache.cassandra.db.marshal.Redaction;
 import org.assertj.core.api.Assertions;
 import org.junit.After;
 import org.junit.Assert;
@@ -415,7 +418,7 @@ public class SAITester extends CQLTester
                 IndexDescriptor indexDescriptor = loadDescriptor(sstable, cfs);
                 if (indexDescriptor.isIndexEmpty(context))
                     continue;
-                
+
                 // Checksum validation is now handled internally by the OnDiskFormat's validateIndexComponent method
                 if (!indexDescriptor.perSSTableComponents().validateComponents(sstable, cfs.getTracker(), true, false)
                     || !indexDescriptor.perIndexComponents(context).validateComponents(sstable, cfs.getTracker(), true, false))
@@ -1193,7 +1196,14 @@ public class SAITester extends CQLTester
         StorageAttachedIndexSearcher searcher = indexPlan.searcherFor(command);
         Plan.RowsIteration saiPlan = searcher.buildPlan();
 
-        Assertions.assertThat(containsPlan(saiPlan, planClass)).isTrue();
+        assertContainsPlan(saiPlan, planClass);
+    }
+
+    private static void assertContainsPlan(Plan plan, Class<? extends Plan> planClass)
+    {
+        Assertions.assertThat(containsPlan(plan, planClass))
+                  .withFailMessage("Expected plan %s to be present in %s", planClass, plan.toStringRecursive(Redaction.NONE))
+                  .isTrue();
     }
 
     private static boolean containsPlan(Plan plan, Class<? extends Plan> planClass)
@@ -1204,12 +1214,14 @@ public class SAITester extends CQLTester
 
     protected static class PlanSelectionAssertion
     {
+        private final Plan.RowsIteration plan;
         private final double expectedRows;
         private final Set<String> selectedIndexes;
         private final List<String> warnings;
 
         public PlanSelectionAssertion(@Nullable Plan.RowsIteration plan, @Nullable List<String> warnings)
         {
+            this.plan = plan;
             this.expectedRows = plan != null ? plan.expectedRows() : -1.0;
             this.selectedIndexes = plan != null ? plannedIndexes(plan) : Set.of();
             this.warnings = warnings;
@@ -1284,6 +1296,22 @@ public class SAITester extends CQLTester
             Assert.assertNotNull(warnings);
             Assert.assertEquals(1, warnings.size());
             Assert.assertEquals(expectedWarning, warnings.get(0));
+        }
+
+        public void matches(Predicate<Plan.RowsIteration> predicate)
+        {
+            Assertions.assertThat(plan)
+                      .withFailMessage("Plan didn't match:\n%s", plan.toStringRecursive(Redaction.NONE))
+                      .matches(predicate);
+        }
+
+        @SafeVarargs
+        public final void hasSubplans(Class<? extends Plan>... planClasses)
+        {
+            for (Class<? extends Plan> planClass : planClasses)
+            {
+                assertContainsPlan(plan, planClass);
+            }
         }
     }
 

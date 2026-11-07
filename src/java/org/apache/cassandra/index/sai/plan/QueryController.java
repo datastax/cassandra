@@ -141,6 +141,13 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     private Plan.KeysIteration whereKeysPlan;
 
     /**
+     * The keys plan that feeds the sort node in a filter-then-sort plan. This is {@link #whereKeysPlan}, additionally
+     * intersected with the BM25 query terms when ordering by BM25, so the index can discard the rows that don't contain
+     * all the terms before they are read and scored.
+     */
+    private Plan.KeysIteration sortSourceKeysPlan;
+
+    /**
      * Holds the primary key iterators for indexed expressions in the query (i.e. leaves of the expression tree).
      * We will construct the final iterator from those.
      * We need a MultiMap because the same Expression can occur more than once in a query.
@@ -454,7 +461,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         Plan.KeysIteration keysIterationPlan = whereKeysPlan;
         if (orderer != null)
         {
-            keysIterationPlan = planFactory.sort(whereKeysPlan, orderer);
+            sortSourceKeysPlan = orderer.isBM25() ? intersectWhereClauseWithBM25Terms(whereKeysPlan) : whereKeysPlan;
+            keysIterationPlan = planFactory.sort(sortSourceKeysPlan, orderer);
         }
 
         // This would mean we have no WHERE nor ANN clauses at all; this can happen in case an index was dropped after the
@@ -463,6 +471,41 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             throw invalidRequest(INDEX_MAY_HAVE_BEEN_DROPPED);
 
         return keysIterationPlan;
+    }
+
+    /**
+     * BM25 ordering also acts as a filter: only the rows containing all the query terms are returned.
+     * We intersect the given WHERE clause plan with an {@code ANALYZER_MATCHES} index scan per term in the BM25 ordering.
+     * If the WHERE clause plan is already an intersection, the term scans are added to it instead of nesting intersections.
+     * <p>
+     * Those scans are regular leaves, so the optimizer is free to remove them. If it removes all of them together with
+     * the rest of the WHERE clause, the plan becomes a sort-then-filter plan with a {@link Plan.Bm25IndexScan}.
+     * <p>
+     * When there is no WHERE clause plan to sort the result of, the plan is returned as it is. It will be turned into
+     * a {@link Plan.Bm25IndexScan}, which already takes care of matching the terms.
+     */
+    private Plan.KeysIteration intersectWhereClauseWithBM25Terms(Plan.KeysIteration source)
+    {
+        if (source == planFactory.everything || source == planFactory.nothing)
+            return source;
+
+        // don't add scans for the terms that are already explicitly present in the WHERE clause
+        Set<Expression> existing = new HashSet<>();
+        for (Plan.IndexScan scan : source.nodesOfType(Plan.IndexScan.class))
+            if (scan.predicate != null)
+                existing.add(scan.predicate);
+
+        List<Plan.KeysIteration> termScans = new ArrayList<>();
+        for (ByteBuffer term : orderer.getQueryTerms())
+        {
+            Expression expression = new Expression(orderer.context).add(Operator.ANALYZER_MATCHES, term);
+            if (existing.contains(expression))
+                continue;
+            long expectedMatchingRowCount = Math.min(estimateMatchingRowCount(expression), planFactory.tableMetrics.rows);
+            termScans.add(planFactory.indexScan(expression, expectedMatchingRowCount));
+        }
+
+        return termScans.isEmpty() ? source : planFactory.intersection(source, termScans);
     }
 
     /**
@@ -505,7 +548,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 }
                 if (orderedScan == null)
                     return plan; // already filter-then-sort; nothing to do
-                Plan.KeysSort keysSort = planFactory.sortForced(whereKeysPlan, orderer);
+                Plan.KeysSort keysSort = planFactory.sortForced(sortSourceKeysPlan, orderer);
                 Plan.RowsIteration overridden = (Plan.RowsIteration) plan.replaceNode(orderedScan.id, keysSort);
                 Tracing.logAndTrace(logger, "sai_hybrid_sort_order=filter_then_sort: forcing filter-then-sort, replacing sort-then-filter plan");
                 return overridden;
