@@ -101,6 +101,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JavaUtils;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.SigarLibrary;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_JMX_LOCAL_PORT;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COM_SUN_MANAGEMENT_JMXREMOTE_PORT;
@@ -1080,11 +1081,12 @@ public class StartupChecks
      * <p>
      * With {@code NONE} it refuses, in the same way, while the marker or the record of the upgrade from DSE 5.1 exists
      * (the files {@code DSE_5_1} writes, {@link DseUpgradeMarker#path(InternodeCompatibilityMode)} and
-     * {@link DsePeersRecord#path(InternodeCompatibilityMode)}), naming DSE 5.1 and {@code DSE_5_1}. The DSE 6 files are
-     * checked first, and the DSE 5.1 ones only when no DSE 6 file is found (a node of one upgrade has no file of the
-     * other, unless it was started in {@code DSE_6} with the override despite the DSE 5.1 files, below; the DSE 5.1
-     * files are then refused once the DSE 6 ones are deleted): with the override property set, the WARN names the DSE 6
-     * files alone, on purpose, so that its text is that of a node of the upgrade from DSE 6 whatever else the metadata
+     * {@link DsePeersRecord#path(InternodeCompatibilityMode)}), naming DSE 5.1 and, among its remedies, {@code DSE_5_1}
+     * with the {@code storage_compatibility_mode} and the {@code big} format it requires. The DSE 6 files are checked
+     * first, and the DSE 5.1 ones only when no DSE 6 file is found (a node of one upgrade has no file of the other,
+     * unless it was started in {@code DSE_6} with the override despite the DSE 5.1 files, below; the DSE 5.1 files are
+     * then refused once the DSE 6 ones are deleted): with the override property set, the WARN names the DSE 6 files
+     * alone, on purpose, so that its text is that of a node of the upgrade from DSE 6 whatever else the metadata
      * directory holds (one that cannot be read included, where every file "may be present"). A start in {@code DSE_5_1}
      * is not refused by its own files.
      * <p>
@@ -1198,7 +1200,12 @@ public class StartupChecks
         }
         // a configuration refusal whatever the evidence, an unreadable record included: the start without the mode of
         // the upgrade is what is refused, and that mode is one of its remedies (loadDsePeersRecord, which cannot do
-        // without the record, reports the same file as a disk state error)
+        // without the record, reports the same file as a disk state error); DSE_5_1 is refused without the storage
+        // mode and the format it requires, so its remedy names them
+        String setting = source.isDse51()
+                         ? source + " with storage_compatibility_mode: " + StorageCompatibilityMode.DSE_5_1 +
+                           " and sstable.selected_format: " + BigFormat.NAME
+                         : source.toString();
         String remedies;
         if (mode.isDse6())
             // the DSE 5.1 files on a node in DSE_6: a node of the upgrade from DSE 5.1 started in DSE_6 by mistake goes
@@ -1208,10 +1215,10 @@ public class StartupChecks
                                      "On a node of the upgrade from %s whose %s files are left from an earlier " +
                                      "upgrade from %s, delete those files once no %s node is left in the cluster. " +
                                      "Or start with -D%s=true",
-                                     release, source, remedy, mode.source(), release, release, release, ignoreKey);
+                                     release, setting, remedy, mode.source(), release, release, release, ignoreKey);
         else
             remedies = String.format("Set internode_compatibility_mode: %s, or %s, or start with -D%s=true",
-                                     source, remedy, ignoreKey);
+                                     setting, remedy, ignoreKey);
         throw new StartupException(StartupException.ERR_WRONG_CONFIG,
                                    String.format("internode_compatibility_mode is %s but %s: %s peers may still be " +
                                                  "in the cluster. %s",
