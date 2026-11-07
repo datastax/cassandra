@@ -413,7 +413,7 @@ final class LogRecord
             // of the smaller strings in the set). Also note that the prefixes always end with '-' which means we won't
             // have "xy-1111-Data.db".startsWith("xy-11") below (we'd get "xy-1111-Data.db".startsWith("xy-11-")); the
             // records of DSE 5.1 compatibility mode (DseTransactionLogs.recordPath) end with the format instead, as in
-            // "nb-11-big", with which no file of another sstable starts either ("nb-110-big-Data.db" does not)
+            // "me-11-big", with which no file of another sstable starts either ("me-110-big-Data.db" does not)
             String baseName = dirSet.floor(name);
             if (baseName != null && name.startsWith(baseName))
             {

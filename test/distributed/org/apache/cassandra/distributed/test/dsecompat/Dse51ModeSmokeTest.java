@@ -53,6 +53,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -61,18 +62,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * A cluster of nodes of this software in {@code internode_compatibility_mode: DSE_5_1}, on the storage settings the
- * mode requires, started without the mode first and restarted in it, as upgraded DSE 5.1 nodes, writes, flushes and
- * restarts: each node writes big {@code nb} sstables with numeric generations, writes the DSE 5.1 upgrade marker once,
- * at its first start in the mode, and is not refused by it when it starts again in the mode, reads and records the
- * values of DSE 5.1's columns of {@code system.local} and {@code system.peers} at its first start in the mode and loads
- * them from that record at the restart, and replays its own commit log segments at the restarts without moving them
- * aside. Its saved definitions of {@code system.local} and
- * {@code system.peers} list the columns DSE 5.1 adds as dropped columns. The nodes talk to each other as nodes of
- * this software, at their own messaging version: GROUP BY queries with paging, logged batches and lightweight
- * transactions run between them, while the schema is frozen as in {@code DSE_6} and the property lifts the freeze. A
- * node in the mode also starts on the {@code system.local} and {@code system.peers} sstables a DSE 5.1.51 node wrote,
- * and reads and records their values. Each node publishes in gossip what DSE 5.1 nodes read of it: the states drivers
- * learn a node by, at DSE 5.1's ordinals, and its DSE state in DSE 5.1's form.
+ * mode requires, from their first start on, as upgraded DSE 5.1 nodes ({@link Dse51NewNodes}), writes, flushes and
+ * restarts: each node writes big {@code me} sstables with numeric generations, on flush and on compaction, writes the
+ * DSE 5.1 upgrade marker once, at its first start in the mode, and is not refused by it when it starts again in the
+ * mode, reads and records the values of DSE 5.1's columns of {@code system.local} and {@code system.peers} at its first
+ * start in the mode and loads them from that record at the restart, and replays its own commit log segments at the
+ * restarts without moving them aside. Its saved definitions of {@code system.local} and {@code system.peers} list the
+ * columns DSE 5.1 adds as dropped columns. The nodes talk to each other as nodes of this software, at their own
+ * messaging version: GROUP BY queries with paging, logged batches and lightweight transactions run between them, while
+ * the schema is frozen as in {@code DSE_6} and the property lifts the freeze. A node in the mode also starts on the
+ * {@code system.local} and {@code system.peers} sstables a DSE 5.1.51 node wrote, and reads and records their values.
+ * Each node publishes in gossip what DSE 5.1 nodes read of it: the states drivers learn a node by, at DSE 5.1's
+ * ordinals, and its DSE state in DSE 5.1's form.
  */
 public class Dse51ModeSmokeTest extends TestBaseImpl
 {
@@ -96,8 +97,8 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
                 assertThat(instance.callOnInstance(DatabaseDescriptor::isDse51CompatibilityMode)).isTrue();
                 List<String> dataFiles = dataFiles(instance);
                 assertThat(dataFiles).isNotEmpty()
-                                     .allMatch(f -> f.matches("nb-[0-9]+-big-Data\\.db"),
-                                               "big nb, numeric generation: " + dataFiles);
+                                     .allMatch(f -> f.matches("me-[0-9]+-big-Data\\.db"),
+                                               "big me, numeric generation: " + dataFiles);
                 assertMarkers(instance);
                 // the definitions of the local system keyspaces saved at the start list the columns DSE 5.1 adds to
                 // system.local and system.peers as dropped columns, as in every mode
@@ -181,6 +182,59 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
     }
 
     /**
+     * A node in the mode compacts into big {@code me} too, refuses a repair (the guards of the mode refuse every
+     * repair; the refusal of an incremental one by the storage mode is {@code RepairMessageVerbHandlerDse51Test}'s),
+     * and after the flag drop ({@code internode_compatibility_mode: NONE} with
+     * {@code storage_compatibility_mode: HCD_1}) writes big {@code nb} again, while it still reads the {@code me}
+     * sstables it wrote in the mode.
+     */
+    @Test
+    public void aNodeInTheModeCompactsIntoMeAndWritesNbAfterTheFlagDrop() throws Throwable
+    {
+        try (Cluster cluster = upgradedNodes(1, "CREATE TABLE %s.t (id int PRIMARY KEY, v text)"))
+        {
+            IInvokableInstance instance = cluster.get(1);
+            for (int flush = 0; flush < 2; flush++)
+            {
+                for (int i = 0; i < ROWS; i++)
+                    cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.t (id, v) VALUES (?, ?)"),
+                                                   ConsistencyLevel.ALL, flush * ROWS + i, "v" + i);
+                instance.flush(KEYSPACE);
+            }
+            List<String> flushed = dataFiles(instance);
+            instance.forceCompact(KEYSPACE, "t");
+            // the compaction writes new sstables, big me as every other
+            List<String> compacted = dataFiles(instance);
+            assertThat(compacted).isNotEqualTo(flushed)
+                                 .anyMatch(f -> !flushed.contains(f))
+                                 .allMatch(f -> f.matches("me-[0-9]+-big-Data\\.db"), "big me");
+
+            // the guards of the mode refuse every repair
+            Dse6GuardsTest.assertRefused(instance.nodetoolResult("repair", KEYSPACE),
+                                         "repair is refused while the DSE 5.1 upgrade is in progress");
+
+            // the flag drop
+            instance.shutdown().get();
+            instance.config().set("internode_compatibility_mode", "NONE");
+            instance.config().set("storage_compatibility_mode", "HCD_1");
+            try (WithProperties ignore = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS, true))
+            {
+                instance.startup();
+            }
+            assertThat(instance.callOnInstance(DatabaseDescriptor::isDse51CompatibilityMode)).isFalse();
+            cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.t (id, v) VALUES (?, ?)"),
+                                           ConsistencyLevel.ALL, 1000, "after");
+            instance.flush(KEYSPACE);
+            List<String> after = dataFiles(instance);
+            // the me sstables of the mode stay, beside the nb one of the flush
+            assertThat(after).anyMatch(f -> f.matches("me-[0-9]+-big-Data\\.db"))
+                             .anyMatch(f -> f.matches("nb-[0-9]+-big-Data\\.db"));
+            assertThat(cluster.coordinator(1).execute(withKeyspace("SELECT count(*) FROM %s.t"), ConsistencyLevel.ALL))
+            .isDeepEqualTo(new Object[][]{ { (long) 2 * ROWS + 1 } });
+        }
+    }
+
+    /**
      * The messaging between nodes of this software in the mode, which opens the pre-4.0 code paths only below 4.0:
      * GROUP BY queries, paged, logged batches and lightweight transactions (Paxos v1, the variant of the mode) run at
      * ALL and SERIAL; a schema change is refused, with the text of the mode, and the property lifts the freeze, but
@@ -243,36 +297,30 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
     }
 
     /**
-     * Nodes of this software, started without the mode on the storage settings it requires, with the test keyspace and
-     * the tables of {@code schema} created then, and restarted in {@code DSE_5_1}: the restart of an upgraded DSE 5.1
-     * node, which has joined its ring (a node in the mode does not bootstrap, the guards refuse it) and whose schema is
-     * frozen in the mode.
+     * Nodes of this software in {@code DSE_5_1} from their first start on ({@link Dse51NewNodes}), with the test
+     * keyspace and the tables of {@code schema} created with {@code allow_ddl}: the nodes of an upgraded DSE 5.1
+     * cluster, whose sstables are all big {@code me}, whose ring is joined (a node in the mode does not bootstrap, the
+     * guards refuse it) and whose schema is frozen in the mode.
      */
     private static Cluster upgradedNodes(int nodes, String... schema) throws Throwable
     {
         Cluster cluster = Cluster.build(nodes)
                                  .withDynamicPortAllocation(true)
-                                 .withConfig(c -> c.with(NETWORK, GOSSIP, NATIVE_PROTOCOL)
-                                                   // the any-address, so that the broadcast one is what gossip carries
-                                                   .set("rpc_address", "0.0.0.0")
-                                                   // advertised only, distinct from the internode address
-                                                   .set("broadcast_rpc_address", "127.0.0." + (100 + c.num()))
-                                                   .set("storage_compatibility_mode", "HCD_1")
-                                                   .set("uuid_sstable_identifiers_enabled", false)
-                                                   .set("sstable", Map.of("selected_format", "big")))
+                                 .withInstanceInitializer(Dse51NewNodes::install)
+                                 .withConfig(c -> {
+                                     c.with(NETWORK, GOSSIP, NATIVE_PROTOCOL)
+                                      // the any-address, so that the broadcast one is what gossip carries
+                                      .set("rpc_address", "0.0.0.0")
+                                      // advertised only, distinct from the internode address
+                                      .set("broadcast_rpc_address", "127.0.0." + (100 + c.num()));
+                                     Dse51NewNodes.configure(c);
+                                 })
                                  .start();
-        try
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
         {
             init(cluster, nodes);
             for (String statement : schema)
                 cluster.schemaChange(withKeyspace(statement));
-            for (int node = 1; node <= nodes; node++)
-            {
-                IInvokableInstance instance = cluster.get(node);
-                instance.shutdown().get();
-                instance.config().set("internode_compatibility_mode", "DSE_5_1");
-                instance.startup();
-            }
             return cluster;
         }
         catch (Throwable t)
