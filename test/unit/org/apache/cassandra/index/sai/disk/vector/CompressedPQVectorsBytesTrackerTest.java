@@ -28,11 +28,12 @@ import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
+import org.apache.cassandra.cql3.CQLTester;
 
-import static org.apache.cassandra.index.sai.disk.vector.CompressedVectorsBytesTracker.VECTORS_PER_CHUNK;
+import static org.apache.cassandra.index.sai.disk.vector.CompressedPQVectorsBytesTracker.VECTORS_PER_CHUNK;
 import static org.junit.Assert.assertEquals;
 
-public class CompressedVectorsBytesTrackerTest
+public class CompressedPQVectorsBytesTrackerTest
 {
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
     private static final int DIMENSION = 16;
@@ -49,8 +50,8 @@ public class CompressedVectorsBytesTrackerTest
     }
 
     /**
-     * {@link CompressedVectorsBytesTracker} relies on the size of {@link MutablePQVectors} changing only when the
-     * vector count passes a multiple of {@link CompressedVectorsBytesTracker#VECTORS_PER_CHUNK}. This fails if
+     * {@link CompressedPQVectorsBytesTracker} relies on the size of {@link MutablePQVectors} changing only when the
+     * vector count passes a multiple of {@link CompressedPQVectorsBytesTracker#VECTORS_PER_CHUNK}. This fails if
      * jvector's private {@code MutablePQVectors.VECTORS_PER_CHUNK} no longer matches it.
      */
     @Test
@@ -80,7 +81,7 @@ public class CompressedVectorsBytesTrackerTest
     public void testTrackedSizeMatchesRealSize()
     {
         MutablePQVectors pqVectors = new MutablePQVectors(pq);
-        CompressedVectorsBytesTracker tracker = new CompressedVectorsBytesTracker(pqVectors);
+        CompressedPQVectorsBytesTracker tracker = new CompressedPQVectorsBytesTracker(pqVectors);
         long initialBytesUsed = pqVectors.ramBytesUsed();
         assertEquals(initialBytesUsed, tracker.bytesUsed());
 
@@ -112,7 +113,7 @@ public class CompressedVectorsBytesTrackerTest
         for (int ordinal = 0; ordinal < count; ordinal++)
             pqVectors.encodeAndSet(ordinal, vectors.get(ordinal % vectors.size()));
 
-        CompressedVectorsBytesTracker tracker = new CompressedVectorsBytesTracker(pqVectors);
+        CompressedPQVectorsBytesTracker tracker = new CompressedPQVectorsBytesTracker(pqVectors);
         assertEquals(pqVectors.ramBytesUsed(), tracker.bytesUsed());
 
         long before = pqVectors.ramBytesUsed();
@@ -127,9 +128,6 @@ public class CompressedVectorsBytesTrackerTest
 
     private static VectorFloat<?> randomVector()
     {
-        float[] values = new float[DIMENSION];
-        for (int i = 0; i < DIMENSION; i++)
-            values[i] = (float) random.nextGaussian();
-        return vts.createFloatVector(values);
+        return vts.createFloatVector(CQLTester.randomVector(DIMENSION));
     }
 }

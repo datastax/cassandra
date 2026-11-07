@@ -54,10 +54,8 @@ import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
-import io.github.jbellis.jvector.quantization.MutableCompressedVectors;
 import io.github.jbellis.jvector.quantization.MutablePQVectors;
 import io.github.jbellis.jvector.quantization.NVQuantization;
-import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
 import io.github.jbellis.jvector.quantization.VectorCompressor;
 import io.github.jbellis.jvector.util.Accountable;
@@ -153,9 +151,9 @@ public class CompactionGraph implements Closeable, Accountable
     private boolean pqFinetuned = false;
     // not final; will be updated to different objects after fine-tuning
     private VectorCompressor<?> compressor;
-    private MutableCompressedVectors compressedVectors;
+    private MutablePQVectors compressedVectors;
     // tracks compressedVectors.ramBytesUsed() without calling it for every inserted vector
-    private CompressedVectorsBytesTracker compressedVectorsBytes;
+    private CompressedPQVectorsBytesTracker compressedVectorsBytes;
     private GraphIndexBuilder builder;
 
     private final VectorFloat<?> globalMean;
@@ -213,8 +211,8 @@ public class CompactionGraph implements Closeable, Accountable
         if (compressor instanceof ProductQuantization)
         {
             compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
-            compressedVectorsBytes = new CompressedVectorsBytesTracker(compressedVectors);
-            bsp = BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors);
+            compressedVectorsBytes = new CompressedPQVectorsBytesTracker(compressedVectors);
+            bsp = BuildScoreProvider.pqBuildScoreProvider(similarityFunction, compressedVectors);
         }
         else
         {
@@ -376,11 +374,11 @@ public class CompactionGraph implements Closeable, Accountable
 
                         // Update bytes to account for new encoding. This isn't expected to change, but just
                         // in case it does, we track it here.
-                        compressedVectorsBytes = new CompressedVectorsBytesTracker(compressedVectors);
+                        compressedVectorsBytes = new CompressedPQVectorsBytesTracker(compressedVectors);
                         bytesUsed += (compressedVectorsBytes.bytesUsed() - originalBytesUsed);
 
                         // Keep the existing edges but recompute their scores
-                        builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, (PQVectors) compressedVectors));
+                        builder = GraphIndexBuilder.rescore(builder, BuildScoreProvider.pqBuildScoreProvider(similarityFunction, compressedVectors));
                         markCopiedNodesComplete((OnHeapGraphIndex) builder.getGraph());
                     }
                     finally
@@ -571,7 +569,7 @@ public class CompactionGraph implements Closeable, Accountable
                     {
                         try (var view = builder.getGraph().getView())
                         {
-                            supplier.put(FeatureId.FUSED_PQ, ordinal -> new FusedPQ.State(view, (PQVectors) compressedVectors, ordinal));
+                            supplier.put(FeatureId.FUSED_PQ, ordinal -> new FusedPQ.State(view, compressedVectors, ordinal));
                             writer.write(supplier);
                         }
                     }

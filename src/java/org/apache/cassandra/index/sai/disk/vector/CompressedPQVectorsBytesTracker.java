@@ -15,13 +15,15 @@
  */
 package org.apache.cassandra.index.sai.disk.vector;
 
-import io.github.jbellis.jvector.quantization.MutableCompressedVectors;
+import javax.annotation.concurrent.NotThreadSafe;
+
 import io.github.jbellis.jvector.quantization.MutablePQVectors;
 
 /**
- * Tracks the memory used by a {@link MutableCompressedVectors} as vectors are added, without calling its
- * {@code ramBytesUsed()} for every vector. For {@link MutablePQVectors}, {@code ramBytesUsed()} walks every chunk of
- * compressed vectors, so calling it for every vector makes each insert slower as the segment grows.
+ * Tracks the memory used by a {@link MutablePQVectors} as vectors are added, without calling its
+ * {@code ramBytesUsed()} for every vector. {@code ramBytesUsed()} walks every chunk of compressed vectors, so calling
+ * it for every vector makes each insert slower as the segment grows. Only for {@link MutablePQVectors}, because it
+ * relies on their chunk size.
  * <p>
  * The size of {@link MutablePQVectors} only changes when a chunk of {@link #VECTORS_PER_CHUNK} vectors is added, so the
  * size is measured again only when the last vector lands in a new chunk. If jvector's chunk size ever differs from
@@ -31,23 +33,24 @@ import io.github.jbellis.jvector.quantization.MutablePQVectors;
  * fewer than {@link #VECTORS_PER_CHUNK} vectors, until the next measurement;</li>
  * <li>if they are larger, the size is measured more often than needed.</li>
  * </ul>
- * {@code CompressedVectorsBytesTrackerTest} fails if jvector's chunk size changes.
+ * {@code CompressedPQVectorsBytesTrackerTest} fails if jvector's chunk size changes.
  * <p>
- * Not thread-safe; the caller must serialize the changes to the vectors and the calls to this class.
+ * The caller must serialize the changes to the vectors and the calls to this class.
  */
-final class CompressedVectorsBytesTracker
+@NotThreadSafe
+final class CompressedPQVectorsBytesTracker
 {
     /** Number of vectors per chunk in jvector's {@link MutablePQVectors} ({@code VECTORS_PER_CHUNK}, which is private). */
     static final int VECTORS_PER_CHUNK = 1024;
 
-    private final MutableCompressedVectors<?> vectors;
+    private final MutablePQVectors vectors;
     private long bytesUsed;
     private int lastChunk;
 
     /**
      * Starts tracking the given vectors, measuring their current size.
      */
-    CompressedVectorsBytesTracker(MutableCompressedVectors<?> vectors)
+    CompressedPQVectorsBytesTracker(MutablePQVectors vectors)
     {
         this.vectors = vectors;
         this.bytesUsed = vectors.ramBytesUsed();
