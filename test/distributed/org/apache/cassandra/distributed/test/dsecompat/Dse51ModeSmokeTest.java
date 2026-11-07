@@ -52,7 +52,7 @@ import org.apache.cassandra.service.DseUpgradeMarker;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
-import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -330,13 +330,22 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
             Files.delete(Path.of(record));
 
             // the node now has two DSE 5.1 peers on record, which never come up, so the cluster-wide read of the check
-            // of the DSE access controls cannot be made: only this node's replica is checked
-            try (WithProperties localCheck = new WithProperties()
-                                             .set(INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY, true))
+            // of the DSE access controls cannot be made: after the wait, lowered here, only this node's replica is
+            // checked and the node starts, with a WARN
+            try (WithProperties wait = new WithProperties()
+                                       .set(INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS, 6))
             {
                 instance.startup();
             }
             assertMarkers(instance);
+            // a single attempt when the first read takes longer than the wait less the pause
+            String fallback = "The startup check of the DSE access controls could not read " +
+                              "system_auth.role_permissions at LOCAL_QUORUM \\(.*\\)( after [0-9]+ attempts in " +
+                              "[0-9]+ s)?; with internode_compatibility_mode DSE_5_1 only this node's replica was " +
+                              "checked, since DSE 5.1 has no RESTRICT and no delegation and the restrictions DSE 5.1 " +
+                              "applies on this node are in the schema this node checked; the periodic check reads " +
+                              "the whole table again every 10 minutes";
+            assertThat(instance.logs().grep(fallback).getResult()).hasSize(1);
             String row = "DSE 5.1 compatibility mode: DSE 5.1's columns of system.local and system.peers for %s " +
                          "\\(workloads \\[Cassandra\\], workload Cassandra, graph false, dse_version 5.1.51\\)";
             for (String node : List.of("local", "127.0.51.12", "127.0.51.13"))
