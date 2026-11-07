@@ -20,12 +20,14 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +48,7 @@ import org.junit.rules.TemporaryFolder;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.Dse51SystemTables;
+import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
@@ -53,10 +56,12 @@ import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.security.EncryptionContext;
+import org.apache.cassandra.service.Dse6AccessControlCheck;
 import org.apache.cassandra.service.Dse6NonCoreTraces;
 import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.service.DseUpgradeMarker;
 import org.apache.cassandra.tools.ToolRunner;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
 
@@ -71,15 +76,19 @@ import static org.assertj.core.api.Assertions.entry;
  * of the three-node cluster of the fixtures, laid out by {@link Dse51NodeFixture}: its configuration as it ran and as
  * installed, its {@code system.local} and {@code system.peers} sstables (compacted and flushed, and those of the node
  * of the Search and Graph cluster), its schema, hints and commit log. The node as DSE 5.1.51 ran it is ready once
- * Thrift is off; each problem added to a copy makes the tool name it. The schema rows a test adds are written as big
- * {@code me} sstables by this JVM, a client in the DSE 5.1 compatibility mode, since the fixtures hold no table on a
- * compaction strategy this software lacks, and no other release.
+ * Thrift is off and the changes its schema needs are made ({@link #schemaChangesMade}); its schema as captured
+ * ({@link #schemaAsCaptured}) holds what the schema checks block: two compact tables, a SASI index, a table and a view
+ * restricted to rows, and the row a failed UNRESTRICT ROWS on the view left. Each problem added to a copy makes the
+ * tool name it. The schema rows a test adds or deletes are written as big {@code me} sstables by this JVM, a client in
+ * the DSE 5.1 compatibility mode, since the fixtures hold no table on a compaction strategy this software lacks, no
+ * other release, and no rows/ grant in node 1's replica of system_auth.role_permissions.
  */
 public class Dse51PreflightTest
 {
     private static final List<String> KEYSPACES_KEY = List.of("keyspace_name");
     private static final String DTCS = "org.apache.cassandra.db.compaction.DateTieredCompactionStrategy";
     private static final String TIERED = "org.apache.cassandra.db.compaction.TieredCompactionStrategy";
+    private static final String CFS_COMPACTION = "com.datastax.bdp.hadoop.cfs.compaction.CFSCompactionStrategy";
 
     @Rule
     public TemporaryFolder temporaryFolder = new TemporaryFolder();
@@ -97,22 +106,91 @@ public class Dse51PreflightTest
         .isEqualTo(InternodeCompatibilityMode.DSE_51_BIG_VERSION);
     }
 
+    /** Node 1 as it ran, with the changes of its schema the upgrade requires made ({@link #schemaChangesMade}). */
     private Dse51NodeFixture node() throws IOException
     {
-        return Dse51NodeFixture.create(temporaryFolder.newFolder().toPath());
+        return schemaChangesMade(Dse51NodeFixture.create(temporaryFolder.newFolder().toPath()));
     }
 
     private Dse51NodeFixture node(boolean running, Path systemTables) throws IOException
     {
-        return Dse51NodeFixture.create(temporaryFolder.newFolder().toPath(), running, systemTables);
+        return schemaChangesMade(Dse51NodeFixture.create(temporaryFolder.newFolder().toPath(), running,
+                                                         systemTables));
     }
 
-    /** The node as it ran, with Thrift turned off in its cassandra.yaml. */
+    /** The node as it ran, with Thrift turned off in its cassandra.yaml, and the changes of its schema made. */
     private Dse51NodeFixture thriftOff() throws IOException
     {
         Dse51NodeFixture node = node();
         node.replace(NodeLayout.CASSANDRA_YAML, "start_rpc: true", "start_rpc: false");
         return node;
+    }
+
+    /** As {@link #thriftOff}, with the schema of system_schema and system_auth as DSE 5.1.51 left them. */
+    private Dse51NodeFixture schemaAsCaptured() throws IOException
+    {
+        Dse51NodeFixture node = Dse51NodeFixture.create(temporaryFolder.newFolder().toPath());
+        node.replace(NodeLayout.CASSANDRA_YAML, "start_rpc: true", "start_rpc: false");
+        return node;
+    }
+
+    /**
+     * Node 1 once the changes its schema needs before the upgrade are made on DSE 5.1, written over what DSE wrote:
+     * the two compact tables and the SASI index dropped, the restriction of the table rlac to rows removed, the view
+     * rlac_by_v restricted to rows created again without the restriction (its row rewritten without the key: a real
+     * drop and creation would also give the view a new id, which no check depends on), and the row of
+     * system_schema.tables a failed UNRESTRICT ROWS on it left removed (no repair of it is validated; the test needs a
+     * node without it).
+     */
+    private static Dse51NodeFixture schemaChangesMade(Dse51NodeFixture node) throws IOException
+    {
+        dropTable(node, "compact_dense");
+        dropTable(node, "compact_static");
+        node.deleteRows(SchemaInspector.SCHEMA, "indexes", KEYSPACES_KEY, List.of("table_name", "index_name"),
+                        row("test_ks", "sasi_t", "sasi_t_v"));
+        node.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                       row("test_ks", "rlac").with("extensions", Map.of()));
+        node.deleteRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                        row("test_ks", "rlac_by_v"));
+        node.writeRows(SchemaInspector.SCHEMA, "views", KEYSPACES_KEY, List.of("view_name"),
+                       row("test_ks", "rlac_by_v").with("extensions", Map.of()));
+        return node;
+    }
+
+    /**
+     * A table {@code test_ks.<table> (id int PRIMARY KEY)} with the compaction {@code compaction}, its rows of
+     * system_schema.tables and system_schema.columns written as DSE 5.1 writes those of a CQL table.
+     */
+    private static void writeTable(Dse51NodeFixture node, String table, Map<String, String> compaction)
+    throws IOException
+    {
+        node.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                       row("test_ks", table).with("id", UUID.nameUUIDFromBytes(table.getBytes(StandardCharsets.UTF_8)))
+                                            .with("flags", Set.of("compound"))
+                                            .with("compaction", compaction));
+        node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                       row("test_ks", table, "id").with("clustering_order", "none")
+                                                  .with("column_name_bytes", ByteBufferUtil.bytes("id"))
+                                                  .with("kind", "partition_key")
+                                                  .with("position", 0)
+                                                  .with("type", "int"));
+    }
+
+    /** The table {@code test_ks.<table>} dropped: its row of system_schema.tables and those of its columns deleted. */
+    private static void dropTable(Dse51NodeFixture node, String table) throws IOException
+    {
+        List<String> columnsKey = List.of("table_name", "column_name");
+        DseTableReader.TableRows columns = DseTableReader.readBig(List.of(new File(node.data)), SchemaInspector.SCHEMA,
+                                                                  "columns", KEYSPACES_KEY, columnsKey);
+        List<DseNodeFixture.SchemaRow> rows = new ArrayList<>();
+        columns.rows.stream()
+                    .filter(r -> r.getString("keyspace_name").equals("test_ks") &&
+                                 r.getString("table_name").equals(table))
+                    .forEach(r -> rows.add(row("test_ks", table, r.getString("column_name"))));
+        assertThat(rows).as("columns of test_ks.%s", table).isNotEmpty();
+        node.deleteRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, columnsKey,
+                        rows.toArray(new DseNodeFixture.SchemaRow[0]));
+        node.deleteRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"), row("test_ks", table));
     }
 
     /** The scratch directories of {@link DseTableReader#readBig} the runs of a test have left. */
@@ -201,12 +279,15 @@ public class Dse51PreflightTest
         assertThat(report.dse51.rowLevelAccessControlEnforced).isTrue();
         assertThat(run.findings("ROW_LEVEL_ACCESS").get(0).remedy)
         .contains("UNRESTRICT ROWS on every restricted table, REVOKE the rows/ grants, then set " +
-                  "allow_row_level_security: false; for a materialized view restricted to rows, ask the upgrade " +
-                  "owner, since its remedy is not validated yet (never UNRESTRICT ROWS on a view");
+                  "allow_row_level_security: false; drop a materialized view restricted to rows and create it " +
+                  "again without the restriction (see RESTRICTED_VIEW where a node reports it; " +
+                  SchemaInspector.VIEW_REMEDY_NOT_VALIDATED +
+                  "; never UNRESTRICT ROWS on a view");
         Set<String> warnings = new HashSet<>(run.codes(Finding.Severity.WARNING));
         warnings.removeAll(List.of("JAVA", "LOW_DISK_SPACE")); // they depend on the machine
+        // the proxy grants DSE gave the creator of the roles reader and writer, which the fixture holds
         assertThat(warnings).containsExactlyInAnyOrder("ROW_LEVEL_ACCESS", "SNITCH", "PENDING_HINTS",
-                                                       "AUTH_CONFIG_CHANGE");
+                                                       "AUTH_CONFIG_CHANGE", "PROXY_GRANT");
         assertThat(run.findings("NO_PEERS")).isEmpty();
         assertThat(run.findings("SNITCH").get(0).remedy).contains("endpoint_snitch: GossipingPropertyFileSnitch")
                                                        .contains("dc=Cassandra and rack=rack1 (from system.local)");
@@ -235,7 +316,264 @@ public class Dse51PreflightTest
         assertThat(report.upgradePath.upgradeSteps)
         .contains("Thrift: off", "Sstable formats: every sstable is big me",
                   "DSE core only: no trace of DSE Search, Graph, Analytics, DSEFS, CFS, Advanced Replication, tiered " +
-                  "storage or in-memory tables, nor a compaction strategy HCD 2.0 no longer has, was found");
+                  "storage or in-memory tables, nor a compaction strategy HCD 2.0 no longer has, was found",
+                  "Schema: no table, index, type or function HCD 2.0 refuses or cannot load was found",
+                  "Materialized views: 2 view(s), none to change in this node's schema; a RESTRICT ROWS on a view " +
+                  "is in the schema of the node that ran it only: aggregate the reports of every node",
+                  "Security: review the access control warnings above");
+        // the keyspaces of system and system_schema, which DSE 5.1 lists in its schema too, are left out
+        assertThat(report.inputs.get("schema"))
+        .isEqualTo(Map.of("keyspaces", 11, "tables", 26, "views", 2,
+                          "keyspace_names", List.of("dse_insights", "dse_insights_local", "dse_leases", "dse_perf",
+                                                    "dse_security", "dse_system", "system_auth", "system_distributed",
+                                                    "system_traces", "test_ks", "test_ks_fixture"),
+                          "keyspaces_left_out", List.of("system", "system_schema")));
+        assertThat(report.dse51.restrictedViews).isEmpty();
+        assertThat(report.dse51.viewTableRows).isEmpty();
+        assertThat(report.accessControls.authorizationEnabled).isTrue();
+        assertThat(report.accessControls.rolePermissionsRows).isEqualTo(3);
+    }
+
+    /**
+     * Node 1's schema as DSE 5.1.51 left it: its two compact tables, its SASI index, its table restricted to rows, its
+     * view restricted to rows (on node 1 only, which ran RESTRICT ROWS on it) and the row of system_schema.tables the
+     * failed UNRESTRICT ROWS on the view left there, each blocking; DSE's proxy grants a warning.
+     */
+    @Test
+    public void theSchemaAsDseLeftItBlocks() throws IOException
+    {
+        Dse51NodeFixture node = schemaAsCaptured();
+        Map<String, String> before = node.fingerprint();
+        DsePreflightTest.Run run = assertBlocked(run(node), "RESTRICTED_VIEW");
+        assertThat(node.fingerprint()).isEqualTo(before);
+        assertThat(run.codes(Finding.Severity.BLOCKING))
+        .containsExactlyInAnyOrder("COMPACT_STORAGE", "SASI_INDEX", "ROW_LEVEL_ACCESS", "RESTRICTED_VIEW",
+                                   "VIEW_TABLE_ROW");
+
+        // DSE's own compact tables of the system keyspace, which DSE 5.1 lists in system_schema, are left out
+        assertThat(run.messages("COMPACT_STORAGE"))
+        .isEqualTo("tables with COMPACT STORAGE: test_ks.compact_dense (flags [dense]), test_ks.compact_static " +
+                   "(flags []); HCD 2.0 does not load them, and DSE 5.1 runs DROP COMPACT STORAGE with no setting " +
+                   "to allow it");
+        assertThat(run.findings("COMPACT_STORAGE").get(0).remedy)
+        .startsWith("on DSE 5.1, before the first node is upgraded: ALTER TABLE ... DROP COMPACT STORAGE for each");
+        assertThat(run.messages("SASI_INDEX")).startsWith("SASI indexes: test_ks.sasi_t.sasi_t_v; HCD 2.0 has no SASI");
+        assertThat(run.findings("SASI_INDEX").get(0).remedy)
+        .startsWith("on DSE 5.1, before the first node is upgraded: DROP INDEX for each");
+
+        Finding table = blocking(run, "ROW_LEVEL_ACCESS");
+        assertThat(table.message).isEqualTo("tables restricted to rows by DSE row-level access control (DSE_RLACA): " +
+                                            "test_ks.rlac (tenant column region); HCD 2.0 does not enforce it, and a " +
+                                            "node in DSE_5_1 mode refuses to start while a table holds it");
+        // the node enforces row-level access control: the access of the readers by rows comes first
+        assertThat(table.remedy)
+        .startsWith("on DSE 5.1, before the first node is upgraded: give the users who read these tables through " +
+                    "rows/ grants the access they need without row-level access control (or none)")
+        .contains("(DSE enforces row-level access control on this node); then UNRESTRICT ROWS ON " +
+                  "<keyspace>.<table> for each, then REVOKE their rows/ grants, which UNRESTRICT ROWS leaves")
+        .endsWith(SchemaInspector.NEVER_UNRESTRICT_VIEW);
+
+        assertThat(run.messages("RESTRICTED_VIEW"))
+        .isEqualTo("materialized views restricted to rows by DSE row-level access control (DSE_RLACA) in this " +
+                   "node's schema: test_ks.rlac_by_v (tenant column region); HCD 2.0 does not enforce it, and a node " +
+                   "in DSE_5_1 mode refuses to start while its schema holds it; DSE 5.1 keeps a RESTRICT ROWS on a " +
+                   "view in the schema of the node that ran it only, so the reports of the other nodes may not show " +
+                   "it");
+        assertThat(run.findings("RESTRICTED_VIEW").get(0).remedy)
+        .contains("; then REVOKE the rows/ grants on each view, drop it (DROP MATERIALIZED VIEW) and create it " +
+                  "again without the restriction, which builds it again from its base table (" +
+                  SchemaInspector.VIEW_REMEDY_NOT_VALIDATED + "); do not drop test_ks.rlac_by_v before the upgrade " +
+                  "owner has chosen the repair of the row VIEW_TABLE_ROW names beside it; " +
+                  SchemaInspector.NEVER_UNRESTRICT_VIEW)
+        .doesNotContain("UNRESTRICT ROWS ON");
+
+        String leftover = "the table row test_ks.rlac_by_v (id " + Dse51Fixtures.RLAC_VIEW_ID + ") beside the " +
+                          "materialized view test_ks.rlac_by_v (id " + Dse51Fixtures.RLAC_VIEW_ID + ')';
+        assertThat(run.messages("VIEW_TABLE_ROW"))
+        .isEqualTo("rows of system_schema.tables named after a materialized view of system_schema.views, or with " +
+                   "its id, in this node's schema: " + leftover + "; DSE 5.1.51 leaves such a row on the node where " +
+                   "UNRESTRICT ROWS on a view failed, after which neither DSE 5.1.51 (\"Attempting to load already " +
+                   "loaded view\") nor HCD 2.0 starts the node");
+        assertThat(run.findings("VIEW_TABLE_ROW").get(0).remedy)
+        .startsWith("this tool does not repair the row, and no repair is validated yet: do not upgrade this node");
+        // the row is not checked as a table
+        assertThat(run.findings("UNLOADABLE_TABLE")).isEmpty();
+        assertThat(run.report.inputs.get("schema")).satisfies(summary -> {
+            assertThat(((Map<?, ?>) summary).get("tables")).isEqualTo(28);
+            assertThat(((Map<?, ?>) summary).get("views")).isEqualTo(2);
+        });
+
+        // as captured: DSE granted the proxy permissions on the roles it created to their creator
+        assertThat(run.findings("PROXY_GRANT")).singleElement().satisfies(f -> {
+            assertThat(f.severity).isEqualTo(Finding.Severity.WARNING);
+            assertThat(f.message).startsWith("DSE proxy authentication grants (DSE also grants them to the creator " +
+                                             "of every role): role 'cassandra' on roles/reader: [PROXY.EXECUTE, " +
+                                             "PROXY.LOGIN], role 'cassandra' on roles/writer: [PROXY.EXECUTE, " +
+                                             "PROXY.LOGIN]; HCD 2.0 has no proxy login or proxy execution");
+        });
+
+        NodeReport report = run.report;
+        assertThat(report.dse51.restrictedViews).containsExactly("test_ks.rlac_by_v (tenant column region)");
+        assertThat(report.dse51.viewTableRows).containsExactly(leftover);
+        assertThat(report.upgradePath.upgradeSteps)
+        .contains("Schema: change on DSE 5.1, before the first node is upgraded, what COMPACT_STORAGE, SASI_INDEX " +
+                  "name",
+                  "Materialized views: on DSE 5.1, REVOKE the rows/ grants on test_ks.rlac_by_v (tenant column " +
+                  "region), then drop it and create it again without the restriction (see RESTRICTED_VIEW; " +
+                  SchemaInspector.VIEW_REMEDY_NOT_VALIDATED + "), only once the upgrade owner has chosen the repair " +
+                  "of the row VIEW_TABLE_ROW names beside it; this node cannot be " +
+                  "upgraded while the rows VIEW_TABLE_ROW names are in its schema: report to the upgrade owner; a " +
+                  "RESTRICT ROWS on a view " +
+                  "is in the schema of the node that ran it only: aggregate the reports of every node",
+                  "Security: resolve the blocking access control findings above, on DSE 5.1");
+    }
+
+    /**
+     * The rows/ grants of system_auth.role_permissions block, which UNRESTRICT ROWS leaves: those of the capture's
+     * role reader, on the table and on the view, written here, since reader's partition is not in node 1's replica
+     * (select-system-auth.txt lists them, read at a consistency level that reached the other nodes).
+     */
+    @Test
+    public void theRowGrantsBlock() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        node.writeRows("system_auth", "role_permissions", List.of("role"), List.of("resource"),
+                       row("reader", "rows/EU/data/test_ks/rlac").with("permissions", Set.of("SELECT")),
+                       row("reader", "rows/EU/data/test_ks/rlac_by_v").with("permissions", Set.of("SELECT")));
+        DsePreflightTest.Run run = assertBlocked(run(node), "ROW_LEVEL_ACCESS");
+        assertThat(run.codes(Finding.Severity.BLOCKING)).containsExactly("ROW_LEVEL_ACCESS");
+        Finding grants = blocking(run, "ROW_LEVEL_ACCESS");
+        assertThat(grants.message)
+        .isEqualTo("DSE row-level access control grants in system_auth.role_permissions: role 'reader' on " +
+                   "rows/EU/data/test_ks/rlac: [SELECT], role 'reader' on rows/EU/data/test_ks/rlac_by_v: [SELECT]; " +
+                   "HCD 2.0 does not enforce them, and a node in DSE_5_1 mode refuses to start while one exists, " +
+                   "whether or not a table or view is still restricted to rows");
+        assertThat(grants.remedy)
+        .isEqualTo("on DSE 5.1, before the first node is upgraded: REVOKE each of them (REVOKE SELECT ON '<value>' " +
+                   "ROWS IN <keyspace>.<table> FROM <role>, and the same for MODIFY): UNRESTRICT ROWS does not " +
+                   "revoke them");
+        assertThat(run.report.accessControls.rolePermissionsRows).isEqualTo(5);
+        assertThat(run.report.upgradePath.upgradeSteps)
+        .contains("Security: resolve the blocking access control findings above, on DSE 5.1");
+    }
+
+    /**
+     * The remedies of the table and the view restricted to rows on node 1's schema as captured, as DSE 5.1 enforces
+     * row-level access control on the node, does not, or as it is not known.
+     */
+    @Test
+    public void theRemediesOfTheRestrictionsFollowWhetherDseEnforcesThem() throws IOException
+    {
+        Dse51NodeFixture node = schemaAsCaptured();
+        Map<Boolean, String> notes = new HashMap<>();
+        notes.put(true, "(DSE enforces row-level access control on this node); then ");
+        notes.put(null, "(whether DSE enforces row-level access control on this node could not be read); then ");
+        for (Boolean enforced : new Boolean[]{ true, false, null })
+        {
+            List<Finding> findings = new ArrayList<>();
+            SchemaInspector.forDse51(List.of(new File(node.data)), null, Murmur3Partitioner.instance, enforced,
+                                     findings).inspect();
+            for (String code : List.of("ROW_LEVEL_ACCESS", "RESTRICTED_VIEW"))
+            {
+                Finding finding = findings.stream().filter(f -> f.code.equals(code)).findFirst()
+                                          .orElseThrow(() -> new AssertionError(code + " with " + enforced));
+                if (enforced == null || enforced)
+                    assertThat(finding.remedy).as("%s with %s", code, enforced)
+                                              .startsWith("on DSE 5.1, before the first node is upgraded: give the " +
+                                                          "users who read these ")
+                                              .contains(notes.get(enforced));
+                else
+                    assertThat(finding.remedy).as("%s with %s", code, enforced)
+                                              .startsWith("on DSE 5.1, before the first node is upgraded: " +
+                                                          (code.equals("ROW_LEVEL_ACCESS")
+                                                           ? "UNRESTRICT ROWS ON"
+                                                           : "REVOKE the rows/ grants"));
+            }
+        }
+
+        // through the tool: allow_row_level_security false in dse.yaml, so DSE does not enforce it
+        node.replace(NodeLayout.DSE_YAML, "    allow_row_level_security: true", "    allow_row_level_security: false");
+        DsePreflightTest.Run run = assertBlocked(run(node), "RESTRICTED_VIEW");
+        assertThat(run.report.dse51.rowLevelAccessControlEnforced).isFalse();
+        assertThat(blocking(run, "ROW_LEVEL_ACCESS").remedy)
+        .startsWith("on DSE 5.1, before the first node is upgraded: UNRESTRICT ROWS ON <keyspace>.<table> for each");
+    }
+
+    /**
+     * A row of system_schema.tables with the id of a materialized view, not its name, as the start check of the mode
+     * refuses it too: a view written here with the id of the table test_ks.rlac.
+     */
+    @Test
+    public void aTableRowWithTheIdOfAViewBlocks() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        node.writeRows(SchemaInspector.SCHEMA, "views", KEYSPACES_KEY, List.of("view_name"),
+                       row("test_ks", "rlac_by_id").with("id", Dse51Fixtures.RLAC_TABLE_ID)
+                                                   .with("base_table_id", Dse51Fixtures.RLAC_TABLE_ID)
+                                                   .with("base_table_name", "rlac"));
+        // the table, its row named after no view, is still checked as a table: its restriction to rows is reported
+        node.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                       row("test_ks", "rlac").with("extensions", Map.of(Dse6AccessControlCheck.RLAC_EXTENSION_KEY,
+                                                                        ByteBufferUtil.bytes("region"))));
+        DsePreflightTest.Run run = assertBlocked(run(node), "VIEW_TABLE_ROW");
+        assertThat(run.messages("VIEW_TABLE_ROW"))
+        .contains("in this node's schema: the table row test_ks.rlac (id " + Dse51Fixtures.RLAC_TABLE_ID + ") beside " +
+                  "the materialized view test_ks.rlac_by_id (id " + Dse51Fixtures.RLAC_TABLE_ID + "); ");
+        assertThat(run.report.dse51.viewTableRows).hasSize(1);
+        assertThat(blocking(run, "ROW_LEVEL_ACCESS").message).contains("test_ks.rlac (tenant column region)");
+        assertThat(((Map<?, ?>) run.report.inputs.get("schema")).get("tables")).isEqualTo(26);
+    }
+
+    /**
+     * The tables of a keyspace the markers report (here CFS's, a compact table on DSE's CFSCompactionStrategy, written
+     * here since the fixtures hold no DSE Analytics) are left to that report, whose remedy drops the keyspace: no
+     * remedy of the schema checks for them.
+     */
+    @Test
+    public void theTablesOfAKeyspaceTheMarkersReportAreLeftToThem() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        node.writeRows(SchemaInspector.SCHEMA, "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("cfs").with("replication", Map.of("class", "org.apache.cassandra.locator.SimpleStrategy",
+                                                             "replication_factor", "1")));
+        node.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                       row("cfs", "inode").with("id", UUID.nameUUIDFromBytes("inode".getBytes(StandardCharsets.UTF_8)))
+                                          .with("flags", Set.of())
+                                          .with("compaction", Map.of("class", CFS_COMPACTION)));
+        DsePreflightTest.Run run = assertBlocked(run(node), "NON_CORE_KEYSPACE");
+        assertThat(run.codes(Finding.Severity.BLOCKING)).containsExactly("NON_CORE_KEYSPACE");
+        assertThat(run.messages("NON_CORE_KEYSPACE")).startsWith("DSE Analytics, DSEFS and CFS: keyspace cfs");
+        assertThat(run.report.upgradePath.upgradeSteps)
+        .contains("Schema: no table, index, type or function HCD 2.0 refuses or cannot load was found");
+    }
+
+    /**
+     * A table and a view restricted to rows whose names need quotes in CQL, written here (the fixtures' names are all
+     * lower case): both are named as the start refusal names them, quoted.
+     */
+    @Test
+    public void namesThatNeedQuotesAreQuoted() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        Map<String, ByteBuffer> restricted = Map.of(Dse6AccessControlCheck.RLAC_EXTENSION_KEY,
+                                                    ByteBufferUtil.bytes("region"));
+        node.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                       row("test_ks", "MixedT").with("extensions", restricted));
+        node.writeRows(SchemaInspector.SCHEMA, "views", KEYSPACES_KEY, List.of("view_name"),
+                       row("test_ks", "RlacV").with("extensions", restricted).with("base_table_name", "rlac"));
+        DsePreflightTest.Run run = assertBlocked(run(node), "RESTRICTED_VIEW");
+        assertThat(blocking(run, "ROW_LEVEL_ACCESS").message).contains(": test_ks.\"MixedT\" (tenant column region);");
+        assertThat(run.messages("RESTRICTED_VIEW")).contains(": test_ks.\"RlacV\" (tenant column region);");
+        assertThat(run.report.dse51.restrictedViews).containsExactly("test_ks.\"RlacV\" (tenant column region)");
+    }
+
+    /** The blocking finding of {@code code} of a run, of which there must be one. */
+    private static Finding blocking(DsePreflightTest.Run run, String code)
+    {
+        List<Finding> found = run.findings(code).stream().filter(f -> f.severity == Finding.Severity.BLOCKING)
+                                 .collect(Collectors.toList());
+        assertThat(found).as("blocking %s", code).hasSize(1);
+        return found.get(0);
     }
 
     @Test
@@ -331,8 +669,7 @@ public class Dse51PreflightTest
     public void aTableOnDateTieredCompactionIsReportedAmongTheMarkers() throws IOException
     {
         Dse51NodeFixture node = thriftOff();
-        node.writeRows("system_schema", "tables", KEYSPACES_KEY, List.of("table_name"),
-                       row("test_ks", "dtcs").with("compaction", Map.of("class", DTCS)));
+        writeTable(node, "dtcs", Map.of("class", DTCS));
         node.writeRows("system_schema", "views", KEYSPACES_KEY, List.of("view_name"),
                        row("test_ks", "tiered_view").with("compaction", Map.of("class", TIERED)));
         Map<String, String> before = node.fingerprint();
@@ -349,6 +686,9 @@ public class Dse51PreflightTest
                     TIERED + ')');
         // the sstables the test wrote are big me with numeric generations, as DSE 5.1's
         assertThat(run.findings("SSTABLE_FORMAT")).isEmpty();
+        // the schema checks leave the classes the markers report to them: no class HCD 2.0 cannot load
+        assertThat(run.findings("UNLOADABLE_CLASS")).isEmpty();
+        assertThat(run.messages("UNLOADABLE_TABLE")).doesNotContain("test_ks.dtcs");
     }
 
     @Test
@@ -418,15 +758,16 @@ public class Dse51PreflightTest
         .isEqualTo(Dse51NodeInspector.SSTABLE_UNKNOWN);
 
         Dse51NodeFixture node = thriftOff();
-        // a table this tool does not read: only its file names are checked
-        Path table = node.data.resolve("system_auth").resolve("role_permissions-3afbe79f219431a7add7f5ab90d8ec9c");
+        // a table this tool does not read (a user table): only its file names are checked
+        Path table = Files.createDirectories(node.data.resolve("test_ks").resolve(
+            "t-" + Dse51Fixtures.FIXTURE_TABLE_ID.toString().replace("-", "")));
         Files.write(table.resolve("mc-800-big-Data.db"), new byte[0]);
         Map<String, String> before = node.fingerprint();
         DsePreflightTest.Run run = assertBlocked(run(node), "SSTABLE_FORMAT");
         assertThat(node.fingerprint()).isEqualTo(before);
         assertThat(run.codes(Finding.Severity.BLOCKING)).containsExactly("SSTABLE_FORMAT");
         assertThat(run.messages("SSTABLE_FORMAT"))
-        .isEqualTo(Dse51NodeInspector.SSTABLE_BIG_OLDER + ": system_auth.role_permissions: 1 (mc-800-big-Data.db)");
+        .isEqualTo(Dse51NodeInspector.SSTABLE_BIG_OLDER + ": test_ks.t: 1 (mc-800-big-Data.db)");
         assertThat(run.findings("SSTABLE_FORMAT").get(0).remedy)
         .startsWith("run nodetool upgradesstables on DSE 5.1 first");
         assertThat(run.messages("SSTABLE_WITHOUT_TOC")).contains("mc-800-big-Data.db");
@@ -456,6 +797,104 @@ public class Dse51PreflightTest
                                                        "commit log, its saved caches and its hints files");
         assertThat(run.findings("TDE_TABLE").get(0).remedy)
         .contains("nodetool upgradesstables -a system batches paxos on every node");
+        // a setting of dse.yaml, not a change of the schema
+        assertThat(run.report.upgradePath.upgradeSteps)
+        .contains("Schema: no table, index, type or function HCD 2.0 refuses or cannot load was found");
+    }
+
+    /** A table of the schema with DSE 5.1's encrypting compressor, written here: no fixture holds one. */
+    @Test
+    public void anEncryptedTableIsAChangeOfTheSchema() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        writeTable(node, "secret", Map.of("class", "SizeTieredCompactionStrategy"));
+        node.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                       row("test_ks", "secret").with("compression",
+                                                     Map.of("class", "org.apache.cassandra.io.compress." +
+                                                                     "EncryptingLZ4Compressor")));
+        DsePreflightTest.Run run = assertBlocked(run(node), "TDE_TABLE");
+        assertThat(run.messages("TDE_TABLE")).startsWith("encrypted (TDE) tables: test_ks.secret (compression class " +
+                                                         "org.apache.cassandra.io.compress.EncryptingLZ4Compressor)");
+        assertThat(run.report.upgradePath.upgradeSteps)
+        .contains("Schema: change on DSE 5.1, before the first node is upgraded, what TDE_TABLE name");
+    }
+
+    /**
+     * The DSEFS keyspace dse.yaml names, when it is not dsefs, is a trace of DSE Analytics, which the start check does
+     * not know by its name; its tables are left to that finding. Written here: the fixtures hold no DSEFS.
+     */
+    @Test
+    public void aDsefsKeyspaceNamedInDseYamlIsATrace() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        node.append(NodeLayout.DSE_YAML, "dsefs_options:", "    keyspace_name: myfs");
+        node.writeRows(SchemaInspector.SCHEMA, "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("myfs").with("replication", Map.of("class", "org.apache.cassandra.locator.SimpleStrategy",
+                                                              "replication_factor", "1")));
+        node.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                       row("myfs", "inode").with("id", UUID.nameUUIDFromBytes("myfs".getBytes(StandardCharsets.UTF_8)))
+                                           .with("flags", Set.of()));
+        DsePreflightTest.Run run = assertBlocked(run(node), "NON_CORE_KEYSPACE");
+        assertThat(run.codes(Finding.Severity.BLOCKING)).containsExactly("NON_CORE_KEYSPACE");
+        assertThat(run.messages("NON_CORE_KEYSPACE"))
+        .startsWith("DSE Analytics, DSEFS and CFS: keyspace myfs (DSEFS, named in dse.yaml)");
+        assertThat(((Map<?, ?>) run.report.inputs.get("schema")).get("keyspaces_left_out"))
+        .isEqualTo(List.of("myfs", "system", "system_schema"));
+    }
+
+    /**
+     * The geospatial and date range types of DSE 5.1, as columns added here to the captured table test_ks.t (the
+     * fixtures hold none), load as they do for DSE 6.
+     */
+    @Test
+    public void theGeoAndDateRangeTypesLoad() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        int position = 0;
+        for (String type : List.of("PointType", "LineStringType", "PolygonType", "DateRangeType"))
+            node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                           row("test_ks", "t", "c" + position).with("clustering_order", "none")
+                                                              .with("column_name_bytes",
+                                                                    ByteBufferUtil.bytes("c" + position++))
+                                                              .with("kind", "regular")
+                                                              .with("position", -1)
+                                                              .with("type", "'org.apache.cassandra.db.marshal." +
+                                                                            type + '\''));
+        assertReady(run(node));
+
+        // the columns are read: one of a type this software does not have makes the table one it cannot load
+        node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                       row("test_ks", "t", "bad").with("clustering_order", "none")
+                                                 .with("column_name_bytes", ByteBufferUtil.bytes("bad"))
+                                                 .with("kind", "regular")
+                                                 .with("position", -1)
+                                                 .with("type", "'org.apache.cassandra.db.marshal.NoSuchType'"));
+        DsePreflightTest.Run unloadable = assertBlocked(run(node), "UNLOADABLE_TABLE");
+        assertThat(unloadable.messages("UNLOADABLE_TABLE")).startsWith("tables HCD 2.0 cannot load: test_ks.t: ");
+    }
+
+    /**
+     * A replication of system_schema.keyspaces that cannot be read, written here as bytes no map has: the inspection
+     * of the schema fails, and the steps that depend on it say so rather than report nothing found.
+     */
+    @Test
+    public void aFailedInspectionOfTheSchemaIsNoAllClear() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        node.writeRows(SchemaInspector.SCHEMA, "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("broken").with("replication", ByteBuffer.wrap(new byte[]{ 0, 0, 0, 9 })));
+        DsePreflightTest.Run run = assertBlocked(run(node), "INSPECTION_ERROR");
+        assertThat(run.messages("INSPECTION_ERROR"))
+        .startsWith("the inspection of the schema and the access controls failed (");
+        String failed = "the inspection of the schema failed, see INSPECTION_ERROR";
+        assertThat(run.report.upgradePath.upgradeSteps)
+        .contains("DSE core only: not checked completely (not read: " + failed + ')',
+                  "Schema: not checked completely (not read: " + failed + ')',
+                  "Materialized views: not checked (see INSPECTION_ERROR); a RESTRICT ROWS on a view is in the " +
+                  "schema of the node that ran it only: aggregate the reports of every node",
+                  "Security: review the access control warnings above; not checked completely (not read: the " +
+                  "schema, system_auth.role_permissions, " + failed + ')');
+        assertThat(run.report.dse51.restrictedViews).isNull();
     }
 
     @Test
@@ -608,6 +1047,10 @@ public class Dse51PreflightTest
                                                               "g_system (a keyspace of the graph g)");
         assertThat(run.messages("NON_CORE_KEYSPACE"))
         .startsWith("DSE Analytics, DSEFS and CFS: keyspace dse_analytics");
+        // reported once, by DSE 5.1's rules: the schema checks do not report the index or the keyspaces again
+        assertThat(run.findings("SEARCH_INDEX")).hasSize(1);
+        assertThat(run.findings("NON_CORE_KEYSPACE")).hasSize(1);
+        assertThat(run.findings("UNLOADABLE_CLASS")).isEmpty();
     }
 
     @Test
@@ -646,16 +1089,58 @@ public class Dse51PreflightTest
         .endsWith("(no sstable of the table): the DSE release, identity and workloads of this node cannot be read");
         assertThat(run.findings("NOT_A_DSE_NODE").get(0).remedy).startsWith("point the tool at DSE's data directories");
 
-        // no system_schema.keyspaces: the traces cannot all be checked
+        // no system_schema.keyspaces: the schema, and the traces with it, cannot all be checked
         Dse51NodeFixture noKeyspaces = thriftOff();
         new File(noKeyspaces.data.resolve("system_schema").resolve("keyspaces-abac5682dea631c5b535b3d6cffd0fb6"))
         .deleteRecursive();
         DsePreflightTest.Run schema = assertBlocked(run(noKeyspaces), "UNREADABLE_SCHEMA");
         assertThat(schema.messages("UNREADABLE_SCHEMA"))
-        .startsWith("cannot read system_schema.keyspaces (no sstable of the table), so the traces");
+        .isEqualTo("cannot read system_schema.keyspaces (no sstable of the table), so the checks of the schema, the " +
+                   "traces of the DSE features HCD 2.0 does not support among them, cannot all be made");
+        assertThat(schema.findings("UNREADABLE_SCHEMA").get(0).remedy)
+        .startsWith("run the tool again (DSE may have been compacting the tables)");
         assertThat(schema.report.upgradePath.upgradeSteps)
         .contains("DSE core only: not checked completely (not read: system_schema.keyspaces (no sstable of the " +
-                  "table))");
+                  "table))",
+                  "Schema: not checked completely (not read: system_schema.keyspaces (no sstable of the table))",
+                  "Materialized views: not checked (the schema could not be read); a RESTRICT ROWS on a view is in " +
+                  "the schema of the node that ran it only: aggregate the reports of every node",
+                  "Security: review the access control warnings above; not checked completely (not read: the " +
+                  "schema)");
+        assertThat(schema.report.dse51.restrictedViews).isNull();
+        assertThat(schema.report.dse51.viewTableRows).isNull();
+        // system_auth.role_permissions is still read
+        assertThat(schema.report.accessControls.rolePermissionsRows).isEqualTo(3);
+
+        // an sstable of system_auth.role_permissions that cannot be read
+        Dse51NodeFixture damaged = thriftOff();
+        Path permissions = damaged.data.resolve("system_auth")
+                                       .resolve("role_permissions-3afbe79f219431a7add7f5ab90d8ec9c");
+        Files.write(permissions.resolve("me-1-big-Data.db"), new byte[]{ 1, 2, 3 });
+        DsePreflightTest.Run auth = assertBlocked(run(damaged), "UNREADABLE_SCHEMA");
+        assertThat(auth.messages("UNREADABLE_SCHEMA"))
+        .startsWith("cannot read system_auth.role_permissions (")
+        .endsWith("), so the DSE access controls this software does not enforce cannot be checked");
+        assertThat(auth.report.accessControls.rolePermissionsRows).isNull();
+        assertThat(auth.report.upgradePath.upgradeSteps)
+        .contains("Security: review the access control warnings above; not checked completely (not read: " +
+                  "system_auth.role_permissions)");
+
+        // an sstable of system_schema.views that cannot be read: the views are not known, not taken for none
+        Dse51NodeFixture views = thriftOff();
+        Path viewsTable = views.data.resolve("system_schema").resolve("views-9786ac1cdd583201a7cdad556410c985");
+        try (Stream<Path> files = Files.list(viewsTable))
+        {
+            for (Path file : (Iterable<Path>) files::iterator)
+                if (file.getFileName().toString().endsWith("-Data.db"))
+                    Files.write(file, new byte[]{ 1, 2, 3 });
+        }
+        DsePreflightTest.Run noViews = assertBlocked(run(views), "UNREADABLE_SCHEMA");
+        assertThat(noViews.messages("UNREADABLE_SCHEMA")).startsWith("cannot read system_schema.views (");
+        assertThat(noViews.report.dse51.restrictedViews).isNull();
+        assertThat(noViews.report.dse51.viewTableRows).isNull();
+        assertThat(noViews.report.upgradePath.upgradeSteps)
+        .anyMatch(s -> s.startsWith("Materialized views: not checked completely (not read: system_schema.views"));
 
         // a trie sstable in system.local, which DSE 5.1 does not write, is not read
         Dse51NodeFixture trie = thriftOff();
@@ -713,19 +1198,87 @@ public class Dse51PreflightTest
                                                            "(-Ddse.solr.data.dir in DSE's JVM options) exists");
     }
 
-    /** The aggregate of this release does not check the reports of DSE 5.1 nodes, and says so. */
+    /**
+     * The aggregate of the three nodes of the cluster of the fixtures: node 1's report written by the tool, those of
+     * nodes 2 and 3 made from it ({@link #peerReports}), with their identity as node 1's system.peers records it and
+     * without the restriction of the view, which their schema does not hold (the capture's extensions-per-node.txt).
+     * Ready once node 1's schema changes are made; with its schema as captured, the view restricted to rows and the
+     * row a failed UNRESTRICT ROWS left are named for node 1 only.
+     */
     @Test
-    public void theAggregateRefusesTheReportsOfDse51Nodes() throws IOException
+    public void theAggregateChecksTheReportsOfDse51Nodes() throws IOException
     {
-        Dse51NodeFixture node = thriftOff();
         Path reports = temporaryFolder.newFolder("reports").toPath();
-        assertReady(DsePreflightTest.run(reports.resolve("node1.json"), node.args()));
-        ClusterAggregate.AggregateReport aggregate = ClusterAggregate.aggregate(reports);
-        assertThat(aggregate.result).isEqualTo(NodeReport.BLOCKED);
-        assertThat(aggregate.findings).anyMatch(f -> f.code.equals("DSE51_REPORT") &&
-                                                     f.severity == Finding.Severity.BLOCKING &&
-                                                     f.message.endsWith(": node1.json"));
-        assertThat(aggregate.findings).noneMatch(f -> f.code.equals("NO_REPORT"));
+        NodeReport node1 = assertReady(DsePreflightTest.run(reports.resolve("node1.json"), thriftOff().args())).report;
+        peerReports(reports, node1);
+        ClusterAggregate.AggregateReport ready = ClusterAggregate.aggregate(reports);
+        assertThat(ready.findings).as("findings").noneMatch(f -> f.severity == Finding.Severity.BLOCKING);
+        assertThat(ready.result).isEqualTo(NodeReport.READY);
+        assertThat(ready.reportsRead).isEqualTo(Dse51Fixtures.CLUSTER_NODES);
+        assertThat(ready.dataCenters)
+        .isEqualTo(Map.of("Cassandra", Map.of("rack1", List.of("127.0.51.11", "127.0.51.12", "127.0.51.13"))));
+
+        Path captured = temporaryFolder.newFolder("captured").toPath();
+        NodeReport asCaptured = assertBlocked(DsePreflightTest.run(captured.resolve("node1.json"),
+                                                                   schemaAsCaptured().args()),
+                                              "RESTRICTED_VIEW").report;
+        peerReports(captured, asCaptured);
+        ClusterAggregate.AggregateReport blocked = ClusterAggregate.aggregate(captured);
+        assertThat(blocked.result).isEqualTo(NodeReport.BLOCKED);
+        assertThat(blocked.findings).filteredOn(f -> f.code.equals("RESTRICTED_VIEW"))
+                                    .singleElement()
+                                    .satisfies(f -> assertThat(f.message).startsWith(
+                                        "materialized views restricted to rows, with the nodes whose schema holds " +
+                                        "the restriction: test_ks.rlac_by_v (tenant column region) on " +
+                                        "[127.0.51.11]; "));
+        assertThat(blocked.findings).filteredOn(f -> f.code.equals("VIEW_TABLE_ROW"))
+                                    .singleElement()
+                                    .satisfies(f -> assertThat(f.message).contains(
+                                        "the table row test_ks.rlac_by_v (id " + Dse51Fixtures.RLAC_VIEW_ID + ") " +
+                                        "beside the materialized view test_ks.rlac_by_v (id " +
+                                        Dse51Fixtures.RLAC_VIEW_ID +
+                                        ") on [127.0.51.11]"));
+    }
+
+    /**
+     * Writes the reports of nodes 2 and 3 into {@code directory}, each a copy of node 1's {@code report} with the
+     * identity node 1's system.peers records for it (address, host id, data center, rack, release, schema version),
+     * node 1 and the other node as its peers, and without what only node 1's schema holds: the view restricted to rows
+     * and the row a failed UNRESTRICT ROWS on it left.
+     */
+    private static void peerReports(Path directory, NodeReport report) throws IOException
+    {
+        byte[] json = JsonUtils.JSON_OBJECT_PRETTY_WRITER.writeValueAsBytes(report);
+        NodeReport.Peer self = new NodeReport.Peer();
+        self.address = report.node.broadcastAddress;
+        self.hostId = report.node.hostId;
+        self.dataCenter = report.node.dataCenter;
+        self.rack = report.node.rack;
+        self.releaseVersion = report.node.releaseVersion;
+        self.dseVersion = report.node.dseVersion;
+        self.schemaVersion = report.node.schemaVersion;
+        int i = 2;
+        for (NodeReport.Peer peer : report.peers)
+        {
+            NodeReport copy = ClusterAggregate.READER.readValue(json);
+            copy.hostname = "node" + i;
+            copy.node.hostId = peer.hostId;
+            copy.node.broadcastAddress = peer.address;
+            copy.node.listenAddress = peer.address;
+            copy.node.dataCenter = peer.dataCenter;
+            copy.node.rack = peer.rack;
+            copy.node.releaseVersion = peer.releaseVersion;
+            copy.node.dseVersion = peer.dseVersion;
+            copy.node.schemaVersion = peer.schemaVersion;
+            copy.peers = new ArrayList<>(List.of(self));
+            report.peers.stream().filter(p -> p != peer).forEach(copy.peers::add);
+            copy.findings.removeIf(f -> f.code.equals("RESTRICTED_VIEW") || f.code.equals("VIEW_TABLE_ROW"));
+            copy.dse51.restrictedViews = List.of();
+            copy.dse51.viewTableRows = List.of();
+            copy.result = copy.blocked() ? NodeReport.BLOCKED : NodeReport.READY;
+            Files.write(directory.resolve("node" + i++ + ".json"),
+                        JsonUtils.JSON_OBJECT_PRETTY_WRITER.writeValueAsBytes(copy));
+        }
     }
 
     /** A header of a DSE 5.1 hints file, laid out as {@code HintsDescriptor} writes it, with its parameters. */
@@ -1020,8 +1573,7 @@ public class Dse51PreflightTest
     {
         Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
         Dse51NodeFixture node = thriftOff();
-        node.writeRows("system_schema", "tables", KEYSPACES_KEY, List.of("table_name"),
-                       row("test_ks", "dtcs").with("compaction", Map.of("class", DTCS)));
+        writeTable(node, "dtcs", Map.of("class", DTCS));
         Path json = temporaryFolder.getRoot().toPath().resolve("launcher.json");
         List<String> command = new ArrayList<>(List.of("tools/bin/dsepreflight"));
         command.addAll(List.of(node.args("--json", json.toString())));

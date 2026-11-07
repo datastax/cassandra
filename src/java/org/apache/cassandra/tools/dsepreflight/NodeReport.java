@@ -210,6 +210,20 @@ public final class NodeReport
         /** the TLS settings of {@code server_encryption_options} and {@code client_encryption_options}, by key */
         @JsonProperty("tls")
         public Map<String, String> tls = new LinkedHashMap<>();
+        /**
+         * the materialized views restricted to rows in this node's schema, as {@code ks.view (tenant column c)}: DSE
+         * 5.1 keeps a {@code RESTRICT ROWS} on a view on the node that ran it only, so the aggregate names the nodes;
+         * null when the schema or its views could not be read, or its inspection failed
+         */
+        @JsonProperty("restricted_views")
+        public List<String> restrictedViews;
+        /**
+         * the rows of {@code system_schema.tables} named after a materialized view, or with its id, in this node's
+         * schema, which a failed {@code UNRESTRICT ROWS} on the view left on the node that ran it; null when the schema
+         * or its views could not be read, or its inspection failed
+         */
+        @JsonProperty("view_table_rows")
+        public List<String> viewTableRows;
     }
 
     /** One {@code nodetool} command. */

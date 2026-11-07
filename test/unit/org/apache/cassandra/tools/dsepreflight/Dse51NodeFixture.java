@@ -39,6 +39,8 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.io.sstable.metadata.MetadataType;
+import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
@@ -51,8 +53,9 @@ import org.apache.cassandra.utils.FBUtilities;
  * moved there); a data directory with its {@code system.local} and {@code system.peers} sstables (compacted or
  * flushed), its {@code system_schema} and {@code system_auth.role_permissions} sstables; its hints file and its commit
  * log segment; an empty metadata directory. Not captured, generated here: the {@code ds_version.txt} of the
- * installation ({@code DSVersion=5.1.51}), and the schema rows a test adds ({@link #writeRows}), written as big
- * {@code me} sstables next to DSE's by this software in the DSE 5.1 compatibility mode of a client.
+ * installation ({@code DSVersion=5.1.51}), and the schema rows a test adds or deletes ({@link #writeRows},
+ * {@link #deleteRows}), written as big {@code me} sstables next to DSE's by this software in the DSE 5.1
+ * compatibility mode of a client.
  */
 final class Dse51NodeFixture
 {
@@ -153,7 +156,21 @@ final class Dse51NodeFixture
     void writeRows(String keyspace, String table, List<String> partitionKey, List<String> clustering,
                    DseNodeFixture.SchemaRow... rows) throws IOException
     {
-        try (SSTableTxnWriter writer = writer(keyspace, table, partitionKey, clustering, rows))
+        try (SSTableTxnWriter writer = writer(keyspace, table, partitionKey, clustering, false, rows))
+        {
+            writer.finish(false, null);
+        }
+    }
+
+    /**
+     * Writes the deletion of each of {@code rows} (their primary keys; their columns are not read) to
+     * {@code keyspace.table} as one more big sstable, as {@link #writeRows} writes rows: the rows DSE wrote are
+     * shadowed, as after a {@code DROP} or an {@code ALTER} on DSE.
+     */
+    void deleteRows(String keyspace, String table, List<String> partitionKey, List<String> clustering,
+                    DseNodeFixture.SchemaRow... rows) throws IOException
+    {
+        try (SSTableTxnWriter writer = writer(keyspace, table, partitionKey, clustering, true, rows))
         {
             writer.finish(false, null);
         }
@@ -167,28 +184,14 @@ final class Dse51NodeFixture
     SSTableTxnWriter startWriting(String keyspace, String table, List<String> partitionKey, List<String> clustering,
                                   DseNodeFixture.SchemaRow... rows) throws IOException
     {
-        return writer(keyspace, table, partitionKey, clustering, rows);
+        return writer(keyspace, table, partitionKey, clustering, false, rows);
     }
 
     private SSTableTxnWriter writer(String keyspace, String table, List<String> partitionKey, List<String> clustering,
-                                    DseNodeFixture.SchemaRow... rows) throws IOException
+                                    boolean deletions, DseNodeFixture.SchemaRow... rows) throws IOException
     {
         TableMetadata metadata = DseTableReader.metadataFromSSTables(List.of(new File(data)), keyspace, table,
                                                                      partitionKey, clustering);
-        long timestamp = FBUtilities.timestampMicros();
-        Map<String, PartitionUpdate.SimpleBuilder> partitions = new TreeMap<>();
-        for (DseNodeFixture.SchemaRow row : rows)
-        {
-            PartitionUpdate.SimpleBuilder partition =
-                partitions.computeIfAbsent(Arrays.toString(row.partitionKey),
-                                           k -> PartitionUpdate.simpleBuilder(metadata, row.partitionKey)
-                                                               .timestamp(timestamp));
-            Row.SimpleBuilder builder = partition.row(row.clustering);
-            row.columns.forEach(builder::add);
-        }
-        List<PartitionUpdate> updates = new ArrayList<>();
-        partitions.values().forEach(p -> updates.add(p.build()));
-        updates.sort((a, b) -> a.partitionKey().compareTo(b.partitionKey()));
         Path directory;
         try (Stream<Path> tables = Files.list(data.resolve(keyspace)))
         {
@@ -197,6 +200,23 @@ final class Dse51NodeFixture
                               .orElseThrow(() -> new IllegalStateException("no directory of " + keyspace + '.' +
                                                                            table));
         }
+        long timestamp = newerThanEveryCell(directory);
+        Map<String, PartitionUpdate.SimpleBuilder> partitions = new TreeMap<>();
+        for (DseNodeFixture.SchemaRow row : rows)
+        {
+            PartitionUpdate.SimpleBuilder partition =
+                partitions.computeIfAbsent(Arrays.toString(row.partitionKey),
+                                           k -> PartitionUpdate.simpleBuilder(metadata, row.partitionKey)
+                                                               .timestamp(timestamp));
+            Row.SimpleBuilder builder = partition.row(row.clustering);
+            if (deletions)
+                builder.delete();
+            else
+                row.columns.forEach(builder::add);
+        }
+        List<PartitionUpdate> updates = new ArrayList<>();
+        partitions.values().forEach(p -> updates.add(p.build()));
+        updates.sort((a, b) -> a.partitionKey().compareTo(b.partitionKey()));
         Descriptor descriptor = new Descriptor(new File(directory), keyspace, table,
                                                new SequenceBasedSSTableId(generation++), BigFormat.getInstance());
         SerializationHeader header = new SerializationHeader(true, metadata, metadata.regularAndStaticColumns(),
@@ -215,6 +235,29 @@ final class Dse51NodeFixture
             writer.abort();
             throw e;
         }
+    }
+
+    /**
+     * A write timestamp above that of every cell of the sstables of a table directory (the maximum timestamp of their
+     * statistics, plus one), so that what a test writes or deletes shadows what DSE wrote whatever the clock of the
+     * machine; this machine's clock for a directory without an sstable.
+     */
+    private static long newerThanEveryCell(Path directory) throws IOException
+    {
+        long newest = Long.MIN_VALUE;
+        try (Stream<Path> files = Files.list(directory))
+        {
+            for (Path file : (Iterable<Path>) files::iterator)
+            {
+                if (!file.getFileName().toString().endsWith("-Data.db"))
+                    continue;
+                Descriptor descriptor = Descriptor.fromFile(new File(file));
+                StatsMetadata stats = (StatsMetadata) descriptor.getMetadataSerializer()
+                                                                .deserialize(descriptor, MetadataType.STATS);
+                newest = Math.max(newest, stats.maxTimestamp);
+            }
+        }
+        return newest == Long.MIN_VALUE ? FBUtilities.timestampMicros() : newest + 1;
     }
 
     /** Every file under the node, with its size, modification time and CRC32: unchanged by a read-only run. */

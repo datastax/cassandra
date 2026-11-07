@@ -256,12 +256,12 @@ final class NodeInspector
 
         guarded("nodes/local and nodes/peers", this::inspectNodesFiles);
         guarded("cassandra.yaml and dse.yaml", this::inspectConfiguration);
-        schema = new SchemaInspector(layout.dataDirectories, dsefsKeyspace(), partitioner(),
+        schema = new SchemaInspector(layout.dataDirectories, dsefsKeyspace(layout), partitioner(layout),
                                      isTrue(get(layout.dseConf, "system_info_encryption", "enabled")), nodesByDataCenter(),
                                      nodesWithoutDataCenter(), local != null && peersRead, peersRead, peersFileMissing, mixedPhase(), findings);
         guarded("the schema and the access controls", schema::inspect);
         report.accessControls.rolePermissionsRows = schema.rolePermissionsRead ? schema.rolePermissionsRows : null;
-        report.accessControls.authorizationEnabled = authorizationEnabled();
+        report.accessControls.authorizationEnabled = authorizationEnabled(layout);
         if (schema.schemaRead)
         {
             Map<String, Object> summary = new LinkedHashMap<>();
@@ -885,7 +885,7 @@ final class NodeInspector
      * when it does not), for the table metadata the schema is checked with; {@code Murmur3Partitioner} when the one named
      * is not in this software, which the configuration check reports.
      */
-    private IPartitioner partitioner()
+    static IPartitioner partitioner(NodeLayout layout)
     {
         String name = getString(layout.cassandraConf, "partitioner");
         try
@@ -904,7 +904,7 @@ final class NodeInspector
      * the authorizer is {@code DseAuthorizer} and {@code dse.yaml} cannot be read.
      */
     @Nullable
-    private Boolean authorizationEnabled()
+    static Boolean authorizationEnabled(NodeLayout layout)
     {
         if (layout.unreadable.containsKey(NodeLayout.CASSANDRA_YAML))
             return null;
@@ -918,7 +918,7 @@ final class NodeInspector
 
     /** The DSEFS keyspace named in {@code dse.yaml} when it is not DSE's default, else null. */
     @Nullable
-    private String dsefsKeyspace()
+    static String dsefsKeyspace(NodeLayout layout)
     {
         String name = getString(layout.dseConf, "dsefs_options", "keyspace_name");
         return name == null || name.equals("dsefs") ? null : name;

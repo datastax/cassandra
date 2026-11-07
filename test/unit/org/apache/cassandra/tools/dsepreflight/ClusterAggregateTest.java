@@ -1215,6 +1215,267 @@ public class ClusterAggregateTest
         assertThat(aggregate(reports, json).exitCode).isEqualTo(DsePreflight.EXIT_READY);
     }
 
+    // ---- reports of DSE 5.1 nodes ----
+
+    @Test
+    public void theReportsOfDse51NodesAreAggregated() throws IOException
+    {
+        Aggregate ready = aggregate(dse51Cluster(3));
+        assertThat(ready.exitCode).as(ready.out).isEqualTo(DsePreflight.EXIT_READY);
+        assertThat(ready.codes("BLOCKING")).isEmpty();
+        assertThat(ready.json.get("reports_read")).isEqualTo(3);
+    }
+
+    /**
+     * A view restricted to rows and the row a failed UNRESTRICT ROWS left are each in the schema of the nodes that ran
+     * the statements only: the aggregate names those nodes, the others' reports holding neither.
+     */
+    @Test
+    public void aViewRestrictedOnOneNodeIsNamedForThatNode() throws IOException
+    {
+        Path reports = dse51Cluster(3);
+        String view = "ks.v (tenant column region)";
+        String row = "the table row ks.v (id 00000000-0000-0000-0000-00000000000a) beside the materialized view ks.v " +
+                     "(id 00000000-0000-0000-0000-00000000000a)";
+        rewrite(reports.resolve("node1.json"), report -> {
+            report.dse51.restrictedViews = List.of(view);
+            report.dse51.viewTableRows = List.of(row);
+            report.findings.add(Finding.blocking("RESTRICTED_VIEW", "a view restricted to rows", "drop it"));
+            report.findings.add(Finding.blocking("VIEW_TABLE_ROW", "a row of system_schema.tables", "report"));
+            report.result = NodeReport.BLOCKED;
+        });
+        rewrite(reports.resolve("node3.json"), report -> {
+            report.dse51.restrictedViews = List.of(view);
+            report.findings.add(Finding.blocking("RESTRICTED_VIEW", "a view restricted to rows", "drop it"));
+            report.result = NodeReport.BLOCKED;
+        });
+        Aggregate aggregate = aggregate(reports);
+        assertThat(aggregate.exitCode).isEqualTo(DsePreflight.EXIT_BLOCKED);
+        assertThat(aggregate.codes("BLOCKING")).containsExactlyInAnyOrder("NODE_BLOCKED", "RESTRICTED_VIEW",
+                                                                          "VIEW_TABLE_ROW");
+        assertThat(aggregate.messages("RESTRICTED_VIEW"))
+        .isEqualTo("materialized views restricted to rows, with the nodes whose schema holds the restriction: " + view +
+                   " on [10.0.0.1, 10.0.0.3]; DSE 5.1 keeps a RESTRICT ROWS on a view in the schema of the node that " +
+                   "ran it only, and a node in DSE_5_1 mode refuses to start while its schema holds one");
+        assertThat(remedy(aggregate, "RESTRICTED_VIEW"))
+        .isEqualTo("on DSE 5.1, before the first node is upgraded: give the users who read these views through " +
+                   "rows/ grants the access they need without row-level access control where DSE enforces it (the " +
+                   "ROW_LEVEL_ACCESS finding of a node's settings says so), then REVOKE the rows/ grants on each " +
+                   "view, drop it and create it again without the restriction (" +
+                   SchemaInspector.VIEW_REMEDY_NOT_VALIDATED + "); do not drop a view beside which VIEW_TABLE_ROW " +
+                   "names a row before the upgrade owner has chosen the repair of that row; " +
+                   SchemaInspector.NEVER_UNRESTRICT_VIEW);
+        assertThat(aggregate.messages("VIEW_TABLE_ROW")).contains(row + " on [10.0.0.1]; DSE 5.1.51 leaves such a row");
+        assertThat(remedy(aggregate, "VIEW_TABLE_ROW"))
+        .startsWith("no repair is validated yet: upgrade none of these nodes");
+    }
+
+    @Test
+    public void otherReleasesAndDse6ReportsAreRefused() throws IOException
+    {
+        Path reports = dse51Cluster(3);
+        rewrite(reports.resolve("node3.json"), report -> {
+            report.node.releaseVersion = "3.11.3.5150";
+            report.node.dseVersion = "5.1.50";
+        });
+        Aggregate release = aggregate(reports);
+        assertThat(release.codes("BLOCKING")).containsExactlyInAnyOrder("DSE_RELEASE", "MIXED_RELEASES");
+        assertThat(release.messages("DSE_RELEASE"))
+        .isEqualTo("DSE 5.1 nodes that do not run DSE 5.1.51, the only DSE 5.1 release upgraded in place: 10.0.0.3 " +
+                   "(release 3.11.3.5150, DSE 5.1.50)");
+        assertThat(remedy(release, "MIXED_RELEASES"))
+        .isEqualTo("bring every DSE 5.1 node to DSE 5.1.51 before the upgrade");
+        assertThat(remedy(release, "DSE_RELEASE")).isEqualTo("upgrade them to DSE 5.1.51 first, then run the tool on " +
+                                                             "them again");
+
+        // a DSE 6 node's report beside those of DSE 5.1 nodes: the DSE 6 texts, and the sources refused
+        Path mixed = dse51Cluster(2);
+        Path dse6 = cluster(1).resolve("node1.json");
+        rewrite(dse6, report -> {
+            report.node.hostId = hostId(3);
+            report.node.broadcastAddress = address(3);
+            report.node.listenAddress = address(3);
+            report.peers.add(peer(address(1), hostId(1), null));
+            report.peers.add(peer(address(2), hostId(2), null));
+        });
+        Files.copy(dse6, mixed.resolve("node3.json"));
+        Aggregate sources = aggregate(mixed);
+        assertThat(sources.codes("BLOCKING")).containsExactlyInAnyOrder("MIXED_SOURCES", "MIXED_RELEASES");
+        assertThat(sources.messages("MIXED_SOURCES"))
+        .isEqualTo("reports of DSE 5.1 nodes and of DSE 6 nodes in one aggregate: DSE 5.1 node1.json, node2.json; " +
+                   "DSE 6 node3.json; an upgrade starts from one release, and a cluster that runs both is not " +
+                   "upgraded in place");
+        assertThat(remedy(sources, "MIXED_SOURCES"))
+        .isEqualTo("aggregate the reports of one cluster at a time; if these nodes are one cluster, bring every node " +
+                   "to one release supported for the upgrade first (DSE 5.1.51, or DSE 6.8 or 6.9)");
+        assertThat(remedy(sources, "MIXED_RELEASES")).isEqualTo("bring every DSE node to the same release (6.9 " +
+                                                                "preferred) before the upgrade");
+    }
+
+    /** The texts of an aggregate of DSE 5.1 reports name the tables DSE 5.1 keeps the identity of its nodes in. */
+    @Test
+    public void theTextsOfDse51ReportsNameSystemLocalAndSystemPeers() throws IOException
+    {
+        Path reports = dse51Cluster(3);
+        rewrite(reports.resolve("node2.json"), report -> {
+            report.node.schemaVersion = "11111111-1111-1111-1111-111111111111";
+            report.node.dataCenter = "dc2";
+        });
+        rewrite(reports.resolve("node1.json"), report -> report.peers.forEach(p -> p.dataCenter = "dc1"));
+        // node 3, listed by the others, has no report
+        Files.delete(reports.resolve("node3.json"));
+        Path withThird = dse51Cluster(3);
+        Aggregate aggregate = aggregate(reports);
+        assertThat(aggregate.messages("SCHEMA_DISAGREEMENT"))
+        .startsWith("the nodes record different schema versions in system.local: ");
+        assertThat(remedy(aggregate, "MISSING_REPORT"))
+        .endsWith("an entry of a node that has left the cluster is stale: check nodetool status on the nodes listing " +
+                  "it, and remove the node from the ring there (nodetool removenode) if it has left; if nodetool " +
+                  "status does not list it, report to the upgrade owner");
+        assertThat(aggregate.messages("TOPOLOGY_MISMATCH"))
+        .contains("10.0.0.2 (data center dc2, rack (unknown) in its system.local; data center dc1, rack (unknown) in " +
+                  "the system.peers of [10.0.0.1])");
+        assertThat(remedy(aggregate, "TOPOLOGY_MISMATCH")).endsWith("upgraded node takes them from DSE's " +
+                                                                    "system.peers until gossip gives them)");
+
+        rewrite(withThird.resolve("node3.json"), report -> {
+            report.peers.clear();
+            report.upgradePath.settings.put("server_encryption_options.internode_encryption", "all");
+        });
+        Aggregate alone = aggregate(withThird);
+        assertThat(alone.messages("NO_PEERS_RECORDED"))
+        .startsWith("nodes whose system.peers records no other node, although other nodes of the cluster have " +
+                    "reports: 10.0.0.3 (no peer recorded)");
+        assertThat(remedy(alone, "NO_PEERS_RECORDED"))
+        .isEqualTo("on each of them, check that nodetool status shows its peers and run nodetool flush system, then " +
+                   "run the tool on it again and aggregate again; if system.peers still records no peer, report to " +
+                   "the upgrade owner");
+        assertThat(remedy(alone, "INTERNODE_TLS"))
+        .isEqualTo("give every DSE 5.1 node the same internode_encryption and ssl_storage_port before the upgrade: " +
+                   "HCD 2.0 dials every connection it encrypts to a DSE 5.1 node on the ssl_storage_port of its own " +
+                   "cassandra.yaml, and listens there for those of DSE 5.1, which dials the ssl_storage_port of the " +
+                   "DSE 5.1 node's own cassandra.yaml; and " + NodeInspector.CHECK_SSL_STORAGE_PORT_OPTION);
+    }
+
+    /**
+     * A ready report of a DSE 5.1 node without the views its schema restricts or the rows it holds (one of another
+     * build, or edited) cannot be read: the cluster-wide check of views would take it for none. A blocked report
+     * without a release (its system.local unread) is named by NODE_BLOCKED, not by DSE_RELEASE.
+     */
+    @Test
+    public void incompleteReportsOfDse51NodesAreNotTakenForNone() throws IOException
+    {
+        Path reports = dse51Cluster(3);
+        editJson(reports.resolve("node2.json"), json -> {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> dse51 = (Map<String, Object>) json.get("dse51");
+            dse51.remove("restricted_views");
+        });
+        rewrite(reports.resolve("node3.json"), report -> {
+            report.node.releaseVersion = null;
+            report.node.dseVersion = null;
+            report.dse51.restrictedViews = null;
+            report.dse51.viewTableRows = null;
+            report.result = NodeReport.BLOCKED;
+            report.findings.add(Finding.blocking("NOT_A_DSE_NODE", "system.local cannot be read", "point the tool"));
+        });
+        // a blocked report with the DSE version only: DSE_RELEASE names what it has
+        rewrite(reports.resolve("node1.json"), report -> {
+            report.node.releaseVersion = null;
+            report.node.dseVersion = "5.1.50";
+            report.result = NodeReport.BLOCKED;
+            report.findings.add(Finding.blocking("DSE_RELEASE", "DSE 5.1.50", "upgrade to 5.1.51"));
+        });
+        Aggregate aggregate = aggregate(reports);
+        // node 2, listed by the others, has no report that can be read
+        assertThat(aggregate.codes("BLOCKING")).containsExactlyInAnyOrder("UNREADABLE_REPORT", "NODE_BLOCKED",
+                                                                          "MISSING_REPORT", "DSE_RELEASE");
+        assertThat(aggregate.messages("UNREADABLE_REPORT"))
+        .contains("node2.json (ready, but its dse51 section lacks restricted_views or view_table_rows)");
+        assertThat(aggregate.messages("DSE_RELEASE")).endsWith(": 10.0.0.1 (DSE 5.1.50)");
+        assertThat(aggregate.messages("VIEWS_NOT_KNOWN"))
+        .isEqualTo("DSE 5.1 nodes whose views restricted to rows and leftover rows are not known (their reports are " +
+                   "blocked without them: the schema or system_schema.views could not be read, or the inspection " +
+                   "of the schema failed): 10.0.0.3; RESTRICTED_VIEW and VIEW_TABLE_ROW name only the other nodes " +
+                   "until they are inspected again");
+    }
+
+    /** In the mixed phase the remedy of a stale entry of system.peers is no topology change. */
+    @Test
+    public void aMissingReportInTheMixedPhaseIsLeftToTheUpgradeOwner() throws IOException
+    {
+        Path reports = dse51Cluster(2);
+        for (int i = 1; i <= 2; i++)
+            rewrite(reports.resolve("node" + i + ".json"), report -> {
+                NodeReport.Peer upgraded = peer(address(9), hostId(9), null);
+                upgraded.upgraded = true;
+                report.peers.add(upgraded);
+                NodeReport.Peer stale = peer(address(8), hostId(8), null);
+                stale.releaseVersion = Dse51NodeInspector.RELEASE_VERSION;
+                report.peers.add(stale);
+            });
+        Aggregate aggregate = aggregate(reports);
+        assertThat(aggregate.codes("BLOCKING")).containsExactly("MISSING_REPORT");
+        assertThat(remedy(aggregate, "MISSING_REPORT"))
+        .endsWith("check nodetool status on the nodes listing it, and report to the upgrade owner if it has left: " +
+                  "the upgrade has started (UPGRADED_PEERS), and no topology change is made in the mixed phase");
+    }
+
+    /** DSE checks permissions on the DSE 5.1 nodes, but no report read a grant: the warning names DSE 5.1's ones. */
+    @Test
+    public void noGrantReadOnDse51NodesIsWarnedOf() throws IOException
+    {
+        Path reports = dse51Cluster(3);
+        for (int i = 1; i <= 3; i++)
+            rewrite(reports.resolve("node" + i + ".json"), report -> {
+                report.accessControls.authorizationEnabled = true;
+                report.accessControls.rolePermissionsRows = 0;
+            });
+        Aggregate aggregate = aggregate(reports);
+        assertThat(aggregate.exitCode).as(aggregate.out).isEqualTo(DsePreflight.EXIT_READY);
+        assertThat(aggregate.messages("NO_GRANTS_READ"))
+        .isEqualTo("DSE checks permissions, but no report read a row of system_auth.role_permissions: the checks of " +
+                   "the DSE access controls (row-level access control, proxy grants) had nothing to check on any node");
+        assertThat(remedy(aggregate, "NO_GRANTS_READ"))
+        .isEqualTo("check that every node was inspected with all its data directories, after nodetool flush " +
+                   "system_auth");
+    }
+
+    /** The remedy of the finding {@code code} of an aggregate, of which there must be one. */
+    private static String remedy(Aggregate aggregate, String code)
+    {
+        List<Object> remedies = aggregate.findings().stream()
+                                         .filter(f -> code.equals(f.get("code")))
+                                         .map(f -> f.get("remedy"))
+                                         .collect(Collectors.toList());
+        assertThat(remedies).as("findings %s", code).hasSize(1);
+        return (String) remedies.get(0);
+    }
+
+    /**
+     * The reports of a ready cluster of {@code size} DSE 5.1.51 nodes, as {@link #cluster} builds those of DSE 6 nodes,
+     * with the section of a DSE 5.1 node: no view restricted to rows and no row left by a failed UNRESTRICT ROWS.
+     */
+    private Path dse51Cluster(int size) throws IOException
+    {
+        Path reports = cluster(size);
+        for (int i = 1; i <= size; i++)
+            rewrite(reports.resolve("node" + i + ".json"), report -> {
+                report.dse51 = new NodeReport.Dse51();
+                report.dse51.source = Dse51NodeInspector.SOURCE;
+                report.dse51.restrictedViews = List.of();
+                report.dse51.viewTableRows = List.of();
+                report.node.releaseVersion = Dse51NodeInspector.RELEASE_VERSION;
+                report.node.dseVersion = Dse51NodeInspector.DSE_VERSION;
+                for (NodeReport.Peer peer : report.peers)
+                {
+                    peer.releaseVersion = Dse51NodeInspector.RELEASE_VERSION;
+                    peer.dseVersion = Dse51NodeInspector.DSE_VERSION;
+                }
+            });
+        return reports;
+    }
+
     // ---- helpers ----
 
     /** The reports of {@code size} nodes all in data center dc1 and rack r1, recording each other so. */
