@@ -173,22 +173,30 @@ final class DseTableReader
     static TableRows readBig(List<File> dataDirectories, String keyspace, String table, List<String> partitionKey,
                              List<String> clustering) throws IOException
     {
+        return readBig(dataDirectories, null, keyspace, table, partitionKey, clustering);
+    }
+
+    /**
+     * Reads every live row of {@code keyspace.table} from the data directories of a DSE 5.1 node, or, when
+     * {@code snapshot} is not null, from the snapshot of that name of the table, as
+     * {@link #read(List, String, String, String, List, List)} chooses them, from scratch copies as
+     * {@link #readBig(List, String, String, List, List)} reads them.
+     *
+     * @see #readBig(List, String, String, List, List)
+     */
+    static TableRows readBig(List<File> dataDirectories, @Nullable String snapshot, String keyspace, String table,
+                             List<String> partitionKey, List<String> clustering) throws IOException
+    {
         List<Descriptor> descriptors = new ArrayList<>();
-        boolean found = descriptors(dataDirectories, null, keyspace, table, descriptors);
+        boolean found = descriptors(dataDirectories, snapshot, keyspace, table, descriptors);
         List<String> names = new ArrayList<>(descriptors.size());
         for (Descriptor descriptor : descriptors)
             names.add(descriptor.baseFile().toString());
         if (descriptors.isEmpty())
             return new TableRows(List.of(), names, found);
         for (Descriptor descriptor : descriptors)
-        {
-            if (!BigFormat.is(descriptor.version.format))
-                throw new IOException(descriptor.baseFile() + " is in the " + descriptor.version.format.name() +
-                                      " format, which DSE 5.1 does not write: this tool reads only the big format on " +
-                                      "a DSE 5.1 node");
-        }
-        Path scratch = scratchParent == null ? Files.createTempDirectory(SCRATCH_PREFIX)
-                                             : Files.createTempDirectory(scratchParent, SCRATCH_PREFIX);
+            checkBigFormat(descriptor);
+        Path scratch = scratchDirectory();
         try
         {
             List<Descriptor> copies = new ArrayList<>(descriptors.size());
@@ -203,6 +211,47 @@ final class DseTableReader
         {
             deleteScratch(scratch);
         }
+    }
+
+    /**
+     * Passes every live row of one big sstable of a DSE 5.1 node on its own, as {@link #readSSTable} passes those of a
+     * trie sstable, read from a scratch copy as {@link #readBig(List, String, String, List, List)} reads them.
+     *
+     * @throws IOException when the sstable cannot be read, is not in the big format, or the scratch copy cannot be made
+     * @throws RuntimeException when the sstable cannot be decoded
+     */
+    static void readBigSSTable(Descriptor descriptor, List<String> partitionKey, List<String> clustering,
+                               BiConsumer<UntypedResultSet.Row, Row> consumer) throws IOException
+    {
+        checkBigFormat(descriptor);
+        Path scratch = scratchDirectory();
+        try
+        {
+            Descriptor copy = scratchCopy(descriptor, scratch.resolve("0"));
+            TableMetadata metadata = metadataFromHeaders(descriptor.ksname, descriptor.cfname, List.of(copy),
+                                                         partitionKey, clustering);
+            rows(List.of(copy), metadata, consumer);
+        }
+        finally
+        {
+            deleteScratch(scratch);
+        }
+    }
+
+    /** Refuses an sstable that is not in the big format, before anything of it is copied or opened. */
+    private static void checkBigFormat(Descriptor descriptor) throws IOException
+    {
+        if (!BigFormat.is(descriptor.version.format))
+            throw new IOException(descriptor.baseFile() + " is in the " + descriptor.version.format.name() +
+                                  " format, which DSE 5.1 does not write: this tool reads only the big format on " +
+                                  "a DSE 5.1 node");
+    }
+
+    /** A new scratch directory of {@link #readBig}, in {@link #scratchParent} when set. */
+    private static Path scratchDirectory() throws IOException
+    {
+        return scratchParent == null ? Files.createTempDirectory(SCRATCH_PREFIX)
+                                     : Files.createTempDirectory(scratchParent, SCRATCH_PREFIX);
     }
 
     /**

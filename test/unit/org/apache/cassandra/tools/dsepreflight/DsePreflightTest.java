@@ -4699,6 +4699,46 @@ public class DsePreflightTest
         assertThat(json).doesNotExist();
     }
 
+    /**
+     * The rollback check of a node going back to DSE 5.1 takes the options of its inputs and --json only, refuses the
+     * others, so that none is silently ignored, and is named in the help with its exit codes.
+     */
+    @Test
+    public void theRollbackCheckTakesOnlyItsOptions() throws IOException
+    {
+        Path json = temporaryFolder.getRoot().toPath().resolve("unused.json");
+        List<String> refused = new ArrayList<>();
+        for (Option option : DsePreflight.options().getOptions())
+        {
+            String name = option.getLongOpt();
+            if (DsePreflight.ROLLBACK_CHECK_OPTIONS.contains(name))
+                continue;
+            refused.add(name);
+            Run misuse = run(json, "--rollback-check", option.hasArg() ? "--" + name + "=x" : "--" + name);
+            assertThat(misuse.exitCode).as(name).isEqualTo(DsePreflight.EXIT_ERROR);
+            // the Paxos rollback mode and the aggregate mode refuse it first
+            String refusal = name.equals("paxos-rollback") ? "--rollback-check does not apply to --paxos-rollback"
+                             : name.equals("aggregate") ? "--rollback-check does not apply to --aggregate"
+                             : "--" + name + " does not apply to --rollback-check";
+            assertThat(misuse.err).as(name).startsWith(refusal);
+        }
+        assertThat(refused).contains("dse-yaml", "rackdc", "jvm-options", "nodetool", "cql", "dc")
+                           .doesNotContain("snapshot");
+        // --snapshot, which both rollback modes take, is refused alone with both named
+        Run snapshotAlone = run(json, "--snapshot", "pre-hcd-x");
+        assertThat(snapshotAlone.exitCode).isEqualTo(DsePreflight.EXIT_ERROR);
+        assertThat(snapshotAlone.err).startsWith("--snapshot applies only to --paxos-rollback and --rollback-check");
+        Run help = run(json, "--help");
+        assertThat(help.exitCode).isEqualTo(DsePreflight.EXIT_READY);
+        assertThat(help.out.lines()).anyMatch(l -> l.matches("^ +--rollback-check .*"));
+        assertThat(help.out.replaceAll("\\s+", " "))
+        .contains("dsepreflight --rollback-check [options] check a node to roll back to DSE 5.1")
+        .contains("With --rollback-check, checks a node of HCD 2.0 to roll back to DSE 5.1.")
+        .contains("With --rollback-check: 0 the node can go back to DSE 5.1 (warnings allowed), 1 blocking findings, " +
+                  "2 usage or inspection error.");
+        assertThat(json).doesNotExist();
+    }
+
     // ---- helpers ----
 
     private static void deleteTree(Path root) throws IOException

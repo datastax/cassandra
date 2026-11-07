@@ -1237,14 +1237,15 @@ public class Dse6NonCoreTracesTest extends CQLTester
     }
 
     /**
-     * What the refusals of the workloads DSE 5.1 stored say of the record of the upgrade: the rollback must delete it
-     * with the marker.
+     * What the refusals of the workloads DSE 5.1 stored say of the record of the upgrade: the rollback must delete it,
+     * the marker kept.
      */
     private static String rollbackDeletes()
     {
-        return "The rollback must delete " + DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1) + " and " +
-               Dse51SystemTables.recordPath() + ", which hold what this node read of system.local and system.peers " +
-               "at its first start in DSE_5_1 mode, or the next start reads the same workloads again";
+        return "The rollback must delete " + Dse51SystemTables.recordPath() + ", which holds what this node read of " +
+               "system.local and system.peers at its first start in DSE_5_1 mode, or the next start, with " +
+               DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1) + " kept as the rollback keeps it, reads " +
+               "the same workloads again";
     }
 
     /** The gossip states of the Search and Graph node of the fixtures: its DSE state and its {@code NET_VERSION}. */
