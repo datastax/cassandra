@@ -18,6 +18,11 @@ package org.apache.cassandra.tools.dsepreflight;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,6 +33,8 @@ import java.util.regex.Pattern;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.UntypedResultSet;
@@ -49,6 +56,7 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.StatsComponent;
 import org.apache.cassandra.io.sstable.format.TOCComponent;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.File;
@@ -61,7 +69,8 @@ import org.apache.cassandra.utils.FBUtilities;
  * Reads the rows of one table from a node's sstables, offline and read-only: those of the data directories or of a
  * snapshot of the table, or one sstable on its own ({@link #readSSTable}), written by DSE or by HCD 2.0. Only the
  * sstables of committed transactions are read ({@link LifecycleTransaction#getFiles}), only in the trie format, and they
- * are opened without validation, which neither rebuilds nor saves any component. The table is described by the
+ * are opened without validation, which neither rebuilds nor saves any component; the big sstables of a DSE 5.1 node
+ * are read from a scratch copy instead ({@link #readBig}). The table is described by the
  * serialization headers of its sstables (the union of their columns, with the types they were written with), so that a
  * column DSE has and this software does not, such as the {@code restricted} set of DSE's
  * {@code system_auth.role_permissions}, is read too; the primary key columns are named by the caller. The sstables read
@@ -70,8 +79,25 @@ import org.apache.cassandra.utils.FBUtilities;
  */
 final class DseTableReader
 {
+    private static final Logger logger = LoggerFactory.getLogger(DseTableReader.class);
+
     /** The table id at the end of the name of a table directory. */
     private static final Pattern TABLE_ID = Pattern.compile("[0-9a-f]{32}");
+
+    /** The prefix of the name of a scratch directory of {@link #readBig}. */
+    static final String SCRATCH_PREFIX = "dsepreflight-";
+    /** Where {@link #readBig} makes its scratch directories: the temporary directory when null; set by tests. */
+    @VisibleForTesting
+    @Nullable
+    static volatile Path scratchParent;
+
+    /** The components a scratch copy of a big sstable copies; {@link #LINKED} are linked instead. */
+    private static final List<Component> COPIED = List.of(Components.TOC, Components.STATS,
+                                                          BigFormat.Components.SUMMARY, Components.FILTER,
+                                                          Components.COMPRESSION_INFO, Components.DIGEST,
+                                                          Components.CRC);
+    /** The components a scratch copy of a big sstable links symbolically: the large ones, never written on opening. */
+    private static final List<Component> LINKED = List.of(Components.DATA, BigFormat.Components.PRIMARY_INDEX);
 
     private DseTableReader()
     {
@@ -130,6 +156,113 @@ final class DseTableReader
         List<UntypedResultSet.Row> rows = new ArrayList<>();
         rows(descriptors, metadata, (row, cells) -> rows.add(row));
         return new TableRows(rows, names, found);
+    }
+
+    /**
+     * Reads every live row of {@code keyspace.table} from the data directories of a DSE 5.1 node, whose sstables are in
+     * the big format, as {@link #read(List, String, String, List, List)} reads those of the trie format. Opening a
+     * big sstable can delete its {@code Summary.db} and write its {@code TOC.txt}, even offline, so each one is opened
+     * from a scratch copy in a new temporary directory: its small components copied, its {@code Data.db} and
+     * {@code Index.db} linked symbolically, never written; the copy is deleted once the rows are read. The node's files
+     * are only read.
+     *
+     * @throws IOException when a directory or an sstable cannot be read, an sstable is not in the big format, or the
+     *                     scratch copy cannot be made
+     * @throws RuntimeException when an sstable cannot be decoded
+     */
+    static TableRows readBig(List<File> dataDirectories, String keyspace, String table, List<String> partitionKey,
+                             List<String> clustering) throws IOException
+    {
+        List<Descriptor> descriptors = new ArrayList<>();
+        boolean found = descriptors(dataDirectories, null, keyspace, table, descriptors);
+        List<String> names = new ArrayList<>(descriptors.size());
+        for (Descriptor descriptor : descriptors)
+            names.add(descriptor.baseFile().toString());
+        if (descriptors.isEmpty())
+            return new TableRows(List.of(), names, found);
+        for (Descriptor descriptor : descriptors)
+        {
+            if (!BigFormat.is(descriptor.version.format))
+                throw new IOException(descriptor.baseFile() + " is in the " + descriptor.version.format.name() +
+                                      " format, which DSE 5.1 does not write: this tool reads only the big format on " +
+                                      "a DSE 5.1 node");
+        }
+        Path scratch = scratchParent == null ? Files.createTempDirectory(SCRATCH_PREFIX)
+                                             : Files.createTempDirectory(scratchParent, SCRATCH_PREFIX);
+        try
+        {
+            List<Descriptor> copies = new ArrayList<>(descriptors.size());
+            for (int i = 0; i < descriptors.size(); i++)
+                copies.add(scratchCopy(descriptors.get(i), scratch.resolve(Integer.toString(i))));
+            TableMetadata metadata = metadataFromHeaders(keyspace, table, copies, partitionKey, clustering);
+            List<UntypedResultSet.Row> rows = new ArrayList<>();
+            rows(copies, metadata, (row, cells) -> rows.add(row));
+            return new TableRows(rows, names, found);
+        }
+        finally
+        {
+            deleteScratch(scratch);
+        }
+    }
+
+    /**
+     * Deletes a scratch directory of {@link #readBig}: its copies, and its links themselves (a link is deleted, never
+     * followed, so the node's files it points to stay). What cannot be deleted stays in the temporary directory, which
+     * holds no file of the node, and is logged at WARN; a run killed while it reads leaves its scratch directory too.
+     */
+    private static void deleteScratch(Path scratch)
+    {
+        try
+        {
+            Files.walkFileTree(scratch, new SimpleFileVisitor<>()
+            {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attributes) throws IOException
+                {
+                    Files.delete(file);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path directory, IOException e) throws IOException
+                {
+                    Files.delete(directory);
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+        }
+        catch (IOException | RuntimeException e)
+        {
+            // what is left holds copies of components of the node's system tables: said, for the operator to delete
+            logger.warn("Could not delete the scratch copy {} of a DSE 5.1 sstable ({}); delete it by hand", scratch,
+                        e.toString());
+        }
+    }
+
+    /**
+     * A copy of the big sstable {@code descriptor} in {@code directory} (created), named as the original, its
+     * {@link #COPIED} components copied and its {@link #LINKED} ones linked to the original files; the components it
+     * does not have are left out.
+     */
+    private static Descriptor scratchCopy(Descriptor descriptor, Path directory) throws IOException
+    {
+        Path tableDirectory = Files.createDirectories(directory.resolve(descriptor.ksname)
+                                                               .resolve(descriptor.directory.name()));
+        Descriptor copy = new Descriptor(descriptor.version, new File(tableDirectory), descriptor.ksname,
+                                         descriptor.cfname, descriptor.id);
+        for (Component component : COPIED)
+        {
+            Path source = descriptor.fileFor(component).toPath();
+            if (Files.exists(source))
+                Files.copy(source, copy.fileFor(component).toPath());
+        }
+        for (Component component : LINKED)
+        {
+            Path source = descriptor.fileFor(component).toPath();
+            if (Files.exists(source))
+                Files.createSymbolicLink(copy.fileFor(component).toPath(), source.toAbsolutePath());
+        }
+        return copy;
     }
 
     /**

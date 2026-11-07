@@ -44,7 +44,10 @@ import org.apache.cassandra.io.util.File;
  * The files and directories of a DSE node the preflight inspection reads, resolved from the options, DSE's
  * {@code cassandra.yaml} and DSE's defaults, and the configuration files read. DSE's {@code cassandra.yaml} and
  * {@code dse.yaml} hold keys this software does not have, so they are read as plain YAML maps, never through this
- * software's configuration loader.
+ * software's configuration loader. DSE 5.1 keeps its files in the same places as DSE 6 ({@code /etc/dse/cassandra} and
+ * {@code /etc/dse/dse.yaml} for a package install, {@code resources/cassandra/conf} and {@code resources/dse/conf} of
+ * the installation for a tarball), and its JVM options in one {@code jvm.options} next to {@code cassandra.yaml}, which
+ * only the inspection of a DSE 5.1 node reads ({@link #readJvmOptions}); DSE 5.1 has no metadata directory.
  */
 final class NodeLayout
 {
@@ -58,6 +61,8 @@ final class NodeLayout
     static final String RACKDC = "cassandra-rackdc.properties";
     static final String CASSANDRA_YAML = "cassandra.yaml";
     static final String DSE_YAML = "dse.yaml";
+    /** DSE 5.1's file of JVM options, next to its {@code cassandra.yaml}. */
+    static final String JVM_OPTIONS = "jvm.options";
 
     /** What the operator gave on the command line; null where nothing was given. */
     static final class Options
@@ -67,6 +72,7 @@ final class NodeLayout
         Path cassandraYaml;
         Path dseYaml;
         Path rackdc;
+        Path jvmOptions;
         List<Path> dataDirectories = new ArrayList<>();
         Path metadataDirectory;
         Path commitLogDirectory;
@@ -80,6 +86,8 @@ final class NodeLayout
     final Path cassandraYaml;
     final Path dseYaml;
     final Path rackdc;
+    /** DSE 5.1's {@code jvm.options}, read only by the inspection of a DSE 5.1 node ({@link #readJvmOptions}) */
+    final Path jvmOptions;
     /** the YAML of {@code cassandra.yaml}; empty when the file is empty or cannot be read (see {@link #unreadable}) */
     final Map<String, Object> cassandraConf;
     /** the YAML of {@code dse.yaml}; empty when the file is empty or cannot be read (see {@link #unreadable}) */
@@ -103,6 +111,7 @@ final class NodeLayout
                                                                                                               : dseHome.resolve("resources/cassandra/conf");
         cassandraYaml = options.cassandraYaml != null ? options.cassandraYaml : confDir.resolve("cassandra.yaml");
         rackdc = options.rackdc != null ? options.rackdc : cassandraYaml.resolveSibling("cassandra-rackdc.properties");
+        jvmOptions = options.jvmOptions != null ? options.jvmOptions : cassandraYaml.resolveSibling(JVM_OPTIONS);
         dseYaml = options.dseYaml != null ? options.dseYaml
                                           : Files.isRegularFile(PACKAGE_DSE_YAML) || dseHome == null ? PACKAGE_DSE_YAML
                                                                                                      : dseHome.resolve("resources/dse/conf/dse.yaml");
@@ -226,6 +235,27 @@ final class NodeLayout
                 return trimmed.substring("DSVersion=".length()).trim();
         }
         throw new IOException(file + " has no DSVersion= line");
+    }
+
+    /**
+     * The options of {@link #jvmOptions}, as the {@code cassandra-env.sh} of Apache Cassandra 3.11 reads them
+     * ({@code for opt in `grep "^-" $JVM_OPTS_FILE`}): the lines that start with {@code -} in their first column,
+     * split at whitespace. That DSE 5.1.51's script, which reads the same file, has the same loop is not recorded by
+     * the answers of the collection.
+     *
+     * @throws IOException when the file cannot be read
+     */
+    List<String> readJvmOptions() throws IOException
+    {
+        List<String> options = new ArrayList<>();
+        for (String line : Files.readAllLines(jvmOptions, StandardCharsets.UTF_8))
+        {
+            if (!line.startsWith("-"))
+                continue;
+            for (String option : line.trim().split("\\s+"))
+                options.add(option);
+        }
+        return options;
     }
 
     /** A YAML value as a list of strings: a list, or a comma-separated string; empty when absent. */
