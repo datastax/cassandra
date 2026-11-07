@@ -162,6 +162,7 @@ final class ClusterAggregate
         List<String> skippedPaxos = new ArrayList<>();
         List<String> notFiles = new ArrayList<>();
         List<String> stale = new ArrayList<>();
+        List<String> dse51Reports = new ArrayList<>();
         try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "*.json"))
         {
             for (Path file : files)
@@ -214,6 +215,11 @@ final class ClusterAggregate
                         unreadable.add(name + " (" + problem + ')');
                         continue;
                     }
+                    if (report.dse51 != null)
+                    {
+                        dse51Reports.add(name);
+                        continue;
+                    }
                     Instant generatedAt = Instant.parse(report.generatedAt);
                     if (generatedAt.isBefore(now.minus(MAX_REPORT_AGE)) || generatedAt.isAfter(now.plus(MAX_CLOCK_SKEW)))
                         stale.add(name + " (written at " + report.generatedAt + ')');
@@ -239,7 +245,12 @@ final class ClusterAggregate
             findings.add(blocking("UNREADABLE_REPORT", "reports that cannot be read: " + list(unreadable),
                                   "run the tool again on those nodes with --json, with the same release of HCD 2.0, and remove from the " +
                                   "directory any file that is not a node report of this tool"));
-        if (reports.isEmpty())
+        if (!dse51Reports.isEmpty())
+            findings.add(blocking("DSE51_REPORT",
+                                  "reports of DSE 5.1 nodes, which this release of the tool does not aggregate: " +
+                                  list(dse51Reports),
+                                  "check the report of each DSE 5.1 node on its own (its result and its findings)"));
+        if (reports.isEmpty() && dse51Reports.isEmpty())
             findings.add(blocking("NO_REPORT", "no report in " + directory, "collect the --json report of every DSE node into one directory"));
         if (!stale.isEmpty())
             findings.add(blocking("STALE_REPORT", "reports written more than " + MAX_REPORT_AGE.toHours() + " hours before this aggregate, or " +

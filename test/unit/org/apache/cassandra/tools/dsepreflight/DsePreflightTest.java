@@ -1062,6 +1062,65 @@ public class DsePreflightTest
                   "Replication of system_auth: not checked (the schema could not be read, or its inspection failed)");
     }
 
+    // ---- the source release ----
+
+    /** The layout the tool reads with --dse-home, --conf-dir, --dse-yaml (its dse.yaml) and --metadata-dir. */
+    private static NodeLayout layoutOf(Path dseHome, Path conf, Path metadata)
+    {
+        NodeLayout.Options options = new NodeLayout.Options();
+        options.dseHome = dseHome;
+        options.confDir = conf;
+        options.dseYaml = conf.resolve("dse.yaml");
+        options.metadataDirectory = metadata;
+        return new NodeLayout(options);
+    }
+
+    /**
+     * A DSE 6 node (its nodes/local) is inspected as before; a DSE 5.1 node, told by its ds_version.txt, or without one
+     * by its system.local in big 3.x sstables, by the inspection of DSE 5.1, whose report has its own section.
+     */
+    @Test
+    public void theInspectionIsChosenFromTheReleaseOfTheNode() throws IOException
+    {
+        DseNodeFixture dse6 = node();
+        assertThat(DsePreflight.isDse51Node(layoutOf(dse6.dseHome, dse6.conf, dse6.metadata))).isFalse();
+        Run run = assertReady(run(dse6));
+        assertThat(run.report.dse51).isNull();
+        assertThat(run.out).startsWith("DSE 6 preflight inspection");
+        // the JVM options of DSE 5.1 do not apply to a DSE 6 node
+        Run jvmOptions = run(dse6, "--jvm-options", dse6.conf.resolve("jvm.options").toString());
+        assertThat(jvmOptions.exitCode).isEqualTo(DsePreflight.EXIT_ERROR);
+        assertThat(jvmOptions.err).contains("--jvm-options applies to DSE 5.1 nodes only, and this node is inspected " +
+                                            "as a DSE 6 node");
+
+        Dse51NodeFixture dse51 = Dse51NodeFixture.create(temporaryFolder.newFolder().toPath());
+        assertThat(DsePreflight.isDse51Node(layoutOf(dse51.dseHome, dse51.conf, dse51.metadata))).isTrue();
+        Run report = run(temporaryFolder.getRoot().toPath().resolve("report-dse51.json"), dse51.args());
+        assertThat(report.report.dse51.source).isEqualTo("DSE 5.1");
+        assertThat(report.out).startsWith("DSE 5.1 preflight inspection");
+
+        // without ds_version.txt, system.local in big me sstables tells a DSE 5.1 node
+        Files.delete(dse51.dseHome.resolve("ds_version.txt"));
+        assertThat(DsePreflight.isDse51Node(layoutOf(dse51.dseHome, dse51.conf, dse51.metadata))).isTrue();
+        // a release before DSE 6 is inspected as DSE 5.1, whose inspection refuses it
+        Files.write(dse51.dseHome.resolve("ds_version.txt"), "DSVersion=5.0.15\n".getBytes(StandardCharsets.UTF_8));
+        assertThat(DsePreflight.isDse51Node(layoutOf(dse51.dseHome, dse51.conf, dse51.metadata))).isTrue();
+        Run older = run(temporaryFolder.getRoot().toPath().resolve("report-dse50.json"), dse51.args());
+        assertThat(older.report.dse51.source).isEqualTo("DSE 5.1");
+        assertThat(older.messages("INSTALLED_RELEASE_MISMATCH"))
+        .contains("is 5.0.15 (ds_version.txt) but this node last ran DSE 5.1.51 (system.local)");
+        assertThat(older.findings("INSTALLED_RELEASE_MISMATCH")).extracting(f -> f.severity)
+                                                                .containsExactly(Finding.Severity.BLOCKING);
+        // a ds_version.txt of DSE 6 decides, and so do DSE 6's nodes files
+        Files.write(dse51.dseHome.resolve("ds_version.txt"),
+                    "DSVersion=6.8.65-4a7b9eb\n".getBytes(StandardCharsets.UTF_8));
+        assertThat(DsePreflight.isDse51Node(layoutOf(dse51.dseHome, dse51.conf, dse51.metadata))).isFalse();
+        Files.delete(dse51.dseHome.resolve("ds_version.txt"));
+        Files.createDirectories(dse51.metadata.resolve("nodes"));
+        Files.write(dse51.metadata.resolve("nodes").resolve("local"), new byte[0]);
+        assertThat(DsePreflight.isDse51Node(layoutOf(dse51.dseHome, dse51.conf, dse51.metadata))).isFalse();
+    }
+
     // ---- live state ----
 
     @Test
@@ -4629,8 +4688,11 @@ public class DsePreflightTest
         assertThat(refused).contains("dse-home", "data-dir", "nodetool", "nodetool-timeout");
         Run help = run(json, "--help");
         assertThat(help.exitCode).isEqualTo(DsePreflight.EXIT_READY);
-        assertThat(help.out).contains("--aggregate").contains("With --aggregate, checks the JSON reports of the")
-                            .contains("--nodetool").contains("Exit codes: 0 ready (warnings allowed), 1 blocking findings or cluster not ready");
+        assertThat(help.out).contains("--aggregate").contains("--nodetool").contains("--jvm-options");
+        assertThat(help.out.replaceAll("\\s+", " "))
+        .contains("Inspects a DSE 6.8/6.9 or DSE 5.1.51 node, read-only")
+        .contains("With --aggregate, checks the JSON reports of the")
+        .contains("Exit codes: 0 ready (warnings allowed), 1 blocking findings or cluster not ready");
         // the lines of the Paxos rollback mode that the procedure looks for in the help
         assertThat(help.out.lines()).anyMatch(l -> l.matches("^ +--paxos-rollback .*"));
         assertThat(help.out.replaceAll("\\s+", " ")).contains("Only the directory given is read, not its subdirectories");

@@ -128,9 +128,11 @@ public final class Dse51SystemTables
                                                                .map(UTF8Type.instance::decompose)
                                                                .collect(Collectors.toUnmodifiableSet());
 
-    /** The name of the record of the values read at the first start in the mode, in the metadata directory. */
-    @VisibleForTesting
-    static final String RECORD_FILE_NAME = "dse51-system-columns";
+    /**
+     * The name of the record of the values read at the first start in the mode, in the metadata directory; public for
+     * the preflight tool, which reports it.
+     */
+    public static final String RECORD_FILE_NAME = "dse51-system-columns";
 
     @VisibleForTesting
     static final String RECORD_HEADER = "# values of DSE 5.1's columns of system.local and system.peers, " +
@@ -139,9 +141,14 @@ public final class Dse51SystemTables
 
     private static final String ABSENT = "-";
 
-    /** The suffix, followed by a dash and the time in milliseconds, a record that cannot be read is renamed with. */
-    @VisibleForTesting
-    static final String UNREADABLE_SUFFIX = ".unreadable";
+    /**
+     * The suffix, followed by a dash and the time in milliseconds, a record that cannot be read is renamed with; public
+     * for the preflight tool, which reports such copies.
+     */
+    public static final String UNREADABLE_SUFFIX = ".unreadable";
+
+    /** The suffix of the temporary file the record is written to before it is moved in place. */
+    public static final String TEMPORARY_SUFFIX = ".tmp";
 
     /** What {@link #loadOrReadAtStart} found; empty until it runs. */
     private static volatile List<StoredColumns> stored = Collections.emptyList();
@@ -441,7 +448,7 @@ public final class Dse51SystemTables
     public static boolean deleteRecordOfAnEarlierUpgrade()
     {
         Path record = recordPath();
-        Path temporary = record.resolveSibling(record.getFileName() + ".tmp");
+        Path temporary = record.resolveSibling(record.getFileName() + TEMPORARY_SUFFIX);
         try
         {
             Files.deleteIfExists(temporary);
@@ -492,7 +499,7 @@ public final class Dse51SystemTables
                    .append(row.graph == null ? ABSENT : row.graph.toString()).append('\t')
                    .append(workloads.isEmpty() ? ABSENT : String.join(",", workloads)).append('\n');
         }
-        Path temporary = record.resolveSibling(record.getFileName() + ".tmp");
+        Path temporary = record.resolveSibling(record.getFileName() + TEMPORARY_SUFFIX);
         try
         {
             try (FileChannel channel = FileChannel.open(temporary, StandardOpenOption.CREATE, StandardOpenOption.WRITE,

@@ -43,6 +43,13 @@ final class LiveState
      */
     static final List<String> COMMANDS = List.of("version", "status", "describecluster", "nodesyncservice status", "compactionstats",
                                                  "netstats", "listpendinghints", "gossipinfo", "tpstats");
+    /**
+     * The commands run on a DSE 5.1 node, in this order; each is read-only. DSE 5.1 has no NodeSync, names its command
+     * of pending hints {@code listendpointspendinghints}, and still runs Thrift ({@code statusthrift}).
+     */
+    static final List<String> DSE51_COMMANDS = List.of("version", "status", "describecluster", "statusthrift",
+                                                       "compactionstats", "netstats", "listendpointspendinghints",
+                                                       "gossipinfo", "tpstats");
     /** The most output kept of one command. */
     static final int MAX_OUTPUT_BYTES = 256 * 1024;
 
@@ -50,11 +57,12 @@ final class LiveState
     {
     }
 
-    /** Runs every command of {@link #COMMANDS}; the result is keyed by command. */
-    static Map<String, NodeReport.LiveCommand> collect(String nodetool, List<String> extraArguments, long timeoutSeconds)
+    /** Runs every command of {@code commands}, {@link #COMMANDS} or {@link #DSE51_COMMANDS}, keyed by command. */
+    static Map<String, NodeReport.LiveCommand> collect(String nodetool, List<String> extraArguments,
+                                                       long timeoutSeconds, List<String> commands)
     {
         Map<String, NodeReport.LiveCommand> results = new LinkedHashMap<>();
-        for (String command : COMMANDS)
+        for (String command : commands)
             results.put(command, run(nodetool, extraArguments, command, timeoutSeconds));
         return results;
     }

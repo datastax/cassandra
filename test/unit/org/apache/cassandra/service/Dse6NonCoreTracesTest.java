@@ -39,6 +39,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.Dse51SystemTablesRecords;
@@ -878,6 +879,9 @@ public class Dse6NonCoreTracesTest extends CQLTester
                         graphs + ALTER_REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON " +
                         "<keyspace>.<table>); delete the solr.data directories once no search index is left; drop " +
                         "the keyspace solr_admin once no node runs DSE Search; " + otherRemedies + REMEDY_SUFFIX);
+            // the markers of the preflight tool, fed the same rows, find the same traces, grouped the same way
+            assertThat(offlineMarkers()).isEqualTo("DSE Search: keyspace solr_admin, " + index + ", directory " +
+                                                   solrData + "; " + graphs);
 
             // without solr_admin, the search index is no reason to drop it
             DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
@@ -908,6 +912,36 @@ public class Dse6NonCoreTracesTest extends CQLTester
             for (String keyspace : created)
                 schemaChange("DROP KEYSPACE IF EXISTS " + keyspace);
         }
+    }
+
+    /**
+     * The traces {@link Dse6NonCoreTraces.Dse51Markers} finds in the rows of {@code system_schema} of this node and its
+     * data directories, fed one by one as the preflight tool feeds what it read offline, joined as the refusal of the
+     * start check joins its groups.
+     */
+    private static String offlineMarkers()
+    {
+        Dse6NonCoreTraces.Dse51Markers markers = new Dse6NonCoreTraces.Dse51Markers();
+        Map<String, String> keyspaces = new TreeMap<>();
+        String keyspaceRows = "SELECT keyspace_name, replication FROM system_schema.keyspaces";
+        for (UntypedResultSet.Row row : executeOnceInternal(keyspaceRows))
+            keyspaces.put(row.getString("keyspace_name"), row.getFrozenTextMap("replication").get("class"));
+        markers.keyspaces(keyspaces);
+        for (UntypedResultSet.Row row : executeOnceInternal("SELECT * FROM system_schema.indexes"))
+            markers.index(row.getString("keyspace_name"), row.getString("table_name"), row.getString("index_name"),
+                          row.getFrozenTextMap("options").get(IndexTarget.CUSTOM_INDEX_OPTION_NAME));
+        for (UntypedResultSet.Row row : executeOnceInternal("SELECT * FROM system_schema.tables"))
+            markers.table(row.getString("keyspace_name"), row.getString("table_name"),
+                          row.getFrozenTextMap("compaction").get("class"));
+        for (UntypedResultSet.Row row : executeOnceInternal("SELECT * FROM system_schema.views"))
+            markers.view(row.getString("keyspace_name"), row.getString("view_name"),
+                         row.getFrozenTextMap("compaction").get("class"));
+        markers.solrData(DatabaseDescriptor.getAllDataFileLocations());
+        return markers.byFeature()
+                      .entrySet()
+                      .stream()
+                      .map(e -> e.getKey().displayName() + ": " + String.join(", ", e.getValue()))
+                      .collect(Collectors.joining("; "));
     }
 
     /**
@@ -981,6 +1015,11 @@ public class Dse6NonCoreTracesTest extends CQLTester
                         " (compaction " + dateTiered + ')' + ONLY_ALTER_REMEDY_PREFIX + dseRemedy + "; " +
                         removedRemedy +
                         REMEDY_SUFFIX);
+            // the markers of the preflight tool, fed the same rows, find the same traces in the same groups
+            assertThat(offlineMarkers()).isEqualTo("DSE tiered storage and in-memory tables: materialized view " +
+                                                   KEYSPACE + '.' + view + " (compaction MemoryOnlyStrategy); a " +
+                                                   "compaction strategy this software no longer has: table " +
+                                                   KEYSPACE + '.' + table + " (compaction " + dateTiered + ')');
 
             // the rows are not read with NONE or DSE_6
             for (InternodeCompatibilityMode mode : List.of(InternodeCompatibilityMode.NONE,
