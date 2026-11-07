@@ -100,6 +100,15 @@ public final class DseCompat
      */
     public static final String REFUSED_DSE51_REPAIR_MESSAGE = "repair message from a DSE 5.1 peer";
 
+    /**
+     * The reason under which the reads a DSE 5.1 coordinator sends with a row filter holding a user expression (kind 4)
+     * are counted in the DSE 5.1 compatibility mode: DSE 5.1's expression of row-level access control, the only one it
+     * sends, which this software cannot apply. Each is refused when the message is read and answered with a failure
+     * response when the coordinator asked for one, never served without the filter.
+     */
+    public static final String REFUSED_DSE51_ROW_LEVEL_ACCESS_CONTROL =
+        "row-level access control read from a DSE 5.1 peer";
+
     /** The DSE 6 messaging versions {@link #storedDecodingVersion} maps, as error messages list them. */
     public static final String DSE_STORED_VERSIONS_TEXT = String.format("%d, %d, %d, %d, %d or %d", DSE_60_VERSION, DSE_603_VERSION,
                                                                         DSE_68_VERSION, DSE_681_VERSION, DSE_69_VERSION,

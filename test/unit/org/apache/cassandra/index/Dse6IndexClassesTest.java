@@ -16,6 +16,7 @@
 
 package org.apache.cassandra.index;
 
+import java.util.List;
 import java.util.Map;
 
 import org.junit.After;
@@ -31,14 +32,23 @@ import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.marshal.MapType;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Dse51SchemaRows;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaKeyspaceTables;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -46,7 +56,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * Index classes in a schema that came from DataStax Enterprise: the 6.8 name of the storage-attached index
  * resolves to ours, an index type this software does not have loads as a no-op index while the DSE 6
  * compatibility mode is on (instead of preventing the node from starting), and a DSE Search index is refused in
- * that mode (DSE Search is not supported).
+ * that mode (DSE Search is not supported); in the DSE 5.1 compatibility mode too, for DSE 5.1's classes.
  */
 public class Dse6IndexClassesTest extends CQLTester
 {
@@ -385,5 +395,79 @@ public class Dse6IndexClassesTest extends CQLTester
         execute("DROP INDEX " + KEYSPACE + ".foreign_index");
         execute("DROP INDEX " + KEYSPACE + ".t_solr_query_index");
         assertThat(currentTableMetadata().indexes.isEmpty()).isTrue();
+    }
+
+    /**
+     * In DSE_5_1 mode the two DSE Search class names of DSE 5.1 are refused, the refusal naming the mode, and the SASI
+     * index of the DSE 5.1.51 fixtures (its class as DSE 5.1.51 stored it in {@code system_schema.indexes}), a class
+     * this software does not have, loads as a no-op index, as in DSE_6; a new custom index must still name a class that
+     * exists, with the schema freeze lifted.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    public void dse51IndexClassesAreReadAsInDse6Mode() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        String found = null;
+        for (List<PartitionUpdate> sstable : Dse51SchemaRows.partitions(SchemaKeyspaceTables.INDEXES))
+            for (PartitionUpdate partition : sstable)
+                for (Row row : partition.rows())
+                {
+                    ColumnMetadata options = partition.metadata().getColumn(ByteBufferUtil.bytes("options"));
+                    Cell<?> cell = row.getCell(options);
+                    if (Dse51SchemaRows.keyspaceOf(partition).equals(Dse51SchemaRows.KEYSPACE) && cell != null)
+                    {
+                        Map<String, String> values = ((MapType<String, String>) options.type).compose(cell.buffer());
+                        found = values.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME);
+                    }
+                }
+        String sasi = found;
+        assertThat(sasi).isEqualTo("org.apache.cassandra.index.sasi.SASIIndex");
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        for (String className : List.of("com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex",
+                                        "com.datastax.bdp.cassandra.index.solr.Cql3SolrSecondaryIndex"))
+        {
+            IndexMetadata index =
+                IndexMetadata.fromSchemaMetadata("solr_index", IndexMetadata.Kind.CUSTOM,
+                                                 Map.of(IndexTarget.CUSTOM_INDEX_OPTION_NAME, className,
+                                                        IndexTarget.TARGET_OPTION_NAME, "solr_query"));
+            String refusal = "internode_compatibility_mode DSE_5_1 refused: the schema contains the DSE Search index " +
+                             KEYSPACE + '.' + currentTable() + ".solr_index (" + className + "); DSE Search is not " +
+                             "supported by this software. Roll this node back to DSE, drop the search index there " +
+                             "(DROP SEARCH INDEX ON " + KEYSPACE + '.' + currentTable() + ") and upgrade it again";
+            assertThatThrownBy(() -> cfs.indexManager.addIndex(index, true)).as(className)
+            .hasMessageContaining(refusal);
+            assertThatThrownBy(() -> index.validate(currentTableMetadata())).as(className).hasMessage(refusal);
+        }
+
+        IndexMetadata sasiIndex = IndexMetadata.fromSchemaMetadata("sasi_t_v", IndexMetadata.Kind.CUSTOM,
+                                                                   Map.of(IndexTarget.CUSTOM_INDEX_OPTION_NAME, sasi,
+                                                                          IndexTarget.TARGET_OPTION_NAME, "v"));
+        sasiIndex.validate(currentTableMetadata());
+        withLogAppender(SecondaryIndexManager.class, managerLog -> {
+            cfs.indexManager.addIndex(sasiIndex, true);
+            assertThat(managerLog.list.stream()
+                                      .filter(e -> e.getLevel() == Level.WARN)
+                                      .map(ILoggingEvent::getFormattedMessage))
+            .containsExactly("Cannot find index type " + sasi + " of index sasi_t_v; running in " +
+                             "internode_compatibility_mode DSE_5_1, so it is loaded as a no-op index (a node in NONE " +
+                             "mode refuses to load it: it must be dropped on DSE before the upgrade)");
+        });
+        Index noop = cfs.indexManager.getIndexByName("sasi_t_v");
+        assertThat(noop).isInstanceOf(NoopIndex.class);
+        assertThat(((NoopIndex) noop).getUnsupportedMessage())
+        .isEqualTo("Custom index " + KEYSPACE + ".sasi_t_v of type '" + sasi + "' on column v is not supported by " +
+                   "this software. The DSE 5.1 compatibility mode (internode_compatibility_mode: DSE_5_1) is enabled " +
+                   "so using a noop index that will ignore writes and won't be queryable. Please drop this index on " +
+                   "DSE before the upgrade (a node in internode_compatibility_mode NONE refuses to load it) and/or " +
+                   "use a Storage Attached Index (SAI) instead.");
+
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+        {
+            assertThatThrownBy(() -> execute("CREATE CUSTOM INDEX ON %s (v) USING '" + FOREIGN_INDEX + '\''))
+            .hasMessageContaining("Unable to find custom indexer class '" + FOREIGN_INDEX + '\'');
+        }
     }
 }

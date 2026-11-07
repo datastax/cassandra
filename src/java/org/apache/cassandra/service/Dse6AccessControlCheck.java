@@ -20,8 +20,10 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
@@ -51,9 +53,12 @@ import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaKeyspace;
+import org.apache.cassandra.schema.SchemaKeyspaceTables;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.Pair;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -109,6 +114,16 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  * </ol>
  * The check refuses whatever authorizer is configured (it fails closed: with one that enforces nothing, such as
  * {@code AllowAllAuthorizer}, the controls are not enforced either). With {@code NONE} nothing is read.
+ * <p>
+ * In {@code internode_compatibility_mode: DSE_5_1} the same passes and the periodic check run on what DSE 5.1 has:
+ * its {@code role_permissions} has neither {@code restricted} nor {@code grantables} (DSE 5.1 has no {@code RESTRICT}
+ * of a role and no delegation), and no {@code UPDATE} or {@code TRUNCATE}, so the lone grants are not looked for; its
+ * {@code rows/} grants ({@code rows/<target>/data/<ks>/<table>}, the target being the value of the tenant column the
+ * grant opens) and the key {@value #RLAC_EXTENSION_KEY} refuse the start as in {@code DSE_6}, the key on a
+ * materialized view too: DSE 5.1 writes it with {@code RESTRICT ROWS} on a view, on the node that runs the statement
+ * only, so a view's key refuses the start of that node only, where the key of a table, which every node gets, refuses
+ * them all. No remedy is given for a view: {@code UNRESTRICT ROWS} on a view fails on DSE 5.1.51 and leaves a row that
+ * keeps the node from starting, which {@link #verifyDse51SchemaRowsAtStartup} refuses before the schema is loaded.
  */
 public final class Dse6AccessControlCheck
 {
@@ -141,12 +156,24 @@ public final class Dse6AccessControlCheck
     public static final String LOCAL_SOURCE = "this node's replica";
     /** The start of the compatstatus entry of a table restricted to rows. */
     private static final String RESTRICTED_TABLE_ENTRY = "row-level restricted table in the schema ";
+    /** The start of the compatstatus entry of a materialized view restricted to rows, in {@code DSE_5_1} only. */
+    private static final String RESTRICTED_VIEW_ENTRY = "row-level restricted materialized view in the schema ";
     private static final int PAGE_SIZE = 1000;
     /** The lone DSE write grants named in a warning; compatstatus lists them all. */
     @VisibleForTesting
     static final int LONE_GRANTS_LOGGED = 20;
     private static final String LONE_GRANTS_REMEDY = "GRANT MODIFY where the role should also have the other, or accept the loss " +
                                                      "(nodetool compatstatus lists them)";
+
+    /**
+     * Whether the scans read the DSE grants of {@code UPDATE} or {@code TRUNCATE} alone through
+     * {@code CassandraAuthorizer}: with that authorizer configured, and not in {@code DSE_5_1}, since DSE 5.1 has
+     * neither permission.
+     */
+    private static boolean tracksLoneWriteGrants()
+    {
+        return DatabaseDescriptor.getAuthorizer() instanceof CassandraAuthorizer && !DseCompat.isDse51();
+    }
 
     /** The pause between two attempts of the cluster-wide read of the second startup pass. */
     @VisibleForTesting
@@ -230,8 +257,9 @@ public final class Dse6AccessControlCheck
     }
 
     /**
-     * The first pass: refuses the start in {@code DSE_6} mode while this node's replica of the permissions holds a
-     * DSE restriction or row-level grant, or the schema holds a table DSE restricts to rows, unless
+     * The first pass: refuses the start in {@code DSE_6} or {@code DSE_5_1} mode while this node's replica of the
+     * permissions holds a DSE restriction or row-level grant, or the schema holds a table DSE restricts to rows (or, in
+     * {@code DSE_5_1}, a materialized view), unless
      * {@code cassandra.internode_compatibility_mode.ignore_dse_restrictions} is set; a no-op with {@code NONE}.
      *
      * @throws StartupException with the roles and resources found, and what to do; also when
@@ -248,7 +276,7 @@ public final class Dse6AccessControlCheck
     @VisibleForTesting
     static void verifyAtStartup(Function<ConsistencyLevel, Findings> localScan) throws StartupException
     {
-        if (!DseCompat.isDse6())
+        if (!DseCompat.enabled())
             return;
         // a wrong value refuses the start before the node joins the ring, not only at the second pass
         waitSeconds();
@@ -288,7 +316,7 @@ public final class Dse6AccessControlCheck
         catch (RuntimeException e)
         {
             throw new StartupException(StartupException.ERR_WRONG_CONFIG,
-                                       "internode_compatibility_mode DSE_6 refused: unable to read system_auth.role_permissions on this node (" + e +
+                                       refused() + "unable to read system_auth.role_permissions on this node (" + e +
                                        "), so the DSE access controls this software does not enforce cannot be checked", e);
         }
     }
@@ -313,7 +341,7 @@ public final class Dse6AccessControlCheck
      */
     public static void verifyAfterJoin() throws StartupException
     {
-        if (!DseCompat.isDse6())
+        if (!DseCompat.enabled())
             return;
         long waitSeconds = waitSeconds();
         boolean fallbackChosen = CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY.getBoolean() ||
@@ -339,7 +367,7 @@ public final class Dse6AccessControlCheck
         catch (NumberFormatException e)
         {
             throw new StartupException(StartupException.ERR_WRONG_CONFIG,
-                                       "internode_compatibility_mode DSE_6 refused: invalid value '" +
+                                       refused() + "invalid value '" +
                                        CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS.getString() + "' for " +
                                        CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS.getKey() +
                                        ": a number of seconds is expected", e);
@@ -457,7 +485,7 @@ public final class Dse6AccessControlCheck
                 return;
             }
             throw new StartupException(StartupException.ERR_WRONG_CONFIG,
-                                       "internode_compatibility_mode DSE_6 refused: " + problem + "; make the replicas of system_auth reachable, " +
+                                       refused() + problem + "; make the replicas of system_auth reachable, " +
                                        "or start with -D" + CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY.getKey() +
                                        "=true to rely on the check of this node's replica alone", e);
         }
@@ -468,16 +496,16 @@ public final class Dse6AccessControlCheck
     }
 
     /**
-     * The periodic check, from the status task of {@code DseUpgradeGuards} in {@code DSE_6} mode: a DSE node can still
-     * RESTRICT or grant row-level access after this node started, and this node would not enforce it. What would grant
-     * access is logged at ERROR (with {@code ignore_dse_restrictions}, which drops it knowingly, at WARN, and only what
-     * was not logged before) and shown by {@code nodetool compatstatus}; the node keeps running (refusing to serve
-     * would not remove the control). The cluster-wide read is tried first, this node's replica when it cannot be made.
-     * The lone DSE write grants it lists first are logged in one warning. The first periodic check can overlap a slow
-     * second startup pass (the periodic recheck task is scheduled before it): the scans are not serialized, which at
-     * worst logs a lone grant twice, or leaves it out of compatstatus until its row is read again.
+     * The periodic check, from the status task of {@code DseUpgradeGuards} in {@code DSE_6} or {@code DSE_5_1} mode: a
+     * DSE node can still RESTRICT or grant row-level access after this node started, and this node would not enforce
+     * it. What would grant access is logged at ERROR (with {@code ignore_dse_restrictions}, which drops it knowingly,
+     * at WARN, and only what was not logged before) and shown by {@code nodetool compatstatus}; the node keeps running
+     * (refusing to serve would not remove the control). The cluster-wide read is tried first, this node's replica when
+     * it cannot be made. The lone DSE write grants it lists first are logged in one warning. The first periodic check
+     * can overlap a slow second startup pass (the periodic recheck task is scheduled before it): the scans are not
+     * serialized, which at worst logs a lone grant twice, or leaves it out of compatstatus until its row is read again.
      * <p>
-     * The tables restricted to rows are those of this node's schema, which DSE DDL does not reach in {@code DSE_6} mode:
+     * The tables restricted to rows are those of this node's schema, which DSE DDL does not reach in either mode:
      * a {@code RESTRICT ROWS} run on a DSE node after this node started is not detected, only the rows DSE adds to
      * {@code system_auth.role_permissions} are.
      *
@@ -500,7 +528,7 @@ public final class Dse6AccessControlCheck
     @VisibleForTesting
     public static List<String> recheck(Function<ConsistencyLevel, Findings> scan)
     {
-        if (!DseCompat.isDse6())
+        if (!DseCompat.enabled())
             return List.of();
         Findings findings;
         String source;
@@ -577,11 +605,21 @@ public final class Dse6AccessControlCheck
                             source, CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS.getKey(), added);
             return;
         }
-        String tables = findings.rowLevelRestrictedTables.isEmpty()
-                        ? ""
-                        : "; the tables restricted to rows are in this node's schema, which DSE DDL does not reach, and refuse its next " +
-                          "start: roll it back to DSE, run " + unrestrictRows(findings.rowLevelRestrictedTables) +
-                          " there and upgrade it again";
+        List<TableMetadata> withoutViews = withoutViews(findings.rowLevelRestrictedTables);
+        List<TableMetadata> views = views(findings.rowLevelRestrictedTables);
+        String tables = (withoutViews.isEmpty()
+                         ? ""
+                         : "; the tables restricted to rows are in this node's schema, which DSE DDL does not reach, " +
+                           "and refuse its next start: roll it back to DSE, run " + unrestrictRows(withoutViews) +
+                           " there and upgrade it again") +
+                        (views.isEmpty()
+                         ? ""
+                         : "; the materialized views restricted to rows are in this node's schema and refuse its " +
+                           "next start. " + restrictedViewsAdvice(views));
+        // DSE 5.1 has no RESTRICT or UNRESTRICT of a role
+        String statements = DseCompat.isDse51()
+                            ? "GRANT, REVOKE, RESTRICT ROWS or UNRESTRICT ROWS on " + DseCompat.source() + " nodes"
+                            : "GRANT, REVOKE, RESTRICT, UNRESTRICT, RESTRICT ROWS or UNRESTRICT ROWS on DSE nodes";
         // DSE removes what role_permissions holds; the tables only as their remedy says
         String removeOnDse = !findings.permissionsWouldGrantAccessIfDropped() ? ""
                              : findings.rowLevelRestrictedTables.isEmpty() ? "remove them on DSE, and "
@@ -589,8 +627,8 @@ public final class Dse6AccessControlCheck
                                                 : findings.restrictions.isEmpty() ? "row-level grants"
                                                 : "restrictions and row-level grants") + " on DSE, and ";
         logger.error("The periodic check ({}) found DSE access controls this node does not enforce: {}; {}do not " +
-                     "run GRANT, REVOKE, RESTRICT, UNRESTRICT, RESTRICT ROWS or UNRESTRICT ROWS on DSE nodes during the upgrade{}",
-                     source, describe(findings), removeOnDse, tables);
+                     "run {} during the upgrade{}",
+                     source, describe(findings), removeOnDse, statements, tables);
     }
 
     /** The message of a failure, or its string form when it has none. */
@@ -614,7 +652,7 @@ public final class Dse6AccessControlCheck
     {
         List<String> found = permissionEntries(findings);
         for (TableMetadata table : findings.rowLevelRestrictedTables)
-            found.add(RESTRICTED_TABLE_ENTRY + describe(table));
+            found.add((table.isView() ? RESTRICTED_VIEW_ENTRY : RESTRICTED_TABLE_ENTRY) + describe(table));
         return found;
     }
 
@@ -660,7 +698,7 @@ public final class Dse6AccessControlCheck
      */
     private static void loneWriteGrantsScanned(Findings findings, String how, boolean complete)
     {
-        if (DatabaseDescriptor.getAuthorizer() instanceof CassandraAuthorizer)
+        if (tracksLoneWriteGrants())
             CassandraAuthorizer.dseLoneWriteGrantsScanned(how + ", then the rows read since", findings.loneWriteGrants, complete);
     }
 
@@ -671,7 +709,7 @@ public final class Dse6AccessControlCheck
      */
     private static void logLoneWriteGrants(List<String> lone, String source, boolean complete)
     {
-        if (!(DatabaseDescriptor.getAuthorizer() instanceof CassandraAuthorizer))
+        if (!tracksLoneWriteGrants())
             return;
         if (!lone.isEmpty())
             logger.warn("Found {} grant(s) of UPDATE or TRUNCATE alone in {}.{} ({}), DataStax Enterprise permissions: this software has " +
@@ -714,7 +752,8 @@ public final class Dse6AccessControlCheck
         // a node DSE ran always has the table once it has the schema: without it nothing could be checked, which fails closed too
         if (secondPass && findings.permissionsTableMissing && !CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS.getBoolean())
             throw new StartupException(StartupException.ERR_WRONG_CONFIG,
-                                       "internode_compatibility_mode DSE_6 refused: " + SchemaConstants.AUTH_KEYSPACE_NAME + '.' + AuthKeyspace.ROLE_PERMISSIONS +
+                                       refused() + SchemaConstants.AUTH_KEYSPACE_NAME + '.' +
+                                       AuthKeyspace.ROLE_PERMISSIONS +
                                        " is not in the schema, so the DSE access controls this software does not enforce cannot be checked; " +
                                        "start with -D" + CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS.getKey() +
                                        "=true to start without that check");
@@ -742,14 +781,128 @@ public final class Dse6AccessControlCheck
     {
         // the stale-replica advice is about the rows of system_auth.role_permissions, not about the schema
         boolean staleRowsPossible = source.startsWith(LOCAL_SOURCE) && findings.permissionsWouldGrantAccessIfDropped();
-        return "internode_compatibility_mode DSE_6 refused: DSE access controls that this software does not enforce would grant " +
+        String remedies = remedies(findings);
+        List<TableMetadata> views = views(findings.rowLevelRestrictedTables);
+        return refused() + "DSE access controls that this software does not enforce would grant " +
                "access if ignored (found by " + source + "): " + what + ". " +
                (staleRowsPossible ? "The rows listed from system_auth.role_permissions may be stale: the replica may hold partitions this node no " +
                                     "longer owns (once it is rolled back to DSE, run nodetool cleanup system_auth on it), or miss a removal made on " +
                                     "DSE while this node was down (once it is rolled back to DSE, hints or nodetool repair system_auth deliver it). " : "") +
-               "Roll this node back to DSE, remove them there (" + remedies(findings) +
-               ") and upgrade it again; or start with -D" +
+               (remedies.isEmpty()
+                ? ""
+                : "Roll this node back to DSE, remove them there (" + remedies + ") and upgrade it again") +
+               (views.isEmpty() ? "" : (remedies.isEmpty() ? "" : ". ") + restrictedViewsAdvice(views)) +
+               "; or start with -D" +
                CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS.getKey() + "=true to drop them knowingly";
+    }
+
+    /**
+     * In {@code DSE_5_1}, refuses the start, before the schema is loaded, while a row of {@code system_schema.tables}
+     * has the name or the id of a materialized view of {@code system_schema.views}: the row DSE 5.1.51 leaves on the
+     * node where {@code UNRESTRICT ROWS} on the view failed, with which neither DSE 5.1.51 nor this software starts
+     * the node (this software's load of the schema would fail on the shared id with an error that does not say why).
+     * The rows are read as stored. No repair is attempted, none being validated. A no-op in the other modes.
+     *
+     * @throws StartupException naming each such row and its view
+     */
+    public static void verifyDse51SchemaRowsAtStartup() throws StartupException
+    {
+        if (!DseCompat.isDse51())
+            return;
+        Map<Pair<String, String>, String> tablesByName = new HashMap<>();
+        Map<Pair<String, String>, String> tablesById = new HashMap<>();
+        for (UntypedResultSet.Row row : schemaRows("table_name", SchemaKeyspaceTables.TABLES))
+        {
+            String keyspace = row.getString("keyspace_name");
+            String table = row.getString("table_name");
+            String id = row.has("id") ? row.getUUID("id").toString() : null;
+            tablesByName.put(Pair.create(keyspace, table), id);
+            if (id != null)
+                tablesById.put(Pair.create(keyspace, id), table);
+        }
+        List<String> found = new ArrayList<>();
+        for (UntypedResultSet.Row row : schemaRows("view_name", SchemaKeyspaceTables.VIEWS))
+        {
+            String keyspace = row.getString("keyspace_name");
+            String view = row.getString("view_name");
+            String viewId = row.has("id") ? row.getUUID("id").toString() : null;
+            Pair<String, String> byName = Pair.create(keyspace, view);
+            String table = tablesByName.containsKey(byName)
+                           ? view
+                           : viewId == null ? null : tablesById.get(Pair.create(keyspace, viewId));
+            if (table != null)
+            {
+                String tableId = String.valueOf(tablesByName.get(Pair.create(keyspace, table)));
+                found.add(SchemaKeyspace.dse51TableRowOfView(qualified(keyspace, table), tableId,
+                                                             qualified(keyspace, view), String.valueOf(viewId)));
+            }
+        }
+        if (!found.isEmpty())
+            throw new StartupException(StartupException.ERR_WRONG_CONFIG,
+                                       SchemaKeyspace.dse51TableRowsOfViewsRefusal(found));
+    }
+
+    /**
+     * The rows of {@code keyspace_name}, {@code <name>} and {@code id} of a table of {@code system_schema}, as stored.
+     */
+    private static UntypedResultSet schemaRows(String name, String table)
+    {
+        return QueryProcessor.executeInternal("SELECT keyspace_name, " + name + ", id FROM " +
+                                              SchemaConstants.SCHEMA_KEYSPACE_NAME + '.' + table);
+    }
+
+    /** {@code keyspace.table}, with the names quoted where CQL needs it, as {@code TableMetadata} shows them. */
+    private static String qualified(String keyspace, String table)
+    {
+        return ColumnIdentifier.maybeQuote(keyspace) + '.' + ColumnIdentifier.maybeQuote(table);
+    }
+
+    /**
+     * The start of the startup refusals of this check: {@code internode_compatibility_mode DSE_6 refused: }, or
+     * {@code DSE_5_1} in that mode.
+     */
+    private static String refused()
+    {
+        return "internode_compatibility_mode " + DseCompat.textMode() + " refused: ";
+    }
+
+    /**
+     * What a refusal or the periodic ERROR says of the materialized views restricted to rows, which only
+     * {@code DSE_5_1} reports: no remedy, since none has been validated on DSE 5.1 nodes; only the statement not to
+     * run.
+     */
+    private static String restrictedViewsAdvice(List<TableMetadata> views)
+    {
+        List<String> names = new ArrayList<>(views.size());
+        for (TableMetadata view : views)
+            names.add(view.toString());
+        return "No remedy is validated yet for the materialized views restricted to rows " + names + ": " +
+               DseCompat.source() + " keeps a RESTRICT ROWS on a view on the node that ran it only, and an " +
+               "UNRESTRICT ROWS on a view fails on DSE 5.1.51 and leaves on that node a row of system_schema.tables " +
+               "named after the view, with which neither DSE 5.1.51 nor this software starts the node: do not run " +
+               "UNRESTRICT ROWS on a view";
+    }
+
+    /**
+     * The materialized views among {@code tables} (in {@code DSE_5_1} only, which checks the views), in their order.
+     */
+    private static List<TableMetadata> views(List<TableMetadata> tables)
+    {
+        List<TableMetadata> views = new ArrayList<>();
+        for (TableMetadata table : tables)
+            if (table.isView())
+                views.add(table);
+        return views;
+    }
+
+    /** The tables among {@code tables} that are not materialized views, in their order. */
+    private static List<TableMetadata> withoutViews(List<TableMetadata> tables)
+    {
+        List<TableMetadata> withoutViews = new ArrayList<>(tables.size());
+        for (TableMetadata table : tables)
+            if (!table.isView())
+                withoutViews.add(table);
+        return withoutViews;
     }
 
     /**
@@ -763,8 +916,9 @@ public final class Dse6AccessControlCheck
             remedies.add("UNRESTRICT the roles");
         if (!findings.rowLevelGrants.isEmpty())
             remedies.add("REVOKE the row-level grants");
-        if (!findings.rowLevelRestrictedTables.isEmpty())
-            remedies.add(unrestrictRows(findings.rowLevelRestrictedTables));
+        List<TableMetadata> tables = withoutViews(findings.rowLevelRestrictedTables);
+        if (!tables.isEmpty())
+            remedies.add(unrestrictRows(tables));
         return String.join(", ", remedies);
     }
 
@@ -786,12 +940,22 @@ public final class Dse6AccessControlCheck
             what.append("RESTRICT ").append(findings.restrictions);
         if (!findings.rowLevelGrants.isEmpty())
             what.append(what.length() > 0 ? "; " : "").append("row-level grants ").append(findings.rowLevelGrants);
-        if (!findings.rowLevelRestrictedTables.isEmpty())
+        List<TableMetadata> withoutViews = withoutViews(findings.rowLevelRestrictedTables);
+        if (!withoutViews.isEmpty())
         {
-            List<String> tables = new ArrayList<>(findings.rowLevelRestrictedTables.size());
-            for (TableMetadata table : findings.rowLevelRestrictedTables)
+            List<String> tables = new ArrayList<>(withoutViews.size());
+            for (TableMetadata table : withoutViews)
                 tables.add(describe(table));
             what.append(what.length() > 0 ? "; " : "").append("row-level restricted tables in the schema ").append(tables);
+        }
+        List<TableMetadata> restrictedViews = views(findings.rowLevelRestrictedTables);
+        if (!restrictedViews.isEmpty())
+        {
+            List<String> views = new ArrayList<>(restrictedViews.size());
+            for (TableMetadata view : restrictedViews)
+                views.add(describe(view));
+            what.append(what.length() > 0 ? "; " : "").append("row-level restricted materialized views in the schema ")
+                .append(views);
         }
         return what.toString();
     }
@@ -836,7 +1000,7 @@ public final class Dse6AccessControlCheck
         // as the way out)
         UntypedResultSet rows = consistency == null ? QueryProcessor.executeInternalWithPaging(query, PageSize.inRows(PAGE_SIZE))
                                                     : QueryProcessor.process(query, consistency);
-        readRows(rows, findings, hasRestricted, hasGrantables, DatabaseDescriptor.getAuthorizer() instanceof CassandraAuthorizer);
+        readRows(rows, findings, hasRestricted, hasGrantables, tracksLoneWriteGrants());
         findings.restrictions.sort(null);
         findings.rowLevelGrants.sort(null);
         findings.delegations.sort(null);
@@ -905,13 +1069,23 @@ public final class Dse6AccessControlCheck
         return tables;
     }
 
-    /** The user tables with the key {@value #RLAC_EXTENSION_KEY}, sorted by their CQL name. */
+    /**
+     * The user tables with the key {@value #RLAC_EXTENSION_KEY}, sorted by their CQL name; in {@code DSE_5_1} the
+     * materialized views with the key too, which DSE 5.1 writes with {@code RESTRICT ROWS} on a view, on the node that
+     * runs it only.
+     */
     private static List<TableMetadata> restrictedTables()
     {
         List<TableMetadata> tables = new ArrayList<>();
         for (TableMetadata table : userTables())
             if (table.params.extensions.containsKey(RLAC_EXTENSION_KEY))
                 tables.add(table);
+        if (DseCompat.isDse51())
+        {
+            for (TableMetadata view : userViews())
+                if (view.params.extensions.containsKey(RLAC_EXTENSION_KEY))
+                    tables.add(view);
+        }
         tables.sort(Comparator.comparing(TableMetadata::toString));
         return tables;
     }
@@ -1011,6 +1185,19 @@ public final class Dse6AccessControlCheck
                 keyspace.tables.forEach(tables::add);
         }
         return tables;
+    }
+
+    /** The materialized views of the user keyspaces, as their table metadata. */
+    private static List<TableMetadata> userViews()
+    {
+        List<TableMetadata> views = new ArrayList<>();
+        for (String keyspaceName : Schema.instance.getUserKeyspaces())
+        {
+            KeyspaceMetadata keyspace = Schema.instance.getKeyspaceMetadata(keyspaceName);
+            if (keyspace != null)
+                keyspace.views.forEach(view -> views.add(view.metadata));
+        }
+        return views;
     }
 
     /**
