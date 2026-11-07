@@ -25,6 +25,7 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
@@ -592,9 +593,12 @@ final class HintsDescriptor
         {
             this.statistics = Statistics.deserialize(statsFile);
         }
-        catch (FileNotFoundException e)
+        catch (FileNotFoundException | NoSuchFileException e)
         {
-            // Statistics are only used for metrics; it's ok to ignore an absent component during upgrades
+            // Statistics are only used for metrics; it's ok to ignore an absent component during upgrades, or that of
+            // a file whose writer was killed before it wrote it. Files.newInputStream throws NoSuchFileException for an
+            // absent file; FileNotFoundException, caught since the component was added, is kept in case another reader
+            // throws it
             logger.warn("Cannot find stats component `{}` for hints descriptor, initialising with empty statistics.", file);
             this.statistics = EMPTY_STATS;
         }

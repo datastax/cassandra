@@ -40,9 +40,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The transaction log tests of {@link LogTransactionTest}, every one of them, with
  * {@code internode_compatibility_mode: DSE_5_1} and the {@code big} format the mode writes: the records then name the
  * sstables by their path without the trailing component separator, with the remove records' update time taken over
- * every file and cut to the second ({@link DseTransactionLogs}), and every path of a transaction (tracking new and
- * obsolete sstables, untracking, commit, abort, the listing of temporary files, the clean-up at start) works on them as
- * on the records written without the mode.
+ * every file, in milliseconds ({@link DseTransactionLogs}), and every path of a transaction (tracking new and obsolete
+ * sstables, untracking, commit, abort, the listing of temporary files, the clean-up at start) works on them as on the
+ * records written without the mode.
  */
 public class LogTransactionDse51Test extends LogTransactionTest
 {
