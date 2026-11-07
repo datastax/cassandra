@@ -219,9 +219,8 @@ public class DseTransactionLogsTest
      * sstable without the trailing component separator, the update time 0 but in a remove record, the checksum the
      * CRC32 of the path, the type, the update time as two ints (low half first) and the number of files. This software
      * parses each as a valid record. The update times of the remove records are in milliseconds, as the Java 8 of the
-     * capture read the files' times, where the mode writes them cut to the second
-     * ({@link DseTransactionLogs#removeRecordTime}, whose premise of a second's resolution on Java 8 the capture
-     * contradicts): pinned here, the behaviour unchanged until the owner decides it.
+     * capture read the files' times, and the mode writes them so
+     * ({@link #theRemoveRecordsTheModeWritesCarryTheCapturedTimes}).
      */
     @Test
     public void theRecordsOfTheLogsDse51WroteAreTheOnesBuiltHere() throws IOException
@@ -232,7 +231,6 @@ public class DseTransactionLogsTest
         assertThat(inProgress).containsExactly(committed.get(0));
         assertThat(committed).extracting(line -> line.substring(0, line.indexOf(':')))
                              .containsExactly("ADD", "REMOVE", "REMOVE", "REMOVE", "REMOVE", "COMMIT");
-        List<Long> removeTimes = new ArrayList<>();
         for (String line : committed)
         {
             Matcher matcher = DSE_51_RECORD.matcher(line);
@@ -254,16 +252,68 @@ public class DseTransactionLogsTest
                 assertThat(record.absolutePath()).isEqualTo(path).doesNotEndWith(String.valueOf(Component.SEPARATOR));
                 assertThat(files).as(line).isEqualTo(ME_COMPONENTS.size());
             }
-            if (record.type == LogRecord.Type.REMOVE)
-                removeTimes.add(updateTime);
-            else
+            if (record.type != LogRecord.Type.REMOVE)
                 assertThat(updateTime).as(line).isZero();
         }
-        assertThat(removeTimes).hasSize(4).noneMatch(time -> time % SECOND == 0);
+        assertThat(dse51RemoveTimes()).hasSize(4).noneMatch(time -> time % SECOND == 0);
+    }
+
+    /**
+     * The remove record the mode writes for an sstable whose files carry one of the update times of the remove records
+     * DSE 5.1.51 wrote carries that time, to the millisecond, as DSE 5.1.51 wrote it: the line built here
+     * ({@link #dse51Record}) with the path of the sstable and the number of its files.
+     */
+    @Test
+    public void theRemoveRecordsTheModeWritesCarryTheCapturedTimes() throws IOException
+    {
         DatabaseDescriptor.setInternodeCompatibilityMode(DSE_5_1);
-        for (long time : removeTimes)
-            assertThat(DseTransactionLogs.removeRecordTime(time)).isEqualTo(LogFile.truncateMillis(time))
-                                                                .isNotEqualTo(time);
+        ColumnFamilyStore cfs = MockSchema.newCFS(KEYSPACE);
+        int generation = 1;
+        for (long time : dse51RemoveTimes())
+        {
+            SSTableReader sstable = MockSchema.sstable(generation++, 128, cfs);
+            sstable.descriptor.fileFor(Components.STATS).createFileIfNotExists();
+            List<File> files = LogRecord.getExistingFiles(sstable.descriptor.baseFileUri() + Component.SEPARATOR);
+            for (File file : files)
+                setLastModified(file, time);
+
+            LogTransaction txn = new LogTransaction(OperationType.COMPACTION, LifecycleTransaction.newId());
+            AbstractLogTransaction.ReaderTidier tidier = txn.obsoleted(sstable);
+            Throwable aborted;
+            try
+            {
+                List<String> written = Files.readAllLines(txn.logFiles().get(0).toPath());
+                assertThat(written).hasSize(1);
+                LogRecord record = LogRecord.make(written.get(0));
+                assertThat(record.type).isEqualTo(LogRecord.Type.REMOVE);
+                assertThat(record.updateTime).isEqualTo(time);
+                assertThat(record.numFiles).isEqualTo(files.size());
+                assertThat(record.absolutePath()).isEqualTo(sstable.descriptor.baseFile().absolutePath());
+                assertThat(written.get(0)).isEqualTo(dse51Record("REMOVE",
+                                                                 sstable.descriptor.baseFile().absolutePath(), time,
+                                                                 files.size()));
+            }
+            finally
+            {
+                aborted = tidier.abort(null);
+                txn.abort();
+            }
+            assertThat(aborted).isNull();
+        }
+    }
+
+    /** The update times of the remove records of the committed log DSE 5.1.51 wrote, in their order. */
+    private static List<Long> dse51RemoveTimes() throws IOException
+    {
+        List<Long> removeTimes = new ArrayList<>();
+        for (String line : Files.readAllLines(DseFixtures.dse51().transactionLog(true)))
+        {
+            Matcher matcher = DSE_51_RECORD.matcher(line);
+            assertThat(matcher.matches()).as(line).isTrue();
+            if (matcher.group(1).equals(LogRecord.Type.REMOVE.name()))
+                removeTimes.add(Long.parseLong(matcher.group(3)));
+        }
+        return removeTimes;
     }
 
     /**
@@ -399,7 +449,7 @@ public class DseTransactionLogsTest
      * older; with {@link #DATA_NEWER} the data file is a second newer than the record instead; with
      * {@link #OTHER_FILES_RESTORED} every file but the stats file is then made 10 s newer than the record. The records
      * name the sstables of the directory, their checksums computed again, their update times kept; the records this
-     * software builds from those files, without the cut of the mode, are the lines of the moved log (but with
+     * software builds from those files, the stats file included, are the lines of the moved log (but with
      * {@link #DATA_NEWER}). The start completes the log when {@code completes} (a committed one: the input deleted, the
      * output kept; one in progress: the output deleted, the input kept), otherwise it keeps every file. Returns what
      * {@link #loggedWhile} collects.
@@ -769,7 +819,7 @@ public class DseTransactionLogsTest
      * As {@link #startOnACommittedMajorCompaction}, the transaction written in {@code DSE_5_1} and the start in
      * {@code start}: the log is named with the version alone and the type DSE 5.1 accepts, its records name the
      * sstables by their path without the trailing component separator, as DSE 5.1 writes them, and the remove record's
-     * update time is the stats file's cut to the second. Only the changes {@link #STATS_WRITTEN_AGAIN} and
+     * update time is the stats file's, to the millisecond. Only the changes {@link #STATS_WRITTEN_AGAIN} and
      * {@link #OTHER_FILES_RESTORED} are made here.
      */
     private static List<ILoggingEvent> startOnACommittedMajorCompactionWrittenInDse51(InternodeCompatibilityMode start,
@@ -782,7 +832,8 @@ public class DseTransactionLogsTest
         SSTableReader output = MockSchema.sstable(2, 128, cfs);
         File directory = input.descriptor.directory;
         long others = latestModificationOfAllButTheStatsFile(input);
-        File stats = statsFile(input, others + 5 * SECOND);
+        // a time that is not on a whole second, which the record keeps
+        File stats = statsFile(input, LogFile.truncateMillis(others) + 5 * SECOND + 123);
 
         LogTransaction txn = new LogTransaction(OperationType.MAJOR_COMPACTION, LifecycleTransaction.newId());
         txn.trackNew(output);
@@ -800,7 +851,7 @@ public class DseTransactionLogsTest
                                                       input.descriptor.baseFile().absolutePath());
         assertThat(records).filteredOn(r -> r.type == LogRecord.Type.REMOVE)
                            .extracting(r -> r.updateTime)
-                           .containsExactly(LogFile.truncateMillis(stats.lastModified()));
+                           .containsExactly(stats.lastModified());
         // each line as DSE 5.1 writes it, checksum included; DSE 5.1 finds the files of a record by its path followed
         // by the separator, which names the files of that sstable only
         for (LogRecord record : records)

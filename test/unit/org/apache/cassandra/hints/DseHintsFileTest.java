@@ -17,8 +17,8 @@
 package org.apache.cassandra.hints;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
-import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -134,6 +134,8 @@ public class DseHintsFileTest
             assertThat(descriptor.messagingVersion()).isEqualTo(MessagingService.VERSION_30);
             assertThat(descriptor.hostId).isEqualTo(hostId);
             assertThat(descriptor.parameters).isEmpty();
+            // the statistics companion, read: the number of hints
+            assertThat(descriptor.statistics().totalCount()).isEqualTo(hints.size());
 
             // nothing logged by the catalog, nor by the descriptor, which reads the statistics file too
             Logger descriptorLogger = (Logger) LoggerFactory.getLogger(HintsDescriptor.class);
@@ -163,8 +165,9 @@ public class DseHintsFileTest
      * timestamp and its hints, byte for byte, and a hints file of this software, which the catalog loads in every mode
      * and leaves as it is. It was copied while DSE still had it open, so it comes without the {@code .crc32} and
      * {@code -Statistics.hints} companions, as a file DSE 5.1 left open when it was killed would: the copy here is
-     * loaded alone. The catalog logs nothing; the descriptor logs an ERROR for the missing statistics (pinned). The
-     * generated file, with both companions, is {@link #dse51HintsFileIsLoadedAsAHintsFileOfThisSoftwareInEveryMode}'s.
+     * loaded alone. The catalog logs nothing; the descriptor logs the WARN of an absent statistics companion, and no
+     * ERROR, in every mode. The generated file, with both companions, is
+     * {@link #dse51HintsFileIsLoadedAsAHintsFileOfThisSoftwareInEveryMode}'s.
      */
     @Test
     public void theHintsFileDse51WroteIsTheOneGeneratedAndIsLoadedInEveryMode() throws IOException
@@ -208,36 +211,88 @@ public class DseHintsFileTest
                 descriptorLogger.detachAppender(descriptorEvents);
             }
             // without its statistics companion the descriptor logs, as for any hints file of this software without it,
-            // an ERROR (the missing file is not the FileNotFoundException its WARN expects), and starts with empty
-            // statistics, which only metrics read; counted during the catalog load only (the readFromFileQuietly
-            // above logs the same ERROR)
+            // the WARN of an absent companion, and starts with empty statistics, which only metrics read; counted
+            // during the catalog load only (the readFromFileQuietly above logs the same WARN)
             Path statistics = directory.toPath().resolve(name.replaceFirst("\\.hints$", "-Statistics.hints"));
-            assertThat(descriptorEvents.list).filteredOn(e -> e.getLevel().isGreaterOrEqual(Level.WARN))
-                                             .as("WARN and ERROR of the descriptors in " + mode)
-                                             .singleElement()
-                                             .satisfies(e -> {
-                                                 assertThat(e.getLevel()).isEqualTo(Level.ERROR);
-                                                 assertThat(e.getFormattedMessage())
-                                                 .isEqualTo("Cannot read stats component `" + statistics +
-                                                            "` for hints descriptor, initialising with empty " +
-                                                            "statistics.");
-                                                 assertThat(e.getThrowableProxy().getClassName())
-                                                 .isEqualTo(NoSuchFileException.class.getName());
-                                             });
+            assertAbsentStatisticsWarning(descriptorEvents.list, statistics, mode);
+            assertThat(descriptor.statistics()).isSameAs(HintsDescriptor.EMPTY_STATS);
             assertThat(Files.readAllBytes(file)).isEqualTo(before);
             assertThat(list(directory)).containsExactly(name);
         }
     }
 
+    /**
+     * A hints file of this software whose statistics companion is missing, as when its writer was killed before the
+     * first session closed: with {@code NONE} the catalog loads it, and the descriptor logs the WARN of an absent
+     * companion, as for the file DSE 5.1.51 left open, and no ERROR.
+     */
+    @Test
+    public void aHintsFileOfThisSoftwareWithoutItsStatisticsIsLoadedWithAWarningWithNone() throws IOException
+    {
+        File directory = new File(folder.newFolder());
+        long now = Clock.Global.currentTimeMillis();
+        HintsDescriptor own = new HintsDescriptor(UUID.randomUUID(), now);
+        Mutation mutation = oneRowMutation();
+        try (HintsWriter writer = HintsWriter.create(directory, own);
+             HintsWriter.Session session = writer.newSession(ByteBuffer.allocate(1024)))
+        {
+            session.append(Hint.create(mutation, now));
+        }
+        Path file = directory.toPath().resolve(own.fileName());
+        // with its companion the file has the statistics of its hint
+        assertThat(HintsDescriptor.readFromFileQuietly(file).orElseThrow().statistics().totalCount()).isEqualTo(1);
+        Path statistics = directory.toPath().resolve(own.statisticsFileName());
+        Files.delete(statistics);
+        assertThat(list(directory)).containsExactlyInAnyOrder(own.fileName(), own.checksumFileName());
+
+        Logger descriptorLogger = (Logger) LoggerFactory.getLogger(HintsDescriptor.class);
+        ListAppender<ILoggingEvent> descriptorEvents = new ListAppender<>();
+        descriptorEvents.start();
+        descriptorLogger.addAppender(descriptorEvents);
+        try
+        {
+            assertThat(loadAndCollectEvents(directory, InternodeCompatibilityMode.NONE, 1)).isEmpty();
+        }
+        finally
+        {
+            descriptorLogger.detachAppender(descriptorEvents);
+        }
+        assertAbsentStatisticsWarning(descriptorEvents.list, statistics, InternodeCompatibilityMode.NONE);
+        assertThat(list(directory)).containsExactlyInAnyOrder(own.fileName(), own.checksumFileName());
+        assertThat(HintsDescriptor.readFromFileQuietly(file).orElseThrow().statistics())
+        .isSameAs(HintsDescriptor.EMPTY_STATS);
+    }
+
+    /** The descriptor logged one WARN or ERROR: the WARN of the absent statistics companion, with no stack trace. */
+    private static void assertAbsentStatisticsWarning(List<ILoggingEvent> events, Path statistics,
+                                                      InternodeCompatibilityMode mode)
+    {
+        assertThat(events).filteredOn(e -> e.getLevel().isGreaterOrEqual(Level.WARN))
+                          .as("WARN and ERROR of the descriptors in " + mode)
+                          .singleElement()
+                          .satisfies(e -> {
+                              assertThat(e.getLevel()).isEqualTo(Level.WARN);
+                              assertThat(e.getFormattedMessage())
+                              .isEqualTo("Cannot find stats component `" + statistics + "` for hints descriptor, " +
+                                         "initialising with empty statistics.");
+                              assertThat(e.getThrowableProxy()).isNull();
+                          });
+    }
+
     /** A hint of one row of a table of its own, as DSE 5.1 writes it: its mutation in the layout of version 12. */
     private static byte[] dse51Hint(long creationTime) throws IOException
+    {
+        return DseFixtures.dseHint(creationTime, GC_GRACE_SECONDS, DseFixtures.mutation40(oneRowMutation()));
+    }
+
+    /** A mutation of one row of a table of its own. */
+    private static Mutation oneRowMutation()
     {
         TableMetadata table = TableMetadata.builder("ks", "t")
                                            .addPartitionKeyColumn("k", Int32Type.instance)
                                            .addRegularColumn("v", UTF8Type.instance)
                                            .build();
-        Mutation mutation = new RowUpdateBuilder(table, FBUtilities.timestampMicros(), 1).add("v", "x").build();
-        return DseFixtures.dseHint(creationTime, GC_GRACE_SECONDS, DseFixtures.mutation40(mutation));
+        return new RowUpdateBuilder(table, FBUtilities.timestampMicros(), 1).add("v", "x").build();
     }
 
     @Test
