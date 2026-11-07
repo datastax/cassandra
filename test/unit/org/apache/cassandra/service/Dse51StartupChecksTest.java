@@ -23,7 +23,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -47,6 +49,8 @@ import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ULIDBasedSSTableId;
 import org.apache.cassandra.io.util.File;
@@ -54,8 +58,11 @@ import org.apache.cassandra.locator.Ec2Snitch;
 import org.apache.cassandra.locator.Ec2Snitches;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JsonUtils;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_VERSION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -63,11 +70,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * The startup checks with {@code internode_compatibility_mode: DSE_5_1}: what a start in the mode refuses to find on
  * disk (what the node wrote without the mode), the marker of the upgrade from DSE 5.1 it writes once every check has
- * passed, the refusal of a start with {@code NONE} while that marker or the record of DSE 5.1 peers exists, and the
- * warning about the standard EC2 names. The checks of {@code DSE_6} are in {@link Dse6StartupChecksTest}; the cases
- * here that involve {@code DSE_6} show the refusal of a start in that mode while the marker of the upgrade from DSE
- * 5.1 is present or its record lists a peer, and that nothing else of its behaviour depends on those files. Every
- * test works in data, commit log and metadata directories of its own.
+ * passed, the refusal of a start with {@code NONE} while that marker or the record of DSE 5.1 peers exists, the warning
+ * about the standard EC2 names, and the DSE version the node gossips to DSE 5.1 nodes. The checks of {@code DSE_6} are
+ * in {@link Dse6StartupChecksTest}; the cases here that involve {@code DSE_6} show the refusal of a start in that mode
+ * while the marker of the upgrade from DSE 5.1 is present or its record lists a peer, and that nothing else of its
+ * behaviour depends on those files. Every test works in data, commit log and metadata directories of its own.
  */
 public class Dse51StartupChecksTest
 {
@@ -725,6 +732,71 @@ public class Dse51StartupChecksTest
             DatabaseDescriptor.setBroadcastAddress(broadcastBefore);
             DatabaseDescriptor.setBroadcastRpcAddress(broadcastRpcBefore);
             FBUtilities.reset();
+        }
+    }
+
+    /**
+     * The DSE version gossiped to DSE 5.1 nodes in DSE_5_1 mode: 5.1.51, also with the property unset, with no warning;
+     * none and any other value refuse the start, so that the node never gossips a value DSE 5.1 cannot parse, nor none.
+     */
+    @Test
+    public void dse51RefusesAnyDseVersionBut5151() throws Exception
+    {
+        mode(InternodeCompatibilityMode.DSE_5_1);
+        assertThat(new StartupChecks().withDefaultTests().getPreFlightChecks()).contains(StartupChecks.checkDse6GossipedDseVersion);
+        try (WithProperties unset = new WithProperties().clear(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION))
+        {
+            assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDse6GossipedDseVersion.execute(OPTIONS))).isEmpty();
+        }
+        try (WithProperties set = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION, Dse51Fixtures.DSE_VERSION))
+        {
+            assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDse6GossipedDseVersion.execute(OPTIONS))).isEmpty();
+        }
+        for (String refused : new String[]{ DseCompat.NO_DSE_VERSION, "6.8.1", "5.1.50", "5.1.51 ", "" })
+        {
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION, refused))
+            {
+                assertThatThrownBy(() -> StartupChecks.checkDse6GossipedDseVersion.execute(OPTIONS))
+                .as("'%s'", refused)
+                .isInstanceOf(StartupException.class)
+                .hasMessage(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey() + " is '" + refused + "': in internode_compatibility_mode " +
+                            "DSE_5_1 it must be '5.1.51', its default in that mode, the DSE version of the DSE 5.1 nodes, which " +
+                            "this node gossips to them so that their version gates stay as in a cluster of DSE 5.1.51 nodes; " +
+                            "'none' (no DSE version) is not accepted in that mode either: remove the property");
+            }
+        }
+    }
+
+    /**
+     * The state a node starts gossiping with in DSE_5_1 mode: its DSE state at the ordinal of X_11_PADDING in DSE 5.1's
+     * form, with the DSE version 5.1.51, whatever the DSE 6 default of the property is: the state node 1 of the
+     * captured DSE 5.1.51 cluster gossips, its keys in its order and with its types, but for its server id, null here,
+     * and its health, left out.
+     */
+    @Test
+    public void dse51StartsGossipingTheDse51FormOfTheDseState() throws IOException
+    {
+        Dse51Fixtures dse51 = DseFixtures.dse51();
+        String captured = dse51.gossipStates(dse51.gossipInfo(1), "/127.0.51.11").stream()
+                               .filter(s -> s.name.equals(ApplicationState.X_11_PADDING.name()))
+                               .findFirst().orElseThrow().value;
+        Map<String, Object> expected = JsonUtils.fromJsonMap(captured);
+        assertThat(expected).containsKeys("server_id", "health");
+        expected.put("server_id", null);
+        expected.remove("health");
+
+        mode(InternodeCompatibilityMode.DSE_5_1);
+        VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(DatabaseDescriptor.getPartitioner());
+        try (WithProperties unset = new WithProperties().clear(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION))
+        {
+            Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+            StorageService.addDseState(states, factory);
+            assertThat(states).containsOnlyKeys(ApplicationState.X_11_PADDING);
+            assertThat(states.get(ApplicationState.X_11_PADDING).value).isEqualTo(factory.dse51State(Dse51Fixtures.DSE_VERSION).value)
+                                                                        .isEqualTo(JsonUtils.writeAsJsonString(expected))
+                                                                        .isEqualTo("{\"dse_version\":\"5.1.51\",\"workloads\":\"Cassandra\"," +
+                                                                                   "\"workload\":\"Cassandra\",\"active\":\"true\"," +
+                                                                                   "\"server_id\":null,\"graph\":false}");
         }
     }
 }

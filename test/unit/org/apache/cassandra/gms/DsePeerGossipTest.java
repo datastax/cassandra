@@ -54,7 +54,8 @@ import static org.assertj.core.api.Assertions.entry;
 /**
  * The gossip states exchanged at the pre-4.0 dialect use DSE's application-state ordinals only with the peers identified
  * as DSE 6 nodes ({@link DsePeers}): HCD 1.2 at version 11 exchanges the 4.0 line's ordinals, and so does this node with
- * it. The identification by handshake is covered by {@code DseHandshakeTest}.
+ * it. The identification by handshake is covered by {@code DseHandshakeTest}. In DSE_5_1 mode, the states of this node
+ * sent to a DSE 5.1 node are those above the version its digest asks for.
  */
 public class DsePeerGossipTest
 {
@@ -808,6 +809,76 @@ public class DsePeerGossipTest
             // with the mode off a recorded DSE peer gets all the states, as before
             DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
             assertThat(byOrdinal(ownStatesSentTo(dsePeer, generation, 8))).isEqualTo(all);
+        }
+        finally
+        {
+            Gossiper.instance.endpointStateMap.remove(subject);
+            if (before == null)
+                Gossiper.instance.endpointStateMap.remove(self);
+            else
+                Gossiper.instance.endpointStateMap.put(self, before);
+        }
+    }
+
+    /**
+     * DSE_5_1 mode: DSE 5.1.51 has no CASSANDRA-15097 either, so a DSE 5.1 node, identified or known only by the
+     * NET_VERSION of 10 or 11 this node stores for it, is sent the states of this node above the version its digest
+     * asks for, in the answer to its syn and in the ack2 answering its ack, and so reads no state it already has at
+     * that version; a node of this software still gets all of them (CASSANDRA-19983).
+     */
+    @Test
+    public void aDse51PeerIsSentOnlyTheStatesOfThisNodeItAsksFor() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        InetAddressAndPort self = FBUtilities.getBroadcastAddressAndPort();
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        states.put(ApplicationState.STATUS_WITH_PORT, VersionedValue.unsafeMakeVersionedValue("NORMAL,1", 3));
+        states.put(ApplicationState.STATUS, VersionedValue.unsafeMakeVersionedValue("NORMAL,1", 4));
+        states.put(ApplicationState.DC, VersionedValue.unsafeMakeVersionedValue("dc1", 5));
+        states.put(ApplicationState.RACK, VersionedValue.unsafeMakeVersionedValue("rack1", 6));
+        states.put(ApplicationState.SCHEMA, VersionedValue.unsafeMakeVersionedValue(UUID.randomUUID().toString(), 7));
+        states.put(ApplicationState.LOAD, VersionedValue.unsafeMakeVersionedValue("1.0", 9));
+        int generation = 7;
+        Map<Integer, String> all = byOrdinal(new EndpointState(new HeartBeatState(generation, 10), states));
+        EndpointState before = Gossiper.instance.endpointStateMap.put(self, new EndpointState(new HeartBeatState(generation, 10), states));
+        DsePeers.identify(dsePeer, "test");
+        try
+        {
+            assertThat(DsePeers.isDse(dsePeer)).isTrue();
+            // the heartbeat moved since the peer's digest (8): a DSE 5.1 node gets it and LOAD, the only state above 8
+            EndpointState toDse51 = ownStatesSentTo(dsePeer, generation, 8);
+            assertThat(toDse51.getHeartBeatState().getHeartBeatVersion()).isEqualTo(10);
+            assertThat(byOrdinal(toDse51)).containsOnlyKeys(ApplicationState.LOAD.ordinal());
+
+            // and so a DSE 5.1 node reads the ack and the ack2 at 11: no STATUS, DC, RACK, SCHEMA or other state it has
+            Map<InetAddressAndPort, EndpointState> sent = Collections.singletonMap(self, toDse51);
+            GossipDigestAck ack = new GossipDigestAck(Collections.emptyList(), sent, dsePeer);
+            assertThat(byOrdinal(read(GossipDigestAck.serializer, write(GossipDigestAck.serializer, ack, DIALECT), DIALECT).epStateMap.get(self)))
+            .containsOnlyKeys(ApplicationState.LOAD.ordinal());
+            GossipDigestAck2 ack2 = new GossipDigestAck2(sent, dsePeer);
+            assertThat(byOrdinal(read(GossipDigestAck2.serializer, write(GossipDigestAck2.serializer, ack2, DIALECT), DIALECT).epStateMap.get(self)))
+            .containsOnlyKeys(ApplicationState.LOAD.ordinal());
+
+            // a DSE 5.1 node whose digest is up to date is sent nothing, and one that has none of the states gets all
+            assertThat(ownStatesSentTo(dsePeer, generation, 10)).isNull();
+            assertThat(byOrdinal(ownStatesSentTo(dsePeer, generation, HeartBeatState.EMPTY_VERSION))).isEqualTo(all);
+
+            // a DSE 5.1 node known only by the NET_VERSION this node stores for it, 11 or 10, is sent the delta too
+            for (String netVersion : new String[]{ "11", "10" })
+            {
+                Map<ApplicationState, VersionedValue> subjectStates = new EnumMap<>(ApplicationState.class);
+                subjectStates.put(ApplicationState.NET_VERSION, VersionedValue.unsafeMakeVersionedValue(netVersion, 1));
+                Gossiper.instance.endpointStateMap.put(subject, new EndpointState(new HeartBeatState(3, 4), subjectStates));
+                assertThat(DsePeers.isDse(subject)).isFalse();
+                assertThat(byOrdinal(ownStatesSentTo(subject, generation, 8))).as(netVersion).containsOnlyKeys(ApplicationState.LOAD.ordinal());
+            }
+
+            // a node of this software (NET_VERSION 12 or more, or none known) gets all of them, as in every mode
+            Map<ApplicationState, VersionedValue> ourStates = new EnumMap<>(ApplicationState.class);
+            ourStates.put(ApplicationState.NET_VERSION, VersionedValue.unsafeMakeVersionedValue(String.valueOf(MessagingService.current_version), 1));
+            Gossiper.instance.endpointStateMap.put(subject, new EndpointState(new HeartBeatState(3, 4), ourStates));
+            assertThat(byOrdinal(ownStatesSentTo(subject, generation, 8))).isEqualTo(all);
+            assertThat(byOrdinal(ownStatesSentTo(hcdPeer, generation, 8))).isEqualTo(all);
         }
         finally
         {

@@ -210,6 +210,47 @@ public class DseCompatTest
         }
     }
 
+    /**
+     * In DSE_5_1 mode the node gossips 5.1.51, the version of the DSE 5.1 nodes, also with the property unset; any
+     * other value, none and DSE 6's included, is refused.
+     */
+    @Test
+    public void gossipedDseVersionInDse51Mode()
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try (WithProperties unset = new WithProperties().clear(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION))
+        {
+            assertThat(DseCompat.gossipedDseVersion()).isEqualTo(DseCompat.DSE51_GOSSIPED_DSE_VERSION).isEqualTo("5.1.51");
+        }
+        try (WithProperties set = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION, "5.1.51"))
+        {
+            assertThat(DseCompat.gossipedDseVersion()).isEqualTo("5.1.51");
+        }
+        for (String refused : new String[]{ DseCompat.NO_DSE_VERSION, "6.8.1", "5.1.50", "5.1.51.0", "abc", "" })
+        {
+            try (WithProperties other = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION, refused))
+            {
+                assertThatThrownBy(DseCompat::gossipedDseVersion).as(refused)
+                                                                 .isInstanceOf(ConfigurationException.class)
+                                                                 .hasMessage(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey() + " is '" + refused +
+                                                                             "': in internode_compatibility_mode DSE_5_1 it must be '5.1.51', its " +
+                                                                             "default in that mode, the DSE version of the DSE 5.1 nodes, which this " +
+                                                                             "node gossips to them so that their version gates stay as in a cluster " +
+                                                                             "of DSE 5.1.51 nodes; 'none' (no DSE version) is not accepted in that " +
+                                                                             "mode either: remove the property");
+            }
+        }
+    }
+
+    @Test
+    public void dse51Version10Advice()
+    {
+        assertThat(DseCompat.dse51Version10Advice()).isEqualTo("a DSE 5.1 node speaks messaging version 10 only when started with " +
+                                                               "-Dcassandra.force_3_0_protocol_version=true, which " +
+                                                               "internode_compatibility_mode DSE_5_1 does not support: restart " +
+                                                               "that node without the property");
+    }
+
     @Test
     public void refusedVerbReason()
     {

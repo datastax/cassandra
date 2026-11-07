@@ -467,7 +467,8 @@ public class InboundConnectionInitiator
          * <p>
          * Everything that can refuse the connection before the third message is checked before we answer, so a refused
          * peer gets no second message: streaming, an obsolete version (below 3.0, which DSE also closes without an
-         * answer) and the encryption requirement, evaluated here on the socket's remote IP address with the
+         * answer), in the DSE 5.1 compatibility mode a first message only DSE 6 sends (DSE-flagged, or requesting 12),
+         * and the encryption requirement, evaluated here on the socket's remote IP address with the
          * default storage port (see {@link #pre40EncryptionCheckAddress}). The peer's broadcast address is only known
          * from the third message, where the encryption requirement is checked again.
          */
@@ -490,6 +491,19 @@ public class InboundConnectionInitiator
             {
                 logger.warn("peer {} requested the obsolete messaging version {}; the earliest version supported is 3.0.0 (10), closing",
                             remote, requested);
+                failHandshake(ctx);
+                return;
+            }
+
+            // DSE 5.1 compatibility mode: only DSE 6 sends these first messages (DSE-flagged, or pre-4.0-shaped at 12),
+            // and no DSE 6 node is in a cluster under the DSE 5.1 upgrade
+            boolean flagged = requested == DseCompat.DSE_VERSION_BYTE;
+            if (DseCompat.isDse51() && (flagged || requested == DseCompat.NET_VERSION_PUBLISHED))
+            {
+                logger.warn("peer {} sent a first handshake message only a DSE 6 node sends ({}): internode_compatibility_mode " +
+                            "DSE_5_1 connects to DSE 5.1 nodes and nodes of this software only, and no DSE 6 node can be in a " +
+                            "cluster under the DSE 5.1 upgrade; closing",
+                            remote, flagged ? "DSE-flagged" : "pre-4.0, requesting version " + requested);
                 failHandshake(ctx);
                 return;
             }
@@ -525,7 +539,8 @@ public class InboundConnectionInitiator
 
         /**
          * The third (and last) message of the pre-4.0 handshake: the peer's version and address. Only the dialect we
-         * answered with is accepted.
+         * answered with is accepted: a DSE 5.1 node started with {@code -Dcassandra.force_3_0_protocol_version=true}
+         * confirms with 10 and is refused, in the DSE 5.1 compatibility mode with a WARN that names the property.
          */
         @VisibleForTesting
         void confirmPre40(ChannelHandlerContext ctx, ByteBuf in)
@@ -547,8 +562,15 @@ public class InboundConnectionInitiator
             logger.trace("Received third handshake message from peer {}, message = {}", ctx.channel().remoteAddress(), confirmOutboundPre40);
             if (confirmOutboundPre40.maxMessagingVersion != DseCompat.DSE_DIALECT)
             {
-                logger.warn("peer {} ({}) confirmed the pre-4.0 handshake with version {} instead of the {} we answered; closing",
-                            ctx.channel().remoteAddress(), confirmOutboundPre40.from, confirmOutboundPre40.maxMessagingVersion, DseCompat.DSE_DIALECT);
+                // DSE 5.1 compatibility mode: a DSE 5.1 node at 10 runs with
+                // -Dcassandra.force_3_0_protocol_version=true, refused as before, with the advice of the mode
+                if (DseCompat.isDse51() && confirmOutboundPre40.maxMessagingVersion == MessagingService.VERSION_30)
+                    logger.warn("peer {} ({}) confirmed the pre-4.0 handshake with version {} instead of the {} we answered; closing: {}",
+                                ctx.channel().remoteAddress(), confirmOutboundPre40.from, confirmOutboundPre40.maxMessagingVersion, DseCompat.DSE_DIALECT,
+                                DseCompat.dse51Version10Advice());
+                else
+                    logger.warn("peer {} ({}) confirmed the pre-4.0 handshake with version {} instead of the {} we answered; closing",
+                                ctx.channel().remoteAddress(), confirmOutboundPre40.from, confirmOutboundPre40.maxMessagingVersion, DseCompat.DSE_DIALECT);
                 failHandshake(ctx);
                 return;
             }
