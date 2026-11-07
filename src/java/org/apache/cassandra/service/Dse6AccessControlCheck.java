@@ -110,7 +110,8 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  *     read failure: the connections to the other replicas, DSE ones included, may still be coming up) is retried, with
  *     a pause of {@value #RETRY_INTERVAL_SECONDS} seconds after each failed attempt, for up to
  *     {@code cassandra.internode_compatibility_mode.dse_restrictions_check_wait_seconds} (120 by default); one that still
- *     fails then, or fails otherwise, refuses the start too (fail closed).</li>
+ *     fails then refuses the start too in {@code DSE_6} (see below for {@code DSE_5_1}), and one that fails otherwise
+ *     refuses it in both modes (fail closed).</li>
  * </ol>
  * The check refuses whatever authorizer is configured (it fails closed: with one that enforces nothing, such as
  * {@code AllowAllAuthorizer}, the controls are not enforced either). With {@code NONE} nothing is read.
@@ -124,6 +125,15 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  * only, so a view's key refuses the start of that node only, where the key of a table, which every node gets, refuses
  * them all. No remedy is given for a view: {@code UNRESTRICT ROWS} on a view fails on DSE 5.1.51 and leaves a row that
  * keeps the node from starting, which {@link #verifyDse51SchemaRowsAtStartup} refuses before the schema is loaded.
+ * <p>
+ * In {@code DSE_5_1} a cluster-wide read of the second pass that still fails on the request at the end of the wait does
+ * not refuse the start: the node checks its own replica, as with {@code dse_restrictions_local_check_only}, and starts
+ * with a WARN, as long as its {@code role_permissions} has neither {@code restricted} nor {@code grantables}, DSE 5.1's
+ * table (one of DSE 6's shape keeps the refusal). The cluster-wide read adds to the first pass only the {@code rows/}
+ * grants held on other replicas: DSE 5.1 has no {@code RESTRICT} of a role and no delegation, and a {@code rows/} grant
+ * restricts access only on a table or view with the key {@value #RLAC_EXTENSION_KEY}, which is in the schema the first
+ * pass reads; the periodic check reads the whole table again. A read that fails otherwise (aborted by the guardrails,
+ * or any other error) still refuses the start, and {@code DSE_6} keeps the refusal.
  */
 public final class Dse6AccessControlCheck
 {
@@ -334,7 +344,10 @@ public final class Dse6AccessControlCheck
      * that case, with a warning, and {@code cassandra.internode_compatibility_mode.ignore_dse_restrictions} accepts no
      * cluster-wide check at all: what this node's replica and the schema hold is then listed and dropped knowingly,
      * under a {@code not checked: ...} source; with either of them set the read is not retried, since the operator
-     * already chose what happens when it fails. The restrictions found by the first pass are still refused.
+     * already chose what happens when it fails. The restrictions found by the first pass are still refused. In
+     * {@code DSE_5_1}, with neither set, a read still failing on the request at the end of the wait is followed by the
+     * check of this node's replica, with a warning of its own, while that replica's table has the shape of DSE 5.1's
+     * (see the class javadoc).
      *
      * @throws StartupException also when {@code dse_restrictions_check_wait_seconds} is not a number of seconds, or
      *         {@code system_auth.role_permissions} is not in the schema
@@ -380,8 +393,8 @@ public final class Dse6AccessControlCheck
      *
      * @param clusterScan the scan of {@code system_auth.role_permissions}, as {@link #scan}: null for a read of this
      *                    node's replica (made by the fallbacks of {@code dse_restrictions_local_check_only} and
-     *                    {@code ignore_dse_restrictions} when the cluster-wide read fails), otherwise the consistency
-     *                    level of the cluster-wide read
+     *                    {@code ignore_dse_restrictions} when the cluster-wide read fails, and in {@code DSE_5_1} by
+     *                    the one after the wait), otherwise the consistency level of the cluster-wide read
      * @param waitNanos how long a read failing on the request is retried, from the first attempt: an attempt that would
      *                  start after that time (the time of the failed attempt plus the pause) is not made; 0 or less makes
      *                  a single attempt
@@ -394,6 +407,8 @@ public final class Dse6AccessControlCheck
         ConsistencyLevel consistency = DatabaseDescriptor.getAuthReadConsistencyLevel();
         Findings findings;
         RuntimeException failure;
+        // whether the read failed on the request (and was retried for the wait), not otherwise
+        boolean failedOnTheRequest = false;
         long start = clock.getAsLong();
         int attempts = 0;
         for (;;)
@@ -417,6 +432,7 @@ public final class Dse6AccessControlCheck
                 {
                     findings = null;
                     failure = e;
+                    failedOnTheRequest = true;
                     break;
                 }
                 logger.warn("The startup check of the DSE access controls could not read {}.{} at {} (attempt {}: {}); retrying in {} s, " +
@@ -484,8 +500,34 @@ public final class Dse6AccessControlCheck
                 verify(known, notChecked + "what " + LOCAL_SOURCE + " and the schema hold is listed", true, false);
                 return;
             }
+            // in DSE_5_1 the start on this node's replica, when the read failed on the request on a table of DSE 5.1
+            boolean dse51Fallback = failedOnTheRequest && DseCompat.isDse51();
+            TableMetadata permissions = Schema.instance.getTableMetadata(SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                                         AuthKeyspace.ROLE_PERMISSIONS);
+            boolean dse51Table = dse51Fallback && permissions != null && isDse51PermissionsTable(permissions);
+            if (dse51Table)
+            {
+                logger.warn("The startup check of the DSE access controls could not read {}.{} at {} ({}){}; " +
+                            "with internode_compatibility_mode DSE_5_1 only this node's replica was checked, since " +
+                            "DSE 5.1 has no RESTRICT and no delegation and the restrictions DSE 5.1 applies on this " +
+                            "node are in the schema this node checked; the periodic check reads the whole table " +
+                            "again every {} minutes",
+                            SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.ROLE_PERMISSIONS, consistency, message(e),
+                            tried, DseUpgradeGuards.STATUS_LOG_INTERVAL_MINUTES);
+                // the local findings are still refused, as with dse_restrictions_local_check_only
+                verify(scanLocally(clusterScan),
+                       LOCAL_SOURCE + " only: the cluster-wide read failed (" + message(e) + ')', true, false);
+                return;
+            }
+            // in DSE_5_1 a table of DSE 6's shape is why this node's replica alone is not relied on
+            String dse6Shaped = dse51Fallback && permissions != null
+                                ? "; this node's " + SchemaConstants.AUTH_KEYSPACE_NAME + '.' +
+                                  AuthKeyspace.ROLE_PERMISSIONS + " has the restricted or grantables column of DSE " +
+                                  "6, so this node's replica alone is not relied on"
+                                : "";
             throw new StartupException(StartupException.ERR_WRONG_CONFIG,
-                                       refused() + problem + "; make the replicas of system_auth reachable, " +
+                                       refused() + problem + dse6Shaped +
+                                       "; make the replicas of system_auth reachable, " +
                                        "or start with -D" + CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY.getKey() +
                                        "=true to rely on the check of this node's replica alone", e);
         }
@@ -1212,6 +1254,17 @@ public final class Dse6AccessControlCheck
             logger.info("Tables with schema extensions other than {}, kept and not interpreted by this software (not DSE access controls): {}{}",
                         RLAC_EXTENSION_KEY, tables.size() <= OTHER_EXTENSIONS_LOGGED ? tables : tables.subList(0, OTHER_EXTENSIONS_LOGGED),
                         tables.size() <= OTHER_EXTENSIONS_LOGGED ? "" : " and " + (tables.size() - OTHER_EXTENSIONS_LOGGED) + " more");
+    }
+
+    /**
+     * Whether this node's {@code system_auth.role_permissions}, {@code table}, has the shape of DSE 5.1's table:
+     * neither the {@code restricted} nor the {@code grantables} column, which a table of DSE 6 has (and a
+     * {@code RESTRICT} or a delegation held on another replica only would then go unseen by a check of this node's
+     * replica).
+     */
+    private static boolean isDse51PermissionsTable(TableMetadata table)
+    {
+        return !hasColumn(table, RESTRICTED_COLUMN) && !hasColumn(table, GRANTABLES_COLUMN);
     }
 
     private static boolean hasColumn(TableMetadata table, String name)

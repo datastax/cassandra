@@ -1160,6 +1160,182 @@ public class Dse6AccessControlCheckTest extends CQLTester
         }
     }
 
+    /** The WARN of a {@code DSE_5_1} start on this node's replica after the cluster-wide read failed. */
+    private static String dse51FallbackWarning(String failure, String tried)
+    {
+        return "The startup check of the DSE access controls could not read system_auth.role_permissions at " +
+               "LOCAL_QUORUM (" + failure + ')' + tried + "; with internode_compatibility_mode DSE_5_1 only this " +
+               "node's replica was checked, since DSE 5.1 has no RESTRICT and no delegation and the restrictions DSE " +
+               "5.1 applies on this node are in the schema this node checked; the periodic check reads the whole " +
+               "table again every 10 minutes";
+    }
+
+    /** The cluster-wide read of {@code read}, and this node's replica read as the pass reads it. */
+    private static Function<ConsistencyLevel, Findings> orThisNodesReplica(ScriptedRead read)
+    {
+        return consistency -> consistency == null ? Dse6AccessControlCheck.scan(null) : read.apply(consistency);
+    }
+
+    /** {@code system_auth.role_permissions} as DSE 5.1 has it: without the columns of DSE 6. */
+    private void removeDseColumns() throws Throwable
+    {
+        for (String column : List.of("restricted", "grantables"))
+        {
+            TableMetadata table = Schema.instance.getTableMetadata(SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                                   AuthKeyspace.ROLE_PERMISSIONS);
+            if (table.getColumn(ColumnIdentifier.getInterned(column, true)) != null)
+                execute("ALTER TABLE system_auth.role_permissions DROP " + column);
+        }
+    }
+
+    /**
+     * In DSE_5_1, a cluster-wide read still failing on the request at the end of the wait is followed by the check of
+     * this node's replica, and the node starts with a WARN of its own; compatstatus' source says the cluster-wide read
+     * failed. What the replica holds is still refused.
+     */
+    @Test
+    public void dse51AClusterWideReadStillFailingAfterTheWaitFallsBackToThisNodesReplica() throws Throwable
+    {
+        removeDseColumns();
+        dse51();
+        FakeTime time = new FakeTime();
+        ScriptedRead read = new ScriptedRead(List.of(), null, time);
+        Function<ConsistencyLevel, Findings> scan = orThisNodesReplica(read);
+        List<String> warnings = warnings(() -> Dse6AccessControlCheck.verifyAfterJoin(scan, time.now::get, time,
+                                                                                      SECONDS.toNanos(10), PAUSE));
+        assertThat(read.attempts).isEqualTo(3);
+        assertThat(time.pauses).containsExactly(PAUSE, PAUSE);
+        assertThat(warnings).containsExactly(retryWarning(1, TIMED_OUT, 10), retryWarning(2, TIMED_OUT, 10),
+                                             dse51FallbackWarning(TIMED_OUT, " after 3 attempts in 10 s"));
+        assertThat(Dse6AccessControlCheck.lastCheck().source)
+        .isEqualTo("this node's replica only: the cluster-wide read failed (" + TIMED_OUT + ')');
+        assertThat(Dse6AccessControlCheck.lastCheck().findings).isEmpty();
+
+        // a single attempt with a wait of 0, the same fallback
+        FakeTime once = new FakeTime();
+        RuntimeException unavailable = UnavailableException.create(ConsistencyLevel.LOCAL_QUORUM, 2, 1);
+        ScriptedRead single = new ScriptedRead(List.of(unavailable), new Findings(), once);
+        Function<ConsistencyLevel, Findings> singleScan = orThisNodesReplica(single);
+        assertThat(warnings(() -> Dse6AccessControlCheck.verifyAfterJoin(singleScan, once.now::get, once, 0, 0)))
+        .containsExactly(dse51FallbackWarning(LOCAL_QUORUM_FAILED, ""));
+        assertThat(single.attempts).isEqualTo(1);
+
+        // a row-level grant held on this node's replica is refused, with the text of the local-only fallback
+        execute("INSERT INTO system_auth.role_permissions (role, resource, permissions) " +
+                "VALUES ('analyst', 'rows/top_secret/data/ks1/table1', {'SELECT'})");
+        FakeTime again = new FakeTime();
+        Function<ConsistencyLevel, Findings> refusedScan = orThisNodesReplica(new ScriptedRead(List.of(), null, again));
+        assertThatThrownBy(() -> Dse6AccessControlCheck.verifyAfterJoin(refusedScan, again.now::get, again, 0, 0))
+        .isInstanceOf(StartupException.class)
+        .hasMessageStartingWith("internode_compatibility_mode DSE_5_1 refused: DSE access controls that this " +
+                                "software does not enforce would grant access if ignored (found by this node's " +
+                                "replica only: the cluster-wide read failed (" + TIMED_OUT + ")): row-level grants " +
+                                "[role 'analyst' on rows/top_secret/data/ks1/table1: [SELECT]]. " + STALE);
+    }
+
+    /**
+     * In DSE_5_1, a permissions table with a column of DSE 6 ({@code restricted} or {@code grantables}, each alone or
+     * both) keeps the refusal of a cluster-wide read that cannot be made, which says why: a RESTRICT or a delegation
+     * held on another replica only would go unseen.
+     */
+    @Test
+    public void dse51KeepsTheRefusalWhenThePermissionsTableHasTheColumnsOfDse6() throws Throwable
+    {
+        String dse6Shaped = "; this node's system_auth.role_permissions has the restricted or grantables column of " +
+                            "DSE 6, so this node's replica alone is not relied on";
+        for (String columns : List.of("restricted set<text>", "grantables set<text>",
+                                      "restricted set<text>, grantables set<text>"))
+        {
+            removeDseColumns();
+            execute("ALTER TABLE system_auth.role_permissions ADD (" + columns + ')');
+            try
+            {
+                dse51();
+                FakeTime time = new FakeTime();
+                ScriptedRead read = new ScriptedRead(List.of(), null, time);
+                Function<ConsistencyLevel, Findings> scan = orThisNodesReplica(read);
+                String refusal = refusal(TIMED_OUT, " after 3 attempts in 10 s").replace("DSE_6 refused",
+                                                                                         "DSE_5_1 refused");
+                String unable = unableToRead(TIMED_OUT, " after 3 attempts in 10 s");
+                assertThatThrownBy(() -> Dse6AccessControlCheck.verifyAfterJoin(scan, time.now::get, time,
+                                                                                SECONDS.toNanos(10), PAUSE))
+                .as(columns)
+                .isInstanceOf(StartupException.class)
+                .hasMessage(refusal.replace(unable, unable + dse6Shaped))
+                .hasCauseInstanceOf(ReadTimeoutException.class);
+                assertThat(read.attempts).isEqualTo(3);
+                // no start on this node's replica was recorded
+                assertThat(Dse6AccessControlCheck.lastCheck()).as(columns).isNull();
+            }
+            finally
+            {
+                // the schema is frozen in the mode
+                DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+                removeDseColumns();
+            }
+        }
+    }
+
+    /**
+     * DSE_6 keeps its refusal of a cluster-wide read that cannot be made on a permissions table of DSE 5.1's shape too:
+     * the fallback after the wait is DSE_5_1's, whatever the table.
+     */
+    @Test
+    public void dse6RefusesTheStartOnAPermissionsTableOfDse51sShape() throws Throwable
+    {
+        removeDseColumns();
+        dse6();
+        FakeTime time = new FakeTime();
+        ScriptedRead read = new ScriptedRead(List.of(), null, time);
+        Function<ConsistencyLevel, Findings> scan = orThisNodesReplica(read);
+        long wait = SECONDS.toNanos(10);
+        String refused = refusal(TIMED_OUT, " after 3 attempts in 10 s");
+        List<String> warnings = warnings(() -> {
+            assertThatThrownBy(() -> Dse6AccessControlCheck.verifyAfterJoin(scan, time.now::get, time, wait, PAUSE))
+            .isInstanceOf(StartupException.class)
+            .hasMessage(refused);
+        });
+        assertThat(read.attempts).isEqualTo(3);
+        // the retries only, no WARN of a start on this node's replica
+        assertThat(warnings).containsExactly(retryWarning(1, TIMED_OUT, 10), retryWarning(2, TIMED_OUT, 10));
+        assertThat(Dse6AccessControlCheck.lastCheck()).isNull();
+    }
+
+    /**
+     * In DSE_5_1 the cluster-wide read is taken when it succeeds, after retries; one failing otherwise than on the
+     * request (aborted by the guardrails, or any other error) still refuses the start, never falling back.
+     */
+    @Test
+    public void dse51TakesTheClusterWideReadAndRefusesItsOtherFailures() throws Throwable
+    {
+        removeDseColumns();
+        dse51();
+        FakeTime time = new FakeTime();
+        ScriptedRead read = new ScriptedRead(List.of(UnavailableException.create(ConsistencyLevel.LOCAL_QUORUM, 2, 1)),
+                                             new Findings(), time);
+        Function<ConsistencyLevel, Findings> scan = orThisNodesReplica(read);
+        List<String> warnings = warnings(() -> Dse6AccessControlCheck.verifyAfterJoin(scan, time.now::get, time,
+                                                                                      SECONDS.toNanos(120), PAUSE));
+        assertThat(read.attempts).isEqualTo(2);
+        assertThat(warnings).containsExactly(retryWarning(1, LOCAL_QUORUM_FAILED, 120));
+        assertThat(Dse6AccessControlCheck.lastCheck().source).isEqualTo("a LOCAL_QUORUM read");
+
+        RuntimeException aborted = new TombstoneAbortException("too many tombstones", 1, 100_001, false,
+                                                               ConsistencyLevel.LOCAL_QUORUM, 0, 2, Map.of());
+        for (RuntimeException failure : List.of(new IllegalStateException("unreadable row"), aborted))
+        {
+            FakeTime once = new FakeTime();
+            ScriptedRead failing = new ScriptedRead(List.of(failure), new Findings(), once);
+            Function<ConsistencyLevel, Findings> failingScan = orThisNodesReplica(failing);
+            assertThatThrownBy(() -> Dse6AccessControlCheck.verifyAfterJoin(failingScan, once.now::get, once,
+                                                                            SECONDS.toNanos(120), PAUSE))
+            .isInstanceOf(StartupException.class)
+            .hasMessage(refusal(failure.getMessage(), "").replace("DSE_6 refused", "DSE_5_1 refused"))
+            .hasCause(failure);
+            assertThat(failing.attempts).isEqualTo(1);
+        }
+    }
+
     /**
      * The real pass, with the wait property: retried (one pause of 5 s within a 7 s wait) then refused on this node,
      * which never joined a ring; not retried at all when the local-only or ignore property says what to do; an invalid

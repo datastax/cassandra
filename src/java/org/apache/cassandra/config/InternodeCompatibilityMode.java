@@ -44,10 +44,11 @@ package org.apache.cassandra.config;
  * and refuses their repair messages and their reads that carry row-level access control. It refuses to start, as
  * {@link #DSE_6} does, while DSE access controls it does not enforce exist (row-level grants, tables and views
  * restricted to rows) or any trace of the DSE features it does not support (Search, Graph, Analytics, DSEFS, CFS,
- * Advanced Replication, tiered storage, in-memory tables), and creates no SAI index, even with the schema freeze
- * lifted. Offline tools inherit only the checks of the on-disk settings and the transaction logs and statistics of the
- * mode (they write big {@code oa}, without the storage mode); clients, which do not read {@code cassandra.yaml}, get
- * the {@code big} format and numeric generations forced.
+ * Advanced Replication, tiered storage, in-memory tables); it also refuses, unlike {@link #DSE_6}, a table or view on a
+ * compaction strategy this software no longer has, and creates no SAI index, even with the schema freeze lifted.
+ * Offline tools inherit only the checks of the on-disk settings and the transaction logs and statistics of the mode
+ * (they write big {@code oa}, without the storage mode); clients, which do not read {@code cassandra.yaml}, get the
+ * {@code big} format and numeric generations forced.
  * <p>
  * The mode is removed with a rolling restart once every node runs this software.
  */

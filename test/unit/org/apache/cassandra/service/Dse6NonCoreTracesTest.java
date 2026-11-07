@@ -67,6 +67,10 @@ import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaTestUtil;
+import org.apache.cassandra.schema.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.service.Dse6NonCoreTraces.Kind;
@@ -93,6 +97,10 @@ public class Dse6NonCoreTracesTest extends CQLTester
     private static final String SOLR_INDEX = "com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex";
     private static final String NO_TRACE = "DSE 6 compatibility mode: no trace of DSE Search, Graph, Analytics, DSEFS, CFS or Advanced Replication found";
     private static final String REMEDY_PREFIX = ". Roll this node back to DSE, remove them there (";
+    /** The start of the remedies when a compaction strategy, which an ALTER removes, is refused with other traces. */
+    private static final String ALTER_REMEDY_PREFIX = ". Roll this node back to DSE, remove or alter them there (";
+    /** The start of the remedies when compaction strategies alone are refused. */
+    private static final String ONLY_ALTER_REMEDY_PREFIX = ". Roll this node back to DSE, alter them there (";
     private static final String REMEDY_SUFFIX = ") and upgrade it again";
     private static final String PEER_ADVICE = ". An entry of nodes/peers is stale when that node has since been restarted as a Cassandra-only " +
                                               "node or has left the cluster: if every entry listed from nodes/peers is stale, start with -D" +
@@ -106,7 +114,8 @@ public class Dse6NonCoreTracesTest extends CQLTester
                                               "Cassandra workload) can be upgraded. ";
     private static final String NO_TRACE_DSE51 = "DSE 5.1 compatibility mode: no trace of DSE Search, Graph, " +
                                                  "Analytics, DSEFS, CFS, Advanced Replication, tiered storage or " +
-                                                 "in-memory tables found";
+                                                 "in-memory tables found, nor a compaction strategy this software " +
+                                                 "no longer has";
     /** The Search and Graph node of the DSE 5.1.51 fixtures. */
     private static final String SEARCH_GRAPH_NODE = "127.0.51.21";
     /** What DSE 5.1.51 stored for the Search and Graph node, as the refusals list it. */
@@ -861,11 +870,12 @@ public class Dse6NonCoreTracesTest extends CQLTester
             String otherRemedies = "migrate the data of the graph keyspaces elsewhere and drop them; migrate the " +
                                    "data of the Analytics, DSEFS and CFS keyspaces elsewhere if it is needed and " +
                                    "drop them, empty or not; stop Advanced Replication, migrate what its keyspace " +
-                                   "holds if it is needed and drop it, empty or not; alter the tables listed to a " +
-                                   "compaction strategy of Apache Cassandra (ALTER TABLE ... WITH compaction)";
+                                   "holds if it is needed and drop it, empty or not; alter the tables and " +
+                                   "materialized views listed to a compaction strategy of Apache Cassandra (ALTER " +
+                                   "TABLE or ALTER MATERIALIZED VIEW ... WITH compaction)";
             assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
             .hasMessage(FOUND_DSE51 + "DSE Search: keyspace solr_admin, " + index + ", directory " + solrData + "; " +
-                        graphs + REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON " +
+                        graphs + ALTER_REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON " +
                         "<keyspace>.<table>); delete the solr.data directories once no search index is left; drop " +
                         "the keyspace solr_admin once no node runs DSE Search; " + otherRemedies + REMEDY_SUFFIX);
 
@@ -875,8 +885,9 @@ public class Dse6NonCoreTracesTest extends CQLTester
             DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
             assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
             .hasMessage(FOUND_DSE51 + "DSE Search: " + index + ", directory " + solrData + "; " + graphs +
-                        REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON <keyspace>.<table>); delete " +
-                        "the solr.data directories once no search index is left; " + otherRemedies + REMEDY_SUFFIX);
+                        ALTER_REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON <keyspace>.<table>); " +
+                        "delete the solr.data directories once no search index is left; " + otherRemedies +
+                        REMEDY_SUFFIX);
 
             // the same keyspaces and rows are not read with NONE or DSE_6, whose check reads the loaded schema
             for (InternodeCompatibilityMode mode : List.of(InternodeCompatibilityMode.NONE,
@@ -897,6 +908,118 @@ public class Dse6NonCoreTracesTest extends CQLTester
             for (String keyspace : created)
                 schemaChange("DROP KEYSPACE IF EXISTS " + keyspace);
         }
+    }
+
+    /**
+     * A table and a materialized view compacted by {@code DateTieredCompactionStrategy}, which DSE 5.1.51 has and this
+     * software no longer has, are refused in a group of their own with the remedy, before the schema is loaded; the
+     * compaction of the materialized views is read for the DSE classes too. The rows are written directly to
+     * {@code system_schema}, as DSE wrote them. With {@code NONE} and {@code DSE_6} nothing of it is read: the check of
+     * {@code DSE_6} ({@link Dse6NonCoreTraces#verifyAtStartup}) reads the loaded schema only, not these rows.
+     */
+    @Test
+    public void dse51TablesAndViewsOnACompactionStrategyThisSoftwareNoLongerHasAreRefused() throws Throwable
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        // the drop of a view records it in system_distributed, which this test node does not create
+        String distributed = SchemaConstants.DISTRIBUTED_KEYSPACE_NAME;
+        boolean distributedAdded = Schema.instance.getKeyspaceMetadata(distributed) == null;
+        if (distributedAdded)
+            SchemaTestUtil.addOrUpdateKeyspace(SystemDistributedKeyspace.metadata(), true);
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        // the build of the view is not waited for: its rows do not matter here
+        String view = createViewAsync("CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s WHERE k IS NOT NULL AND v IS " +
+                                      "NOT NULL PRIMARY KEY (v, k)");
+        String dateTiered = "org.apache.cassandra.db.compaction.DateTieredCompactionStrategy";
+        String removedRemedy = "alter the tables and materialized views compacted by DateTieredCompactionStrategy to " +
+                               "TimeWindowCompactionStrategy (ALTER TABLE or ALTER MATERIALIZED VIEW ... WITH " +
+                               "compaction = {'class': 'TimeWindowCompactionStrategy', ...})";
+        try
+        {
+            executeOnceInternal("UPDATE system_schema.tables SET compaction = {'class': '" + dateTiered + "'} " +
+                                "WHERE keyspace_name = ? AND table_name = ?", KEYSPACE, table);
+            executeOnceInternal("UPDATE system_schema.views SET compaction = " +
+                                "{'class': 'DateTieredCompactionStrategy'} WHERE keyspace_name = ? AND view_name = ?",
+                                KEYSPACE, view);
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            String removed = "tables or materialized views on a compaction strategy this software no longer has: " +
+                             "table " + KEYSPACE + '.' + table + " (compaction " + dateTiered + "), materialized " +
+                             "view " + KEYSPACE + '.' + view + " (compaction DateTieredCompactionStrategy)";
+            assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
+            .isInstanceOf(StartupException.class)
+            .hasMessage("internode_compatibility_mode DSE_5_1 refused: found " + removed + ONLY_ALTER_REMEDY_PREFIX +
+                        removedRemedy + REMEDY_SUFFIX)
+            .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
+            assertThat(Dse6NonCoreTraces.status()).isNull();
+
+            // a view on a DSE class of tiered storage or in-memory tables is refused as a table is, the strategy this
+            // software no longer has in its group, after the DSE features
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            executeOnceInternal("UPDATE system_schema.tables SET compaction = {'class': 'MemoryOnlyStrategy'} " +
+                                "WHERE keyspace_name = ? AND table_name = ?", KEYSPACE, table);
+            String tieredClass = "org.apache.cassandra.db.compaction.TieredCompactionStrategy";
+            executeOnceInternal("UPDATE system_schema.views SET compaction = {'class': '" + tieredClass + "'} " +
+                                "WHERE keyspace_name = ? AND view_name = ?", KEYSPACE, view);
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            String dseRemedy = "alter the tables and materialized views listed to a compaction strategy of Apache " +
+                               "Cassandra (ALTER TABLE or ALTER MATERIALIZED VIEW ... WITH compaction)";
+            assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
+            .hasMessage(FOUND_DSE51 + "DSE tiered storage and in-memory tables: table " + KEYSPACE + '.' + table +
+                        " (compaction MemoryOnlyStrategy), materialized view " + KEYSPACE + '.' + view +
+                        " (compaction " + tieredClass + ')' + ONLY_ALTER_REMEDY_PREFIX + dseRemedy + REMEDY_SUFFIX);
+
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            executeOnceInternal("UPDATE system_schema.views SET compaction = {'class': 'MemoryOnlyStrategy'} " +
+                                "WHERE keyspace_name = ? AND view_name = ?", KEYSPACE, view);
+            executeOnceInternal("UPDATE system_schema.tables SET compaction = {'class': '" + dateTiered + "'} " +
+                                "WHERE keyspace_name = ? AND table_name = ?", KEYSPACE, table);
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
+            .hasMessage(FOUND_DSE51 + "DSE tiered storage and in-memory tables: materialized view " + KEYSPACE + '.' +
+                        view + " (compaction MemoryOnlyStrategy). Also found tables or materialized views on a " +
+                        "compaction strategy this software no longer has: table " + KEYSPACE + '.' + table +
+                        " (compaction " + dateTiered + ')' + ONLY_ALTER_REMEDY_PREFIX + dseRemedy + "; " +
+                        removedRemedy +
+                        REMEDY_SUFFIX);
+
+            // the rows are not read with NONE or DSE_6
+            for (InternodeCompatibilityMode mode : List.of(InternodeCompatibilityMode.NONE,
+                                                           InternodeCompatibilityMode.DSE_6))
+            {
+                DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+                assertThat(logsOf(null, Dse6NonCoreTraces::verifyDse51AtStartup)).as("%s", mode).isEmpty();
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            Dse6NonCoreTraces.resetStatus();
+            // dropped here, so that no row the test changed is left behind for the next test
+            dropView(view);
+            schemaChange("DROP TABLE " + KEYSPACE + '.' + table);
+            if (distributedAdded)
+                SchemaTestUtil.dropKeyspaceIfExist(distributed, true);
+        }
+    }
+
+    /** The compaction classes the check reads, by their long and their short names, and those it does not refuse. */
+    @Test
+    public void dse51CompactionTracesByClass()
+    {
+        Dse6NonCoreTraces.Traces traces = new Dse6NonCoreTraces.Traces();
+        Dse6NonCoreTraces.addCompactionTrace(traces, "table ks.a", "DateTieredCompactionStrategy");
+        Dse6NonCoreTraces.addCompactionTrace(traces, "materialized view ks.b",
+                                             "org.apache.cassandra.db.compaction.DateTieredCompactionStrategy");
+        Dse6NonCoreTraces.addCompactionTrace(traces, "table ks.c", "TieredCompactionStrategy");
+        Dse6NonCoreTraces.addCompactionTrace(traces, "table ks.d", "TimeWindowCompactionStrategy");
+        Dse6NonCoreTraces.addCompactionTrace(traces, "table ks.e", "SizeTieredCompactionStrategy");
+        Dse6NonCoreTraces.addCompactionTrace(traces, "table ks.f", null);
+        assertThat(traces.all).extracting(t -> t.kind + " " + t.description)
+                              .containsExactly("REMOVED_COMPACTION table ks.a (compaction " +
+                                               "DateTieredCompactionStrategy)",
+                                               "REMOVED_COMPACTION materialized view ks.b (compaction " +
+                                               "org.apache.cassandra.db.compaction.DateTieredCompactionStrategy)",
+                                               "TABLE_COMPACTION table ks.c (compaction TieredCompactionStrategy)");
     }
 
     /**

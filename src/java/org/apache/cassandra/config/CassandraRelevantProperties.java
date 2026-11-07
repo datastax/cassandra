@@ -564,21 +564,27 @@ public enum CassandraRelevantProperties
      */
     INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL("cassandra.internode_compatibility_mode.allow_ddl", "false"),
     /**
-     * How long, in seconds, a node in {@code internode_compatibility_mode: DSE_6} retries the cluster-wide read of
-     * {@code system_auth.role_permissions} of its second startup check while it fails on the request (replicas not
-     * alive yet, a timeout, a read failure): the connections to the other replicas may still be coming up. When the read
-     * still fails after that time the start is refused. With {@code dse_restrictions_local_check_only} or
-     * {@code ignore_dse_restrictions} set, the read is made once and not retried, and those properties decide what
-     * happens when it fails. The value is a decimal number of seconds; any other value refuses the start, whatever the
-     * fallback properties say, and it is checked from the first startup pass on. 0 or less makes a single attempt.
+     * How long, in seconds, a node in {@code internode_compatibility_mode: DSE_6} or {@code DSE_5_1} retries the
+     * cluster-wide read of {@code system_auth.role_permissions} of its second startup check while it fails on the
+     * request (replicas not alive yet, a timeout, a read failure): the connections to the other replicas may still be
+     * coming up. When the read still fails after that time the start is refused in {@code DSE_6}; in {@code DSE_5_1}
+     * the node checks its own replica instead, still refusing what it holds, and starts with a WARN, unless that
+     * replica's table has the {@code restricted} or {@code grantables} column of DSE 6. With
+     * {@code dse_restrictions_local_check_only} or {@code ignore_dse_restrictions} set, the read is made once and not
+     * retried, and those properties decide what happens when it fails. The value is a decimal number of seconds; any
+     * other value refuses the start, whatever the fallback properties say, and it is checked from the first startup
+     * pass on. 0 or less makes a single attempt.
      */
     INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS("cassandra.internode_compatibility_mode.dse_restrictions_check_wait_seconds", "120"),
     /**
-     * Lets a node in {@code internode_compatibility_mode: DSE_6} start when the cluster-wide read of
+     * Lets a node in {@code internode_compatibility_mode: DSE_6} or {@code DSE_5_1} start when the cluster-wide read of
      * {@code system_auth.role_permissions} of its second startup check fails, for any reason (replicas unreachable, a
      * timeout, a read aborted by the guardrails, any other error): the check of the node's own replica is then the only
      * one, and still refuses the DSE access controls it finds. With it set the cluster-wide read is made once, not
-     * retried. Logged at WARN on every start where it is set, and when the fallback is taken.
+     * retried; in {@code DSE_5_1}, where the node falls back to its own replica after
+     * {@code dse_restrictions_check_wait_seconds} for a read failing on the request, it skips that wait, and also falls
+     * back where that fallback does not (any other failure, a table of DSE 6's shape). Logged at WARN on every start
+     * where it is set, and when the fallback is taken.
      */
     INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY("cassandra.internode_compatibility_mode.dse_restrictions_local_check_only", "false"),
     /**

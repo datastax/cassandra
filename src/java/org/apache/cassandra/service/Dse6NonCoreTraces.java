@@ -121,9 +121,12 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_
  *     <li>DSE Graph: the three keyspaces of a graph, {@code <graph>}, {@code <graph>_system} and {@code <graph>_pvt},
  *     and a keyspace {@code <graph>_pvt} of {@code LocalStrategy} (DSE 5.1 has no {@code graph_engine});</li>
  *     <li>DSE Search: an index of a DSE Search class, a {@code solr.data} directory, as for DSE 6;</li>
- *     <li>DSE tiered storage and in-memory tables: a table compacted by {@code TieredCompactionStrategy} or
- *     {@code MemoryOnlyStrategy} (DSE classes this software does not have).</li>
+ *     <li>DSE tiered storage and in-memory tables: a table or a materialized view compacted by
+ *     {@code TieredCompactionStrategy} or {@code MemoryOnlyStrategy} (DSE classes this software does not have).</li>
  * </ul>
+ * The same read refuses, in a group of its own since it is no DSE feature, a table or a materialized view compacted by
+ * {@code DateTieredCompactionStrategy}, the class of Apache Cassandra 3.11 that DSE 5.1.51 has and this software no
+ * longer has, whose load would fail too: the remedy is to alter it to {@code TimeWindowCompactionStrategy} on DSE 5.1.
  * Once the node has joined and gossip has settled, {@link #verifyDse51GossipedWorkloads} refuses the start too when a
  * DSE 5.1 peer gossips a workload other than {@code Cassandra} (live values, which the override does not cover), and
  * the status task of {@code DseUpgradeGuards} checks them again periodically ({@link #recheckDse51GossipedWorkloads}).
@@ -150,6 +153,8 @@ public final class Dse6NonCoreTraces
         ADVANCED_REPLICATION("DSE Advanced Replication"),
         /** DSE 5.1's tiered storage and in-memory tables, whose compaction classes this software does not have */
         TIERED_AND_IN_MEMORY("DSE tiered storage and in-memory tables"),
+        /** not a DSE feature: a class of Apache Cassandra 3.11 that DSE 5.1 has but this software lacks */
+        REMOVED_COMPACTION("a compaction strategy this software no longer has"),
         /** not a feature: the DSE files the check could not read, so it cannot tell whether they hold traces */
         UNREADABLE("DSE files that cannot be read");
 
@@ -183,8 +188,10 @@ public final class Dse6NonCoreTraces
         GRAPH_KEYSPACE(Feature.GRAPH),
         SEARCH_INDEX(Feature.SEARCH),
         SOLR_DATA_DIRECTORY(Feature.SEARCH),
-        /** a table compacted by a DSE class of DSE 5.1's tiered storage or in-memory tables */
+        /** a table or a materialized view compacted by a DSE class of DSE 5.1's tiered storage or in-memory tables */
         TABLE_COMPACTION(Feature.TIERED_AND_IN_MEMORY),
+        /** a table or a materialized view compacted by a class this software no longer has */
+        REMOVED_COMPACTION(Feature.REMOVED_COMPACTION),
         /** the DSE state a DSE 5.1 peer gossips, read once the node has joined, then periodically */
         GOSSIPED_WORKLOADS(Feature.WORKLOADS);
 
@@ -229,6 +236,13 @@ public final class Dse6NonCoreTraces
     static final List<String> DSE51_COMPACTION_CLASSES =
         ImmutableList.of("org.apache.cassandra.db.compaction.TieredCompactionStrategy",
                          "org.apache.cassandra.db.compaction.MemoryOnlyStrategy");
+
+    /**
+     * The compaction classes of Apache Cassandra 3.11 that DSE 5.1 has and this software no longer has, as they are
+     * named in the schema.
+     */
+    static final List<String> DSE51_REMOVED_COMPACTION_CLASSES =
+        ImmutableList.of("org.apache.cassandra.db.compaction.DateTieredCompactionStrategy");
 
     /** The suffix of the keyspace of {@code LocalStrategy} DSE 5.1's Graph creates for a graph. */
     static final String DSE51_GRAPH_PRIVATE_SUFFIX = "_pvt";
@@ -396,7 +410,12 @@ public final class Dse6NonCoreTraces
         }
         String tableColumns = "keyspace_name, table_name, compaction";
         for (UntypedResultSet.Row row : schemaRows(tableColumns, SchemaKeyspaceTables.TABLES))
-            addCompactionTrace(traces, row.getString("keyspace_name") + '.' + row.getString("table_name"),
+            addCompactionTrace(traces, "table " + row.getString("keyspace_name") + '.' + row.getString("table_name"),
+                               row.has("compaction") ? row.getFrozenTextMap("compaction").get("class") : null);
+        String viewColumns = "keyspace_name, view_name, compaction";
+        for (UntypedResultSet.Row row : schemaRows(viewColumns, SchemaKeyspaceTables.VIEWS))
+            addCompactionTrace(traces, "materialized view " + row.getString("keyspace_name") + '.' +
+                                       row.getString("view_name"),
                                row.has("compaction") ? row.getFrozenTextMap("compaction").get("class") : null);
         addSolrDataTraces(traces, DatabaseDescriptor.getAllDataFileLocations());
         verify(traces, INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEER_WORKLOADS.getBoolean());
@@ -489,20 +508,31 @@ public final class Dse6NonCoreTraces
     }
 
     /**
-     * The trace of {@code table} when its compaction class is one of {@link #DSE51_COMPACTION_CLASSES}, by its short or
-     * its long name.
+     * The trace of {@code table}, a table or a materialized view as the refusal names it ({@code table <ks>.<name>},
+     * {@code materialized view <ks>.<name>}), when its compaction class is one of {@link #DSE51_COMPACTION_CLASSES} or
+     * of {@link #DSE51_REMOVED_COMPACTION_CLASSES}, by its short or its long name.
      */
     @VisibleForTesting
     static void addCompactionTrace(Traces traces, String table, @Nullable String compactionClass)
     {
         if (compactionClass == null)
             return;
-        for (String dseClass : DSE51_COMPACTION_CLASSES)
+        if (isOneOf(compactionClass, DSE51_COMPACTION_CLASSES))
+            traces.add(Kind.TABLE_COMPACTION, table + " (compaction " + compactionClass + ')');
+        else if (isOneOf(compactionClass, DSE51_REMOVED_COMPACTION_CLASSES))
+            traces.add(Kind.REMOVED_COMPACTION, table + " (compaction " + compactionClass + ')');
+    }
+
+    /** Whether {@code compactionClass} is one of {@code classes}, by its short or its long name. */
+    private static boolean isOneOf(String compactionClass, List<String> classes)
+    {
+        for (String className : classes)
         {
-            String shortName = dseClass.substring(dseClass.lastIndexOf('.') + 1);
-            if (compactionClass.equals(dseClass) || compactionClass.equals(shortName))
-                traces.add(Kind.TABLE_COMPACTION, "table " + table + " (compaction " + compactionClass + ')');
+            String shortName = className.substring(className.lastIndexOf('.') + 1);
+            if (compactionClass.equals(className) || compactionClass.equals(shortName))
+                return true;
         }
+        return false;
     }
 
     /**
@@ -772,7 +802,8 @@ public final class Dse6NonCoreTraces
 
         String found = DseCompat.isDse51()
                        ? "DSE 5.1 compatibility mode: no trace of DSE Search, Graph, Analytics, DSEFS, CFS, Advanced " +
-                         "Replication, tiered storage or in-memory tables found"
+                         "Replication, tiered storage or in-memory tables found, nor a compaction strategy this " +
+                         "software no longer has"
                        : "DSE 6 compatibility mode: no trace of DSE Search, Graph, Analytics, DSEFS, CFS or Advanced " +
                          "Replication found";
         String peersFile = DseCompat.isDse51() ? "system.peers" : "nodes/peers";
@@ -803,7 +834,11 @@ public final class Dse6NonCoreTraces
         }
         List<String> groups = new ArrayList<>();
         for (Map.Entry<Feature, List<Trace>> e : byFeature.entrySet())
-            groups.add(e.getKey().displayName + ": " + join(e.getValue()));
+        {
+            // a compaction strategy this software no longer has is no DSE feature: a sentence of its own, below
+            if (e.getKey() != Feature.REMOVED_COMPACTION)
+                groups.add(e.getKey().displayName + ": " + join(e.getValue()));
+        }
 
         boolean dse51 = DseCompat.isDse51();
         List<String> remedies = new ArrayList<>();
@@ -832,17 +867,43 @@ public final class Dse6NonCoreTraces
         if (byFeature.containsKey(Feature.ADVANCED_REPLICATION))
             remedies.add("stop Advanced Replication, migrate what its keyspace holds if it is needed and drop it, empty or not");
         if (kinds.contains(Kind.TABLE_COMPACTION))
-            remedies.add("alter the tables listed to a compaction strategy of Apache Cassandra (ALTER TABLE ... WITH " +
-                         "compaction)");
+            remedies.add("alter the tables and materialized views listed to a compaction strategy of Apache " +
+                         "Cassandra (ALTER TABLE or ALTER MATERIALIZED VIEW ... WITH compaction)");
+        if (kinds.contains(Kind.REMOVED_COMPACTION))
+            remedies.add("alter the tables and materialized views compacted by DateTieredCompactionStrategy to " +
+                         "TimeWindowCompactionStrategy (ALTER TABLE or ALTER MATERIALIZED VIEW ... WITH compaction = " +
+                         "{'class': 'TimeWindowCompactionStrategy', ...})");
 
         List<String> sentences = new ArrayList<>();
         // a file that cannot be read is no trace: it only keeps the check from telling whether there is one
         boolean onlyUnreadable = byFeature.keySet().equals(EnumSet.of(Feature.UNREADABLE));
-        sentences.add((onlyUnreadable ? "cannot check for traces of DSE features that this software does not support"
-                                      : "found traces of DSE features that this software does not support") +
-                      "; only DSE core (the Cassandra workload) can be upgraded. " + String.join("; ", groups));
+        List<Trace> removedCompaction = byFeature.getOrDefault(Feature.REMOVED_COMPACTION, List.of());
+        String removed = "tables or materialized views on " + Feature.REMOVED_COMPACTION.displayName + ": " +
+                         join(removedCompaction);
+        if (groups.isEmpty())
+        {
+            sentences.add("found " + removed);
+        }
+        else
+        {
+            String found = onlyUnreadable
+                           ? "cannot check for traces of DSE features that this software does not support"
+                           : "found traces of DSE features that this software does not support";
+            sentences.add(found + "; only DSE core (the Cassandra workload) can be upgraded. " +
+                          String.join("; ", groups));
+            if (!removedCompaction.isEmpty())
+                sentences.add("Also found " + removed);
+        }
+        // the remedy of a compaction strategy is an ALTER, not a removal
+        Set<Kind> compaction = EnumSet.of(Kind.TABLE_COMPACTION, Kind.REMOVED_COMPACTION);
+        boolean alter = kinds.stream().anyMatch(compaction::contains);
+        boolean onlyAlter = compaction.containsAll(kinds);
         if (!remedies.isEmpty())
-            sentences.add("Roll this node back to DSE, remove them there (" + String.join("; ", remedies) + ") and upgrade it again");
+        {
+            String how = onlyAlter ? "alter" : alter ? "remove or alter" : "remove";
+            sentences.add("Roll this node back to DSE, " + how + " them there (" + String.join("; ", remedies) +
+                          ") and upgrade it again");
+        }
         // this node keeps what it read of DSE 5.1's system.local and system.peers in a record of the upgrade, which
         // the next start loads while the marker of the upgrade exists: the rollback removes both
         if (dse51 && (kinds.contains(Kind.WORKLOADS_OF_THIS_NODE) || kinds.contains(Kind.PEER_ENTRY)))
