@@ -44,16 +44,17 @@ package org.apache.cassandra.config;
  * and refresh. A node in the mode speaks, with DSE 5.1 peers, the pre-4.0 handshake and the Apache Cassandra 3.11
  * dialect DSE 5.1 uses (messaging version 11, with Apache Cassandra 3.11's limit ordinals), with this software's gossip
  * ordinals, and applies the operational guards and the schema freeze of {@link #DSE_6} (a schema statement, a schema
- * change received or a JMX compression change that sets a compressor DSE 5.1 does not read is refused too); it neither
- * sends its schema to DSE 5.1 nodes nor applies theirs, and refuses their repair messages and their reads that carry
- * row-level access control. It refuses to start, as {@link #DSE_6} does, while DSE access controls it does not enforce
- * exist (row-level grants, tables and views restricted to rows) or any trace of the DSE features it does not support
- * (Search, Graph, Analytics, DSEFS, CFS, Advanced Replication, tiered storage, in-memory tables); it also refuses,
- * unlike {@link #DSE_6}, a table or view on a compaction strategy this software no longer has, and creates no SAI
- * index, even with the schema freeze lifted. Offline tools inherit only the checks of the on-disk settings and the
- * transaction logs, statistics and sstable version of the mode (they write big {@link #DSE_51_BIG_VERSION} too, without
- * the storage mode); clients, which do not read {@code cassandra.yaml}, get the {@code big} format and numeric
- * generations forced, and write big {@link #DSE_51_BIG_VERSION}.
+ * change received or a JMX compression change that sets a compressor DSE 5.1 does not read is refused too), except
+ * that {@code upgradesstables} and {@code recompress_sstables} run, since every rewrite writes big
+ * {@link #DSE_51_BIG_VERSION}; it neither sends its schema to DSE 5.1 nodes nor applies theirs, and refuses their
+ * repair messages and their reads that carry row-level access control. It refuses to start, as {@link #DSE_6} does,
+ * while DSE access controls it does not enforce exist (row-level grants, tables and views restricted to rows) or any
+ * trace of the DSE features it does not support (Search, Graph, Analytics, DSEFS, CFS, Advanced Replication, tiered
+ * storage, in-memory tables); it also refuses, unlike {@link #DSE_6}, a table or view on a compaction strategy this
+ * software no longer has, and creates no SAI index, even with the schema freeze lifted. Offline tools inherit only the
+ * checks of the on-disk settings and the transaction logs, statistics and sstable version of the mode (they write big
+ * {@link #DSE_51_BIG_VERSION} too, without the storage mode); clients, which do not read {@code cassandra.yaml}, get
+ * the {@code big} format and numeric generations forced, and write big {@link #DSE_51_BIG_VERSION}.
  * <p>
  * The mode is removed with a rolling restart once every node runs this software.
  */

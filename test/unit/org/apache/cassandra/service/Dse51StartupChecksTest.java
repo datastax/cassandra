@@ -314,7 +314,8 @@ public class Dse51StartupChecksTest
         assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode is NONE but the DSE 5.1 upgrade marker " + marker + " is present: " +
-                    "DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: DSE_5_1, or once " +
+                    "DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: " +
+                    "DSE_5_1 with storage_compatibility_mode: DSE_5_1 and sstable.selected_format: big, or once " +
                     "every node runs this software, delete the marker, or start with " +
                     "-Dcassandra.internode_compatibility_mode.ignore_dse_peers=true")
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
@@ -342,11 +343,12 @@ public class Dse51StartupChecksTest
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode is NONE but the record of DSE 5.1 peers " + record +
                     " listing [10.0.0.2:7000, 10.0.0.3:not-a-port] is present: DSE 5.1 peers may still be in the " +
-                    "cluster. Set internode_compatibility_mode: DSE_5_1, or the record empties itself once this " +
-                    "node has seen every listed peer at messaging version 4.0 or later (run once more with " +
-                    "DSE_5_1 after the last upgrade); delete it by hand only after checking that the listed peers " +
-                    "have left the cluster; the entries [10.0.0.3:not-a-port] are not addresses with port " +
-                    "(<ip>:<port>) and must be removed from it by hand, or start with " +
+                    "cluster. Set internode_compatibility_mode: DSE_5_1 with storage_compatibility_mode: DSE_5_1 " +
+                    "and sstable.selected_format: big, or the record empties itself once this node has seen every " +
+                    "listed peer at messaging version 4.0 or later (run once more with DSE_5_1 after the last " +
+                    "upgrade); delete it by hand only after checking that the listed peers have left the cluster; " +
+                    "the entries [10.0.0.3:not-a-port] are not addresses with port (<ip>:<port>) and must be " +
+                    "removed from it by hand, or start with " +
                     "-Dcassandra.internode_compatibility_mode.ignore_dse_peers=true");
 
         // a record that cannot be read refuses the start too
@@ -357,7 +359,8 @@ public class Dse51StartupChecksTest
         .hasMessageStartingWith("internode_compatibility_mode is NONE but the record of DSE 5.1 peers " + record +
                                 " cannot be read (")
         .hasMessageContaining("): DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: " +
-                              "DSE_5_1, or make the record readable, or start with ");
+                              "DSE_5_1 with storage_compatibility_mode: DSE_5_1 and sstable.selected_format: big, " +
+                              "or make the record readable, or start with ");
     }
 
     @Test
@@ -429,7 +432,8 @@ public class Dse51StartupChecksTest
         assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode is DSE_6 but the DSE 5.1 upgrade marker " + marker + " is present: " +
-                    "DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: DSE_5_1, or once " +
+                    "DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: " +
+                    "DSE_5_1 with storage_compatibility_mode: DSE_5_1 and sstable.selected_format: big, or once " +
                     "every node runs this software, delete the marker, or start with " +
                     "-Dcassandra.internode_compatibility_mode.ignore_dse_peers=true")
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
@@ -474,7 +478,8 @@ public class Dse51StartupChecksTest
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode is DSE_6 but the record of DSE 5.1 peers " + record +
                     " listing [10.0.0.2:7000] is present: DSE 5.1 peers may still be in the cluster. Set " +
-                    "internode_compatibility_mode: DSE_5_1, or " + recordRemedy)
+                    "internode_compatibility_mode: DSE_5_1 with storage_compatibility_mode: DSE_5_1 and " +
+                    "sstable.selected_format: big, or " + recordRemedy)
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
 
         try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS, true))
@@ -491,8 +496,9 @@ public class Dse51StartupChecksTest
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode is DSE_6 but the DSE 5.1 upgrade marker " + marker + " is present " +
                     "and the record of DSE 5.1 peers " + record + " listing [10.0.0.2:7000] is present: DSE 5.1 " +
-                    "peers may still be in the cluster. Set internode_compatibility_mode: DSE_5_1, or once every " +
-                    "node runs this software, delete the marker; " + recordRemedy);
+                    "peers may still be in the cluster. Set internode_compatibility_mode: DSE_5_1 with " +
+                    "storage_compatibility_mode: DSE_5_1 and sstable.selected_format: big, or once every node runs " +
+                    "this software, delete the marker; " + recordRemedy);
         assertThat(DseUpgradeMarker.delete(InternodeCompatibilityMode.DSE_5_1)).isTrue();
 
         Files.delete(record);
@@ -502,7 +508,8 @@ public class Dse51StartupChecksTest
         .hasMessageStartingWith("internode_compatibility_mode is DSE_6 but the record of DSE 5.1 peers " + record +
                                 " cannot be read (")
         .hasMessageContaining("): DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: " +
-                              "DSE_5_1, or make the record readable, or start with ")
+                              "DSE_5_1 with storage_compatibility_mode: DSE_5_1 and sstable.selected_format: big, " +
+                              "or make the record readable, or start with ")
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
         try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS, true))
         {
