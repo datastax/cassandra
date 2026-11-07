@@ -17,46 +17,56 @@
 package org.apache.cassandra.distributed.test.dsecompat;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 
 import org.junit.Test;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.service.DseUpgradeMarker;
+import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaTransformations;
+import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
-import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * A node in {@code internode_compatibility_mode: DSE_5_1} refuses to start, once its schema is loaded, while a table is
  * compressed with a compressor DSE 5.1 does not read, and starts while every table uses one DSE 5.1 reads. The node
- * first runs without the mode, on the storage settings the mode requires, then is restarted in it. The advice of the
- * refusal, followed, leads back to a start in the mode. In the mode a {@code CREATE TABLE} with such a compressor is
- * refused when it runs, {@code allow_ddl} or not.
+ * runs in the mode from its first start ({@link Dse51NewNodes}), and the Zstd table reaches its schema as no schema
+ * statement in the mode can bring it, through the schema directly, as a table created on the node before the mode
+ * would. The advice of the refusal, followed, keeps every sstable at big {@code me} and leads back to a start in the
+ * mode. In the mode a {@code CREATE TABLE} with such a compressor is refused when it runs, {@code allow_ddl} or not.
  */
 public class Dse51CompressorsStartupTest extends TestBaseImpl
 {
+    private static final CassandraRelevantProperties IGNORE_DSE51_COMPRESSION =
+        CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE51_COMPRESSION;
+
     @Test
     public void aTableCompressedWithZstdRefusesTheStartInTheMode() throws Throwable
     {
-        try (Cluster cluster = dse51ReadyCluster())
+        try (Cluster cluster = nodeInTheMode())
         {
-            init(cluster);
-            cluster.schemaChange(withKeyspace("CREATE TABLE %s.zstd (k int PRIMARY KEY, v int) " +
-                                              "WITH compression = {'class': 'ZstdCompressor'}"));
-            IInvokableInstance node = restartedInTheMode(cluster, false);
+            IInvokableInstance node = cluster.get(1);
+            addZstdTable(node);
+            node.shutdown().get();
             assertThatThrownBy(node::startup)
             .hasStackTraceContaining("internode_compatibility_mode DSE_5_1 refused: " + KEYSPACE + ".zstd " +
                                      "(ZstdCompressor) is compressed with a compressor DSE 5.1 does not read");
@@ -64,44 +74,73 @@ public class Dse51CompressorsStartupTest extends TestBaseImpl
     }
 
     /**
-     * The advice of the refusal leads back to the mode. Its starting point is reproduced without a refused start, which
-     * an in-JVM instance cannot follow with another start: the node has run in the mode, so it holds the DSE 5.1
-     * upgrade marker, and a table is compressed with a compressor DSE 5.1 does not read. The start without the mode,
-     * with the override of the marker and the storage settings of the mode, is accepted; there the compression is
-     * changed and the sstables rewritten, and the next start in the mode, without the override, is accepted. The
-     * refusal of a start without the mode and without the override is in {@code Dse51StartupChecksTest}.
+     * The advice of the refusal leads back to the mode with every sstable at big {@code me}: one start in the mode with
+     * {@code ignore_dse51_compression}, which logs the refusals at WARN, in which the compression is changed (with
+     * {@code allow_ddl}) and the sstables rewritten ({@code nodetool upgradesstables -a}, which the guards of the mode
+     * let run, and which rewrites those of the secondary index too, whose table takes the compression of its base); the
+     * next start in the mode, without the properties, is accepted. The refused start itself is the test above (an
+     * in-JVM instance cannot start again after it).
      */
     @Test
     public void theAdviceOfTheRefusalLeadsBackToTheMode() throws Throwable
     {
-        try (Cluster cluster = dse51ReadyCluster())
+        try (Cluster cluster = nodeInTheMode())
         {
-            init(cluster);
-            IInvokableInstance node = restartedInTheMode(cluster, true);
-            assertThat(node.callOnInstance(() -> DseUpgradeMarker.exists(InternodeCompatibilityMode.DSE_5_1))).isTrue();
-            node.shutdown().get();
-
-            node.config().set("internode_compatibility_mode", "NONE");
-            try (WithProperties ignore = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS, true))
+            IInvokableInstance node = cluster.get(1);
+            addZstdTable(node);
+            // a secondary index, whose table takes the compression of its base table
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
             {
-                node.startup();
+                cluster.schemaChange(withKeyspace("CREATE INDEX zstd_v ON %s.zstd (v) USING 'legacy_local_table'"));
             }
-            assertThat(node.logs().grep("The DSE 5.1 upgrade marker .* is present but ignored").getResult()).hasSize(1);
-            cluster.schemaChange(withKeyspace("CREATE TABLE %s.zstd (k int PRIMARY KEY, v int) " +
-                                              "WITH compression = {'class': 'ZstdCompressor'}"));
             cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.zstd (k, v) VALUES (1, 1)"),
                                            ConsistencyLevel.ONE);
             node.flush(KEYSPACE);
-            cluster.schemaChange(withKeyspace("ALTER TABLE %s.zstd WITH compression = {'class': 'LZ4Compressor'}"));
-            node.nodetoolResult("upgradesstables", "-a", KEYSPACE, "zstd").asserts().success();
-            // every sstable of the table is now compressed with LZ4, which DSE 5.1 reads
+            // a flush compresses with LZ4 (flush_compression: fast), a compaction with the compressor of the table
+            node.forceCompact(KEYSPACE, "zstd");
+            node.runOnInstance(() -> indexTable(KEYSPACE, "zstd").forceMajorCompaction());
             assertThat(node.callOnInstance(() -> compressorsOfTheSSTables(KEYSPACE, "zstd")))
-            .containsExactly("LZ4Compressor");
+            .containsExactly("ZstdCompressor");
+            assertThat(node.callOnInstance(() -> compressorsOfTheIndexSSTables(KEYSPACE, "zstd")))
+            .containsExactly("ZstdCompressor");
             node.shutdown().get();
 
-            node.config().set("internode_compatibility_mode", "DSE_5_1");
+            try (WithProperties properties = new WithProperties().set(IGNORE_DSE51_COMPRESSION, true)
+                                                                 .set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                node.startup();
+                assertThat(node.logs().grep("internode_compatibility_mode DSE_5_1 starts with " +
+                                            "-Dcassandra.internode_compatibility_mode.ignore_dse51_compression=true " +
+                                            "although " + KEYSPACE + ".zstd \\(ZstdCompressor\\) is compressed")
+                               .getResult())
+                .hasSize(1);
+                // and the same start names the sstables on disk, of the table and of its index
+                assertThat(node.logs().grep("internode_compatibility_mode DSE_5_1 starts with " +
+                                            "-Dcassandra.internode_compatibility_mode.ignore_dse51_compression=true " +
+                                            "although 2 sstables on disk are compressed with a compressor DSE 5.1 " +
+                                            "does not read, or encrypted \\(" + KEYSPACE + "\\.zstd: 1 sstable, " +
+                                            ".*; " + KEYSPACE + "\\.zstd index zstd_v: 1 sstable, ")
+                               .getResult())
+                .hasSize(1);
+                cluster.schemaChange(withKeyspace("ALTER TABLE %s.zstd WITH compression = {'class': 'LZ4Compressor'}"));
+                node.nodetoolResult("upgradesstables", "-a", KEYSPACE, "zstd").asserts().success();
+            }
+            // every sstable of the table and of its index is now compressed with LZ4, which DSE 5.1 reads, and still
+            // big me
+            assertThat(node.callOnInstance(() -> compressorsOfTheSSTables(KEYSPACE, "zstd")))
+            .containsExactly("LZ4Compressor");
+            assertThat(node.callOnInstance(() -> versionsOfTheSSTables(KEYSPACE, "zstd"))).containsExactly("me");
+            assertThat(node.callOnInstance(() -> compressorsOfTheIndexSSTables(KEYSPACE, "zstd")))
+            .containsExactly("LZ4Compressor");
+            assertThat(node.callOnInstance(() -> versionsOfTheIndexSSTables(KEYSPACE, "zstd"))).containsExactly("me");
+            // the WARN of the start with the property, the only one about the sstables on disk until now
+            assertThat(node.logs().grep("sstables? on disk").getResult()).hasSize(1);
+            node.shutdown().get();
+
             node.startup();
             assertThat(node.callOnInstance(DatabaseDescriptor::isDse51CompatibilityMode)).isTrue();
+            // the last start names no sstable on disk
+            assertThat(node.logs().grep("sstables? on disk").getResult()).hasSize(1);
             assertThat(cluster.coordinator(1).execute(withKeyspace("SELECT v FROM %s.zstd WHERE k = 1"),
                                                       ConsistencyLevel.ONE))
             .isDeepEqualTo(new Object[][]{ { 1 } });
@@ -115,10 +154,8 @@ public class Dse51CompressorsStartupTest extends TestBaseImpl
     @Test
     public void aCreateTableWithZstdIsRefusedInTheModeWithAllowDdl() throws Throwable
     {
-        try (Cluster cluster = dse51ReadyCluster())
+        try (Cluster cluster = nodeInTheMode())
         {
-            init(cluster);
-            restartedInTheMode(cluster, true);
             try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
             {
                 String zstd = withKeyspace("CREATE TABLE %s.zstd (k int PRIMARY KEY, v int) " +
@@ -145,19 +182,23 @@ public class Dse51CompressorsStartupTest extends TestBaseImpl
     @Test
     public void tablesCompressedAsDse51ReadsStartInTheMode() throws Throwable
     {
-        try (Cluster cluster = dse51ReadyCluster())
+        try (Cluster cluster = nodeInTheMode())
         {
-            init(cluster);
-            for (String compressor : new String[]{ "LZ4Compressor", "SnappyCompressor", "DeflateCompressor" })
-                cluster.schemaChange(withKeyspace("CREATE TABLE %s." + compressor.toLowerCase() +
-                                                  " (k int PRIMARY KEY, v int) WITH compression = {'class': '" +
-                                                  compressor + "'}"));
-            IInvokableInstance node = restartedInTheMode(cluster, true);
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                for (String compressor : new String[]{ "LZ4Compressor", "SnappyCompressor", "DeflateCompressor" })
+                    cluster.schemaChange(withKeyspace("CREATE TABLE %s." + compressor.toLowerCase() +
+                                                      " (k int PRIMARY KEY, v int) WITH compression = {'class': '" +
+                                                      compressor + "'}"));
+            }
+            IInvokableInstance node = cluster.get(1);
+            node.shutdown().get();
+            node.startup();
             assertThat(node.callOnInstance(DatabaseDescriptor::isDse51CompatibilityMode)).isTrue();
-            // announced once, at the start in the mode, with the version the node writes
-            assertThat(node.logs().grep("Running in internode_compatibility_mode DSE_5_1: the node writes big nb " +
-                                        "sstables, which DSE 5.1 does not read, with numeric generations").getResult())
-            .hasSize(1);
+            // announced at each start in the mode, with the version the node writes
+            assertThat(node.logs().grep("Running in internode_compatibility_mode DSE_5_1: the node writes big me " +
+                                        "sstables, which DSE 5.1 reads, with numeric generations").getResult())
+            .hasSize(2);
         }
     }
 
@@ -170,25 +211,104 @@ public class Dse51CompressorsStartupTest extends TestBaseImpl
         return compressors;
     }
 
-    /** One node of this software, started without the mode on the storage settings DSE_5_1 requires. */
-    private static Cluster dse51ReadyCluster() throws IOException
+    /** The table of the one secondary index of the table, run inside an instance. */
+    private static ColumnFamilyStore indexTable(String keyspace, String table)
     {
-        return Cluster.build(1)
-                      .withDynamicPortAllocation(true)
-                      .withConfig(c -> c.set("storage_compatibility_mode", "HCD_1")
-                                        .set("uuid_sstable_identifiers_enabled", false)
-                                        .set("sstable", Map.of("selected_format", "big")))
-                      .start();
+        return Keyspace.open(keyspace).getColumnFamilyStore(table).indexManager.getAllIndexColumnFamilyStores()
+                       .iterator().next();
     }
 
-    /** Stops the node, sets DSE_5_1 in its configuration and, when {@code start}, starts it again. */
-    private static IInvokableInstance restartedInTheMode(Cluster cluster, boolean start) throws Exception
+    /** The simple names of the compressors of the live sstables of the index of the table, run inside an instance. */
+    private static Set<String> compressorsOfTheIndexSSTables(String keyspace, String table)
     {
-        IInvokableInstance node = cluster.get(1);
-        node.shutdown().get();
-        node.config().set("internode_compatibility_mode", "DSE_5_1");
-        if (start)
-            node.startup();
-        return node;
+        Set<String> compressors = new HashSet<>();
+        for (SSTableReader sstable : indexTable(keyspace, table).getLiveSSTables())
+            compressors.add(sstable.getCompressionMetadata().compressor().getClass().getSimpleName());
+        return compressors;
+    }
+
+    /** The versions of the live sstables of the index of the table, run inside an instance. */
+    private static Set<String> versionsOfTheIndexSSTables(String keyspace, String table)
+    {
+        Set<String> versions = new HashSet<>();
+        for (SSTableReader sstable : indexTable(keyspace, table).getLiveSSTables())
+            versions.add(sstable.descriptor.version.version);
+        return versions;
+    }
+
+    /** The versions of the live sstables of the table, run inside an instance. */
+    private static Set<String> versionsOfTheSSTables(String keyspace, String table)
+    {
+        Set<String> versions = new HashSet<>();
+        for (SSTableReader sstable : Keyspace.open(keyspace).getColumnFamilyStore(table).getLiveSSTables())
+            versions.add(sstable.descriptor.version.version);
+        return versions;
+    }
+
+    /**
+     * A Zstd table added to the schema of the node directly, as no statement in the mode can add it: a table created
+     * before the mode, or by a node without it.
+     */
+    private static void addZstdTable(IInvokableInstance node)
+    {
+        node.runOnInstance(() -> {
+            TableMetadata table = TableMetadata.builder(KEYSPACE, "zstd")
+                                               .addPartitionKeyColumn("k", Int32Type.instance)
+                                               .addRegularColumn("v", Int32Type.instance)
+                                               .compression(CompressionParams.zstd())
+                                               .build();
+            Schema.instance.transform(SchemaTransformations.addTable(table, false));
+        });
+    }
+
+    /**
+     * A column of a type DSE 5.1 cannot read refuses the start in the mode, before the compressor of its table, since
+     * its only remedy, the flag drop, ends the check of the compressors too.
+     */
+    @Test
+    public void aColumnTypeDse51CannotReadRefusesTheStartBeforeTheCompressor() throws Throwable
+    {
+        try (Cluster cluster = nodeInTheMode())
+        {
+            IInvokableInstance node = cluster.get(1);
+            // a schema the mode never writes, as a node outside the mode would
+            node.runOnInstance(() -> {
+                TableMetadata table = TableMetadata.builder(KEYSPACE, "both")
+                                                   .addPartitionKeyColumn("k", Int32Type.instance)
+                                                   .addRegularColumn("e", VectorType.getInstance(FloatType.instance, 2))
+                                                   .compression(CompressionParams.zstd())
+                                                   .build();
+                Schema.instance.transform(SchemaTransformations.addTable(table, false));
+            });
+            node.shutdown().get();
+            assertThatThrownBy(node::startup)
+            .hasStackTraceContaining("internode_compatibility_mode DSE_5_1 refused: " + KEYSPACE + ".both.e (")
+            .hasStackTraceContaining(") is of a type DSE 5.1 cannot read, so this node cannot write the sstables DSE " +
+                                     "5.1 reads for it, and its rollback to DSE 5.1 is no longer possible")
+            .hasStackTraceContaining("End the mode on this node")
+            .satisfies(e -> assertThat(stackTrace(e)).doesNotContain("(ZstdCompressor) is compressed"));
+        }
+    }
+
+    private static String stackTrace(Throwable t)
+    {
+        StringWriter out = new StringWriter();
+        t.printStackTrace(new PrintWriter(out));
+        return out.toString();
+    }
+
+    /** One node of this software in the mode, with the test keyspace. */
+    private static Cluster nodeInTheMode() throws IOException
+    {
+        Cluster cluster = Cluster.build(1)
+                                 .withDynamicPortAllocation(true)
+                                 .withInstanceInitializer(Dse51NewNodes::install)
+                                 .withConfig(Dse51NewNodes::configure)
+                                 .start();
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+        {
+            init(cluster);
+        }
+        return cluster;
     }
 }

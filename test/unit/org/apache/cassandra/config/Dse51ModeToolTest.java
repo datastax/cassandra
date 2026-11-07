@@ -23,11 +23,14 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CONFIG_ALLOW_SYSTEM_PROPERTIES;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_COMPRESSION_SELECTOR_CLASS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
 import static org.apache.cassandra.config.InternodeCompatibilityMode.DSE_5_1;
@@ -36,9 +39,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Offline tools reading a cassandra.yaml that says {@code internode_compatibility_mode: DSE_5_1} run with the mode
- * {@code NONE} and inherit the checks of its on-disk settings: the big format, the compression selector and
- * {@code flush_compression}, and numeric generations. In a class of its own: {@code toolInitialization} happens once
- * per JVM.
+ * {@code NONE} and inherit the checks of its on-disk settings: the big format, the compression selector,
+ * {@code flush_compression} and the checksum type, and numeric generations, and the big version of the mode,
+ * {@code me}, which they write without the storage mode; the storage mode of DSE 5.1 without the internode mode is
+ * refused to them as to the node. In a class of its own: {@code toolInitialization} happens once per JVM.
  */
 public class Dse51ModeToolTest
 {
@@ -89,6 +93,13 @@ public class Dse51ModeToolTest
             assertThat(DatabaseDescriptor.isDse51SSTableOutput()).isTrue();
             assertThat(TRIE_INDEX_FORMAT_VERSION.isPresent()).isFalse();
             assertThat(DatabaseDescriptor.getSelectedSSTableFormat().name()).isEqualTo(BigFormat.NAME);
+            // the version the tool writes, without the storage mode, which a tool runs without
+            assertThat(DatabaseDescriptor.getStorageCompatibilityMode()).isEqualTo(StorageCompatibilityMode.NONE);
+            assertThat(DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion().version)
+            .isEqualTo(InternodeCompatibilityMode.DSE_51_BIG_VERSION);
+            // and its deletion times, 32-bit in me, capped in 2038 without the storage mode too
+            assertThat(CellData.getVersionedMaxDeletiontionTime())
+            .isEqualTo((long) CellData.MAX_DELETION_TIME_2038_LEGACY_CAP);
             assertThat(DatabaseDescriptor.isUUIDSSTableIdentifiersEnabled()).isFalse();
             assertThat(DatabaseDescriptor.getPaxosVariant()).isEqualTo(Config.PaxosVariant.v2);
 
@@ -113,6 +124,21 @@ public class Dse51ModeToolTest
                 .isInstanceOf(ConfigurationException.class)
                 .hasMessage(Dse51ModeConfigTest.flushCompressionRefusal(flushCompression, compressor));
             }
+            try (WithProperties checksum = new WithProperties().set(SSTABLE_CHECKSUM_TYPE, "CRC32C"))
+            {
+                Config config = new Config();
+                config.internode_compatibility_mode = DSE_5_1;
+                config.sstable.selected_format = BigFormat.NAME;
+                assertThatThrownBy(() -> DatabaseDescriptor.applyInternodeCompatibilityMode(config))
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessage(Dse51ModeConfigTest.checksumTypeRefusal("CRC32C"));
+            }
+            // the storage mode of DSE 5.1 in the configuration of a tool without the internode mode
+            Config storageOnly = new Config();
+            storageOnly.storage_compatibility_mode = StorageCompatibilityMode.DSE_5_1;
+            assertThatThrownBy(() -> DatabaseDescriptor.applyInternodeCompatibilityMode(storageOnly))
+            .isInstanceOf(ConfigurationException.class)
+            .hasMessage(Dse51ModeConfigTest.dse51InternodeModeRefusal(InternodeCompatibilityMode.NONE));
             String custom = "org.example.CustomSelector";
             try (WithProperties selector = new WithProperties().set(SSTABLE_COMPRESSION_SELECTOR_CLASS, custom))
             {

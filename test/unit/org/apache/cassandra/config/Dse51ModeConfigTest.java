@@ -30,7 +30,6 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.DefaultCompressionSelector;
@@ -39,6 +38,7 @@ import org.apache.cassandra.service.paxos.Paxos;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_COMPRESSION_SELECTOR_CLASS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
 import static org.apache.cassandra.config.InternodeCompatibilityMode.DSE_5_1;
@@ -50,10 +50,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * What {@code internode_compatibility_mode: DSE_5_1} requires and forces on the node:
- * {@code storage_compatibility_mode: HCD_1}, the big sstable format, {@code paxos_variant: v1} at startup and at run
- * time, the default compression selector and {@code flush_compression} {@code fast} or {@code table}, and numeric
- * sstable generations, with the texts of the DSE 6 mode worded for DSE 5.1. The tool and client paths are
- * {@link Dse51ModeToolTest} and {@link Dse51ModeClientTest}.
+ * {@code storage_compatibility_mode: DSE_5_1} (which requires it in turn), the big sstable format,
+ * {@code paxos_variant: v1} at startup and at run time, the default compression selector and {@code flush_compression}
+ * {@code fast} or {@code table}, the checksum type CRC32, no transient replication, and numeric sstable generations,
+ * with the texts of the DSE 6 mode worded for DSE 5.1. The tool and client paths are {@link Dse51ModeToolTest} and
+ * {@link Dse51ModeClientTest}.
  */
 public class Dse51ModeConfigTest
 {
@@ -91,7 +92,7 @@ public class Dse51ModeConfigTest
     {
         Config config = new Config();
         config.internode_compatibility_mode = DSE_5_1;
-        config.storage_compatibility_mode = StorageCompatibilityMode.HCD_1;
+        config.storage_compatibility_mode = StorageCompatibilityMode.DSE_5_1;
         config.paxos_variant = Config.PaxosVariant.v1;
         config.uuid_sstable_identifiers_enabled = false;
         config.sstable.selected_format = "big";
@@ -137,7 +138,7 @@ public class Dse51ModeConfigTest
     @Test
     public void dse51WithMatchingSettings()
     {
-        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
         apply(dse51Config());
         assertThat(mode()).isEqualTo(DSE_5_1);
         assertThat(DatabaseDescriptor.isDse51CompatibilityMode()).isTrue();
@@ -156,9 +157,8 @@ public class Dse51ModeConfigTest
     }
 
     /**
-     * The daemon announces the mode once the sstable formats are loaded, naming the format and version written, and
-     * not in the other modes. This JVM loaded its formats before the test, so the text names the format it loaded; the
-     * in-JVM {@code Dse51CompressorsStartupTest} checks that a node in the mode names big nb.
+     * The daemon announces the mode once the sstable formats are loaded, naming the format and version written, big
+     * me, which {@code verifyDse51SSTableFormat} has made sure of before, and not in the other modes.
      */
     @Test
     public void theModeIsAnnouncedWithTheVersionWritten()
@@ -183,40 +183,176 @@ public class Dse51ModeConfigTest
         {
             ddLogger.detachAppender(appender);
         }
-        SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
-        String announcement = "Running in internode_compatibility_mode DSE_5_1: the node writes " + format.name() +
-                              ' ' + format.getLatestVersion().version + " sstables, which DSE 5.1 does not read, " +
-                              "with numeric generations, and requires paxos_variant v1; it speaks the pre-4.0 " +
-                              "dialect with DSE 5.1 nodes, with the schema frozen (unless allow_ddl is set; a " +
-                              "compressor DSE 5.1 does not read is refused even then) and repair and topology " +
-                              "changes refused";
+        String announcement = "Running in internode_compatibility_mode DSE_5_1: the node writes big me sstables, " +
+                              "which DSE 5.1 reads, with numeric generations, and requires paxos_variant v1 and " +
+                              "storage_compatibility_mode DSE_5_1; it speaks the pre-4.0 dialect with DSE 5.1 nodes, " +
+                              "with the schema frozen (unless allow_ddl is set; a compressor or a column type DSE " +
+                              "5.1 does not read is refused even then) and repair and topology changes refused";
         assertThat(appender.list).hasSize(1)
                                  .allMatch(e -> e.getLevel() == Level.WARN &&
                                                 e.getFormattedMessage().equals(announcement));
     }
 
     @Test
-    public void dse51RequiresHcd1StorageMode()
+    public void dse51RequiresTheDse51StorageMode()
     {
         StorageCompatibilityMode[] refused = { StorageCompatibilityMode.NONE,
                                                StorageCompatibilityMode.UPGRADING,
-                                               StorageCompatibilityMode.CASSANDRA_4 };
+                                               StorageCompatibilityMode.CASSANDRA_4,
+                                               StorageCompatibilityMode.HCD_1 };
+        assertThat(refused).hasSize(StorageCompatibilityMode.values().length - 1);
         for (StorageCompatibilityMode storage : refused)
         {
             DatabaseDescriptor.setStorageCompatibilityMode(storage);
             assertThatThrownBy(() -> apply(dse51Config()))
             .isInstanceOf(ConfigurationException.class)
-            .hasMessage("internode_compatibility_mode DSE_5_1 requires storage_compatibility_mode HCD_1, found " +
-                        storage.name() + ": HCD_1 keeps the storage formats of the 4.x line, the oldest this " +
-                        "software writes");
+            .hasMessage(dse51StorageModeRefusal(storage));
             assertThat(mode()).isEqualTo(internodeModeBefore);
         }
+    }
+
+    static String dse51StorageModeRefusal(StorageCompatibilityMode found)
+    {
+        return "internode_compatibility_mode DSE_5_1 requires storage_compatibility_mode DSE_5_1, found " +
+               found.name() + ": DSE_5_1 writes the big me sstables DSE 5.1 reads; set storage_compatibility_mode: " +
+               "DSE_5_1 in conf/cassandra.yaml, then restart the node";
+    }
+
+    /** The refusal of the storage mode of DSE 5.1 without its internode mode, also asserted for tools. */
+    static String dse51InternodeModeRefusal(InternodeCompatibilityMode found)
+    {
+        return "storage_compatibility_mode DSE_5_1 requires internode_compatibility_mode DSE_5_1, found " +
+               found.name() + ": the storage mode writes the sstables of DSE 5.1 for as long as the node is in the " +
+               "DSE 5.1 compatibility mode, and the two are set and dropped together; set " +
+               (found == InternodeCompatibilityMode.DSE_6
+                ? "storage_compatibility_mode: HCD_1, which DSE_6 requires, "
+                : "storage_compatibility_mode: HCD_1 with internode_compatibility_mode: NONE, or both to DSE_5_1, ") +
+               "in conf/cassandra.yaml, then restart the node or run the tool again";
+    }
+
+    /** The storage mode of DSE 5.1 is refused in every other internode mode, before anything is applied. */
+    @Test
+    public void theDse51StorageModeRequiresDse51()
+    {
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+        for (InternodeCompatibilityMode other : new InternodeCompatibilityMode[]{ NONE, DSE_6 })
+        {
+            Config config = other == DSE_6 ? dse6Config() : dse51Config();
+            config.internode_compatibility_mode = other;
+            config.storage_compatibility_mode = StorageCompatibilityMode.DSE_5_1;
+            assertThatThrownBy(() -> apply(config))
+            .as("%s", other)
+            .isInstanceOf(ConfigurationException.class)
+            .hasMessage(dse51InternodeModeRefusal(other));
+            assertThat(mode()).isEqualTo(internodeModeBefore);
+        }
+        // the property route too
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE, "NONE"))
+        {
+            assertThatThrownBy(() -> apply(dse51Config()))
+            .isInstanceOf(ConfigurationException.class)
+            .hasMessage(dse51InternodeModeRefusal(NONE));
+        }
+        // the flag drop: HCD_1 with NONE, as for any node of this software
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        Config dropped = dse51Config();
+        dropped.internode_compatibility_mode = NONE;
+        dropped.storage_compatibility_mode = StorageCompatibilityMode.HCD_1;
+        apply(dropped);
+        assertThat(mode()).isEqualTo(NONE);
+    }
+
+    /** The refusal of a checksum type other than CRC32, also asserted for tools by {@link Dse51ModeToolTest}. */
+    static String checksumTypeRefusal(String found)
+    {
+        return "internode_compatibility_mode DSE_5_1 requires the sstable checksum type CRC32, but " +
+               "cassandra.sstable.checksums.type=" + found + ": DSE 5.1 only reads the digest Digest.crc32; remove " +
+               "-Dcassandra.sstable.checksums.type from the JVM options (conf/jvm-server.options or JVM_EXTRA_OPTS " +
+               "for the node, conf/jvm-clients.options or JVM_OPTS for a tool), or set it to CRC32, then restart the " +
+               "node or run the tool again";
+    }
+
+    @Test
+    public void dse51RefusesAnotherChecksumType()
+    {
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+        for (String type : new String[]{ "CRC32C", "CRC64NVME", "ADLER32" })
+        {
+            try (WithProperties properties = new WithProperties().set(SSTABLE_CHECKSUM_TYPE, type))
+            {
+                Config config = dse51Config();
+                config.uuid_sstable_identifiers_enabled = true;
+                assertThatThrownBy(() -> apply(config))
+                .as(type)
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessage(checksumTypeRefusal(type));
+                assertThat(mode()).isEqualTo(internodeModeBefore);
+                assertThat(config.uuid_sstable_identifiers_enabled).isTrue();
+            }
+        }
+        // the default, and CRC32 spelled in any case, as the writers read it
+        for (String type : new String[]{ "CRC32", "crc32" })
+        {
+            try (WithProperties properties = new WithProperties().set(SSTABLE_CHECKSUM_TYPE, type))
+            {
+                apply(dse51Config());
+                assertThat(mode()).isEqualTo(DSE_5_1);
+            }
+        }
+        // the other modes do not check it
+        try (WithProperties properties = new WithProperties().set(SSTABLE_CHECKSUM_TYPE, "CRC32C"))
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+            Config none = dse51Config();
+            none.internode_compatibility_mode = NONE;
+            none.storage_compatibility_mode = StorageCompatibilityMode.HCD_1;
+            apply(none);
+            assertThat(mode()).isEqualTo(NONE);
+        }
+    }
+
+    @Test
+    public void dse51RefusesTransientReplication()
+    {
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+        Config config = dse51Config();
+        config.transient_replication_enabled = true;
+        assertThatThrownBy(() -> apply(config))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessage("internode_compatibility_mode DSE_5_1 refuses transient_replication_enabled: the big me " +
+                    "sstables written for DSE 5.1 cannot mark an sstable transient; set " +
+                    "transient_replication_enabled: false in conf/cassandra.yaml, then restart the node");
+        assertThat(mode()).isEqualTo(internodeModeBefore);
+    }
+
+    /**
+     * The big format of this JVM was loaded before the mode (its version is that of the test storage mode): a node,
+     * tool or client in the mode refuses to go on rather than write a version DSE 5.1 does not read. The in-JVM
+     * {@code Dse51ModeSmokeTest} checks that a node in the mode writes me.
+     */
+    @Test
+    public void aBigFormatLoadedBeforeTheModeIsRefused()
+    {
+        String loaded = DatabaseDescriptor.getSSTableFormats().get("big").getLatestVersion().version;
+        assertThat(loaded).isNotEqualTo(InternodeCompatibilityMode.DSE_51_BIG_VERSION);
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+        apply(dse51Config());
+        assertThatThrownBy(DatabaseDescriptor::verifyDse51SSTableFormat)
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessage("internode_compatibility_mode DSE_5_1 requires the big sstable version me, but the format was " +
+                    "already initialised with " + loaded + ", before the mode was applied: the code that started " +
+                    "loaded the sstable formats too early, an initialisation order to report; a client sets " +
+                    "-Dcassandra.internode_compatibility_mode=DSE_5_1 before it starts");
+        // the other modes do not check it
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        apply(dse6Config());
+        assertThatCode(DatabaseDescriptor::verifyDse51SSTableFormat).doesNotThrowAnyException();
     }
 
     @Test
     public void dse51RequiresTheBigFormat()
     {
-        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
         // bti, also when it is the default of an sstable section that does not name a format
         for (String format : new String[]{ "bti", null, "" })
         {
@@ -262,7 +398,7 @@ public class Dse51ModeConfigTest
     @Test
     public void dse51RequiresPaxosV1AtStartup()
     {
-        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
         int refused = 0;
         for (Config.PaxosVariant variant : Config.PaxosVariant.values())
         {
@@ -283,7 +419,7 @@ public class Dse51ModeConfigTest
     @Test
     public void dse51RefusesAnotherPaxosVariantAtRuntime()
     {
-        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
         Paxos.setPaxosVariant(Config.PaxosVariant.v1);
         apply(dse51Config());
         for (Config.PaxosVariant variant : Config.PaxosVariant.values())
@@ -319,7 +455,7 @@ public class Dse51ModeConfigTest
     @Test
     public void dse51RefusesACustomCompressionSelector()
     {
-        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
         String custom = "org.example.CustomSelector";
         try (WithProperties properties = new WithProperties().set(SSTABLE_COMPRESSION_SELECTOR_CLASS, custom))
         {
@@ -367,7 +503,7 @@ public class Dse51ModeConfigTest
     @Test
     public void dse51RefusesAdaptiveAndNoFlushCompression()
     {
-        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
         Map<Config.FlushCompression, String> refused = Map.of(Config.FlushCompression.adaptive, "AdaptiveCompressor",
                                                               Config.FlushCompression.none, "NoopCompressor");
         for (Map.Entry<Config.FlushCompression, String> flushCompression : refused.entrySet())
@@ -395,7 +531,7 @@ public class Dse51ModeConfigTest
     @Test
     public void bothSourcesWarnWhenForcingNumericGenerations()
     {
-        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
         Logger ddLogger = (Logger) LoggerFactory.getLogger(DatabaseDescriptor.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -409,6 +545,7 @@ public class Dse51ModeConfigTest
             assertThat(dse51.uuid_sstable_identifiers_enabled).isFalse();
             assertThat(appender.list).anyMatch(e -> e.getLevel() == Level.WARN &&
                                                     e.getFormattedMessage().equals(uuidWarning(DSE_5_1, "DSE 5.1")));
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
 
             appender.list.clear();
             Config dse6 = dse6Config();
@@ -420,6 +557,7 @@ public class Dse51ModeConfigTest
 
             // already off: nothing to warn about
             appender.list.clear();
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
             apply(dse51Config());
             assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().contains("uuid_sstable_identifiers"));
         }
@@ -438,7 +576,7 @@ public class Dse51ModeConfigTest
     @Test
     public void thePropertyCanRequestDse51()
     {
-        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
         Config config = dse51Config();
         config.internode_compatibility_mode = NONE;
         try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE, "DSE_5_1"))
@@ -449,8 +587,7 @@ public class Dse51ModeConfigTest
             DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.NONE);
             assertThatThrownBy(() -> apply(config))
             .isInstanceOf(ConfigurationException.class)
-            .hasMessageStartingWith("internode_compatibility_mode DSE_5_1 requires storage_compatibility_mode " +
-                                    "HCD_1, found NONE");
+            .hasMessage(dse51StorageModeRefusal(StorageCompatibilityMode.NONE));
         }
         // the property says NONE: nothing of DSE_5_1 is checked
         try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE, "NONE"))

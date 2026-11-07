@@ -121,7 +121,8 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
             }
             synchronized (this)
             {
-                if (requestedReset == null && !refusesDse51Compressors(msg.from(), msg.payload))
+                if (requestedReset == null && !refusesDse51Compressors(msg.from(), msg.payload)
+                    && !refusesDse51ColumnTypes(msg.from(), msg.payload))
                     applyMutations(msg.payload);
             }
         });
@@ -365,7 +366,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
     @VisibleForTesting
     synchronized void applyMutationsFromCoordinator(InetAddressAndPort from, Collection<Mutation> mutations)
     {
-        if (refusesDse51Compressors(from, mutations))
+        if (refusesDse51Compressors(from, mutations) || refusesDse51ColumnTypes(from, mutations))
             return;
         if (requestedReset != null && !mutations.isEmpty())
         {
@@ -378,15 +379,34 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
     }
 
     /**
+     * As {@link #refusesDse51Compressors}, for the columns and the user type fields the schema {@code mutations} give a
+     * type DSE 5.1 cannot read ({@link Dse51ColumnTypes#refusedSchemaMutations}): applying them would make every flush
+     * of such a table fail in the mode, and the next start of this node refuse.
+     */
+    private static boolean refusesDse51ColumnTypes(InetAddressAndPort from, Collection<Mutation> mutations)
+    {
+        List<String> refused = Dse51ColumnTypes.refusedSchemaMutations(mutations);
+        if (refused.isEmpty())
+            return false;
+        DseCompatRefusals.refused(Dse51ColumnTypes.REFUSED_SCHEMA_CHANGE);
+        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 10, TimeUnit.MINUTES,
+                         "Not applying a schema change from {} in internode_compatibility_mode DSE_5_1: it gives {} " +
+                         "a type DSE 5.1 cannot read. Only a node not in the mode sends such a change: this node's " +
+                         "schema disagrees with that node's, and the schema this node pulls from it is not applied " +
+                         "either, until the change is reverted there", from, refused);
+        return true;
+    }
+
+    /**
      * In {@code internode_compatibility_mode: DSE_5_1}, whether the schema {@code mutations} received from
      * {@code from}, pushed or answering a pull, are not applied because they give a table or a view a compressor DSE
-     * 5.1 does not read, or encryption ({@link Dse51Compressors#refusedSchemaMutations}): none of them is applied, the
-     * refusal is counted in {@code nodetool compatstatus} and logged at WARN at most once every ten minutes. Only a
-     * node of this software not in the mode can send them (a configuration mistake, or the flag drop under way);
-     * applying them would make the next start of this node refuse. The schema versions of the two nodes then disagree,
-     * so this node pulls the schema of the sender, whose answer, the whole schema with that table, is dropped and
-     * counted the same way, every later change of the sender included, until the change is reverted there; a later push
-     * that does not carry the table is applied. False outside the mode, where nothing is checked.
+     * 5.1 does not read, encryption, or a {@code min_compress_ratio} ({@link Dse51Compressors#refusedSchemaMutations}):
+     * none of them is applied, the refusal is counted in {@code nodetool compatstatus} and logged at WARN at most once
+     * every ten minutes. Only a node of this software not in the mode can send them (a configuration mistake, or the
+     * flag drop under way); applying them would make the next start of this node refuse. The schema versions of the two
+     * nodes then disagree, so this node pulls the schema of the sender, whose answer, the whole schema with that table,
+     * is dropped and counted the same way, every later change of the sender included, until the change is reverted
+     * there; a later push that does not carry the table is applied. False outside the mode, where nothing is checked.
      */
     private static boolean refusesDse51Compressors(InetAddressAndPort from, Collection<Mutation> mutations)
     {
@@ -396,8 +416,9 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
         DseCompatRefusals.refused(Dse51Compressors.REFUSED_SCHEMA_CHANGE);
         NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 10, TimeUnit.MINUTES,
                          "Not applying a schema change from {} in internode_compatibility_mode DSE_5_1: it " +
-                         "compresses {} with a compressor DSE 5.1 does not read, or encrypts them (DSE 5.1 reads " +
-                         "LZ4Compressor, SnappyCompressor and DeflateCompressor). Only a node not in the mode sends " +
+                         "compresses {} with a compressor DSE 5.1 does not read, encrypts them, or gives them a " +
+                         "min_compress_ratio (DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor, " +
+                         "every chunk compressed). Only a node not in the mode sends " +
                          "such a change: this node's schema disagrees with that node's, and the schema this node " +
                          "pulls from it is not applied either, until the change is reverted there", from, refused);
         return true;
