@@ -21,11 +21,15 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -61,8 +65,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * disk (what the node wrote without the mode), the marker of the upgrade from DSE 5.1 it writes once every check has
  * passed, the refusal of a start with {@code NONE} while that marker or the record of DSE 5.1 peers exists, and the
  * warning about the standard EC2 names. The checks of {@code DSE_6} are in {@link Dse6StartupChecksTest}; the cases
- * here that involve {@code DSE_6} only show that its behaviour does not depend on the files of the upgrade from DSE
- * 5.1. Every test works in data, commit log and metadata directories of its own.
+ * here that involve {@code DSE_6} show the refusal of a start in that mode while the marker of the upgrade from DSE
+ * 5.1 is present or its record lists a peer, and that nothing else of its behaviour depends on those files. Every
+ * test works in data, commit log and metadata directories of its own.
  */
 public class Dse51StartupChecksTest
 {
@@ -132,6 +137,15 @@ public class Dse51StartupChecksTest
     /** Runs {@code action} and returns the messages {@link StartupChecks} logged at {@code level} meanwhile. */
     private static List<String> logsOf(Level level, CheckedRunnable action) throws Exception
     {
+        return eventsOf(action).stream()
+                               .filter(e -> e.getLevel() == level)
+                               .map(ILoggingEvent::getFormattedMessage)
+                               .collect(Collectors.toList());
+    }
+
+    /** Runs {@code action} and returns what {@link StartupChecks} logged meanwhile. */
+    private static List<ILoggingEvent> eventsOf(CheckedRunnable action) throws Exception
+    {
         Logger logger = (Logger) LoggerFactory.getLogger(StartupChecks.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
@@ -144,10 +158,7 @@ public class Dse51StartupChecksTest
         {
             logger.detachAppender(appender);
         }
-        return appender.list.stream()
-                            .filter(e -> e.getLevel() == level)
-                            .map(ILoggingEvent::getFormattedMessage)
-                            .collect(Collectors.toList());
+        return appender.list;
     }
 
     /** Runs the artefact check and its post-action the way {@link StartupChecks#verify} does. */
@@ -392,22 +403,183 @@ public class Dse51StartupChecksTest
     }
 
     /**
-     * DSE_6 neither reads nor writes the marker and the record of the upgrade from DSE 5.1: its start is not refused by
-     * them, it writes its own marker only, and leaves them as they are.
+     * DSE_6 is refused while the marker of the upgrade from DSE 5.1 is present: the node took part in that upgrade, and
+     * DSE_6 would speak DSE 6's dialect to its DSE 5.1 peers. The text names the file and the remedies; the override
+     * logs it at WARN instead, and the start then writes the DSE 6 marker and leaves the DSE 5.1 one as it is.
      */
     @Test
-    public void dse6DoesNotReadTheFilesOfTheUpgradeFromDse51() throws Exception
+    public void dse6IsRefusedWhileTheDse51MarkerExists() throws Exception
     {
         assertThat(DseUpgradeMarker.writeIfAbsent(InternodeCompatibilityMode.DSE_5_1)).isTrue();
-        writePeersRecord(InternodeCompatibilityMode.DSE_5_1, "10.0.0.2:7000");
-        byte[] marker = Files.readAllBytes(DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1));
-        byte[] record = Files.readAllBytes(DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1));
+        Path marker = DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1);
+        byte[] markerBytes = Files.readAllBytes(marker);
         mode(InternodeCompatibilityMode.DSE_6);
+        assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessage("internode_compatibility_mode is DSE_6 but the DSE 5.1 upgrade marker " + marker + " is present: " +
+                    "DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: DSE_5_1, or once " +
+                    "every node runs this software, delete the marker, or start with " +
+                    "-Dcassandra.internode_compatibility_mode.ignore_dse_peers=true")
+        .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
+
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS, true))
+        {
+            assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS)))
+            .containsExactly("The DSE 5.1 upgrade marker " + marker + " is present but ignored " +
+                             "(cassandra.internode_compatibility_mode.ignore_dse_peers=true); DSE 5.1 peers, if any, " +
+                             "will be spoken to as DSE 6 nodes");
+            assertThat(logsOf(Level.INFO, Dse51StartupChecksTest::verifyArtefacts))
+            .containsExactly("Wrote the DSE 6 upgrade marker " + DseUpgradeMarker.path());
+        }
+        assertThat(Files.readAllBytes(marker)).isEqualTo(markerBytes);
+
+        // that DSE 6 marker then refuses the start in DSE_5_1
+        mode(InternodeCompatibilityMode.DSE_5_1);
+        assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessage("internode_compatibility_mode is DSE_5_1 but the DSE 6 upgrade marker " + DseUpgradeMarker.path() +
+                    " is present: DSE 6 peers may still be in the cluster. Set internode_compatibility_mode: " +
+                    "DSE_6, or once every node runs this software, delete the marker, or start with " +
+                    "-Dcassandra.internode_compatibility_mode.ignore_dse_peers=true")
+        .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
+    }
+
+    /**
+     * DSE_6 is refused while the record of DSE 5.1 peers lists a peer, or is there and cannot be read; with both files
+     * the refusal names both. The override logs the record at WARN instead.
+     */
+    @Test
+    public void dse6IsRefusedWhileDse51PeersAreOnRecord() throws Exception
+    {
+        writePeersRecord(InternodeCompatibilityMode.DSE_5_1, "# peers", "10.0.0.2:7000");
+        Path record = DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1);
+        mode(InternodeCompatibilityMode.DSE_6);
+        String recordRemedy = "the record empties itself once this node has seen every listed peer at messaging " +
+                              "version 4.0 or later (run once more with DSE_5_1 after the last upgrade); delete it " +
+                              "by hand only after checking that the listed peers have left the cluster, or start " +
+                              "with -Dcassandra.internode_compatibility_mode.ignore_dse_peers=true";
+        assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessage("internode_compatibility_mode is DSE_6 but the record of DSE 5.1 peers " + record +
+                    " listing [10.0.0.2:7000] is present: DSE 5.1 peers may still be in the cluster. Set " +
+                    "internode_compatibility_mode: DSE_5_1, or " + recordRemedy)
+        .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
+
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS, true))
+        {
+            assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS)))
+            .containsExactly("The record of DSE 5.1 peers " + record + " listing [10.0.0.2:7000] is present but " +
+                             "ignored (cassandra.internode_compatibility_mode.ignore_dse_peers=true); DSE 5.1 peers, " +
+                             "if any, will be spoken to as DSE 6 nodes");
+        }
+
+        assertThat(DseUpgradeMarker.writeIfAbsent(InternodeCompatibilityMode.DSE_5_1)).isTrue();
+        Path marker = DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1);
+        assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessage("internode_compatibility_mode is DSE_6 but the DSE 5.1 upgrade marker " + marker + " is present " +
+                    "and the record of DSE 5.1 peers " + record + " listing [10.0.0.2:7000] is present: DSE 5.1 " +
+                    "peers may still be in the cluster. Set internode_compatibility_mode: DSE_5_1, or once every " +
+                    "node runs this software, delete the marker; " + recordRemedy);
+        assertThat(DseUpgradeMarker.delete(InternodeCompatibilityMode.DSE_5_1)).isTrue();
+
+        Files.delete(record);
+        Files.createDirectories(record);
+        assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessageStartingWith("internode_compatibility_mode is DSE_6 but the record of DSE 5.1 peers " + record +
+                                " cannot be read (")
+        .hasMessageContaining("): DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: " +
+                              "DSE_5_1, or make the record readable, or start with ")
+        .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS, true))
+        {
+            assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS)))
+            .singleElement().asString()
+            .startsWith("The record of DSE 5.1 peers " + record + " cannot be read (")
+            .endsWith(") but ignored (cassandra.internode_compatibility_mode.ignore_dse_peers=true); DSE 5.1 peers, " +
+                      "if any, will be spoken to as DSE 6 nodes");
+        }
+    }
+
+    /**
+     * DSE_6 starts with neither file of the upgrade from DSE 5.1, or with a record that lists no peer, as a node that
+     * never ran in DSE_5_1 does; one whose metadata directory is not a directory too, the presence of the files then
+     * unknown. It writes its own marker only, and leaves the record as it is.
+     */
+    @Test
+    public void dse6StartsWithoutTheDse51FilesOrWithAnEmptyRecord() throws Exception
+    {
+        mode(InternodeCompatibilityMode.DSE_6);
+        assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))).isEmpty();
+
+        writePeersRecord(InternodeCompatibilityMode.DSE_5_1, "# peers");
+        byte[] record = Files.readAllBytes(DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1));
         assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))).isEmpty();
         assertThat(logsOf(Level.INFO, Dse51StartupChecksTest::verifyArtefacts))
         .containsExactly("Wrote the DSE 6 upgrade marker " + DseUpgradeMarker.path());
-        assertThat(Files.readAllBytes(DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1))).isEqualTo(marker);
+        assertThat(DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1)).doesNotExist();
         assertThat(Files.readAllBytes(DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1))).isEqualTo(record);
+
+        // a metadata directory that is a file: the presence of either file is unknown, which does not refuse DSE_6
+        // (Files.exists is false there, as for a directory that cannot be searched)
+        DatabaseDescriptor.setMetadataDirectory(new File(Files.createFile(root.resolve("not-a-directory"))));
+        assertThat(DseUpgradeMarker.exists(InternodeCompatibilityMode.DSE_5_1)).isTrue();
+        assertThat(Files.exists(DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1))).isFalse();
+        assertThat(Files.exists(DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1))).isFalse();
+        assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))).isEmpty();
+    }
+
+    /**
+     * DSE_6 starts with the marker of the upgrade from DSE 5.1 in a metadata directory that cannot be searched, where
+     * {@code Files.exists} is false: the presence of the marker is unknown. Skipped where the permissions do not apply
+     * (for root).
+     */
+    @Test
+    public void dse6StartsWhenTheMetadataDirectoryCannotBeSearched() throws Exception
+    {
+        mode(InternodeCompatibilityMode.DSE_6);
+        assertThat(DseUpgradeMarker.writeIfAbsent(InternodeCompatibilityMode.DSE_5_1)).isTrue();
+        Path metadata = DatabaseDescriptor.getMetadataDirectory().toPath();
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(metadata);
+        Files.setPosixFilePermissions(metadata, PosixFilePermissions.fromString("rw-------"));
+        try
+        {
+            Assume.assumeFalse("the permissions of the metadata directory apply",
+                               Files.exists(DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1)));
+            assertThat(DseUpgradeMarker.exists(InternodeCompatibilityMode.DSE_5_1)).isTrue();
+            assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))).isEmpty();
+        }
+        finally
+        {
+            Files.setPosixFilePermissions(metadata, permissions);
+        }
+    }
+
+    /**
+     * A DSE 5.1 marker whose content cannot be written but whose file exists is logged at WARN, naming the two starts
+     * it refuses.
+     */
+    @Test
+    public void aDse51MarkerWhoseContentCannotBeWrittenIsLogged() throws Exception
+    {
+        Path marker = DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1);
+        List<ILoggingEvent> events = eventsOf(() -> StartupChecks.writeUpgradeMarker(
+            InternodeCompatibilityMode.DSE_5_1, () -> {
+                Files.createFile(marker);
+                throw new IOException("disk full");
+            }));
+        assertThat(events).filteredOn(e -> e.getLevel() == Level.ERROR).isEmpty();
+        assertThat(events).filteredOn(e -> e.getLevel() == Level.WARN)
+                          .singleElement()
+                          .satisfies(e -> {
+                              assertThat(e.getFormattedMessage())
+                              .isEqualTo("Unable to write the content of the DSE 5.1 upgrade marker " + marker +
+                                         "; the file exists, which is all that matters: a later start with " +
+                                         "internode_compatibility_mode NONE or DSE_6 is refused while it does");
+                              assertThat(e.getThrowableProxy().getMessage()).isEqualTo("disk full");
+                          });
+        assertThat(DseUpgradeMarker.exists(InternodeCompatibilityMode.DSE_5_1)).isTrue();
     }
 
     /** With the files of both upgrades, NONE is refused for the DSE 6 ones first, and the override logs one WARN. */
@@ -446,9 +618,9 @@ public class Dse51StartupChecksTest
         .singleElement().asString()
         .startsWith("Unable to write the DSE 5.1 upgrade marker " +
                     notADirectory.resolve(DseUpgradeMarker.DSE_51_FILE_NAME) + ": unless the file exists, a later " +
-                    "start with internode_compatibility_mode NONE will not be refused while DSE 5.1 peers may " +
-                    "remain; create it by hand. Until it exists, every start also discards the record of the values " +
-                    "of DSE 5.1's columns of system.local and system.peers");
+                    "start with internode_compatibility_mode NONE or DSE_6 will not be refused while DSE 5.1 peers " +
+                    "may remain; create it by hand. Until it exists, every start also discards the record of the " +
+                    "values of DSE 5.1's columns of system.local and system.peers");
     }
 
     /**

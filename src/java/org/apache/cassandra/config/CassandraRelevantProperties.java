@@ -591,7 +591,11 @@ public enum CassandraRelevantProperties
     /**
      * Lets a node start with {@code internode_compatibility_mode: NONE} although the DSE 6 upgrade marker file
      * or the record of DSE 6 peers is still present in its metadata directory (for example a marker left behind,
-     * or a DSE 6 peer that was removed while this node was down).
+     * or a DSE 6 peer that was removed while this node was down). It lets a node start in the same way with
+     * {@code NONE} or {@code DSE_6} although the marker or the record of the upgrade from DSE 5.1 is present, and in
+     * {@code DSE_5_1} although the DSE 6 ones are; the files found are logged at WARN. Started so in {@code DSE_6}, the
+     * node still writes the DSE 6 upgrade marker, which then refuses its start in {@code DSE_5_1} until it is deleted;
+     * the DSE 5.1 files stay, so each later start in {@code DSE_6} needs the property too.
      */
     INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS("cassandra.internode_compatibility_mode.ignore_dse_peers", "false"),
     /**
