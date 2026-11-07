@@ -33,7 +33,11 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.BytesType;
+import org.apache.cassandra.db.marshal.MapType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -41,6 +45,7 @@ import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.repair.consistent.admin.SchemaArgsParser;
 import org.apache.cassandra.schema.SchemaTransformation.SchemaTransformationResult;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_ALLOW_LOCAL_STRATEGY;
@@ -58,7 +63,7 @@ import static org.mockito.Mockito.mock;
  * The two keyspaces a DataStax Enterprise 6 node creates with {@code LocalStrategy}, {@code dse_system_local} and
  * {@code dse_insights_local}, are rows of {@code system_schema} on a node upgraded in place: {@link Schema} loads
  * them with the rest of the distributed schema, keeps them out of the keyspaces that own token ranges, and still
- * refuses {@code LocalStrategy} for any other distributed keyspace.
+ * refuses {@code LocalStrategy} for any other distributed keyspace. DSE 5.1.51 creates the second only.
  */
 public class DseLocalKeyspacesTest
 {
@@ -203,6 +208,40 @@ public class DseLocalKeyspacesTest
         assertFalse(SchemaConstants.isDseLocalStrategyKeyspace("DSE_SYSTEM_LOCAL"));
         assertFalse(SchemaConstants.isDseLocalStrategyKeyspace("dse_system"));
         assertFalse(SchemaConstants.isDseLocalStrategyKeyspace(SchemaConstants.SYSTEM_KEYSPACE_NAME));
+    }
+
+    /**
+     * DSE 5.1.51 creates one distributed keyspace with {@code LocalStrategy}, {@code dse_insights_local}, which this
+     * software accepts, and no {@code dse_system_local}: the keyspaces of {@code LocalStrategy} of the DSE 5.1.51
+     * schema fixture, read from its {@code system_schema.keyspaces}, are that one and the local system keyspaces, and
+     * each of them is accepted, so no change is needed for DSE 5.1.
+     */
+    @Test
+    public void theOnlyDseLocalKeyspaceOfDse51IsAccepted() throws Exception
+    {
+        List<String> local = new ArrayList<>();
+        ColumnMetadata replication = Schema.instance.getTableMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME,
+                                                                      SchemaKeyspaceTables.KEYSPACES)
+                                                    .getColumn(ByteBufferUtil.bytes("replication"));
+        MapType<String, String> type = MapType.getInstance(UTF8Type.instance, UTF8Type.instance, false);
+        for (List<PartitionUpdate> sstable : Dse51SchemaRows.partitions(SchemaKeyspaceTables.KEYSPACES))
+        {
+            for (PartitionUpdate partition : sstable)
+            {
+                for (Row row : partition.rows())
+                {
+                    Cell<?> cell = row.getCell(replication);
+                    if (cell != null && type.compose(cell.buffer()).get("class").endsWith(".LocalStrategy"))
+                        local.add(Dse51SchemaRows.keyspaceOf(partition));
+                }
+            }
+        }
+        assertThat(local).containsExactlyInAnyOrder(SchemaConstants.SYSTEM_KEYSPACE_NAME,
+                                                    SchemaConstants.SCHEMA_KEYSPACE_NAME,
+                                                    DSE_INSIGHTS_LOCAL);
+        for (String keyspace : local)
+            assertTrue(keyspace, SchemaConstants.isLocalSystemKeyspace(keyspace) ||
+                                 SchemaConstants.isDseLocalStrategyKeyspace(keyspace));
     }
 
     private static void saveKeyspaces(KeyspaceMetadata... keyspaces)

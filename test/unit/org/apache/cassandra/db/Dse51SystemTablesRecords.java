@@ -49,6 +49,26 @@ public final class Dse51SystemTablesRecords
         Dse51SystemTables.write(Dse51SystemTables.recordPath(), rows);
     }
 
+    /**
+     * Writes the record with one row per entry of {@code rows}, each the values of the row of {@code system.local}
+     * (a null address) or of a peer, as {@link #workloads} gives them.
+     */
+    public static void write(Dse51SystemTables.StoredColumns... rows) throws IOException
+    {
+        Dse51SystemTables.write(Dse51SystemTables.recordPath(), List.of(rows));
+    }
+
+    /**
+     * One row of the record: the workload columns DSE 5.1 stored for {@code peer} (null for this node) and its
+     * version.
+     */
+    public static Dse51SystemTables.StoredColumns workloads(@Nullable InetAddress peer, List<String> workloads,
+                                                            @Nullable String workload, @Nullable Boolean graph,
+                                                            @Nullable String dseVersion)
+    {
+        return new Dse51SystemTables.StoredColumns(peer, workloads, workload, graph, dseVersion);
+    }
+
     private static Dse51SystemTables.StoredColumns row(@Nullable InetAddress peer, String dseVersion)
     {
         return new Dse51SystemTables.StoredColumns(peer, List.of(DseNodeWorkloads.CASSANDRA), DseNodeWorkloads.CASSANDRA,

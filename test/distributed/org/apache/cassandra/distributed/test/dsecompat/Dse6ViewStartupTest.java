@@ -19,6 +19,7 @@ package org.apache.cassandra.distributed.test.dsecompat;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.Test;
@@ -42,7 +43,8 @@ import static org.awaitility.Awaitility.await;
 /**
  * The startup check of the materialized views of a node in {@code internode_compatibility_mode: DSE_6}, through the
  * start of an instance ({@code DseViewHiddenColumnCatalog.checkViewsAtStartup}): a node whose data directories hold
- * DSE's {@code system_schema.hidden_columns} starts with its views, one whose data directories do not hold it does not.
+ * DSE's {@code system_schema.hidden_columns} starts with its views, one whose data directories do not hold it does not;
+ * in {@code DSE_5_1} the table is not read.
  */
 public class Dse6ViewStartupTest extends TestBaseImpl
 {
@@ -141,6 +143,46 @@ public class Dse6ViewStartupTest extends TestBaseImpl
                                      "(no data directory holds system_schema/" + HIDDEN_COLUMNS_DIRECTORY + ": ")
             .hasStackTraceContaining(" are not the data directories of a node that ran DSE 6); the data of materialized views is not exchanged " +
                                      "with DSE 6 nodes");
+        }
+    }
+
+    /**
+     * A node in {@code internode_compatibility_mode: DSE_5_1} starts with its views without DSE 6's
+     * {@code system_schema.hidden_columns}, which it does not read: DSE 5.1's views have no hidden column. The view is
+     * created by this software here; a view as DSE 5.1.51 stored it, with no {@code version} column (a view of version
+     * 0), is loaded from the schema fixture of DSE 5.1.51 by {@code Dse6AccessControlCheckTest}.
+     */
+    @Test
+    public void aNodeWithViewsStartsInDse51ModeWithoutDsesTableOfHiddenColumns() throws Throwable
+    {
+        try (Cluster cluster = Cluster.build(1)
+                                      .withDynamicPortAllocation(true)
+                                      .withConfig(c -> c.set("storage_compatibility_mode", "HCD_1")
+                                                        .set("uuid_sstable_identifiers_enabled", false)
+                                                        .set("materialized_views_enabled", true)
+                                                        .set("sstable", Map.of("selected_format", "big"))
+                                                        .with(Feature.NETWORK, Feature.GOSSIP))
+                                      .start())
+        {
+            IInvokableInstance node = cluster.get(1);
+            init(cluster);
+            cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (pk int, ck int, v text, PRIMARY KEY (pk, ck))"));
+            cluster.schemaChange("CREATE MATERIALIZED VIEW " + KEYSPACE + ".t_by_v AS SELECT pk, ck, v FROM " +
+                                 KEYSPACE + ".t WHERE v IS NOT NULL AND pk IS NOT NULL AND ck IS NOT NULL " +
+                                 "PRIMARY KEY (v, pk, ck)");
+            cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.t (pk, ck, v) VALUES (1, 1, 'a')"),
+                                           ConsistencyLevel.ONE);
+            String built = "SELECT view_name FROM system.built_views WHERE keyspace_name = ?";
+            await().atMost(1, TimeUnit.MINUTES).until(() -> node.executeInternal(built, KEYSPACE).length == 1);
+            node.flush(KEYSPACE);
+            node.shutdown().get();
+            node.config().set("internode_compatibility_mode", "DSE_5_1");
+            node.startup();
+            assertThat(node.logs().grep("system_schema.hidden_columns").getResult()).isEmpty();
+            // the start in the mode: its startup check of the DSE features this software does not support ran
+            assertThat(node.logs().grep("DSE 5.1 compatibility mode: no trace of DSE Search").getResult()).hasSize(1);
+            String read = withKeyspace("SELECT pk, ck FROM %s.t_by_v WHERE v = 'a'");
+            assertThat(cluster.coordinator(1).execute(read, ConsistencyLevel.ONE).length).isEqualTo(1);
         }
     }
 }

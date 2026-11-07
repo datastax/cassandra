@@ -52,6 +52,7 @@ import org.apache.cassandra.service.DseUpgradeMarker;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
@@ -182,7 +183,8 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
     /**
      * The messaging between nodes of this software in the mode, which opens the pre-4.0 code paths only below 4.0:
      * GROUP BY queries, paged, logged batches and lightweight transactions (Paxos v1, the variant of the mode) run at
-     * ALL and SERIAL; a schema change is refused, with the text of the mode, and the property lifts the freeze.
+     * ALL and SERIAL; a schema change is refused, with the text of the mode, and the property lifts the freeze, but
+     * for an SAI index, which is refused even then.
      */
     @Test
     public void theNodesInTheModeServeGroupByBatchesAndLightweightTransactions() throws Throwable
@@ -227,7 +229,16 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
             try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
             {
                 cluster.coordinator(1).execute(withKeyspace("ALTER TABLE %s.g ADD w int"), ConsistencyLevel.ALL);
+                // but no SAI index is created, the freeze lifted or not
+                String sai = withKeyspace("CREATE CUSTOM INDEX g_v_sai ON %s.g (v) USING 'sai'");
+                assertThatThrownBy(() -> cluster.coordinator(1).execute(sai, ConsistencyLevel.ALL))
+                .hasMessageContaining("Index g_v_sai was not created: with internode_compatibility_mode DSE_5_1 no " +
+                                      "Storage Attached Index (SAI) is created, even with " +
+                                      "-Dcassandra.internode_compatibility_mode.allow_ddl=true");
             }
+            assertThat(cluster.get(1).executeInternal("SELECT index_name FROM system_schema.indexes WHERE " +
+                                                      "keyspace_name = ?",
+                                                      KEYSPACE)).isEmpty();
         }
     }
 
@@ -318,7 +329,13 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
             Files.delete(Path.of(marker));
             Files.delete(Path.of(record));
 
-            instance.startup();
+            // the node now has two DSE 5.1 peers on record, which never come up, so the cluster-wide read of the check
+            // of the DSE access controls cannot be made: only this node's replica is checked
+            try (WithProperties localCheck = new WithProperties()
+                                             .set(INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY, true))
+            {
+                instance.startup();
+            }
             assertMarkers(instance);
             String row = "DSE 5.1 compatibility mode: DSE 5.1's columns of system.local and system.peers for %s " +
                          "\\(workloads \\[Cassandra\\], workload Cassandra, graph false, dse_version 5.1.51\\)";

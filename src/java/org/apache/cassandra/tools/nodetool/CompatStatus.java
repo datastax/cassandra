@@ -41,7 +41,8 @@ import org.apache.cassandra.tools.NodeTool;
  * that it ignored, the DSE access controls it does not enforce, the DataStax Enterprise grants of UPDATE or TRUNCATE
  * alone it drops and the requests it refused because of the upgrade: the operator's view during an in-place upgrade
  * from DataStax Enterprise 6. In {@code DSE_5_1}, the upgrade from DataStax Enterprise 5.1, the peers are the DSE 5.1
- * ones and the record that of the DSE 5.1 peers; the help text is left as it was.
+ * ones and the record that of the DSE 5.1 peers, the traces and the access controls those DSE 5.1 has, and no SAI
+ * version is pinned; the help text is left as it was.
  */
 @Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE peers seen in gossip or identified by a handshake, the DSE 6 peers on record, the SAI on-disk version pinned, the traces of the DSE features not supported that were ignored, the DSE access controls not enforced, the DSE grants of UPDATE or TRUNCATE alone that are dropped and the requests refused during the upgrade")
 public class CompatStatus extends NodeTool.NodeToolCmd
@@ -89,7 +90,7 @@ public class CompatStatus extends NodeTool.NodeToolCmd
             out.printf("  %-45s %d%s%n", e.getKey(), version, note);
         }
 
-        // the DSE peers and their record exist in DSE_6 and DSE_5_1 modes, the access-control check in DSE_6 mode only;
+        // the DSE peers and their record exist in DSE_6 and DSE_5_1 modes, the access-control check too;
         // the record's entries that are not addresses with port are counted and listed too
         boolean dse6 = DSE_6.equals(mode);
         boolean dse51 = DSE_5_1.equals(mode);
@@ -114,14 +115,16 @@ public class CompatStatus extends NodeTool.NodeToolCmd
         else
             out.printf("SAI version pinned           : not checked%s%n", notInTheMode);
 
-        // the traces of the DSE features this software does not support, which refuse the start in DSE_6 mode
-        if (dse6)
+        // the traces of the DSE features this software does not support, which refuse the start in DSE_6 and DSE_5_1
+        // mode
+        if (dse6 || dse51)
             printDseNonCoreTraces(probe, out);
         else
             out.printf("Non-core DSE traces          : not checked%s%n", notInTheMode);
 
-        // what a DSE node restricts but this node does not enforce (the last check in DSE_6 mode), and how it was found
-        if (dse6)
+        // what a DSE node restricts but this node does not enforce (the last check in DSE_6 or DSE_5_1 mode), and how
+        // it was found
+        if (dse6 || dse51)
             printDseAccessControlCheck(probe, out);
         else
             out.printf("DSE access controls ignored  : not checked%s%n", notInTheMode);
