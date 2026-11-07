@@ -24,6 +24,7 @@ import java.util.function.Function;
 
 import javax.annotation.Nullable;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 
 import org.apache.cassandra.auth.AuthenticatedUser;
@@ -137,7 +138,7 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
         SchemaTransformation transformation = DseUpgradeGuards.schemaChangesFrozen() ? new FrozenSchemaStatement(this)
                                                                                      : this;
         if (DatabaseDescriptor.isDse51CompatibilityMode())
-            transformation = new Dse51CompressorsCheck(transformation);
+            transformation = new Dse51SSTableOutputCheck(transformation);
         SchemaTransformationResult result = Schema.instance.transform(transformation, locally);
 
         clientWarnings(result.diff).forEach(ClientWarn.instance::warn);
@@ -205,13 +206,13 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
 
     /**
      * The statement of a schema transformation, for the schema announcement events: the transformation itself when it
-     * is a statement, the statement {@link Dse51CompressorsCheck} wraps in the DSE 5.1 compatibility mode, or null.
+     * is a statement, the statement {@link Dse51SSTableOutputCheck} wraps in the DSE 5.1 compatibility mode, or null.
      */
     @Nullable
     public static CQLStatement statementOf(@Nullable SchemaTransformation transformation)
     {
-        if (transformation instanceof Dse51CompressorsCheck)
-            return statementOf(((Dse51CompressorsCheck) transformation).statement);
+        if (transformation instanceof Dse51SSTableOutputCheck)
+            return statementOf(((Dse51SSTableOutputCheck) transformation).statement);
         return transformation instanceof CQLStatement ? (CQLStatement) transformation : null;
     }
 
@@ -219,17 +220,19 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
      * A schema statement in {@code internode_compatibility_mode: DSE_5_1}, schema freeze or not ({@code allow_ddl}): it
      * refuses a result that creates a table or a view, or changes its compression, with a compressor DSE 5.1 does not
      * read or with encryption ({@link Dse51Compressors#refusedStatementChanges}), so that such a table is refused when
-     * the statement runs, not at the next start of the node. Applied by the same update handler under the same lock as
-     * the statement it wraps, which it applies in full first, so a statement that fails to apply, or that the schema
-     * freeze refuses, fails with its own error. It adds no side effect but the refusal, counted once per application.
-     * It is not a {@code CQLStatement}: the schema announcement events take the statement it wraps
-     * ({@link #statementOf}).
+     * the statement runs, not at the next start of the node, and one that creates or changes a table or a view so that
+     * a column has a type DSE 5.1 cannot read ({@link Dse51ColumnTypes#refusedStatementChanges}), which no sstable
+     * written for DSE 5.1 can hold. Applied by the same update handler under the same lock as the statement it wraps,
+     * which it applies in full first, so a statement that fails to apply, or that the schema freeze refuses, fails with
+     * its own error. It adds no side effect but the refusal, counted once per reason (its compression, a column type).
+     * A statement refused for both names both, after one {@link Dse51Compressors#STATEMENT_REFUSAL}. It is not a
+     * {@code CQLStatement}: the schema announcement events take the statement it wraps ({@link #statementOf}).
      */
-    private static final class Dse51CompressorsCheck implements SchemaTransformation
+    private static final class Dse51SSTableOutputCheck implements SchemaTransformation
     {
         private final SchemaTransformation statement;
 
-        private Dse51CompressorsCheck(SchemaTransformation statement)
+        private Dse51SSTableOutputCheck(SchemaTransformation statement)
         {
             this.statement = statement;
         }
@@ -238,9 +241,16 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
         public Keyspaces apply(Keyspaces schema)
         {
             Keyspaces after = statement.apply(schema);
-            String refusal = Dse51Compressors.refusedStatementChanges(schema, after);
-            if (refusal != null)
-                throw ire("%s", refusal);
+            // a statement refused for both its compression and a column type names both
+            String compression = Dse51Compressors.refusedStatementChanges(schema, after);
+            String types = Dse51ColumnTypes.refusedStatementChanges(schema, after);
+            if (compression != null && types != null)
+            {
+                Preconditions.checkState(types.startsWith(Dse51Compressors.STATEMENT_REFUSAL), types);
+                throw ire("%s; %s", compression, types.substring(Dse51Compressors.STATEMENT_REFUSAL.length()));
+            }
+            if (compression != null || types != null)
+                throw ire("%s", compression != null ? compression : types);
             return after;
         }
 

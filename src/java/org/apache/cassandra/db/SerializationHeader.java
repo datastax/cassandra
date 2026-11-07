@@ -33,6 +33,7 @@ import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -53,6 +54,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Dse51ColumnTypes;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.AbstractTypeSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -82,6 +84,12 @@ public class SerializationHeader
      */
     private final ColumnMetadata dseViewLivenessColumn;
 
+    /**
+     * Whether a LIVE deletion time is written as Cassandra 3.x writes it, for the rows of an sstable of a version that
+     * has that encoding ({@link #forSSTableVersion}); false for every other header.
+     */
+    private final boolean pre40LiveDeletionTime;
+
     private SerializationHeader(boolean isForSSTable,
                                 AbstractType<?> keyType,
                                 List<AbstractType<?>> clusteringTypes,
@@ -100,6 +108,18 @@ public class SerializationHeader
                                 Map<ByteBuffer, AbstractType<?>> typeMap,
                                 ColumnMetadata dseViewLivenessColumn)
     {
+        this(isForSSTable, keyType, clusteringTypes, columns, stats, typeMap, dseViewLivenessColumn, false);
+    }
+
+    private SerializationHeader(boolean isForSSTable,
+                                AbstractType<?> keyType,
+                                List<AbstractType<?>> clusteringTypes,
+                                RegularAndStaticColumns columns,
+                                EncodingStats stats,
+                                Map<ByteBuffer, AbstractType<?>> typeMap,
+                                ColumnMetadata dseViewLivenessColumn,
+                                boolean pre40LiveDeletionTime)
+    {
         this.isForSSTable = isForSSTable;
         this.keyType = keyType;
         this.clusteringTypes = clusteringTypes;
@@ -107,6 +127,7 @@ public class SerializationHeader
         this.stats = stats;
         this.typeMap = typeMap;
         this.dseViewLivenessColumn = dseViewLivenessColumn;
+        this.pre40LiveDeletionTime = pre40LiveDeletionTime;
     }
 
     public static SerializationHeader makeWithoutStats(TableMetadata metadata)
@@ -193,7 +214,26 @@ public class SerializationHeader
             types = new HashMap<>(typeMap);
             types.remove(dseViewLivenessColumn.name.bytes);
         }
-        return new SerializationHeader(isForSSTable, keyType, clusteringTypes, columns.without(dseViewLivenessColumn), stats, types, null);
+        return new SerializationHeader(isForSSTable, keyType, clusteringTypes, columns.without(dseViewLivenessColumn),
+                                       stats, types, null, pre40LiveDeletionTime);
+    }
+
+    /**
+     * This header for writing the rows of an sstable of {@code version}: itself, unless the version is written as
+     * Cassandra 3.x writes it ({@link Version#hasPre40Encoding()}, big {@code me} in the DSE 5.1 compatibility mode),
+     * whose readers take a deletion time for LIVE only when its local deletion time is {@code Integer.MAX_VALUE}: the
+     * header returned then writes a LIVE deletion time so ({@link #writeDeletionTime}); for any other version, a
+     * header that writes it as this software does.
+     */
+    public SerializationHeader forSSTableVersion(Version version)
+    {
+        // the header of an sstable opened from its writer is the writer's: one of a 3.x version does not carry its
+        // encoding to the writer of another version (a scrub, a stream of that sstable)
+        boolean pre40 = isForSSTable && version.hasPre40Encoding();
+        if (pre40 == pre40LiveDeletionTime)
+            return this;
+        return new SerializationHeader(isForSSTable, keyType, clusteringTypes, columns, stats, typeMap,
+                                       dseViewLivenessColumn, pre40);
     }
 
     public boolean hasStatic()
@@ -251,11 +291,26 @@ public class SerializationHeader
         writeTimestamp(dt.markedForDeleteAt(), out);
         // LIVE DeletionTime has localDeletionTime=Long.MAX_VALUE which overflows the 32-bit delta encoding
         // (Long.MAX_VALUE - minLocalDeletionTime doesn't fit in an int). Write a zero delta instead;
-        // the read side recognizes LIVE by markedForDeleteAt == Long.MIN_VALUE.
-        if (dt.isLive())
+        // the read side recognizes LIVE by markedForDeleteAt == Long.MIN_VALUE. A 32-bit reader does not: in an sstable
+        // written for one, LIVE is written as Cassandra 3.x writes it.
+        if (dt.isLive() && pre40LiveDeletionTime)
+            out.writeUnsignedVInt32(pre40LiveLocalDeletionTimeDelta());
+        else if (dt.isLive())
             writeLocalDeletionTime(stats.minLocalDeletionTime, out);
         else
             writeLocalDeletionTime(dt.localDeletionTime(), out);
+    }
+
+    /**
+     * For a header of {@link #forSSTableVersion}: the delta from the header's minimum local deletion time that a
+     * 32-bit reader (Cassandra 3.x, DSE 5.1) adds to that minimum to get {@code Integer.MAX_VALUE}, its local deletion
+     * time of LIVE, computed as that reader adds it, in 32-bit arithmetic: such a reader reads the minimum in 32 bits
+     * too, so the delta of a minimum outside {@code [0, Integer.MAX_VALUE]} (a negative local deletion time of
+     * CASSANDRA-14092 data) wraps as its sum does, and is written, as Cassandra 3.x writes it, sign-extended.
+     */
+    private int pre40LiveLocalDeletionTimeDelta()
+    {
+        return Integer.MAX_VALUE - (int) stats.minLocalDeletionTime;
     }
 
     public long readTimestamp(DataInputPlus in) throws IOException
@@ -302,6 +357,9 @@ public class SerializationHeader
 
     public long deletionTimeSerializedSize(DeletionTime dt)
     {
+        if (dt.isLive() && pre40LiveDeletionTime)
+            return timestampSerializedSize(dt.markedForDeleteAt())
+                   + TypeSizes.sizeofUnsignedVInt(pre40LiveLocalDeletionTimeDelta());
         return timestampSerializedSize(dt.markedForDeleteAt())
                + localDeletionTimeSerializedSize(dt.isLive() ? stats.minLocalDeletionTime : dt.localDeletionTime());
     }
@@ -792,11 +850,64 @@ public class SerializationHeader
         {
             EncodingStats.serializer.serialize(header.stats, out);
 
+            if (hasPre40TypeNames(version))
+            {
+                writePre40Type(header.keyType, out);
+                out.writeUnsignedVInt32(header.clusteringTypes.size());
+                for (AbstractType<?> type : header.clusteringTypes)
+                    writePre40Type(type, out);
+                writePre40ColumnsWithTypes(header.staticColumns, out);
+                writePre40ColumnsWithTypes(header.regularColumns, out);
+                return;
+            }
+
             typeSerializer.serialize(header.keyType, out);
             typeSerializer.serializeList(header.clusteringTypes, out);
 
             writeColumnsWithTypes(header.staticColumns, out);
             writeColumnsWithTypes(header.regularColumns, out);
+        }
+
+        /**
+         * Whether the header of an sstable of {@code version} is written with the type names of Cassandra 3.x, which
+         * DSE 5.1 parses ({@link Dse51ColumnTypes#sstableTypeName}): for a version of the 3.x line (big {@code me}) in
+         * the DSE 5.1 compatibility mode, by the node or by a tool. Without the mode, the header of a 3.x sstable whose
+         * metadata is rewritten keeps the names of this software.
+         */
+        private static boolean hasPre40TypeNames(Version version)
+        {
+            return version.hasPre40Encoding() && DatabaseDescriptor.isDse51SSTableOutput();
+        }
+
+        private static void writePre40Type(AbstractType<?> type, DataOutputPlus out) throws IOException
+        {
+            String name = Dse51ColumnTypes.sstableTypeName(type);
+            ByteBufferUtil.writeWithVIntLength(UTF8Type.instance.decompose(name), out);
+        }
+
+        private static long pre40TypeSize(AbstractType<?> type)
+        {
+            String name = Dse51ColumnTypes.sstableTypeName(type);
+            return ByteBufferUtil.serializedSizeWithVIntLength(UTF8Type.instance.decompose(name));
+        }
+
+        private static void writePre40ColumnsWithTypes(Map<ByteBuffer, AbstractType<?>> columns, DataOutputPlus out)
+        throws IOException
+        {
+            out.writeUnsignedVInt32(columns.size());
+            for (Map.Entry<ByteBuffer, AbstractType<?>> entry : columns.entrySet())
+            {
+                ByteBufferUtil.writeWithVIntLength(entry.getKey(), out);
+                writePre40Type(entry.getValue(), out);
+            }
+        }
+
+        private static long sizeofPre40ColumnsWithTypes(Map<ByteBuffer, AbstractType<?>> columns)
+        {
+            long size = TypeSizes.sizeofUnsignedVInt(columns.size());
+            for (Map.Entry<ByteBuffer, AbstractType<?>> entry : columns.entrySet())
+                size += ByteBufferUtil.serializedSizeWithVIntLength(entry.getKey()) + pre40TypeSize(entry.getValue());
+            return size;
         }
 
         // For SSTables
@@ -817,6 +928,17 @@ public class SerializationHeader
         public int serializedSize(Version version, Component header)
         {
             int size = EncodingStats.serializer.serializedSize(header.stats);
+
+            if (hasPre40TypeNames(version))
+            {
+                long pre40 = pre40TypeSize(header.keyType);
+                pre40 += TypeSizes.sizeofUnsignedVInt(header.clusteringTypes.size());
+                for (AbstractType<?> type : header.clusteringTypes)
+                    pre40 += pre40TypeSize(type);
+                pre40 += sizeofPre40ColumnsWithTypes(header.staticColumns);
+                pre40 += sizeofPre40ColumnsWithTypes(header.regularColumns);
+                return Math.toIntExact(size + pre40);
+            }
 
             size += typeSerializer.serializedSize(header.keyType);
             size += typeSerializer.serializedListSize(header.clusteringTypes);

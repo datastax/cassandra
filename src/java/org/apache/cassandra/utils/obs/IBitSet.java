@@ -46,6 +46,18 @@ public interface IBitSet extends Closeable
 
     public void serialize(DataOutputPlus out) throws IOException;
 
+    /**
+     * Serializes the bits in the layout of the bloom filters of Cassandra 3.x (big {@code m*} sstables, and the trie
+     * {@code a*} sstables of DSE 6.0 and 6.7): the number of longs, then each 8 bytes of the set as one big-endian
+     * long whose least significant byte is the first of them. The same size as {@link #serialize}. A default that
+     * refuses, so that an implementation outside this tree still compiles; the bit set of this software
+     * ({@link OffHeapBitSet}) implements it.
+     */
+    default void serializeOldBfFormat(DataOutputPlus out) throws IOException
+    {
+        throw new UnsupportedOperationException(getClass().getName() + " cannot serialize the old bloom filter layout");
+    }
+
     public long serializedSize();
 
     public void clear();

@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.repair.messages.CleanupMessage;
@@ -51,6 +52,7 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.net.Verb.CLEANUP_MSG;
@@ -99,6 +101,15 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
 
     private static final Logger logger = LoggerFactory.getLogger(RepairMessageVerbHandler.class);
 
+    /** The refusal of an incremental repair in {@code storage_compatibility_mode: DSE_5_1}. */
+    @VisibleForTesting
+    static final String INCREMENTAL_REPAIR_IN_DSE51_STORAGE_MODE =
+        "incremental repair is refused in storage_compatibility_mode DSE_5_1: the big me sstables this node writes " +
+        "for DSE 5.1 cannot be marked pending repair, so they cannot be anticompacted; use a full repair (nodetool " +
+        "repair -full, coordinated by a node without the mode, with stream_entire_sstables: false on every node " +
+        "without the mode) until the flag is dropped and the big me sstables of this node are rewritten (nodetool " +
+        "upgradesstables)";
+
     private boolean isIncremental(TimeUUID sessionID)
     {
         return ctx.repair().consistent.local.isSessionInProgress(sessionID);
@@ -127,6 +138,23 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     replyDedup(ctx.repair().participate(state.id), message);
                     return;
                 }
+                // the sstables of the DSE 5.1 storage mode (big me) cannot be marked pending repair: incremental
+                // repair, which anticompacts, is refused there, whoever coordinates it, before any other check, so
+                // that the operator gets the reason that holds
+                if (prepareMessage.isIncremental && !prepareMessage.previewKind.isPreview()
+                    && DatabaseDescriptor.getStorageCompatibilityMode() == StorageCompatibilityMode.DSE_5_1)
+                {
+                    DseCompatRefusals.refused("repair");
+                    state.phase.fail(INCREMENTAL_REPAIR_IN_DSE51_STORAGE_MODE);
+                    // refused by policy, not failed: the coordinator gets a failure response, the reason is logged
+                    // here, once per repair session
+                    logger.warn("Refused the prepare of the repair session {} from {}: {}",
+                                prepareMessage.parentRepairSession, message.from(),
+                                INCREMENTAL_REPAIR_IN_DSE51_STORAGE_MODE);
+                    sendFailureResponse(message);
+                    return;
+                }
+
                 if (!ctx.repair().verifyCompactionsPendingThreshold(prepareMessage.parentRepairSession, prepareMessage.previewKind))
                 {
                     // error is logged in verifyCompactionsPendingThreshold

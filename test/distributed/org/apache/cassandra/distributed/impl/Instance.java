@@ -122,6 +122,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.Dse51ColumnTypes;
 import org.apache.cassandra.schema.Dse51Compressors;
 import org.apache.cassandra.schema.MigrationCoordinator;
 import org.apache.cassandra.schema.Schema;
@@ -715,11 +716,12 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     throw new RuntimeException(e.getMessage(), e);
                 }
 
-                // as CassandraDaemon.setup: the DSE 5.1 check of the compressors of the tables
+                // as CassandraDaemon.setup: the DSE 5.1 checks of the column types and the compressors of the tables
                 if (DatabaseDescriptor.isDse51CompatibilityMode())
                 {
                     try
                     {
+                        Dse51ColumnTypes.verifyAtStartup();
                         Dse51Compressors.verifyAtStartup();
                     }
                     catch (StartupException e)
@@ -733,6 +735,19 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
                 // clean up debris in data directories
                 CassandraDaemon.getInstanceForTesting().scrubDataDirectories();
+
+                // as CassandraDaemon.setup: the DSE 5.1 check of the sstables on disk
+                if (DatabaseDescriptor.isDse51CompatibilityMode())
+                {
+                    try
+                    {
+                        Dse51Compressors.verifySSTablesAtStartup();
+                    }
+                    catch (StartupException e)
+                    {
+                        throw new RuntimeException(e.getMessage(), e);
+                    }
+                }
 
                 Keyspace.setInitialized();
 

@@ -184,11 +184,11 @@ public class Dse51StartupChecksTest
     public void dse51AcceptsWhatItWritesAndWhatDse51WroteAndWritesItsMarker() throws Exception
     {
         mode(InternodeCompatibilityMode.DSE_5_1);
-        // what DSE 5.1 wrote (big me, and older big versions it still reads), big nb, which the node writes in the
-        // mode, and big oa, which offline tools write in it; commit log segments of DSE 5.1 (version 6) and of the
-        // node in the mode (version 7)
+        // what DSE 5.1 wrote, and what the node and the offline tools write in the mode (big me), and older big
+        // versions DSE 5.1 still reads; commit log segments of DSE 5.1 (version 6) and of the node in the mode
+        // (version 7)
         touch(sstableDir, "me-1-big-Data.db", "me-1-big-TOC.txt", "mc-2-big-Data.db", "ma-3-big-Data.db",
-              "nb-4-big-Data.db", "oa-5-big-Data.db");
+              "me-4-big-Data.db");
         touch(commitLogDir, "CommitLog-6-1.log", "CommitLog-7-2.log");
 
         StartupChecks.checkDse6Artefacts.execute(OPTIONS);
@@ -217,7 +217,8 @@ public class Dse51StartupChecksTest
     {
         mode(InternodeCompatibilityMode.DSE_5_1);
         String ulid = ULIDBasedSSTableId.Builder.instance.generator(Stream.empty()).get().toString();
-        touch(sstableDir, "me-1-big-Data.db", "nb-2-big-Data.db", "pa-3-big-Data.db", "aa-4-bti-Data.db",
+        touch(sstableDir, "me-1-big-Data.db", "nb-2-big-Data.db", "oa-7-big-Data.db", "pa-3-big-Data.db",
+              "aa-4-bti-Data.db",
               "bb-5-bti-Data.db", "me-6-xyz-Data.db", "nb-3h43_18di_43ocw25niiw1m23p1r-big-Data.db",
               "me-" + ulid + "-big-Data.db");
         touch(commitLogDir, "CommitLog-6-1.log", "CommitLog-7-2.log", "CommitLog-8-3.log", "CommitLog-110-4.log",
@@ -225,6 +226,8 @@ public class Dse51StartupChecksTest
         assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(OPTIONS))
         .isInstanceOf(StartupException.class)
         .hasMessageStartingWith(REFUSAL)
+        .hasMessageContaining("nb-2-big-Data.db")
+        .hasMessageContaining("oa-7-big-Data.db")
         .hasMessageContaining("pa-3-big-Data.db")
         .hasMessageContaining("aa-4-bti-Data.db")
         .hasMessageContaining("bb-5-bti-Data.db")
@@ -235,7 +238,6 @@ public class Dse51StartupChecksTest
         .hasMessageContaining("CommitLog-110-4.log")
         .hasMessageContaining("CommitLog-680-5.log")
         .hasMessageNotContaining("me-1-big-Data.db")
-        .hasMessageNotContaining("nb-2-big-Data.db")
         .hasMessageNotContaining("CommitLog-6-1.log")
         .hasMessageNotContaining("CommitLog-7-2.log")
         .hasMessageEndingWith(". Restore the node from its pre-upgrade snapshot. Deleting these files instead loses " +
@@ -249,11 +251,13 @@ public class Dse51StartupChecksTest
     public void theRulesOfEachModeDiffer()
     {
         // big me, nb and oa, every trie version, numeric and other identifiers, names that do not parse
-        assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("nb-1-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("me-1-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isSSTableUnreadableByDse6("me-1-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("nb-1-big-Data.db")).isTrue();
         assertThat(StartupChecks.isSSTableUnreadableByDse6("nb-1-big-Data.db")).isTrue();
         assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("bb-1-bti-Data.db")).isTrue();
         assertThat(StartupChecks.isSSTableUnreadableByDse6("bb-1-bti-Data.db")).isFalse();
-        assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("oa-1-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("oa-1-big-Data.db")).isTrue();
         assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("pa-1-big-Data.db")).isTrue();
         assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("ka-1-big-Data.db")).isFalse();
         assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("ks-t-ka-1-Data.db")).isFalse();
@@ -296,6 +300,7 @@ public class Dse51StartupChecksTest
         assertThat(segments).noneMatch(StartupChecks::isCommitLogSegmentWrittenWithoutDse51Mode);
         // the names reach the classification: the same names of another format or version are refused
         assertThat(sstables).allMatch(n -> StartupChecks.isSSTableWrittenWithoutDse51Mode(n.replace("-big-", "-bti-")));
+        assertThat(sstables).allMatch(n -> StartupChecks.isSSTableWrittenWithoutDse51Mode("nb" + n.substring(2)));
         assertThat(segments).allMatch(n -> StartupChecks.isCommitLogSegmentWrittenWithoutDse51Mode(
             n.replaceFirst("^CommitLog-" + Dse51Fixtures.COMMIT_LOG_VERSION + '-', "CommitLog-680-")));
     }

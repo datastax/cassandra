@@ -723,10 +723,10 @@ public class StartupChecks
     private static final String DSE_6_MAX_BIG_VERSION = "me";
 
     /**
-     * The newest big-format sstable version a start in {@code DSE_5_1} accepts: {@code oa}, the version offline tools
-     * write in the mode (without the storage mode), the node itself writing {@code nb}; DSE 5.1 reads neither.
+     * The newest big-format sstable version a start in {@code DSE_5_1} accepts: {@code me}, the version the node, the
+     * offline tools run with its configuration and the clients write in the mode, the newest DSE 5.1 reads.
      */
-    private static final String DSE_51_MODE_MAX_BIG_VERSION = "oa";
+    private static final String DSE_51_MODE_MAX_BIG_VERSION = InternodeCompatibilityMode.DSE_51_BIG_VERSION;
 
     /**
      * With {@code internode_compatibility_mode: DSE_6}, refuses to start if the data directories or the commit log
@@ -760,9 +760,9 @@ public class StartupChecks
      * <p>
      * With {@code internode_compatibility_mode: DSE_5_1} it refuses, with rules of its own, what the node wrote without
      * that mode ({@link #isSSTableWrittenWithoutDse51Mode}, {@link #isCommitLogSegmentWrittenWithoutDse51Mode}):
-     * sstables of the {@code bti} format, of any other format but {@code big}, of a big version newer than {@code oa}
-     * (the version offline tools write in the mode, the node writing {@code nb}, neither of which DSE 5.1 reads), or
-     * with a non-numeric identifier; commit log segments of a version above the 4.0 line, DSE's {@code 680} included
+     * sstables of the {@code bti} format, of any other format but {@code big}, of a big version newer than {@code me}
+     * (the version the node and the offline tools write in the mode, the newest DSE 5.1 reads), or with a non-numeric
+     * identifier; commit log segments of a version above the 4.0 line, DSE's {@code 680} included
      * (DSE 5.1 writes version 6, the node in the mode version 7). Every file listed is one DSE 5.1 could not read after
      * a rollback. Once every check has passed, the post action writes the marker of the upgrade from DSE 5.1, which a
      * later start in {@code NONE} or {@code DSE_6} is refused by. When that marker does not exist yet (a new upgrade),
@@ -939,7 +939,7 @@ public class StartupChecks
     /**
      * Whether {@code fileName}, an sstable component name {@code <version>-<id>-<format>-<component>}, is one neither
      * a node in {@code DSE_5_1} mode nor an offline tool that reads its configuration writes, so one the node wrote
-     * without the mode: a format other than {@code big}, a big version newer than {@code oa}, or a non-numeric
+     * without the mode: a format other than {@code big}, a big version newer than {@code me}, or a non-numeric
      * identifier; DSE 5.1 reads none of them. A name that does not have the four parts, or whose version or identifier
      * does not parse, is not classified here, as in {@link #isSSTableUnreadableByDse6}.
      */

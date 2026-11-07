@@ -22,6 +22,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.text.NumberFormat;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Locale;
@@ -55,7 +56,9 @@ import org.apache.cassandra.utils.obs.MemoryLimiter;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.BF_IGNORE_MEMORY_LIMIT_ON_FLUSH;
 import static org.apache.cassandra.config.CassandraRelevantProperties.USE_MICROMETER;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
@@ -73,14 +76,7 @@ public class BloomFilterTest
     {
         f.add(FilterTestHelper.bytes("a"));
         DataOutputBuffer out = new DataOutputBuffer();
-        if (oldBfFormat)
-        {
-            SerializationsTest.serializeOldBfFormat((BloomFilter) f, out);
-        }
-        else
-        {
-            BloomFilterSerializer.forVersion(false).serialize((BloomFilter) f, out);
-        }
+        BloomFilterSerializer.forVersion(oldBfFormat).serialize((BloomFilter) f, out);
 
         ByteArrayInputStream in = new ByteArrayInputStream(out.getData(), 0, out.getLength());
         IFilter f2 = BloomFilterSerializer.forVersion(oldBfFormat).deserialize(Util.DataInputStreamPlusImpl.wrap(in));
@@ -168,6 +164,43 @@ public class BloomFilterTest
     {
         BloomFilterTest.testSerialize(bfInvHashes, true).close();
         BloomFilterTest.testSerialize(bfInvHashes, false).close();
+    }
+
+    /**
+     * The serializer of the old format writes the layout of the bloom filters of the big m* sstables (DSE 5.1's me),
+     * the serializer being the same in every mode: the header of the new format (the hash count, then the count of
+     * words), then each word of the bit set as a big-endian long where the new format has its bytes in memory order
+     * (the word read little-endian), so each 8 bytes reversed; read back with the same bits.
+     */
+    @Test
+    public void theOldFormatIsWrittenByTheSerializer() throws IOException
+    {
+        for (int i = 0; i < 100; i++)
+            bfInvHashes.add(FilterTestHelper.bytes("key" + i));
+        BloomFilter filter = (BloomFilter) bfInvHashes;
+        DataOutputBuffer newFormat = new DataOutputBuffer();
+        BloomFilterSerializer.forVersion(false).serialize(filter, newFormat);
+        byte[] newBytes = newFormat.toByteArray();
+        byte[] expected = newBytes.clone();
+        int header = 8;
+        assertEquals(0, (newBytes.length - header) % 8);
+        for (int word = header; word < newBytes.length; word += 8)
+            for (int i = 0; i < 8; i++)
+                expected[word + i] = newBytes[word + 7 - i];
+        DataOutputBuffer written = new DataOutputBuffer();
+        BloomFilterSerializer.forVersion(true).serialize(filter, written);
+        assertArrayEquals(expected, written.toByteArray());
+        assertEquals(BloomFilterSerializer.forVersion(true).serializedSize(filter), written.getLength());
+        assertFalse(Arrays.equals(newBytes, written.toByteArray()));
+
+        ByteArrayInputStream in = new ByteArrayInputStream(written.getData(), 0, written.getLength());
+        try (BloomFilter read = BloomFilterSerializer.forVersion(true)
+                                                     .deserialize(Util.DataInputStreamPlusImpl.wrap(in)))
+        {
+            compare(filter.bitset, read.bitset);
+            for (int i = 0; i < 100; i++)
+                assertTrue(read.isPresent(FilterTestHelper.bytes("key" + i)));
+        }
     }
 
     @Test

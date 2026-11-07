@@ -332,11 +332,12 @@ public class UnfilteredSerializer
     /**
      * DSE 6 and DSE 5.1 compatibility modes: the pre-4.0 dialect has 32-bit local deletion times, the last one early in
      * 2038, and a DSE peer would read a later one as a negative, invalid, time. The text names the DSE release of the
-     * mode ({@link DseCompat#source()}). The mode requires the {@code HCD_1} storage compatibility mode, under which no
-     * deletion time goes past that cap, so this never fires; it fails fast, before anything is written, if one ever
-     * does. {@link Cell#NO_DELETION_TIME} (live) is never written as a deletion time. It covers what is serialized at
-     * the peer's version (mutations, hints, batches, Paxos commits); the data of a read response is serialized once, at
-     * the current version, when the replica builds it, and is sent as is.
+     * mode ({@link DseCompat#source()}). The mode requires a storage compatibility mode before 5.0 ({@code HCD_1} for
+     * DSE 6, {@code DSE_5_1} for DSE 5.1), under which no deletion time goes past that cap (in {@code DSE_5_1} for the
+     * tools and clients too, see {@code CellData.getVersionedMaxDeletiontionTime}), so this never fires; it fails fast,
+     * before anything is written, if one ever does. {@link Cell#NO_DELETION_TIME} (live) is never written as a deletion
+     * time. It covers what is serialized at the peer's version (mutations, hints, batches, Paxos commits); the data of
+     * a read response is serialized once, at the current version, when the replica builds it, and is sent as is.
      */
     static void checkPre40DeletionTime(long localDeletionTime, int version)
     {

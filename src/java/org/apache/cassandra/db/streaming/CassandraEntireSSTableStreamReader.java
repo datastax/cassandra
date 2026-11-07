@@ -22,11 +22,11 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.function.UnaryOperator;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
-import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Directories;
@@ -37,11 +37,16 @@ import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.IOOptions;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.SSTableZeroCopyWriter;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriterOption;
+import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.streaming.ProgressInfo;
 import org.apache.cassandra.streaming.StreamReceiver;
 import org.apache.cassandra.streaming.StreamSession;
@@ -56,6 +61,10 @@ import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 public class CassandraEntireSSTableStreamReader implements IStreamReader
 {
     private static final Logger logger = LoggerFactory.getLogger(CassandraEntireSSTableStreamReader.class);
+
+    /** The reason under which the entire-sstable streams refused in the DSE 5.1 mode are counted. */
+    @VisibleForTesting
+    static final String DSE51_REFUSED_STREAM = "entire sstable stream of a version DSE 5.1 does not read";
 
     private static final boolean SKIP_MUTATING_STATS_AFTER_ZCS = CassandraRelevantProperties.SKIP_MUTATING_STATS_AFTER_ZCS.getBoolean();
 
@@ -94,6 +103,14 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
         {
             // schema was dropped during streaming
             throw new IOException("Table " + tableId + " was dropped during streaming");
+        }
+
+        // an entire sstable keeps its version: in the DSE 5.1 mode a version DSE 5.1 does not read is refused
+        String dse51Refusal = dse51Refusal(header.version, session.peer, cfs.metadata());
+        if (dse51Refusal != null)
+        {
+            DseCompatRefusals.refused(DSE51_REFUSED_STREAM);
+            throw new IOException(dse51Refusal);
         }
 
         ComponentManifest manifest = header.componentManifest;
@@ -180,6 +197,26 @@ public class CassandraEntireSSTableStreamReader implements IStreamReader
             return cfs.getDirectories().getDirectoryForNewSSTables();
 
         return dir;
+    }
+
+    /**
+     * In the DSE 5.1 compatibility mode ({@link DatabaseDescriptor#isDse51SSTableOutput()}), the refusal of an entire
+     * sstable stream of {@code version}, which would put in the data directories, as it is, an sstable DSE 5.1 does not
+     * read: any version but the big 3.x ones ({@link Version#hasPre40Encoding()}); null when it is taken, or outside
+     * the mode. A sender of this software never streams a 3.x sstable entire (their bloom filter is of the old
+     * format, {@code CassandraOutgoingFile.computeShouldStreamEntireSSTables}), so every entire-sstable stream from it
+     * reaching a node in the mode is refused. A stream of a part of an sstable is written here at the version of the
+     * mode, and is not refused.
+     */
+    @VisibleForTesting
+    static String dse51Refusal(Version version, InetAddressAndPort peer, TableMetadata table)
+    {
+        if (!DatabaseDescriptor.isDse51SSTableOutput() || version.hasPre40Encoding())
+            return null;
+        return format("internode_compatibility_mode DSE_5_1 refuses the entire sstable %s streamed from %s for %s: " +
+                      "DSE 5.1 does not read that version, which an entire sstable stream keeps; stream it with " +
+                      "stream_entire_sstables: false on the sender, so that it is written here at the version DSE " +
+                      "5.1 reads", version.toFormatAndVersionString(), peer, table);
     }
 
     protected SSTableZeroCopyWriter createWriter(ColumnFamilyStore cfs, long totalSize, Collection<Component> components) throws IOException

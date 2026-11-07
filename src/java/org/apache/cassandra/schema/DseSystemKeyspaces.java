@@ -45,7 +45,8 @@ import org.apache.cassandra.net.DseCompat;
  * <li>not deferred but missing as well: {@code system_auth.cidr_permissions}, {@code cidr_groups} and
  *     {@code identity_to_role} are created only with {@code storage_compatibility_mode} UPGRADING or NONE, so not at
  *     the first start with {@code internode_compatibility_mode: NONE} either while the storage mode stays
- *     {@code HCD_1}; the CIDR authorizer and the mutual TLS authenticators are refused at startup
+ *     {@code HCD_1} (or {@code DSE_5_1}, in the DSE 5.1 mode); the CIDR authorizer and the mutual TLS
+ *     authenticators are refused at startup
  *     ({@code AuthConfig});</li>
  * <li>{@code system_auth.resource_role_permissons_index}: {@code CassandraAuthorizer} maintains it only when the loaded
  *     {@code system_auth} has it;</li>
