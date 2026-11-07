@@ -88,9 +88,10 @@ import org.apache.cassandra.utils.SyncUtil;
  * when the node's messaging version map puts it at 10 or 11, which only a DSE 5.1 node speaks in such a cluster (an
  * inbound handshake, its gossiped {@code NET_VERSION}, an answer in the dialect), the rule by which {@code DsePeers}
  * identifies a DSE 5.1 node, and leaves it when it is seen at 4.0 or later. It is loaded at a {@code DSE_5_1} start,
- * and the check of a start in {@code NONE} reads it ({@code StartupChecks.checkDsePeersWithoutFlag}), which refuses the
- * start while it lists a peer, as for the DSE 6 record, which also refuses a start in {@code DSE_5_1}. The methods
- * without a mode are those of the DSE 6 record, whose file and bytes do not depend on the DSE 5.1 one.
+ * and the check of a start in {@code NONE} or {@code DSE_6} reads it ({@code StartupChecks.checkDsePeersWithoutFlag}),
+ * which refuses the start while it lists a peer, as for the DSE 6 record, which also refuses a start in
+ * {@code DSE_5_1}. The methods without a mode are those of the DSE 6 record, whose file and bytes do not depend on the
+ * DSE 5.1 one.
  */
 public final class DsePeersRecord
 {
@@ -231,7 +232,8 @@ public final class DsePeersRecord
 
     /**
      * The lines of the persisted record that are not addresses with port, trimmed and sorted: kept in the file, they
-     * keep a start with {@code NONE} refused until they are removed by hand.
+     * keep a start without the mode of the upgrade ({@code NONE}, or {@code DSE_6} for the DSE 5.1 record) refused
+     * until they are removed by hand.
      */
     public static Set<String> unparsedEntries()
     {
@@ -252,7 +254,8 @@ public final class DsePeersRecord
     {
         Path path = path(mode);
         // Files.exists is false when the check itself fails: only a file known to be absent is an empty record, anything
-        // else is read, and a failure to read it is reported (the NONE check then refuses the start: fail closed)
+        // else is read, and a failure to read it is reported (the check of a start without the mode of the upgrade
+        // then refuses it: fail closed)
         if (Files.notExists(path))
             return Collections.emptyList();
         List<String> peers = new ArrayList<>();
@@ -339,8 +342,8 @@ public final class DsePeersRecord
      * Writes the current record, replacing the file atomically and syncing it, or deletes the file when the record
      * is empty. The record is snapshotted at write time, so the last write always reflects the latest state. A failure,
      * including the unchecked ones of the file utilities, is logged at ERROR and does not reach the executor's failure
-     * handling (the disk failure policy is not meant for this metadata file): a start with {@code NONE} would then not
-     * know about the peers.
+     * handling (the disk failure policy is not meant for this metadata file): a start with {@code NONE}, or for the
+     * DSE 5.1 record also with {@code DSE_6}, would then not know about the peers.
      */
     private static synchronized void persist()
     {
