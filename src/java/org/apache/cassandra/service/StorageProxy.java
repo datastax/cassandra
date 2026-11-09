@@ -3750,7 +3750,29 @@ public class StorageProxy implements StorageProxyMBean
     public void setPaxosVariant(String variant)
     {
         Preconditions.checkNotNull(variant);
-        Paxos.setPaxosVariant(Config.PaxosVariant.valueOf(variant));
+        Config.PaxosVariant newVariant = Config.PaxosVariant.valueOf(variant);
+        // the DSE_6 mode accepts exactly paxos_variant v1 at startup and refuses any other, and so does a change at run
+        // time (counted and worded as the other upgrade guards; the check of Paxos.setPaxosVariant stays); a NONE node
+        // that still sees DSE peers refuses the v2 variants only, as before the DSE_6 mode required exactly v1
+        boolean refused = DatabaseDescriptor.isDse6CompatibilityMode()
+                          ? !DatabaseDescriptor.isDse6PaxosVariant(newVariant)
+                          : isPaxosV2Variant(newVariant);
+        if (refused)
+            DseUpgradeGuards.refuseWhileUpgrading("changing paxos_variant to " + newVariant);
+        Paxos.setPaxosVariant(newVariant);
+    }
+
+    /** The variants that run the Paxos v2 protocol, which DSE 6 does not speak. */
+    private static boolean isPaxosV2Variant(Config.PaxosVariant variant)
+    {
+        switch (variant)
+        {
+            case v1:
+            case v1_without_linearizable_reads_or_rejected_writes:
+                return false;
+            default:
+                return true;
+        }
     }
 
     @Override

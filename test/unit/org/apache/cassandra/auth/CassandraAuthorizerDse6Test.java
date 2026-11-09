@@ -105,7 +105,7 @@ public class CassandraAuthorizerDse6Test extends CQLTester
     public void permissionsOnlyInDse6ModeWhenDseHasNoIndex() throws Throwable
     {
         useSuperUser();
-        // created before the mode is set
+        // created before the mode is set: the mode freezes the schema
         String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
         String resource = "data/" + KEYSPACE + '/' + table;
         String role = "dse6_unindexed";
@@ -218,8 +218,7 @@ public class CassandraAuthorizerDse6Test extends CQLTester
             assertThat(permissions(role, "data/" + KEYSPACE)).isEmpty();
             assertThat(permissions(role, "data")).isEmpty();
 
-            // the permissions granted to the creator of a keyspace and of a table (with the property reserved for schema
-            // changes in the mode set, as the tests of the mode do)
+            // the permissions granted to the creator of a keyspace and of a table, when DDL is allowed in the mode
             try (WithProperties allowDdl = new WithProperties().set(CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
             {
                 String createdKeyspace = "data/created_ks_in_dse6";

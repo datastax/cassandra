@@ -18,6 +18,7 @@
 package org.apache.cassandra.cql3.statements.schema;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -35,6 +36,7 @@ import org.apache.cassandra.schema.*;
 import org.apache.cassandra.schema.Keyspaces.KeyspacesDiff;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
+import org.apache.cassandra.service.DseUpgradeGuards;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.transport.Event.SchemaChange;
@@ -130,7 +132,7 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
 
         validateKeyspaceName(keyspaceName, AlterSchemaStatement::ire);
 
-        SchemaTransformationResult result = Schema.instance.transform(this, locally);
+        SchemaTransformationResult result = Schema.instance.transform(DseUpgradeGuards.schemaChangesFrozen() ? new FrozenSchemaStatement(this) : this, locally);
 
         clientWarnings(result.diff).forEach(ClientWarn.instance::warn);
 
@@ -149,6 +151,49 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
             createdResources(result.diff).forEach(r -> grantPermissionsOnResource(r, user));
 
         return new ResultMessage.SchemaChange(schemaChangeEvent(result.diff));
+    }
+
+    /**
+     * A schema statement under the schema freeze of the DSE 6 upgrade, which applies to client and internal (local)
+     * statements alike; created only once the schema was found frozen. Applied to the schema like the statement itself,
+     * by the same update handler under the same lock, it refuses a result that differs from the schema
+     * ({@link DseUpgradeGuards#refuseSchemaChange}) and lets a statement that changes nothing ({@code CREATE ... IF NOT
+     * EXISTS} of an existing object, {@code DROP ... IF EXISTS} of a missing one) run as without the freeze. So it never
+     * yields a schema change, and it is not a {@code CQLStatement} (a schema announcement would not carry the statement,
+     * but there is none to announce). The statement is applied in full before the refusal: a statement that fails to
+     * apply (an existing object, a disabled feature, a guardrail) fails with its own error, as without the freeze, and a
+     * refused one may have emitted its guardrail warnings. It holds no state of its own and adds no side effect but the
+     * refusal: an update handler may apply it more than once, and each refusal is counted once per application.
+     */
+    private static final class FrozenSchemaStatement implements SchemaTransformation
+    {
+        private final AlterSchemaStatement statement;
+
+        private FrozenSchemaStatement(AlterSchemaStatement statement)
+        {
+            this.statement = statement;
+        }
+
+        @Override
+        public Keyspaces apply(Keyspaces schema)
+        {
+            Keyspaces after = statement.apply(schema);
+            if (!Keyspaces.diff(schema, after).isEmpty())
+                DseUpgradeGuards.refuseSchemaChange();
+            return after;
+        }
+
+        @Override
+        public Optional<Long> fixedTimestampMicros()
+        {
+            return statement.fixedTimestampMicros();
+        }
+
+        @Override
+        public String toString()
+        {
+            return statement.toString();
+        }
     }
 
     protected void validateDefaultTimeToLive(TableParams params)

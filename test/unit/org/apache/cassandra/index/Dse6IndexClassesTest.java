@@ -259,8 +259,7 @@ public class Dse6IndexClassesTest extends CQLTester
     @Test
     public void tableWithUnknownIndexClassCanBeAlteredInDse6Mode() throws Throwable
     {
-        // the property reserved for schema changes in DSE_6 mode is set, as the tests of the mode do: the point is what the
-        // no-op index allows
+        // the schema freeze of DSE_6 is lifted by its property here: the point is what the no-op index allows
         try (WithProperties allowDdl = new WithProperties().set(CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
         {
             alterTableWithUnknownIndexClass();

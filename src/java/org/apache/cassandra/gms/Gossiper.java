@@ -82,6 +82,7 @@ import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.service.DseUpgradeGuards;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.concurrent.NotScheduledFuture;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
@@ -1001,6 +1002,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
     public void assassinateEndpoint(String address) throws UnknownHostException
     {
         InetAddressAndPort endpoint = InetAddressAndPort.getByName(address);
+        DseUpgradeGuards.refuseAssassinateWhileUpgrading(endpoint);
         runInGossipStageBlocking(() -> {
             EndpointState epState = endpointStateMap.get(endpoint);
             logger.warn("Assassinating {} via gossip", endpoint);
