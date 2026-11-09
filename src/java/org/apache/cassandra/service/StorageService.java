@@ -4374,16 +4374,21 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     }
 
     /**
-     * Refuses upgradesstables while a DSE upgrade is in progress: it is the maintenance step of a finished upgrade,
-     * and nothing in the mixed cluster needs it; recompress_sstables is the same rewrite. The other rewrites (scrub,
+     * Refuses upgradesstables while a DSE upgrade is in progress: it is the maintenance step of a finished upgrade, and
+     * nothing in the mixed cluster needs it; recompress_sstables is the same rewrite. In
+     * {@code internode_compatibility_mode: DSE_5_1} both run: every rewrite writes big {@code me}, the version DSE 5.1
+     * reads, and they rewrite the sstables of a table whose compression was changed to one DSE 5.1 reads, those of its
+     * secondary indexes included, the remedy the compressor refusals of the mode name. The other rewrites (scrub,
      * garbagecollect, relocatesstables, cleanup) repair or reclaim and stay allowed: like compaction they write trie
-     * {@code bb} sstables, with their storage-attached index components at the SAI on-disk version a start in
-     * {@code DSE_6} mode requires to be pinned to the DSE release ({@link Dse6SaiVersionPin}). The refusal is a checked
-     * exception: nodetool upgradesstables retries and then swallows a RuntimeException (CASSANDRA-18635), and the
-     * operator must see it.
+     * {@code bb} sstables in {@code DSE_6} mode, with their storage-attached index components at the SAI on-disk
+     * version a start in that mode requires to be pinned to the DSE release ({@link Dse6SaiVersionPin}), and big
+     * {@code me} in {@code DSE_5_1}. The refusal is a checked exception: nodetool upgradesstables retries and then
+     * swallows a RuntimeException (CASSANDRA-18635), and the operator must see it.
      */
     private static void refuseSSTableRewriteWhileUpgrading(String operation) throws IOException
     {
+        if (DatabaseDescriptor.isDse51CompatibilityMode())
+            return;
         try
         {
             DseUpgradeGuards.refuseWhileUpgrading(operation);

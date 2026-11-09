@@ -56,7 +56,8 @@ import static org.apache.cassandra.utils.Clock.Global.nanoTime;
  * <p>
  * While the upgrade is in progress, the cluster topology and the on-disk formats must not change: bootstrap (and
  * bootstrap resume), replace, a join of the ring by a node that has not completed a bootstrap, decommission,
- * removenode (also forced), assassinate, move, rebuild, repair, upgradesstables, recompress_sstables, refresh, sstable
+ * removenode (also forced), assassinate, move, rebuild, repair, upgradesstables and recompress_sstables (these two
+ * except in {@code DSE_5_1}, where every rewrite writes the big {@code me} sstables DSE 5.1 reads), refresh, sstable
  * import and resetlocalschema are refused, and so is a change of {@code paxos_variant} to anything but {@code v1} in
  * {@code DSE_6} mode (to a v2 variant in {@code NONE} mode). The schema is frozen too: DDL is refused in {@code DSE_6}
  * mode unless {@code -Dcassandra.internode_compatibility_mode.allow_ddl=true} (a schema change made on a DSE node never

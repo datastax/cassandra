@@ -782,7 +782,7 @@ public class DseCommitLogReplayTest extends CQLTester
         assertThat(Arrays.copyOfRange(newer, header.length, newer.length)).containsOnly((byte) 0);
         File[] files = segments.stream().map(File::new).toArray(File[]::new);
         withDse51SSTableFormat(() -> {
-            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
+            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.DSE_5_1, () -> {
                 List<String> info = new ArrayList<>();
                 List<String> warnings = new ArrayList<>();
                 Logger commitLogLogger = (Logger) LoggerFactory.getLogger(CommitLog.class);
@@ -881,7 +881,7 @@ public class DseCommitLogReplayTest extends CQLTester
         Path segment = Iterables.getOnlyElement(DseFixtures.dse51().unpackCommitLogSegments(
             DseFixtures.dse51().commitLogSegmentGz().getParent(), folder.newFolder().toPath()));
         withDse51SSTableFormat(() -> {
-            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
+            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.DSE_5_1, () -> {
                 List<String> info = new ArrayList<>();
                 List<String> warnings = new ArrayList<>();
                 collecting(READER_LOGGER, Level.INFO, info, () -> {
@@ -1059,7 +1059,7 @@ public class DseCommitLogReplayTest extends CQLTester
         {
             // the format the mode selects, which the reader of the five columns reads
             withDse51SSTableFormat(() -> {
-                withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
+                withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.DSE_5_1, () -> {
                     List<String> info = new ArrayList<>();
                     Map<Keyspace, Integer> replayed = replayCollecting(segment, READER_LOGGER, Level.INFO, info, null);
                     assertThat(replayed.get(Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME))).isEqualTo(3);
@@ -1189,7 +1189,7 @@ public class DseCommitLogReplayTest extends CQLTester
         JVMKiller previousKiller = JVMStabilityInspector.replaceKiller(killer);
         try
         {
-            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.HCD_1, () -> {
+            withModes(InternodeCompatibilityMode.DSE_5_1, StorageCompatibilityMode.DSE_5_1, () -> {
                 ColumnFamilyStore.FlushReason startup = ColumnFamilyStore.FlushReason.STARTUP;
                 assertThatThrownBy(() -> CommitLog.instance.recoverSegmentsOnDiskNoArchive(startup, segments))
                 .isInstanceOf(CommitLogReplayer.CommitLogReplayException.class)

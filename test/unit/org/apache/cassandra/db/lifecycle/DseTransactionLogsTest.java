@@ -78,7 +78,7 @@ public class DseTransactionLogsTest
     /** The trie version DSE 6 reads, and that the node writes in DSE_6 mode. */
     private static final Version BTI_BB = new BtiFormat(null).getVersion("bb");
     /** The big version the node writes in DSE_5_1 mode. */
-    private static final Version BIG_NB = new BigFormat(null).getVersion("nb");
+    private static final Version BIG_ME = new BigFormat(null).getVersion(InternodeCompatibilityMode.DSE_51_BIG_VERSION);
     private static final long SECOND = 1000;
     private static final int STATS_WRITTEN_AGAIN = 1;
     private static final int OTHER_FILES_RESTORED = 2;
@@ -173,20 +173,20 @@ public class DseTransactionLogsTest
 
         TimeUUID id = TimeUUID.Generator.nextTimeUUID();
         DatabaseDescriptor.setInternodeCompatibilityMode(DSE_5_1);
-        assertThat(LogFile.fileName(BIG_NB, OperationType.FLUSH, id)).isEqualTo("nb_txn_flush_" + id + ".log");
+        assertThat(LogFile.fileName(BIG_ME, OperationType.FLUSH, id)).isEqualTo("me_txn_flush_" + id + ".log");
         assertThat(LogFile.fileName(BTI_BB, OperationType.FLUSH, id)).isEqualTo("bb_txn_flush_" + id + ".log");
-        assertThat(LogFile.fileName(BIG_NB, OperationType.RESTORE, id)).isEqualTo("nb_txn_compaction_" + id + ".log");
-        assertThat(LogFile.fileName(BIG_NB, OperationType.MAJOR_COMPACTION, id)).isEqualTo("nb_txn_compaction_" + id +
+        assertThat(LogFile.fileName(BIG_ME, OperationType.RESTORE, id)).isEqualTo("me_txn_compaction_" + id + ".log");
+        assertThat(LogFile.fileName(BIG_ME, OperationType.MAJOR_COMPACTION, id)).isEqualTo("me_txn_compaction_" + id +
                                                                                            ".log");
         for (OperationType type : OperationType.values())
         {
-            Matcher matcher = LogFile.FILE_REGEX.matcher(LogFile.fileName(BIG_NB, type, id));
+            Matcher matcher = LogFile.FILE_REGEX.matcher(LogFile.fileName(BIG_ME, type, id));
             assertThat(matcher.matches()).isTrue();
             assertThat(DseTransactionLogs.DSE_51_OPERATION_TYPES).contains(matcher.group(2));
         }
 
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
-        assertThat(LogFile.fileName(BIG_NB, OperationType.RESTORE, id)).isEqualTo("nb_txn_restore_" + id + ".log");
+        assertThat(LogFile.fileName(BTI_BB, OperationType.RESTORE, id)).isEqualTo("bb_txn_restore_" + id + ".log");
     }
 
     @Test

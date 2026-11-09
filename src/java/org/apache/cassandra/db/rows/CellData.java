@@ -56,7 +56,9 @@ public interface CellData<V, C extends CellData<?, ?>> extends IDataSize
 
     public static long getVersionedMaxDeletiontionTime()
     {
-        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5))
+        // the DSE 5.1 compatibility mode writes the 32-bit deletion times of big me, a tool or a client in it too,
+        // which run with the storage mode NONE
+        if (DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) || DatabaseDescriptor.isDse51SSTableOutput())
             return MAX_DELETION_TIME_2038_LEGACY_CAP;
 
         if (DatabaseDescriptor.getStorageCompatibilityMode().disabled())

@@ -19,9 +19,11 @@ package org.apache.cassandra.utils.streamhist;
 
 import java.io.IOException;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.io.ISerializer;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -71,7 +73,12 @@ public class TombstoneHistogram
 
     public static HistogramSerializer getSerializer(Version version)
     {
-        return version.hasUIntDeletionTime() ? HistogramSerializer.instance : LegacyHistogramSerializer.instance;
+        if (version.hasUIntDeletionTime())
+            return HistogramSerializer.instance;
+        // the 3.x sstables written for DSE 5.1 (big me) carry the maximum bin size as Cassandra 3.x writes it
+        if (version.hasPre40Encoding() && DatabaseDescriptor.isDse51SSTableOutput())
+            return Pre40HistogramSerializer.instance;
+        return LegacyHistogramSerializer.instance;
     }
 
     public static class HistogramSerializer implements ISerializer<TombstoneHistogram>
@@ -191,6 +198,29 @@ public class TombstoneHistogram
             return (value < 0L || value > Cell.MAX_DELETION_TIME_2038_LEGACY_CAP)
                    ? Cell.MAX_DELETION_TIME_2038_LEGACY_CAP
                    : (int) value;
+        }
+    }
+
+    /**
+     * The serializer of the 3.x sstables written in the DSE 5.1 compatibility mode (big {@code me}): the layout of
+     * {@link LegacyHistogramSerializer}, with the maximum bin size Cassandra 3.x and DSE 5.1 write, that of the builder
+     * ({@link SSTable#TOMBSTONE_HISTOGRAM_BIN_SIZE}), in place of the number of bins, which DSE 5.1 would take for the
+     * maximum of the histogram it reads.
+     */
+    public static class Pre40HistogramSerializer extends LegacyHistogramSerializer
+    {
+        public static final Pre40HistogramSerializer instance = new Pre40HistogramSerializer();
+
+        @Override
+        public void serialize(TombstoneHistogram histogram, DataOutputPlus out) throws IOException
+        {
+            out.writeInt(SSTable.TOMBSTONE_HISTOGRAM_BIN_SIZE);
+            out.writeInt(histogram.size());
+            histogram.forEach((point, value) ->
+                              {
+                                  out.writeDouble((double) point);
+                                  out.writeLong((long) value);
+                              });
         }
     }
 }

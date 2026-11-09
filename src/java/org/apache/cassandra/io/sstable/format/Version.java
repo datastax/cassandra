@@ -181,4 +181,19 @@ public abstract class Version
      * See <a href="https://github.com/riptano/cndb/issues/8696">this</a> for reference.
      */
     public abstract boolean hasImplicitlyFrozenTuples();
+
+    /**
+     * Whether this is a version of the sstables of Cassandra 3.x (big {@code m*}, of which this software writes
+     * {@code me} in the DSE 5.1 compatibility mode), written in the 3.x layout for its 32-bit readers: a LIVE deletion
+     * time in the rows (a complex deletion) is written with the local deletion time {@code Integer.MAX_VALUE} they take
+     * for LIVE; the compression info has no maximum compressed length, every chunk is compressed and the compression
+     * ratio leaves the chunk checksums out ({@code DataComponent}, {@code CompressedSequentialWriter}); an sstable of
+     * it cannot hold a pending repair ({@code SSTableWriter}); in that mode, the serialization header names the types
+     * as 3.x does, the tombstone histogram carries the maximum bin size 3.x writes, and an entire-sstable stream is
+     * taken only for it. False for every other version.
+     */
+    public boolean hasPre40Encoding()
+    {
+        return false;
+    }
 }

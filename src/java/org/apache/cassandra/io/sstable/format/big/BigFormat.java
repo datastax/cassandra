@@ -34,6 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cache.KeyCacheKey;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
@@ -61,6 +62,7 @@ import org.apache.cassandra.service.CacheService;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
 import static org.apache.cassandra.io.sstable.format.SSTableFormat.Components.DATA;
@@ -353,8 +355,31 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
 
     static class BigVersion extends Version
     {
-        public static final String current_version = DatabaseDescriptor.getStorageCompatibilityMode().isBefore(5) ? "nb" : "oa";
+        public static final String current_version = currentVersion();
         public static final String earliest_supported_version = "ma";
+
+        /**
+         * The family of the newest version read: that of the version written, or {@code o} while {@code me} is
+         * written, so that the {@code nb} and {@code oa} sstables of this software stay readable.
+         */
+        private static final char newest_readable_version_family = current_version.charAt(0) == 'm'
+                                                                    ? 'o' : current_version.charAt(0);
+
+        /**
+         * The version written, chosen once, when this class loads: {@code me}, the version DSE 5.1 writes and reads, in
+         * the DSE 5.1 compatibility mode (a storage mode of major 3, {@code storage_compatibility_mode: DSE_5_1}, which
+         * goes with {@code internode_compatibility_mode: DSE_5_1}, or an offline tool or a client run with that
+         * internode mode, which runs without the storage mode); {@code nb} under any other storage mode before 5.0;
+         * {@code oa} otherwise. {@code DatabaseDescriptor} applies both modes before it loads the sstable formats, and
+         * refuses to go on if this class was loaded earlier with another version.
+         */
+        private static String currentVersion()
+        {
+            StorageCompatibilityMode storageMode = DatabaseDescriptor.getStorageCompatibilityMode();
+            if (storageMode.isBefore(4) || DatabaseDescriptor.isDse51SSTableOutput())
+                return InternodeCompatibilityMode.DSE_51_BIG_VERSION;
+            return storageMode.isBefore(5) ? "nb" : "oa";
+        }
 
         // ma (3.0.0): swap bf hash order
         //             store rows natively
@@ -398,12 +423,15 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
          */
         private final boolean hasOldBfFormat;
 
+        /** A version of the 4.0 line or later; false for the 3.x line ({@code m*}), see {@link #hasPre40Encoding()}. */
+        private final boolean nOrLater;
+
         BigVersion(BigFormat format, String version)
         {
             super(format, version);
 
             boolean oOrLater = version.compareTo("o") >= 0;
-            boolean nOrLater = oOrLater || version.compareTo("n") >= 0;
+            nOrLater = oOrLater || version.compareTo("n") >= 0;
             boolean mOrLater = nOrLater || version.compareTo("m") >= 0;
 
             isLatestVersion = version.compareTo(current_version) == 0;
@@ -555,7 +583,8 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         @Override
         public boolean isCompatible()
         {
-            return version.compareTo(earliest_supported_version) >= 0 && version.charAt(0) <= current_version.charAt(0);
+            return version.compareTo(earliest_supported_version) >= 0
+                   && version.charAt(0) <= newest_readable_version_family;
         }
 
         @Override
@@ -592,6 +621,12 @@ public class BigFormat extends AbstractSSTableFormat<BigTableReader, BigTableWri
         public boolean hasImplicitlyFrozenTuples()
         {
             return true;
+        }
+
+        @Override
+        public boolean hasPre40Encoding()
+        {
+            return !nOrLater;
         }
     }
 

@@ -19,7 +19,9 @@
 package org.apache.cassandra.db;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -41,9 +43,13 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.marshal.ReversedType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
@@ -79,6 +85,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SerializationHeaderTest
 {
     private static final String KEYSPACE = "SerializationHeaderTest";
+    private static final String MARSHAL = "org.apache.cassandra.db.marshal.";
 
     private final static Version versionWithExplicitFrozenTuples;
     private final static Version versionWithImplicitFrozenTuples;
@@ -323,6 +330,195 @@ public class SerializationHeaderTest
                 DeletionTime result = header.readDeletionTime(in);
                 assertThat(result.isLive()).isTrue();
             }
+        }
+    }
+
+    /**
+     * The header of a big me sstable (DSE 5.1's version, written in the DSE 5.1 compatibility mode) writes a LIVE
+     * deletion time as Cassandra 3.x writes it: a 32-bit reader, which adds the delta to the header's minimum in 32-bit
+     * arithmetic and takes {@code Integer.MAX_VALUE} for LIVE, reads it as LIVE, and so does this software; a deletion
+     * that is not LIVE, and the headers of the other versions and of messages, keep the default encoding, a zero delta.
+     */
+    @Test
+    public void aLiveDeletionTimeIsWrittenForA32BitReaderInMe() throws IOException
+    {
+        long minTimestamp = 1793958609519670L;
+        int minLocalDeletionTime = 1793958609;
+        EncodingStats stats = new EncodingStats(minTimestamp, minLocalDeletionTime, 0);
+        TableMetadata metadata = TableMetadata.builder("ks", "tab")
+                                              .addPartitionKeyColumn("k", Int32Type.instance)
+                                              .addRegularColumn("v", Int32Type.instance)
+                                              .build();
+        RegularAndStaticColumns columns = metadata.regularAndStaticColumns();
+        SerializationHeader sstable = new SerializationHeader(true, metadata, columns, stats);
+        Version me = BigFormat.getInstance().getVersion("me");
+        assertThat(me.hasPre40Encoding()).isTrue();
+        SerializationHeader forMe = sstable.forSSTableVersion(me);
+        assertThat(forMe).isNotSameAs(sstable);
+        assertThat(forMe.forSSTableVersion(me)).isSameAs(forMe);
+        for (String version : new String[]{ "nb", "oa" })
+        {
+            assertThat(BigFormat.getInstance().getVersion(version).hasPre40Encoding()).as(version).isFalse();
+            assertThat(sstable.forSSTableVersion(BigFormat.getInstance().getVersion(version))).isSameAs(sstable);
+        }
+        assertThat(sstable.forSSTableVersion(BtiFormat.getInstance().getVersion("bb"))).isSameAs(sstable);
+        SerializationHeader messaging = new SerializationHeader(false, metadata, columns, stats);
+        assertThat(messaging.forSSTableVersion(me)).isSameAs(messaging);
+
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            forMe.writeDeletionTime(DeletionTime.LIVE, out);
+            assertThat((long) out.getLength()).isEqualTo(forMe.deletionTimeSerializedSize(DeletionTime.LIVE));
+            try (DataInputBuffer in = new DataInputBuffer(out.getData(), 0, out.getLength()))
+            {
+                // a 32-bit reader: the timestamp delta, then the local deletion time delta added in 32 bits
+                long markedForDeleteAt = in.readUnsignedVInt() + minTimestamp;
+                int localDeletionTime = (int) in.readUnsignedVInt() + minLocalDeletionTime;
+                assertThat(markedForDeleteAt).isEqualTo(Long.MIN_VALUE);
+                assertThat(localDeletionTime).isEqualTo(Integer.MAX_VALUE);
+            }
+            try (DataInputBuffer in = new DataInputBuffer(out.getData(), 0, out.getLength()))
+            {
+                assertThat(forMe.readDeletionTime(in)).isEqualTo(DeletionTime.LIVE);
+            }
+        }
+        // a deletion that is not LIVE, in every header, and LIVE in the other headers: the default encoding
+        DeletionTime deleted = DeletionTime.build(minTimestamp + 10, minLocalDeletionTime + 5);
+        for (SerializationHeader header : new SerializationHeader[]{ forMe, sstable, messaging })
+        {
+            try (DataOutputBuffer expected = new DataOutputBuffer(); DataOutputBuffer out = new DataOutputBuffer())
+            {
+                expected.writeUnsignedVInt(10L);
+                expected.writeUnsignedVInt32(5);
+                header.writeDeletionTime(deleted, out);
+                assertThat(out.toByteArray()).isEqualTo(expected.toByteArray());
+            }
+        }
+        // the header of a me sstable reused by the writer of another version (a scrub, a stream) writes it as nb does
+        SerializationHeader backToNb = forMe.forSSTableVersion(BigFormat.getInstance().getVersion("nb"));
+        assertThat(backToNb).isNotSameAs(forMe);
+        for (SerializationHeader header : new SerializationHeader[]{ sstable, messaging, backToNb })
+        {
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                header.writeDeletionTime(DeletionTime.LIVE, out);
+                try (DataInputBuffer in = new DataInputBuffer(out.getData(), 0, out.getLength()))
+                {
+                    in.readUnsignedVInt();
+                    assertThat(in.readUnsignedVInt()).isZero();
+                }
+            }
+        }
+        // a minimum outside 32 bits, negative (CASSANDRA-14092 data) or past 2038: the delta wraps as the 32-bit
+        // reader's sum does, and this software still reads LIVE
+        for (long minimum : new long[]{ -5L, Integer.MIN_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE + 10L })
+        {
+            SerializationHeader header = new SerializationHeader(true, metadata, columns,
+                                                                 new EncodingStats(minTimestamp, minimum, 0))
+                                         .forSSTableVersion(me);
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                header.writeDeletionTime(DeletionTime.LIVE, out);
+                assertThat((long) out.getLength()).as("%s", minimum)
+                                                  .isEqualTo(header.deletionTimeSerializedSize(DeletionTime.LIVE));
+                try (DataInputBuffer in = new DataInputBuffer(out.getData(), 0, out.getLength()))
+                {
+                    in.readUnsignedVInt();
+                    int localDeletionTime = (int) in.readUnsignedVInt() + (int) minimum;
+                    assertThat(localDeletionTime).as("%s", minimum).isEqualTo(Integer.MAX_VALUE);
+                }
+                try (DataInputBuffer in = new DataInputBuffer(out.getData(), 0, out.getLength()))
+                {
+                    assertThat(header.readDeletionTime(in)).as("%s", minimum).isEqualTo(DeletionTime.LIVE);
+                }
+            }
+        }
+    }
+
+    /**
+     * In the DSE 5.1 compatibility mode the header of a big me sstable names the types as Cassandra 3.x does: a frozen
+     * tuple without {@code FrozenType}, at the top, reversed and inside a collection. Outside the mode, and for the
+     * other versions, the names of this software are written.
+     */
+    @Test
+    public void theTypeNamesOfMeAreThoseDse51Reads()
+    {
+        TupleType tuple = new TupleType(Arrays.asList(Int32Type.instance, UTF8Type.instance));
+        TableMetadata metadata = TableMetadata.builder("ks", "tuples")
+                                              .addPartitionKeyColumn("k", tuple)
+                                              .addClusteringColumn("c", ReversedType.getInstance(tuple))
+                                              .addRegularColumn("l", ListType.getInstance(tuple, true))
+                                              .addStaticColumn("s", tuple)
+                                              .build();
+        SerializationHeader header = new SerializationHeader(true, metadata, metadata.regularAndStaticColumns(),
+                                                             EncodingStats.NO_STATS);
+        Version me = BigFormat.getInstance().getVersion("me");
+        String tupleName = MARSHAL + "TupleType(" + MARSHAL + "Int32Type," + MARSHAL + "UTF8Type)";
+        String frozenTuple = MARSHAL + "FrozenType(" + tupleName + ')';
+        assertThat(tuple.toString()).isEqualTo(frozenTuple);
+
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            assertThat(typeNames(header, me)).contains(tupleName)
+                                             .doesNotContain("FrozenType")
+                                             .contains(MARSHAL + "ListType(" + tupleName + ')')
+                                             .contains(MARSHAL + "ReversedType(" + tupleName + ')');
+            // the other versions keep the names of this software
+            assertThat(typeNames(header, BigFormat.getInstance().getVersion("nb"))).contains(frozenTuple);
+
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            assertThat(typeNames(header, me)).contains(frozenTuple);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    /** A vector, which DSE 5.1 cannot read, is refused in the header of a big me sstable written in the mode. */
+    @Test
+    public void aTypeDse51CannotReadIsRefusedInMe()
+    {
+        TableMetadata metadata = TableMetadata.builder("ks", "vectors")
+                                              .addPartitionKeyColumn("k", Int32Type.instance)
+                                              .addRegularColumn("v", VectorType.getInstance(FloatType.instance, 2))
+                                              .build();
+        SerializationHeader header = new SerializationHeader(true, metadata, metadata.regularAndStaticColumns(),
+                                                             EncodingStats.NO_STATS);
+        Version me = BigFormat.getInstance().getVersion("me");
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            assertThatThrownBy(() -> typeNames(header, me))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageStartingWith("A big me sstable for DSE 5.1 cannot hold a column of type " +
+                                    "org.apache.cassandra.db.marshal.VectorType(")
+            .hasMessageContaining(": DSE 5.1 cannot read org.apache.cassandra.db.marshal.VectorType(");
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            assertThat(typeNames(header, me)).contains("VectorType");
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    /** The header component of {@code header} serialized for {@code version}, as text, checked against its size. */
+    private static String typeNames(SerializationHeader header, Version version)
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            SerializationHeader.Component component = header.toComponent();
+            SerializationHeader.serializer.serialize(version, component, out);
+            assertThat(out.getLength()).isEqualTo(SerializationHeader.serializer.serializedSize(version, component));
+            return new String(out.toByteArray(), StandardCharsets.ISO_8859_1);
+        }
+        catch (IOException e)
+        {
+            throw new UncheckedIOException(e);
         }
     }
 

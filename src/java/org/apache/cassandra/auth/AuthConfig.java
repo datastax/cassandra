@@ -229,7 +229,7 @@ public final class AuthConfig
     {
         return ", which " + mode.source() + " does not have: this software creates " + pronoun + " only with " +
                "storage_compatibility_mode UPGRADING or NONE, after the upgrade (internode_compatibility_mode " + mode +
-               " requires HCD_1)";
+               " requires " + (mode.isDse51() ? "storage_compatibility_mode DSE_5_1" : "HCD_1") + ")";
     }
 
     private static String authTable(String table)

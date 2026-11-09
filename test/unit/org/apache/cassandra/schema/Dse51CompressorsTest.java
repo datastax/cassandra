@@ -16,27 +16,42 @@
 
 package org.apache.cassandra.schema;
 
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import org.junit.After;
+import org.junit.Assume;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Rule;
 import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.diag.DiagnosticEventService;
@@ -44,11 +59,13 @@ import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.compress.DeflateCompressor;
 import org.apache.cassandra.io.compress.EncryptorTest;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.compress.SnappyCompressor;
 import org.apache.cassandra.io.compress.ZstdCompressor;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.net.Message;
@@ -64,13 +81,27 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * In {@code internode_compatibility_mode: DSE_5_1} the node refuses to start while a table or a view is compressed with
- * a compressor DSE 5.1 does not read; LZ4, Snappy, Deflate and no compression are accepted, and the other modes check
- * nothing. In the mode a schema statement, {@code allow_ddl} or not, and a schema change received from another node
- * that set such a compressor are refused too.
+ * a compressor DSE 5.1 does not read, encrypted, or given a {@code min_compress_ratio}; LZ4, Snappy, Deflate and no
+ * compression are accepted, and the other modes check nothing. In the mode a schema statement, {@code allow_ddl} or
+ * not, and a schema change received from another node that set such a compression are refused too.
  */
 public class Dse51CompressorsTest extends CQLTester
 {
+    /** How the advice of the refusal and of its WARN has the sstables rewritten. */
+    private static final String REWRITE_COMMANDS = "nodetool upgradesstables -a <keyspace> <table>, which rewrites " +
+                                                   "the sstables of the table and of its secondary indexes";
+
+    private static final String REWRITE = "rewrite the sstables of those with a compressor DSE 5.1 does not read or " +
+                                          "encrypted (" + REWRITE_COMMANDS + "; a table named for its " +
+                                          "min_compress_ratio alone needs no rewrite)";
+
+    private static final CassandraRelevantProperties IGNORE_DSE51_COMPRESSION =
+        CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE51_COMPRESSION;
+
     private InternodeCompatibilityMode modeBefore;
+
+    @Rule
+    public final TemporaryFolder temporaryFolder = new TemporaryFolder();
 
     @BeforeClass
     public static void enableViews()
@@ -105,6 +136,11 @@ public class Dse51CompressorsTest extends CQLTester
     private List<String> encrypted()
     {
         return Dse51Compressors.encrypted(List.of(keyspaceMetadata()));
+    }
+
+    private List<String> withMinCompressRatio()
+    {
+        return Dse51Compressors.withMinCompressRatio(List.of(keyspaceMetadata()));
     }
 
     /** A table of two int columns compressed as {@code compression} says. */
@@ -155,7 +191,7 @@ public class Dse51CompressorsTest extends CQLTester
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
         assertThatThrownBy(Dse51Compressors::verifyAtStartup)
         .isInstanceOf(StartupException.class)
-        .hasMessage(Dse51Compressors.refusal(unreadable(), List.of()))
+        .hasMessage(Dse51Compressors.refusal(unreadable(), List.of(), List.of()))
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
 
         // altered to a compressor DSE 5.1 reads, or dropped, without the mode (its schema is frozen): the start is
@@ -166,6 +202,358 @@ public class Dse51CompressorsTest extends CQLTester
         execute(String.format("DROP TABLE %s.%s", KEYSPACE, adaptive));
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
         assertThatCode(Dse51Compressors::verifyAtStartup).doesNotThrowAnyException();
+    }
+
+    /**
+     * A table given a {@code min_compress_ratio} refuses the start in {@code DSE_5_1}, with its own reason, as do the
+     * statement and the JMX setting that would give it one; with {@code ignore_dse51_compression} the start goes on,
+     * the refusal logged at WARN, and the statement that removes the ratio runs.
+     */
+    @Test
+    public void aMinCompressRatioIsRefusedInDse51ModeAndTheStartCanBePassedOnce() throws Throwable
+    {
+        String ratio = createTableCompressedWith("{'class': 'LZ4Compressor', 'min_compress_ratio': 1.5}");
+        String named = KEYSPACE + '.' + ratio + " (LZ4Compressor), min_compress_ratio 1.5";
+        assertThat(withMinCompressRatio()).containsExactly(named);
+        assertThat(unreadable()).isEmpty();
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertThatThrownBy(Dse51Compressors::verifyAtStartup)
+        .isInstanceOf(StartupException.class)
+        .hasMessage(Dse51Compressors.refusal(List.of(), List.of(), List.of(named)));
+
+        try (WithProperties properties = new WithProperties().set(IGNORE_DSE51_COMPRESSION, true)
+                                                             .set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+        {
+            withLogAppender(Dse51Compressors.class, appender -> {
+                Dse51Compressors.verifyAtStartup();
+                assertThat(appender.list).hasSize(1);
+                assertThat(appender.list.get(0).getLevel()).isEqualTo(Level.WARN);
+                assertThat(appender.list.get(0).getFormattedMessage())
+                .isEqualTo(Dse51Compressors.ignoredRefusal(List.of(), List.of(), List.of(named)))
+                .isEqualTo("internode_compatibility_mode DSE_5_1 starts with " +
+                           "-Dcassandra.internode_compatibility_mode.ignore_dse51_compression=true although " + named +
+                           " is ignored: the sstables this node writes for DSE 5.1 have no uncompressed chunk. " +
+                           "DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor, every chunk " +
+                           "compressed. Change the compression of the tables named to one of them without " +
+                           "min_compress_ratio, or to none (ALTER TABLE or ALTER MATERIALIZED VIEW, with " +
+                           "-Dcassandra.internode_compatibility_mode.allow_ddl=true), " + REWRITE + ", and restart " +
+                           "the node without those properties");
+                // a compressor DSE 5.1 does not read: the sstables written until then are unreadable to it
+                assertThat(Dse51Compressors.ignoredRefusal(List.of("ks.z (ZstdCompressor)"), List.of(), List.of()))
+                .endsWith(", and restart the node without those properties: until then a DSE 5.1 node could not open " +
+                          "the sstables this node writes for the tables of those compressors");
+            });
+
+            // the property does not let a statement or a JMX setting give a table a ratio
+            String lz4 = createTableCompressedWith("{'class': 'LZ4Compressor'}");
+            String created = "created_with_ratio";
+            assertRefused("CREATE TABLE " + KEYSPACE + '.' + created + " (k int PRIMARY KEY, v int) WITH " +
+                          "compression = {'class': 'SnappyCompressor', 'min_compress_ratio': 2}",
+                          List.of(), List.of(),
+                          List.of(KEYSPACE + '.' + created + " (SnappyCompressor), min_compress_ratio 2.0"));
+            assertRefused("ALTER TABLE " + KEYSPACE + '.' + lz4 + " WITH compression = {'class': 'LZ4Compressor', " +
+                          "'min_compress_ratio': 1.5}",
+                          List.of(), List.of(),
+                          List.of(KEYSPACE + '.' + lz4 + " (LZ4Compressor), min_compress_ratio 1.5"));
+            ColumnFamilyStore store = getColumnFamilyStore(KEYSPACE, lz4);
+            assertThatThrownBy(() -> store.setCompressionParameters(Map.of("class", "LZ4Compressor",
+                                                                           "min_compress_ratio", "1.5")))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessage("internode_compatibility_mode DSE_5_1 refuses the compression parameters of " + KEYSPACE +
+                        '.' + lz4 + " (LZ4Compressor), min_compress_ratio 1.5: the sstables this node writes for DSE " +
+                        "5.1 have no uncompressed chunk, so it would be ignored. DSE 5.1 reads LZ4Compressor, " +
+                        "SnappyCompressor and DeflateCompressor, every chunk compressed; use one of them without " +
+                        "min_compress_ratio, or no compression");
+
+            // the remedy: the ratio removed in the mode, after which the start is accepted without the property
+            execute("ALTER TABLE " + KEYSPACE + '.' + ratio + " WITH compression = {'class': 'LZ4Compressor'}");
+        }
+        assertThat(withMinCompressRatio()).isEmpty();
+        assertThatCode(Dse51Compressors::verifyAtStartup).doesNotThrowAnyException();
+    }
+
+    /**
+     * The sstables on disk whose compression info names a compressor DSE 5.1 does not read, or encryption, are named
+     * by table, those of a secondary index and of a table directory linked from the data directory included, snapshots,
+     * backups and a hidden directory not of an index excluded; the compressors DSE 5.1 reads are not named, a
+     * compression info that cannot be read is named apart, and the directory of a dropped table is not inspected.
+     */
+    @Test
+    public void theSSTablesLeftWithACompressorDse51DoesNotReadAreNamed() throws Throwable
+    {
+        String tableName = createTableCompressedWith("{'class': 'LZ4Compressor'}");
+        createIndex("CREATE INDEX t_v ON %s (v) USING 'legacy_local_table'");
+        TableMetadata table = tableMetadata(tableName);
+        Path directory = directoryOf(table);
+        Path zstd = compressionInfo(directory.resolve("me-1-big-CompressionInfo.db"), "ZstdCompressor");
+        compressionInfo(directory.resolve("me-2-big-CompressionInfo.db"), "LZ4Compressor");
+        compressionInfo(directory.resolve("me-3-big-CompressionInfo.db"), DeflateCompressor.class.getName());
+        Path index = compressionInfo(Files.createDirectories(directory.resolve(".t_v"))
+                                          .resolve("me-4-big-CompressionInfo.db"), "Encryptor");
+        Path unknown = compressionInfo(directory.resolve("me-5-big-CompressionInfo.db"),
+                                       "com.example.NoSuchCompressor");
+        compressionInfo(Files.createDirectories(directory.resolve(Directories.SNAPSHOT_SUBDIR).resolve("s"))
+                             .resolve("me-6-big-CompressionInfo.db"), "ZstdCompressor");
+        compressionInfo(Files.createDirectories(directory.resolve(Directories.BACKUPS_SUBDIR))
+                             .resolve("me-7-big-CompressionInfo.db"), "ZstdCompressor");
+        Path empty = Files.createFile(directory.resolve("me-8-big-CompressionInfo.db"));
+        compressionInfo(Files.createDirectories(directory.resolve(".stray")).resolve("me-9-big-CompressionInfo.db"),
+                        "ZstdCompressor");
+
+        // a table directory on another disk, linked from the data directory
+        TableMetadata linked = tableMetadata(createTableCompressedWith("{'class': 'LZ4Compressor'}"));
+        Path link = directoryOf(linked);
+        Path target = temporaryFolder.newFolder().toPath().resolve(link.getFileName());
+        Files.move(link, target);
+        Files.createSymbolicLink(link, target);
+        compressionInfo(target.resolve("me-1-big-CompressionInfo.db"), "ZstdCompressor");
+
+        // a dropped table, whose directory DSE 5.1 does not open either
+        TableMetadata dropped = tableMetadata(createTableCompressedWith("{'class': 'LZ4Compressor'}"));
+        Path droppedDirectory = directoryOf(dropped);
+        execute("DROP TABLE " + KEYSPACE + '.' + dropped.name);
+        compressionInfo(droppedDirectory.resolve("me-1-big-CompressionInfo.db"), "ZstdCompressor");
+
+        Dse51Compressors.SSTablesOnDisk onDisk = Dse51Compressors.sstablesOnDisk(List.of(table, linked));
+        String name = KEYSPACE + '.' + table.name;
+        String linkedName = KEYSPACE + '.' + linked.name;
+        assertThat(onDisk.unreadableByDse51).containsOnlyKeys(name, name + " index t_v", linkedName);
+        assertThat(onDisk.unreadableByDse51.get(name))
+        .containsExactly(zstd + " (ZstdCompressor)", unknown + " (com.example.NoSuchCompressor)");
+        assertThat(onDisk.unreadableByDse51.get(name + " index t_v")).containsExactly(index + " (Encryptor)");
+        assertThat(onDisk.unreadableByDse51.get(linkedName))
+        .containsExactly(link.resolve("me-1-big-CompressionInfo.db") + " (ZstdCompressor)");
+        assertThat(onDisk.notRead).containsExactly(empty + " (EOFException)");
+        assertThat(Dse51Compressors.notReadWarning(onDisk.notRead))
+        .isEqualTo("internode_compatibility_mode DSE_5_1 could not check the compressor of the sstables at " + empty +
+                   " (EOFException): whether a DSE 5.1 node could open them is not known; check those paths before a " +
+                   "rollback to DSE 5.1");
+        // the paths named are capped
+        List<String> paths = new ArrayList<>();
+        for (int i = 0; i < 12; i++)
+            paths.add("p" + i);
+        assertThat(Dse51Compressors.notReadWarning(paths))
+        .contains(" at p0, p1, p2, p3, p4, p5, p6, p7, p8, p9 and 2 more: ");
+
+        // the start in the mode: the dropped table is not named
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try
+        {
+            withLogAppender(Dse51Compressors.class, appender -> {
+                assertThatThrownBy(Dse51Compressors::verifySSTablesAtStartup)
+                .isInstanceOf(StartupException.class)
+                .hasMessageStartingWith("internode_compatibility_mode DSE_5_1 refused: 4 sstables on disk are " +
+                                        "compressed with a compressor DSE 5.1 does not read, or encrypted, although " +
+                                        "the schema of their tables is not (" + name + ": 2 sstables, " + zstd)
+                .hasMessageContaining("; " + linkedName + ": 1 sstable, ")
+                .hasMessageNotContaining(droppedDirectory.toString())
+                .satisfies(e -> assertThat(((StartupException) e).returnCode)
+                                .isEqualTo(StartupException.ERR_WRONG_CONFIG));
+                assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                                         .containsExactly(Dse51Compressors.notReadWarning(onDisk.notRead));
+            });
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+            Files.delete(link);
+            Files.move(target, link);
+        }
+
+        // the texts, for one table
+        SortedMap<String, List<String>> one = new TreeMap<>(Map.of("ks.t", List.of(zstd + " (ZstdCompressor)")));
+        assertThat(Dse51Compressors.filesRefusal(one))
+        .isEqualTo("internode_compatibility_mode DSE_5_1 refused: 1 sstable on disk is compressed with a compressor " +
+                   "DSE 5.1 does not read, or encrypted, although the schema of its table is not (ks.t: 1 sstable, " +
+                   zstd + " (ZstdCompressor)): a rewrite of them did not finish, or did not run since the " +
+                   "compression of that table changed, and a DSE 5.1 node could not open them. DSE 5.1 reads " +
+                   "LZ4Compressor, SnappyCompressor and DeflateCompressor, every chunk compressed. Start this node " +
+                   "once more in the mode with " +
+                   "-Dcassandra.internode_compatibility_mode.ignore_dse51_compression=true, which logs this at WARN " +
+                   "instead; then rewrite the sstables of that table (" + REWRITE_COMMANDS + "), and restart the " +
+                   "node in the mode without that property");
+        assertThat(Dse51Compressors.ignoredFilesRefusal(one))
+        .isEqualTo("internode_compatibility_mode DSE_5_1 starts with " +
+                   "-Dcassandra.internode_compatibility_mode.ignore_dse51_compression=true although 1 sstable on " +
+                   "disk is compressed with a compressor DSE 5.1 does not read, or encrypted (ks.t: 1 sstable, " +
+                   zstd + " (ZstdCompressor)): rewrite the sstables of that table (" + REWRITE_COMMANDS + "), and " +
+                   "restart the node without that property: until then a DSE 5.1 node could not open them");
+        // and the files named per table capped
+        SortedMap<String, List<String>> many = new TreeMap<>(Map.of("ks.t", List.of("a", "b", "c", "d", "e"),
+                                                                    "ks.u", List.of("f")));
+        assertThat(Dse51Compressors.filesRefusal(many))
+        .startsWith("internode_compatibility_mode DSE_5_1 refused: 6 sstables on disk are compressed with a " +
+                    "compressor DSE 5.1 does not read, or encrypted, although the schema of their tables is not " +
+                    "(ks.t: 5 sstables, a, b, c and 2 more; ks.u: 1 sstable, f): a rewrite of them did not finish, " +
+                    "or did not run since the compression of those tables changed")
+        .contains("; then rewrite the sstables of those tables (");
+    }
+
+    /**
+     * A directory that cannot be listed is named apart, as a compression info that cannot be read is: an index
+     * directory, after which the rest of the table directory is still checked, or the table directory itself. Skipped
+     * on a file system without POSIX permissions, and for a user who reads every directory (root).
+     */
+    @Test
+    public void aDirectoryThatCannotBeListedIsNamedApart() throws Throwable
+    {
+        Assume.assumeTrue("POSIX permissions",
+                          FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+        String tableName = createTableCompressedWith("{'class': 'LZ4Compressor'}");
+        createIndex("CREATE INDEX t_x ON %s (v) USING 'legacy_local_table'");
+        TableMetadata table = tableMetadata(tableName);
+        Path directory = directoryOf(table);
+        Path zstd = compressionInfo(directory.resolve("me-1-big-CompressionInfo.db"), "ZstdCompressor");
+        Path index = Files.createDirectories(directory.resolve(".t_x"));
+        compressionInfo(index.resolve("me-2-big-CompressionInfo.db"), "ZstdCompressor");
+        Path other = compressionInfo(directory.resolve("me-3-big-CompressionInfo.db"), "ZstdCompressor");
+        Set<PosixFilePermission> permissions = Files.getPosixFilePermissions(directory);
+        Files.setPosixFilePermissions(index, Set.of());
+        try
+        {
+            // a superuser reads the directory anyway
+            Assume.assumeFalse("the directory can still be read", Files.isReadable(index));
+            Dse51Compressors.SSTablesOnDisk onDisk = Dse51Compressors.sstablesOnDisk(List.of(table));
+            assertThat(onDisk.unreadableByDse51).containsOnlyKeys(KEYSPACE + '.' + table.name);
+            assertThat(onDisk.unreadableByDse51.get(KEYSPACE + '.' + table.name))
+            .containsExactly(zstd + " (ZstdCompressor)", other + " (ZstdCompressor)");
+            assertThat(onDisk.notRead).containsExactly(index + " (AccessDeniedException)");
+
+            Files.setPosixFilePermissions(directory, Set.of());
+            onDisk = Dse51Compressors.sstablesOnDisk(List.of(table));
+            assertThat(onDisk.unreadableByDse51).isEmpty();
+            assertThat(onDisk.notRead).containsExactly(directory + " (AccessDeniedException)");
+        }
+        finally
+        {
+            Files.setPosixFilePermissions(directory, permissions);
+            Files.setPosixFilePermissions(index, permissions);
+        }
+    }
+
+    /**
+     * In {@code DSE_5_1} the sstables of the table of a secondary index are written with the new compression of its
+     * base table at once (the node-local parameters the writers read), so that {@code upgradesstables -a} rewrites
+     * them with it; outside the mode they keep the compression the index was created with until the next start, as
+     * before.
+     */
+    @Test
+    public void theTableOfAnIndexTakesTheNewCompressionOfItsBaseInDse51Mode() throws Throwable
+    {
+        for (InternodeCompatibilityMode mode : new InternodeCompatibilityMode[]{ InternodeCompatibilityMode.NONE,
+                                                                                 InternodeCompatibilityMode.DSE_5_1 })
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            createTableCompressedWith("{'class': 'ZstdCompressor'}");
+            String index = createIndex("CREATE INDEX ON %s (v) USING 'legacy_local_table'");
+            ColumnFamilyStore indexTable = getCurrentColumnFamilyStore().indexManager.getIndexByName(index)
+                                                                                     .getBackingTable().get();
+            assertThat(indexTable.metadata.getLocal().params.compression.klass()).isEqualTo(ZstdCompressor.class);
+
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                execute("ALTER TABLE %s WITH compression = {'class': 'LZ4Compressor'}");
+            }
+            assertThat(indexTable.metadata.getLocal().params.compression.klass())
+            .as(mode.name())
+            .isEqualTo(mode == InternodeCompatibilityMode.DSE_5_1 ? LZ4Compressor.class : ZstdCompressor.class);
+            // no override at all outside the mode
+            if (mode == InternodeCompatibilityMode.NONE)
+                assertThat(indexTable.metadata.getLocal()).isSameAs(indexTable.metadata.get());
+            // the other parameters of the table of an index stay those of an index table
+            assertThat(indexTable.metadata.getLocal().params.gcGraceSeconds).as(mode.name()).isZero();
+            // and a compaction of the index writes with them (a flush compresses with LZ4, flush_compression: fast)
+            execute("INSERT INTO %s (k, v) VALUES (1, 1)");
+            indexTable.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+            indexTable.forceMajorCompaction();
+            assertThat(indexTable.getLiveSSTables()).hasSize(1);
+            assertThat(indexTable.getLiveSSTables().iterator().next().getCompressionMetadata().compressor().getClass())
+            .as(mode.name())
+            .isEqualTo(mode == InternodeCompatibilityMode.DSE_5_1 ? LZ4Compressor.class : ZstdCompressor.class);
+        }
+    }
+
+    /**
+     * A table whose compression was changed to one DSE 5.1 reads after a compaction wrote a Zstd sstable of it, never
+     * rewritten since, refuses the start in {@code DSE_5_1}, with the sstable named, though its schema is accepted;
+     * {@code ignore_dse51_compression} logs it at WARN.
+     */
+    @Test
+    public void anSSTableNotRewrittenRefusesTheStartInDse51Mode() throws Throwable
+    {
+        String table = createTableCompressedWith("{'class': 'ZstdCompressor'}");
+        execute("INSERT INTO %s (k, v) VALUES (1, 1)");
+        flush();
+        execute("INSERT INTO %s (k, v) VALUES (2, 2)");
+        flush();
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        // a flush compresses with LZ4 (flush_compression: fast), a compaction with the compressor of the table
+        cfs.forceMajorCompaction();
+        execute("ALTER TABLE %s WITH compression = {'class': 'LZ4Compressor'}");
+        assertThat(unreadable()).isEmpty();
+        List<TableMetadata> tables = List.of(cfs.metadata());
+        SortedMap<String, List<String>> left = Dse51Compressors.sstablesOnDisk(tables).unreadableByDse51;
+        assertThat(left).containsOnlyKeys(KEYSPACE + '.' + table);
+        assertThat(left.get(KEYSPACE + '.' + table)).hasSize(1);
+        assertThat(left.get(KEYSPACE + '.' + table).get(0)).endsWith("-CompressionInfo.db (ZstdCompressor)");
+
+        // nothing is checked outside the mode
+        for (InternodeCompatibilityMode mode : new InternodeCompatibilityMode[]{ InternodeCompatibilityMode.NONE,
+                                                                                 InternodeCompatibilityMode.DSE_6 })
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            withLogAppender(Dse51Compressors.class, appender -> {
+                assertThatCode(Dse51Compressors::verifySSTablesAtStartup).as(mode.name()).doesNotThrowAnyException();
+                assertThat(appender.list).as(mode.name()).isEmpty();
+            });
+        }
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertThatCode(Dse51Compressors::verifyAtStartup).doesNotThrowAnyException();
+        assertThatThrownBy(Dse51Compressors::verifySSTablesAtStartup)
+        .isInstanceOf(StartupException.class)
+        .hasMessageContaining(Dse51Compressors.filesRefusal(left));
+        try (WithProperties properties = new WithProperties().set(IGNORE_DSE51_COMPRESSION, true))
+        {
+            withLogAppender(Dse51Compressors.class, appender -> {
+                Dse51Compressors.verifySSTablesAtStartup();
+                assertThat(appender.list).hasSize(1);
+                assertThat(appender.list.get(0).getLevel()).isEqualTo(Level.WARN);
+                assertThat(appender.list.get(0).getFormattedMessage())
+                .isEqualTo(Dse51Compressors.ignoredFilesRefusal(left));
+            });
+        }
+
+        // the other tests of this class check the start: the sstable is removed
+        DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+        cfs.truncateBlocking();
+        Util.spinAssertEquals(true, () -> Dse51Compressors.sstablesOnDisk(tables).unreadableByDse51.isEmpty(), 60);
+    }
+
+    private static TableMetadata tableMetadata(String table)
+    {
+        return Schema.instance.getTableMetadata(KEYSPACE, table);
+    }
+
+    /** The directory of {@code table} in the only data directory of the tests. */
+    private static Path directoryOf(TableMetadata table)
+    {
+        List<File> directories = new Directories(table).getCFDirectories();
+        assertThat(directories).hasSize(1);
+        return directories.get(0).toPath();
+    }
+
+    /** A compression info file that names {@code compressor}, its first field, followed by placeholder bytes. */
+    private static Path compressionInfo(Path path, String compressor) throws IOException
+    {
+        try (DataOutputStream out = new DataOutputStream(Files.newOutputStream(path)))
+        {
+            out.writeUTF(compressor);
+            out.writeInt(0);
+        }
+        return path;
     }
 
     /** A compressor class of another package is named in full, so that it is not taken for one DSE 5.1 reads. */
@@ -204,7 +592,7 @@ public class Dse51CompressorsTest extends CQLTester
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
         assertThatThrownBy(Dse51Compressors::verifyAtStartup)
         .isInstanceOf(StartupException.class)
-        .hasMessage(Dse51Compressors.refusal(unreadable(), encrypted()))
+        .hasMessage(Dse51Compressors.refusal(unreadable(), encrypted(), List.of()))
         .hasMessageContaining(KEYSPACE + '.' + encrypted + " (Encryptor) is encrypted, which this mode does not " +
                               "support");
     }
@@ -212,30 +600,40 @@ public class Dse51CompressorsTest extends CQLTester
     @Test
     public void theRefusalNamesEveryTableAndTheFix()
     {
-        // the remedy starts the node without the mode past the DSE 5.1 upgrade marker, which refuses such a start
-        String fix = ". DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor. Start this node without " +
-                     "the mode, with -Dcassandra.internode_compatibility_mode.ignore_dse_peers=true (the DSE 5.1 " +
-                     "upgrade marker this node wrote at its start in the mode refuses that start otherwise), keeping " +
-                     "storage_compatibility_mode: HCD_1, sstable.selected_format: big and " +
-                     "uuid_sstable_identifiers_enabled: false, change the compression of the tables named to one of " +
-                     "them, rewrite their sstables (nodetool upgradesstables -a), then start the node in the mode " +
-                     "again without that property";
-        assertThat(Dse51Compressors.refusal(List.of("ks.t (ZstdCompressor)"), List.of()))
+        // the remedy stays in the mode, so that every sstable stays at the version DSE 5.1 reads: one more start in
+        // it, past the refusal, changes the compression and rewrites the sstables
+        String fix = ". DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor, every chunk compressed. " +
+                     "Start this node once more in the mode with " +
+                     "-Dcassandra.internode_compatibility_mode.ignore_dse51_compression=true, which logs this at " +
+                     "WARN instead; then change the compression of the tables named to one of them without " +
+                     "min_compress_ratio, or to none (ALTER TABLE or ALTER MATERIALIZED VIEW, with " +
+                     "-Dcassandra.internode_compatibility_mode.allow_ddl=true too), " +
+                     REWRITE + ", and restart the node in the mode without those properties";
+        assertThat(Dse51Compressors.refusal(List.of("ks.t (ZstdCompressor)"), List.of(), List.of()))
         .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.t (ZstdCompressor) is compressed with a " +
                    "compressor DSE 5.1 does not read, so a DSE 5.1 node could not open the sstables this node writes " +
                    "for it" + fix);
-        assertThat(Dse51Compressors.refusal(List.of("ks.a (NoopCompressor)", "ks.b (ZstdCompressor)"), List.of()))
+        assertThat(Dse51Compressors.refusal(List.of("ks.a (NoopCompressor)", "ks.b (ZstdCompressor)"), List.of(),
+                                            List.of()))
         .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.a (NoopCompressor), ks.b (ZstdCompressor) " +
                    "are compressed with a compressor DSE 5.1 does not read, so a DSE 5.1 node could not open the " +
                    "sstables this node writes for them" + fix);
-        assertThat(Dse51Compressors.refusal(List.of(), List.of("ks.e (Encryptor)")))
+        assertThat(Dse51Compressors.refusal(List.of(), List.of("ks.e (Encryptor)"), List.of()))
         .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.e (Encryptor) is encrypted, which this mode " +
                    "does not support" + fix);
         List<String> twoEncrypted = List.of("ks.e (Encryptor)", "ks.f (Encryptor)");
-        assertThat(Dse51Compressors.refusal(List.of("ks.t (ZstdCompressor)"), twoEncrypted))
+        assertThat(Dse51Compressors.refusal(List.of("ks.t (ZstdCompressor)"), twoEncrypted, List.of()))
         .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.t (ZstdCompressor) is compressed with a " +
                    "compressor DSE 5.1 does not read, so a DSE 5.1 node could not open the sstables this node writes " +
                    "for it; ks.e (Encryptor), ks.f (Encryptor) are encrypted, which this mode does not support" + fix);
+        String r = "ks.r (LZ4Compressor), min_compress_ratio 1.5";
+        assertThat(Dse51Compressors.refusal(List.of(), List.of(), List.of(r)))
+        .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.r (LZ4Compressor), min_compress_ratio 1.5 is " +
+                   "ignored: the sstables this node writes for DSE 5.1 have no uncompressed chunk" + fix);
+        String s = "ks.s (SnappyCompressor), min_compress_ratio 2.0";
+        assertThat(Dse51Compressors.refusal(List.of(), List.of(), List.of(r, s)))
+        .startsWith("internode_compatibility_mode DSE_5_1 refused: ks.r (LZ4Compressor), min_compress_ratio 1.5, " +
+                    "ks.s (SnappyCompressor), min_compress_ratio 2.0 are ignored: ");
     }
 
     /**
@@ -342,8 +740,8 @@ public class Dse51CompressorsTest extends CQLTester
         ColumnFamilyStore store = getColumnFamilyStore(KEYSPACE, table);
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
         long before = DseCompatRefusals.count(Dse51Compressors.REFUSED_SCHEMA_CHANGE);
-        String reads = ". DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor; use one of them, or " +
-                       "no compression";
+        String reads = ". DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor, every chunk " +
+                       "compressed; use one of them without min_compress_ratio, or no compression";
         assertThatThrownBy(() -> store.setCompressionParameters(Map.of("class", "ZstdCompressor")))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("internode_compatibility_mode DSE_5_1 refuses the compression parameters of " + KEYSPACE + '.' +
@@ -435,8 +833,9 @@ public class Dse51CompressorsTest extends CQLTester
                 assertThat(appender.list.stream().map(ILoggingEvent::getFormattedMessage))
                 .contains("Not applying a schema change from " + sender + " in internode_compatibility_mode DSE_5_1: " +
                           "it compresses [" + KEYSPACE + ".pushed_zstd (ZstdCompressor)] with a compressor DSE 5.1 " +
-                          "does not read, or encrypts them (DSE 5.1 reads LZ4Compressor, SnappyCompressor and " +
-                          "DeflateCompressor). Only a node not in the mode sends such a change: this node's schema " +
+                          "does not read, encrypts them, or gives them a min_compress_ratio (DSE 5.1 reads " +
+                          "LZ4Compressor, SnappyCompressor and DeflateCompressor, every chunk compressed). Only a " +
+                          "node not in the mode sends such a change: this node's schema " +
                           "disagrees with that node's, and the schema this node pulls from it is not applied either, " +
                           "until the change is reverted there");
             });
@@ -506,27 +905,36 @@ public class Dse51CompressorsTest extends CQLTester
         assertThat(Dse51Compressors.refusal("ks", "s", Map.of("class", SubEncryptor.class.getName(),
                                                                "key_provider", "no.such.KeyProvider")))
         .isEqualTo("ks.s (" + SubEncryptor.class.getName() + "), encrypted");
-        // no compression, and a stored LZ4 map with a ratio only the lenient parsing of stored schemas accepts
+        // no compression is read; a stored LZ4 map with a ratio, even one only the lenient parsing of stored schemas
+        // accepts, is named with it
         assertThat(Dse51Compressors.refusal("ks", "n", Map.of("enabled", "false"))).isNull();
         assertThat(Dse51Compressors.refusal("ks", "l", Map.of("class", "LZ4Compressor", "chunk_length_in_kb", "16",
-                                                               "min_compress_ratio", "NaN"))).isNull();
+                                                               "min_compress_ratio", "NaN")))
+        .isEqualTo("ks.l (LZ4Compressor), min_compress_ratio NaN");
+        assertThat(Dse51Compressors.refusal("ks", "r", Map.of("class", "LZ4Compressor", "min_compress_ratio", "1.5")))
+        .isEqualTo("ks.r (LZ4Compressor), min_compress_ratio 1.5");
     }
 
     @Test
     public void theRefusalOfAStatementNamesEveryTable()
     {
-        assertThat(Dse51Compressors.statementRefusal(List.of("ks.t (ZstdCompressor)"), List.of()))
+        String reads = ". DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor, every chunk " +
+                       "compressed; use one of them without min_compress_ratio, or no compression";
+        assertThat(Dse51Compressors.statementRefusal(List.of("ks.t (ZstdCompressor)"), List.of(), List.of()))
         .isEqualTo("internode_compatibility_mode DSE_5_1 refuses the statement: ks.t (ZstdCompressor) would be " +
                    "compressed with a compressor DSE 5.1 does not read, so a DSE 5.1 node could not open the " +
-                   "sstables this node writes for it. DSE 5.1 reads LZ4Compressor, SnappyCompressor and " +
-                   "DeflateCompressor; use one of them, or no compression");
+                   "sstables this node writes for it" + reads);
         assertThat(Dse51Compressors.statementRefusal(List.of("ks.a (NoopCompressor)", "ks.b (ZstdCompressor)"),
-                                                     List.of("ks.e (Encryptor)")))
+                                                     List.of("ks.e (Encryptor)"), List.of()))
         .isEqualTo("internode_compatibility_mode DSE_5_1 refuses the statement: ks.a (NoopCompressor), ks.b " +
                    "(ZstdCompressor) would be compressed with a compressor DSE 5.1 does not read, so a DSE 5.1 node " +
                    "could not open the sstables this node writes for them; ks.e (Encryptor) would be encrypted, " +
-                   "which this mode does not support. DSE 5.1 reads LZ4Compressor, SnappyCompressor and " +
-                   "DeflateCompressor; use one of them, or no compression");
+                   "which this mode does not support" + reads);
+        assertThat(Dse51Compressors.statementRefusal(List.of(), List.of(),
+                                                     List.of("ks.r (LZ4Compressor), min_compress_ratio 1.5")))
+        .isEqualTo("internode_compatibility_mode DSE_5_1 refuses the statement: ks.r (LZ4Compressor), " +
+                   "min_compress_ratio 1.5 would be ignored: the sstables this node writes for DSE 5.1 have no " +
+                   "uncompressed chunk" + reads);
     }
 
     /** A subclass of the {@link org.apache.cassandra.io.compress.Encryptor}, never instantiated here. */
@@ -544,9 +952,15 @@ public class Dse51CompressorsTest extends CQLTester
 
     private void assertRefused(String statement, List<String> unreadable, List<String> encrypted)
     {
+        assertRefused(statement, unreadable, encrypted, List.of());
+    }
+
+    private void assertRefused(String statement, List<String> unreadable, List<String> encrypted,
+                               List<String> withRatio)
+    {
         assertThatThrownBy(() -> execute(statement)).as(statement)
         .isInstanceOf(InvalidRequestException.class)
-        .hasMessage(Dse51Compressors.statementRefusal(unreadable, encrypted));
+        .hasMessage(Dse51Compressors.statementRefusal(unreadable, encrypted, withRatio));
     }
 
     /** A compressor outside {@code org.apache.cassandra.io.compress} that copies its input; no test runs it. */

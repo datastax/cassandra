@@ -29,26 +29,32 @@ package org.apache.cassandra.config;
  * changes).
  * <p>
  * {@link #DSE_5_1} is the mode of the in-place upgrade of a DataStax Enterprise 5.1.51 cluster. It requires
- * {@code storage_compatibility_mode: HCD_1}, the {@code big} sstable format and {@code paxos_variant: v1}, writes
- * numeric sstable generations, refuses the compressors DSE 5.1 does not read, and refuses the authenticators and
- * authorizers that read tables of {@code system_auth} DSE 5.1 does not have. At start it refuses the files a node in
- * the mode never writes (sstables of the {@code bti} format or another format than {@code big}, big sstables newer than
- * {@code oa}, non-numeric generations, commit log segments above version 7), writes the marker of the upgrade from
- * DSE 5.1 (which refuses a later start with {@code NONE} or {@code DSE_6}) and moves aside the commit log segments of
- * DSE 5.1 it replayed; it writes the transaction logs and the sstable statistics as DSE 5.1 reads them. The node still
- * writes big sstables of version {@code nb}, which DSE 5.1 does not read. A node in the mode speaks, with DSE 5.1
- * peers, the pre-4.0 handshake and the Apache Cassandra 3.11 dialect DSE 5.1 uses (messaging version 11, with Apache
- * Cassandra 3.11's limit ordinals), with this software's gossip ordinals, and applies the operational guards and the
- * schema freeze of {@link #DSE_6} (a schema statement, a schema change received or a JMX compression change that sets a
- * compressor DSE 5.1 does not read is refused too); it neither sends its schema to DSE 5.1 nodes nor applies theirs,
- * and refuses their repair messages and their reads that carry row-level access control. It refuses to start, as
- * {@link #DSE_6} does, while DSE access controls it does not enforce exist (row-level grants, tables and views
- * restricted to rows) or any trace of the DSE features it does not support (Search, Graph, Analytics, DSEFS, CFS,
- * Advanced Replication, tiered storage, in-memory tables); it also refuses, unlike {@link #DSE_6}, a table or view on a
- * compaction strategy this software no longer has, and creates no SAI index, even with the schema freeze lifted.
- * Offline tools inherit only the checks of the on-disk settings and the transaction logs and statistics of the mode
- * (they write big {@code oa}, without the storage mode); clients, which do not read {@code cassandra.yaml}, get the
- * {@code big} format and numeric generations forced.
+ * {@code storage_compatibility_mode: DSE_5_1} (which requires it in turn), the {@code big} sstable format and
+ * {@code paxos_variant: v1}, writes numeric sstable generations, refuses the compressors DSE 5.1 does not read (and a
+ * {@code min_compress_ratio}), the column types it does not read, a checksum type other than CRC32, transient
+ * replication and incremental repair, and refuses the authenticators and authorizers that read tables of
+ * {@code system_auth} DSE 5.1 does not have. At start it refuses the files a node in the mode never writes (sstables of
+ * the {@code bti} format or another format than {@code big}, big sstables newer than {@link #DSE_51_BIG_VERSION},
+ * non-numeric generations, commit log segments above version 7), writes the marker of the upgrade from DSE 5.1 (which
+ * refuses a later start with {@code NONE} or {@code DSE_6}) and moves aside the commit log segments of DSE 5.1 it
+ * replayed; it writes the transaction logs and the sstable statistics as DSE 5.1 reads them. The node writes big
+ * sstables of version {@link #DSE_51_BIG_VERSION}, the version DSE 5.1 writes and reads; its code reads every big
+ * version up to {@code oa}, but a start in the mode refuses the big sstables newer than {@link #DSE_51_BIG_VERSION}, an
+ * entire-sstable stream of any version but the big 3.x ones is refused, and the guards of the mode refuse every import
+ * and refresh. A node in the mode speaks, with DSE 5.1 peers, the pre-4.0 handshake and the Apache Cassandra 3.11
+ * dialect DSE 5.1 uses (messaging version 11, with Apache Cassandra 3.11's limit ordinals), with this software's gossip
+ * ordinals, and applies the operational guards and the schema freeze of {@link #DSE_6} (a schema statement, a schema
+ * change received or a JMX compression change that sets a compressor DSE 5.1 does not read is refused too), except
+ * that {@code upgradesstables} and {@code recompress_sstables} run, since every rewrite writes big
+ * {@link #DSE_51_BIG_VERSION}; it neither sends its schema to DSE 5.1 nodes nor applies theirs, and refuses their
+ * repair messages and their reads that carry row-level access control. It refuses to start, as {@link #DSE_6} does,
+ * while DSE access controls it does not enforce exist (row-level grants, tables and views restricted to rows) or any
+ * trace of the DSE features it does not support (Search, Graph, Analytics, DSEFS, CFS, Advanced Replication, tiered
+ * storage, in-memory tables); it also refuses, unlike {@link #DSE_6}, a table or view on a compaction strategy this
+ * software no longer has, and creates no SAI index, even with the schema freeze lifted. Offline tools inherit only the
+ * checks of the on-disk settings and the transaction logs, statistics and sstable version of the mode (they write big
+ * {@link #DSE_51_BIG_VERSION} too, without the storage mode); clients, which do not read {@code cassandra.yaml}, get
+ * the {@code big} format and numeric generations forced, and write big {@link #DSE_51_BIG_VERSION}.
  * <p>
  * The mode is removed with a rolling restart once every node runs this software.
  */
@@ -69,6 +75,12 @@ public enum InternodeCompatibilityMode
      * newer version would be unreadable after a rollback, however compatible its metadata is.
      */
     public static final String DSE_6_TRIE_INDEX_FORMAT_VERSION = "bb";
+
+    /**
+     * The big sstable version written while in {@link #DSE_5_1} mode (the storage mode of the same name), by the node,
+     * the offline tools run with its configuration and the clients: DSE 5.1's own current version, the newest it reads.
+     */
+    public static final String DSE_51_BIG_VERSION = "me";
 
     private final String source;
 

@@ -559,8 +559,8 @@ public enum CassandraRelevantProperties
     /**
      * Lifts the schema freeze of {@code internode_compatibility_mode: DSE_6} and {@code DSE_5_1}: schema changes are
      * refused while the mode is on unless this is set (DSE peers would not understand the schema this software writes).
-     * In {@code DSE_5_1} a statement giving a table or a view a compressor DSE 5.1 does not read, or encryption, is
-     * refused even when this is set.
+     * In {@code DSE_5_1} a statement giving a table or a view a compressor DSE 5.1 does not read, encryption, a
+     * {@code min_compress_ratio} or a column of a type DSE 5.1 does not read is refused even when this is set.
      */
     INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL("cassandra.internode_compatibility_mode.allow_ddl", "false"),
     /**
@@ -596,6 +596,17 @@ public enum CassandraRelevantProperties
      * two modes; any other value refuses the start (see {@code DseCompat#gossipedDseVersion}).
      */
     INTERNODE_COMPATIBILITY_MODE_DSE_VERSION("cassandra.internode_compatibility_mode.dse_version", "6.8.1"),
+    /**
+     * In {@code internode_compatibility_mode: DSE_5_1}, turns the refusal of the start while a table or a view is
+     * compressed with a compressor DSE 5.1 does not read, encrypted, or given a {@code min_compress_ratio}
+     * ({@code Dse51Compressors#verifyAtStartup}), and while an sstable on disk is compressed with such a compressor or
+     * encrypted ({@code Dse51Compressors#verifySSTablesAtStartup}), into a WARN naming them, for the one start in the
+     * mode that changes their compression and rewrites their sstables, so that every sstable stays at the version DSE
+     * 5.1 reads. The schema statements, schema changes and JMX settings that would set such a compression are refused
+     * all the same.
+     */
+    INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE51_COMPRESSION(
+        "cassandra.internode_compatibility_mode.ignore_dse51_compression", "false"),
     /**
      * Lets a node start with {@code internode_compatibility_mode: NONE} although the DSE 6 upgrade marker file
      * or the record of DSE 6 peers is still present in its metadata directory (for example a marker left behind,

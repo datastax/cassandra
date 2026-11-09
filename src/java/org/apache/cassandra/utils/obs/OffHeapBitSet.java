@@ -142,22 +142,13 @@ public class OffHeapBitSet implements IBitSet
         out.write(bytes, 0, bytes.size());
     }
 
-    @VisibleForTesting
+    @Override
     public void serializeOldBfFormat(DataOutputPlus out) throws IOException
     {
         out.writeInt((int) (bytes.size() / 8));
-        for (long i = 0; i < bytes.size(); )
-        {
-            long value = ((bytes.getByte(i++) & 0xff) << 0)
-                         + ((bytes.getByte(i++) & 0xff) << 8)
-                         + ((bytes.getByte(i++) & 0xff) << 16)
-                         + ((long) (bytes.getByte(i++) & 0xff) << 24)
-                         + ((long) (bytes.getByte(i++) & 0xff) << 32)
-                         + ((long) (bytes.getByte(i++) & 0xff) << 40)
-                         + ((long) (bytes.getByte(i++) & 0xff) << 48)
-                         + ((long) bytes.getByte(i++) << 56);
-            out.writeLong(value);
-        }
+        // each 8 bytes as the long whose least significant byte is the first of them: a little-endian read
+        for (long i = 0; i < bytes.size(); i += 8)
+            out.writeLong(bytes.getLong(i));
     }
 
     public long serializedSize()

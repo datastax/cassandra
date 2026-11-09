@@ -17,8 +17,9 @@
 package org.apache.cassandra.distributed.test.dsecompat;
 
 import java.net.UnknownHostException;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -28,6 +29,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.Feature;
@@ -38,6 +40,7 @@ import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.Gossiper;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.Dse6AccessControlCheck;
@@ -237,13 +240,13 @@ public class Dse6GuardsTest extends TestBaseImpl
     }
 
     /**
-     * In {@code DSE_5_1} mode the same guards apply, their texts naming DSE 5.1 and the mode: the schema freeze, lifted
-     * by the property, and the refused operations, counted by {@code compatstatus}, which lists the DSE 5.1 peers and
-     * their record, with the checks of the non-core traces and of the access controls, which find nothing; the
-     * periodic status line and the access-control check are scheduled. The nodes are
-     * started without the mode first, on the storage settings DSE 5.1 requires ({@code big}, {@code HCD_1}, numeric
-     * generations), as upgraded DSE 5.1 nodes. The removal of a lost DSE 5.1 node is checked in
-     * {@code Dse51UpgradeGuardsTest}: no DSE 5.1 node runs in this harness.
+     * In {@code DSE_5_1} mode the same guards apply, their texts naming DSE 5.1 and the mode, but for the sstable
+     * rewrites, which write big {@code me} there: the schema freeze, lifted by the property, and the refused
+     * operations, counted by {@code compatstatus}, which lists the DSE 5.1 peers and their record, with the checks of
+     * the non-core traces and of the access controls, which find nothing; the periodic status line and the
+     * access-control check are scheduled. The nodes run in the mode, with the storage settings it requires, from their
+     * first start on, as upgraded DSE 5.1 nodes ({@link Dse51NewNodes}). The removal of a lost DSE 5.1 node is checked
+     * in {@code Dse51UpgradeGuardsTest}: no DSE 5.1 node runs in this harness.
      */
     @Test
     public void operationsAndSchemaChangesAreRefusedInDse51Mode() throws Throwable
@@ -251,22 +254,16 @@ public class Dse6GuardsTest extends TestBaseImpl
         String refused = "is refused while the DSE 5.1 upgrade is in progress (internode_compatibility_mode: DSE_5_1)";
         String frozen = "schema changes are frozen during the DSE 5.1 upgrade; run them after the flag is dropped";
         Cluster.Builder builder = Cluster.build(2).withSubnet(SUBNET).withDynamicPortAllocation(true)
+                                         .withInstanceInitializer(Dse51NewNodes::install)
                                          .withConfig(c -> {
-                                             dseStorage(c);
-                                             c.set("sstable", Map.of("selected_format", "big"));
+                                             Dse51NewNodes.configure(c);
+                                             c.with(Feature.NETWORK, Feature.GOSSIP);
                                          });
         try (Cluster cluster = builder.start())
         {
-            init(cluster);
-            for (int node = 1; node <= 2; node++)
-            {
-                IInvokableInstance instance = cluster.get(node);
-                instance.shutdown().get();
-                instance.config().set("internode_compatibility_mode", "DSE_5_1");
-                instance.startup();
-            }
             try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
             {
+                init(cluster);
                 cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (id int PRIMARY KEY, v text)"));
             }
             String insert = withKeyspace("INSERT INTO %s.t (id, v) VALUES (?, ?)");
@@ -284,7 +281,16 @@ public class Dse6GuardsTest extends TestBaseImpl
             IInvokableInstance node = cluster.get(1);
             assertRefused(node.nodetoolResult("decommission"), "decommission " + refused);
             assertRefused(node.nodetoolResult("repair", KEYSPACE), "repair " + refused);
-            assertRefused(node.nodetoolResult("upgradesstables", KEYSPACE, "t"), "upgradesstables " + refused);
+            // the sstable rewrites run in DSE_5_1: they write big me, the version DSE 5.1 reads
+            node.flush(KEYSPACE);
+            node.nodetoolResult("upgradesstables", "-a", KEYSPACE, "t").asserts().success();
+            node.nodetoolResult("recompress_sstables", KEYSPACE, "t").asserts().success();
+            assertThat(node.callOnInstance(() -> {
+                Set<String> versions = new HashSet<>();
+                for (SSTableReader sstable : Keyspace.open(KEYSPACE).getColumnFamilyStore("t").getLiveSSTables())
+                    versions.add(sstable.descriptor.version.version);
+                return versions;
+            })).containsExactly("me");
             assertRefused(node.nodetoolResult("rebuild"), "rebuild " + refused);
             Throwable paxos = catchThrowable(() -> node.runOnInstance(() -> StorageProxy.instance
                                                                                     .setPaxosVariant("v2")));
@@ -301,7 +307,7 @@ public class Dse6GuardsTest extends TestBaseImpl
             assertThat(out).contains("(0 speaking the pre-4.0 dialect)");
             assertThat(out).contains("DSE peers                    : 0\n");
             assertThat(out).contains("DSE 5.1 peers on record      : 0\n");
-            assertThat(out).contains("Requests refused (upgrade)   : 7\n");
+            assertThat(out).contains("Requests refused (upgrade)   : 6\n");
             assertThat(out).containsPattern("  schema change +2\n");
             assertThat(out).containsPattern("  repair +1\n");
             // the DSE access controls are checked again in DSE_5_1 too

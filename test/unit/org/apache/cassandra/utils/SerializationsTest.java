@@ -30,22 +30,12 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
-import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
-import org.apache.cassandra.utils.obs.OffHeapBitSet;
 
 public class SerializationsTest extends AbstractSerializationsTester
 {
-    // Helper function to serialize old Bloomfilter format, should be removed once the old format is not supported
-    public static void serializeOldBfFormat(BloomFilter bf, DataOutputPlus out) throws IOException
-    {
-        out.writeInt(bf.hashCount);
-        Assert.assertTrue(bf.bitset instanceof OffHeapBitSet);
-        ((OffHeapBitSet) bf.bitset).serializeOldBfFormat(out);
-    }
-
     @BeforeClass
     public static void initDD()
     {
@@ -60,10 +50,7 @@ public class SerializationsTest extends AbstractSerializationsTester
                 bf.add(Util.dk(Int32Type.instance.decompose(i)));
             try (DataOutputStreamPlus out = getOutput(oldBfFormat ? "3.0" : "4.0", "utils.BloomFilter1000.bin"))
             {
-                if (oldBfFormat)
-                    serializeOldBfFormat((BloomFilter) bf, out);
-                else
-                    BloomFilterSerializer.forVersion(false).serialize((BloomFilter) bf, out);
+                BloomFilterSerializer.forVersion(oldBfFormat).serialize((BloomFilter) bf, out);
             }
         }
     }

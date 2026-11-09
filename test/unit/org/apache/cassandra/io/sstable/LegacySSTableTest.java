@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -52,6 +53,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.crypto.IKeyProvider;
@@ -62,10 +64,13 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.SinglePartitionSliceCommandTest;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.repair.PendingAntiCompaction;
 import org.apache.cassandra.db.rows.RangeTombstoneMarker;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.streaming.CassandraOutgoingFile;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
@@ -73,11 +78,14 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableReaderWithFilter;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.StatsComponent;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.keycache.KeyCacheSupport;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.sstable.metadata.ValidationMetadata;
@@ -91,10 +99,13 @@ import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.streaming.OutgoingStream;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.streaming.StreamPlan;
+import org.apache.cassandra.utils.BloomFilter;
+import org.apache.cassandra.utils.BloomFilterSerializer;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.Pair;
+import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 import org.assertj.core.api.SoftAssertions;
 
@@ -193,6 +204,200 @@ public class LegacySSTableTest
 
         // ignore intentionally empty directory .keep files
         return ".keep".equals(file.toFile().getName()) ? null : Descriptor.fromFilename(new File(file));
+    }
+
+    /**
+     * A round trip of the legacy big me sstables (the version DSE 5.1 writes) through the writer of big me of the DSE
+     * 5.1 compatibility mode: each sstable rewritten at me holds the rows it was read with.
+     */
+    @Test
+    public void testMeRoundTripThroughTheWriter() throws Exception
+    {
+        Version me = BigFormat.getInstance().getVersion("me");
+        createMeTablesIfMissing();
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            int rewritten = 0;
+            for (String suffix : new String[]{ "simple", "clust", "tuple", "simple_counter", "clust_counter" })
+            {
+                String table = "legacy_me_" + suffix;
+                // loaded without the mode, whose guards refuse a refresh
+                DatabaseDescriptor.setInternodeCompatibilityMode(before);
+                loadLegacyTable("me", suffix);
+                // the header names the types as DSE 5.1 does in the mode
+                DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+                ColumnFamilyStore cfs = Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(table);
+                for (SSTableReader source : cfs.getLiveSSTables())
+                {
+                    assertEquals("me", source.descriptor.version.version);
+                    File dir = new File(tempFolder.newFolder(LEGACY_TABLES_KEYSPACE + '-' + table + '-' + rewritten));
+                    Descriptor target = new Descriptor(me, dir, LEGACY_TABLES_KEYSPACE, table,
+                                                       new SequenceBasedSSTableId(1));
+                    MetadataCollector collector = new MetadataCollector(cfs.metadata().comparator);
+                    // closed before it commits (a failed append), the writer aborts and removes its files
+                    try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata);
+                         ISSTableScanner scanner = source.getScanner();
+                         SSTableWriter writer = target.getFormat().getWriterFactory().builder(target)
+                                                      .setKeyCount(source.estimatedKeys())
+                                                      .setTableMetadataRef(cfs.metadata)
+                                                      .setMetadataCollector(collector)
+                                                      .setSerializationHeader(source.header)
+                                                      .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                                                      .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
+                                                      .build(txn, cfs))
+                    {
+                        while (scanner.hasNext())
+                        {
+                            try (UnfilteredRowIterator partition = scanner.next())
+                            {
+                                writer.append(partition);
+                            }
+                        }
+                        writer.prepareToCommit();
+                        txn.prepareToCommit();
+                        Throwables.maybeFail(writer.commit(txn.commit(null)));
+                    }
+                    SSTableReader copy = SSTableReader.open(cfs, target, cfs.metadata);
+                    try
+                    {
+                        assertEquals("me", copy.descriptor.version.version);
+                        assertEquals(contentOf(source), contentOf(copy));
+                    }
+                    finally
+                    {
+                        copy.selfRef().release();
+                    }
+                    rewritten++;
+                }
+            }
+            Assert.assertTrue("the legacy me sstables were rewritten", rewritten >= 5);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    /** The tables of the legacy me sstables exist when big is the selected format of the run only. */
+    private static void createMeTablesIfMissing()
+    {
+        createTablesIfMissing("me");
+    }
+
+    /** The legacy tables of {@code version}, created if the selected format did not create them. */
+    private static void createTablesIfMissing(String version)
+    {
+        if (Schema.instance.getTableMetadata(LEGACY_TABLES_KEYSPACE, "legacy_" + version + "_simple") == null)
+            createTables(version);
+    }
+
+    /** Every partition of the sstable: its key, deletion and static row, then its unfiltereds. */
+    private static List<Object> contentOf(SSTableReader sstable)
+    {
+        List<Object> content = new ArrayList<>();
+        try (ISSTableScanner scanner = sstable.getScanner())
+        {
+            while (scanner.hasNext())
+            {
+                try (UnfilteredRowIterator partition = scanner.next())
+                {
+                    content.add(partition.partitionKey());
+                    content.add(partition.partitionLevelDeletion());
+                    content.add(partition.staticRow());
+                    while (partition.hasNext())
+                        content.add(partition.next());
+                }
+            }
+        }
+        return content;
+    }
+
+    /**
+     * Without any compatibility mode (a node past the flag drop of the DSE 5.1 upgrade holds many me sstables), the
+     * bloom filter of a legacy big me sstable rebuilt when the sstable is opened (its {@code Filter.db} missing) is
+     * saved in the layout of its version, which the next open reads: every key of the sstable is found in the filter
+     * loaded from disk.
+     */
+    @Test
+    public void testRebuiltFilterOfMeIsSavedInItsLayout() throws Exception
+    {
+        rebuiltFilterIsSavedInItsLayout("me");
+    }
+
+    /**
+     * The same for a trie aa sstable (the versions DSE 6.0 and 6.7 write), whose bloom filter is of the old layout
+     * too, in every mode.
+     */
+    @Test
+    public void testRebuiltFilterOfAaIsSavedInItsLayout() throws Exception
+    {
+        rebuiltFilterIsSavedInItsLayout("aa");
+    }
+
+    private void rebuiltFilterIsSavedInItsLayout(String version) throws Exception
+    {
+        assertEquals(InternodeCompatibilityMode.NONE, DatabaseDescriptor.getInternodeCompatibilityMode());
+        createTablesIfMissing(version);
+        String table = "legacy_" + version + "_simple";
+        ColumnFamilyStore cfs = Keyspace.open(LEGACY_TABLES_KEYSPACE).getColumnFamilyStore(table);
+        File source = getTestDataTableDir(version, table);
+        // a data directory layout, from which the descriptor takes the keyspace and the table
+        File dir = new File(tempFolder.newFolder("rebuilt-filter", LEGACY_TABLES_KEYSPACE, table));
+        for (File file : source.tryList(f -> f.name().endsWith(".db") || f.name().endsWith(".txt") ||
+                                             f.name().endsWith(".crc32")))
+            Files.copy(file.toPath(), dir.toPath().resolve(file.name()));
+        Descriptor descriptor = null;
+        for (File file : dir.tryList(f -> f.name().endsWith("-Data.db")))
+            descriptor = Descriptor.fromFile(file);
+        Assert.assertNotNull(descriptor);
+        assertEquals(version, descriptor.version.version);
+        assertTrue(descriptor.version.hasOldBfFormat());
+        assertTrue(descriptor.fileFor(SSTableFormat.Components.FILTER).tryDelete());
+
+        SSTableReader rebuilt = SSTableReader.open(cfs, descriptor, cfs.metadata);
+        List<DecoratedKey> keys = new ArrayList<>();
+        byte[] rebuiltInOldLayout;
+        try (ISSTableScanner scanner = rebuilt.getScanner(); DataOutputBuffer out = new DataOutputBuffer())
+        {
+            while (scanner.hasNext())
+            {
+                try (UnfilteredRowIterator partition = scanner.next())
+                {
+                    keys.add(partition.partitionKey());
+                }
+            }
+            BloomFilter filter = (BloomFilter) ((SSTableReaderWithFilter) rebuilt).getFilter();
+            BloomFilterSerializer.forVersion(true).serialize(filter, out);
+            rebuiltInOldLayout = out.toByteArray();
+        }
+        finally
+        {
+            rebuilt.selfRef().release();
+        }
+        File filterFile = descriptor.fileFor(SSTableFormat.Components.FILTER);
+        assertTrue(filterFile.exists());
+        Assert.assertFalse(keys.isEmpty());
+        // the filter saved is the one rebuilt, in the old layout
+        byte[] saved = Files.readAllBytes(filterFile.toPath());
+        Assert.assertArrayEquals(rebuiltInOldLayout, saved);
+        // a time no save of the file can give it, to see whether the next open saves it again
+        FileTime marked = FileTime.fromMillis(1_000_000_000_000L);
+        Files.setLastModifiedTime(filterFile.toPath(), marked);
+
+        SSTableReader reopened = SSTableReader.open(cfs, descriptor, cfs.metadata);
+        try
+        {
+            for (DecoratedKey key : keys)
+                assertTrue(key.toString(), ((SSTableReaderWithFilter) reopened).getFilter().isPresent(key));
+        }
+        finally
+        {
+            reopened.selfRef().release();
+        }
+        // the open read it, rather than rebuilding and saving it again
+        assertEquals(marked, Files.getLastModifiedTime(filterFile.toPath()));
+        Assert.assertArrayEquals(saved, Files.readAllBytes(filterFile.toPath()));
     }
 
     @Test
