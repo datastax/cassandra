@@ -28,7 +28,7 @@ public class VectorCompaction100dTest extends VectorCompactionTest
     // 100d suite is sharded by version: this class covers FB and later, older versions are covered
     // by VectorCompaction100dEdFaTest, VectorCompaction100dEbEcTest and
     // VectorCompaction100dLegacyTest.
-    @Parameterized.Parameters(name = "version={0} enableNVQ={1}")
+    @Parameterized.Parameters(name = "version={0} enableNVQ={1} enableFused={2}")
     public static Collection<Object[]> data()
     {
         return data(v -> v.onOrAfter(Version.FB));
