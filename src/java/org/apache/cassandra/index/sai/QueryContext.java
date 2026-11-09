@@ -260,15 +260,10 @@ public class QueryContext
     {
         checkThreadOwnership();
 
-        if (command != null && !DISABLE_TIMEOUT)
+        if (command != null && !DISABLE_TIMEOUT && command.isAborted())
         {
-            command.check();
-
-            if (command.isAborted())
-            {
-                queryTimedOut = true;
-                throw new AbortedOperationException();
-            }
+            queryTimedOut = true;
+            throw new AbortedOperationException();
         }
     }
 

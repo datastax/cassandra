@@ -123,7 +123,7 @@ public abstract class MonitorableImpl implements Monitorable
         return state == MonitoringState.COMPLETED;
     }
 
-    public void check()
+    private void check()
     {
         if (QueryContext.DISABLE_TIMEOUT)
             return;

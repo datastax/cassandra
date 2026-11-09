@@ -25,7 +25,6 @@ import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadCommand;
