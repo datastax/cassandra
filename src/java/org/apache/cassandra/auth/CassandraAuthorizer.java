@@ -117,8 +117,8 @@ public class CassandraAuthorizer implements IAuthorizer
     private static final AtomicBoolean dseModifyPairLogged = new AtomicBoolean();
     // (role, resource) -> the DSE name granted alone on it, as last read on this node
     private static final ConcurrentMap<Pair<String, String>, String> dseLoneWriteGrants = new ConcurrentHashMap<>();
-    // how dseLoneWriteGrants was filled, for nodetool compatstatus (see loneDseWriteGrantsSource): set by each scan of
-    // role_permissions (see dseLoneWriteGrantsScanned); null before the first one
+    // how dseLoneWriteGrants was filled, for nodetool compatstatus (see loneDseWriteGrantsSource): set by the checks of
+    // Dse6AccessControlCheck in the DSE 6 compatibility mode, which scan role_permissions; null before the first one
     private static volatile String dseLoneWriteGrantsScan;
 
     private static final String ROLE = "role";
@@ -652,9 +652,10 @@ public class CassandraAuthorizer implements IAuthorizer
 
     /**
      * Reads the permission names of a {@code role_permissions} row as the authorizer does (see {@link #permissions}),
-     * without the warning of each lone grant, for a scan of the table that logs them itself, in one warning per pass
-     * (those it lists first): the lone {@code UPDATE} or {@code TRUNCATE} the row grants on a data resource is listed,
-     * or forgotten when the row no longer holds one alone. A row with no permissions is passed as an empty set.
+     * without the warning of each lone grant, for the scans of {@code Dse6AccessControlCheck}, which log them in one
+     * warning per pass (the periodic check: those it lists first): the lone {@code UPDATE} or {@code TRUNCATE} the
+     * row grants on a data resource is listed, or forgotten when the row no longer holds one alone. A row with no
+     * permissions is passed as an empty set.
      *
      * @param newlyListed where the lone grant is added when this read lists it, or lists another name for the row
      *                    (decided by the update of the list itself): like the authorizer's own read, which logs what
@@ -718,8 +719,8 @@ public class CassandraAuthorizer implements IAuthorizer
      * the entries of the rows it did not find granting one alone (a row that a DSE node deleted, for instance, which
      * no read would otherwise remove); an entry added meanwhile for a row the scan read before a grant is forgotten
      * too, until the row is read again. A lone grant held only in a partition this node keeps but no longer owns
-     * (until {@code nodetool cleanup}) is forgotten by each complete scan, until a read of this node's replica lists it
-     * again.
+     * (until {@code nodetool cleanup}) is forgotten by each complete scan and listed, and logged, again by the next
+     * periodic check that falls back to this node's replica.
      *
      * @param how how the scan was made, as shown by compatstatus
      * @param found the lone grants the scan found, see {@link #readDseLoneWriteGrant}
@@ -760,14 +761,18 @@ public class CassandraAuthorizer implements IAuthorizer
     }
 
     /**
-     * How the list of {@link #loneDseWriteGrants} was made: the last scan of {@code role_permissions}, as recorded by
-     * {@link #dseLoneWriteGrantsScanned}, then the rows read since; before any scan, only the rows this node has read
-     * since it started.
+     * How the list of {@link #loneDseWriteGrants} was made: in the DSE 6 compatibility mode, the last scan of
+     * {@code role_permissions} by the checks of {@code Dse6AccessControlCheck} (at startup, then periodically), then
+     * the rows read since; otherwise only the rows this node has read since it started.
      */
     public static String loneDseWriteGrantsSource()
     {
         String scan = dseLoneWriteGrantsScan;
-        return scan != null ? scan : "the rows read since startup";
+        if (scan != null)
+            return scan;
+        if (DatabaseDescriptor.isDse6CompatibilityMode())
+            return "startup check not run yet; only the rows read so far";
+        return "the rows read since startup; no startup check with internode_compatibility_mode " + DatabaseDescriptor.getInternodeCompatibilityMode();
     }
 
     private static void forgetLoneDseWriteGrant(String role, String resource)
@@ -919,9 +924,10 @@ public class CassandraAuthorizer implements IAuthorizer
      * apply in full.
      *
      * @param read null for a read of the authorizer, which lists a lone {@code UPDATE} or {@code TRUNCATE} and logs
-     *             it when it lists it first; for a read of a scan ({@link #readDseLoneWriteGrant}), which logs them in
-     *             one warning per pass instead, where the lone grant found is recorded; {@link #STATEMENT_READ} for the
-     *             read of GRANT and REVOKE, which leaves the list as it is and logs nothing, the pair included
+     *             it when it lists it first; for a read of the scans of {@code Dse6AccessControlCheck}
+     *             ({@link #readDseLoneWriteGrant}), which log them in one warning per pass instead, where the lone grant
+     *             found is recorded; {@link #STATEMENT_READ} for the read of GRANT and REVOKE, which leaves the list as
+     *             it is and logs nothing, the pair included
      */
     private static Set<Permission> permissions(String role, String resource, Set<String> permissionNames, LoneGrantRead read)
     {
