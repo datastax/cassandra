@@ -55,7 +55,10 @@ public class EmptyRangeQueryTest extends SAITester.Versioned
 
         execute("INSERT INTO %s (pk, ck, v) VALUES (1, 1, 4)");
 
-        beforeAndAfterFlush(() -> assertEmpty(execute("SELECT * FROM %s WHERE v > 5 AND v < 3")));
+        beforeAndAfterFlush(() -> {
+            assertEmpty(execute("SELECT * FROM %s WHERE v > 5 AND v < 3"));
+            assertRows(execute("SELECT COUNT(*) FROM %s WHERE v > 5 AND v < 3"), row(0L));
+        });
     }
 
     @Test

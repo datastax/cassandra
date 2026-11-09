@@ -1211,7 +1211,7 @@ public class SelectSingleColumnRelationTest extends CQLTester
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 4, 4);
         execute("INSERT INTO %s (pk, c, v) VALUES (?, ?, ?)", 1, 5, 5);
 
-        Object[][] allRows = new Object[][] {
+        Object[][] allRows = new Object[][]{
                 row(1, 1, 1),
                 row(1, 2, 2),
                 row(1, 3, 3),

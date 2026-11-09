@@ -50,9 +50,9 @@ import org.apache.cassandra.cql3.restrictions.Restrictions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.cql3.statements.SelectOptions;
 import org.apache.cassandra.db.Clustering;
-import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionPurger;
+import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.context.CounterContext;
@@ -127,7 +127,8 @@ public class RowFilter
      * Used when the CQL restrictions are detected to be trivially unsatisfiable,
      * for example for {@code x < 1 AND x > 2}.
      */
-    public static final RowFilter ALL = new RowFilter(FilterElement.ALL, false, IndexHints.NONE, OptimizerOptions.NONE) {
+    public static final RowFilter ALL = new RowFilter(FilterElement.ALL, false, IndexHints.NONE, OptimizerOptions.NONE)
+    {
         @Override
         public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator partitions, long nowInSec)
         {
@@ -626,8 +627,8 @@ public class RowFilter
             for (ExternalRestriction expression : restrictions.filterRestrictions().getExternalExpressions())
                 addAllAsConjunction(b -> expression.addToRowFilter(b, table, options));
 
-            // Add childern, optimizing out any conjunctions/disjunctions with always-true or always-false restrictions.
-            // Optimizing is not needed for correctness, although secondary index implementations might rely on it.
+            // Add children, optimizing out any conjunctions/disjunctions with always-true or always-false restrictions.
+            // Optimizing is not needed for correctness.
             List<StatementRestrictions> children = restrictions.children();
             return restrictions.isDisjunction()
                    ? buildDisjunction(element, children, table, options, annOptions)
@@ -1162,7 +1163,7 @@ public class RowFilter
         static final String MULTIPLE_LOWER_BOUNDS_MESSAGE = "Unexpected multiple lower bounds on the same cell";
         static final String MULTIPLE_UPPER_BOUNDS_MESSAGE = "Unexpected multiple upper bounds on the same cell";
         static final String EQUALITY_WITH_BOUNDS_MESSAGE = "Unexpected equality combined with slice bounds on the same cell";
-        static final String UNEXPECTED_OPERATOR_MESSAGE = "Unexpected operator ";
+        static final String UNEXPECTED_OPERATOR_MESSAGE = "Unexpected operator: ";
 
         private final AbstractType<?> type;
         private ByteBuffer lowerBound = null;

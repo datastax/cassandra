@@ -89,14 +89,14 @@ public class RowFilterEmptyRangesTest extends CQLTester
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a >= 0");
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a <= 0");
 
-        // with multiple expressions in the same column that don't neeed optimization
+        // with multiple expressions in the same column that don't need optimization
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a >= 0 AND a <= 0");
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a > 1 AND a < 2");
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a > 1 AND a <= 2");
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a >= 1 AND a < 2");
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a >= 1 AND a <= 2");
 
-        // with multiple expressions in the same column that do neeed optimization
+        // with multiple expressions in the same column that do need optimization
         assertIsEmptyQuery("SELECT * FROM %s WHERE a >= 0 AND a < 0");
         assertIsEmptyQuery("SELECT * FROM %s WHERE a > 0 AND a <= 0");
         assertIsEmptyQuery("SELECT * FROM %s WHERE a < 1 AND a > 2");
@@ -108,7 +108,7 @@ public class RowFilterEmptyRangesTest extends CQLTester
         assertIsEmptyQuery("SELECT * FROM %s WHERE a <= 1 AND a >= 2");
         assertIsEmptyQuery("SELECT * FROM %s WHERE a >= 2 AND a <= 1");
 
-        // unsatisfiable conjunctions should be removed from conjunctions, even though the entire query is not empty
+        // unsatisfiable conjunctions should be removed from disjunctions, even though the entire query is not empty
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a = 0 OR (b < 1 AND b > 2)", "a = 0");
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a = 0 OR (b < 1 AND b >= 2)", "a = 0");
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a = 0 OR (b <= 1 AND b >= 2)", "a = 0");
@@ -399,7 +399,7 @@ public class RowFilterEmptyRangesTest extends CQLTester
         assertIsEmptyQuery("SELECT * FROM %s WHERE a['k1'] <= 1 AND a['k1'] >= 2");
         assertIsEmptyQuery("SELECT * FROM %s WHERE a['k1'] >= 2 AND a['k1'] <= 1");
 
-        // unsatisfiable conjunctions should be removed from conjunctions, even though the entire query is not empty
+        // unsatisfiable conjunctions should be removed from disjunctions, even though the entire query is not empty
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a['k1'] = 0 OR (b['k1'] < 1 AND b['k1'] > 2)", "a['k1'] = 0");
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a['k1'] > 0 OR (b['k1'] < 1 AND b['k1'] > 2)", "a['k1'] > 0");
         assertIsNotEmptyQuery("SELECT * FROM %s WHERE a['k1'] < 0 OR (b['k1'] < 1 AND b['k1'] > 2)", "a['k1'] < 0");
@@ -561,7 +561,7 @@ public class RowFilterEmptyRangesTest extends CQLTester
     }
 
     /// Verifies that the specified query produces a not empty row filter when there is an index,
-    /// with one of the specified CQL representations, or an empty row filter if there is an index.
+    /// with one of the specified CQL representations, or an empty row filter if there is no index.
     ///
     /// @param query A CQL query.
     /// @param optimizedFilters The acceptable CQL representations of the row optimized filter.
