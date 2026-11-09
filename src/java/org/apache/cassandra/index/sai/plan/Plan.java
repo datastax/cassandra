@@ -908,7 +908,14 @@ abstract public class Plan
         }
     }
 
-    abstract static class IndexScan extends Leaf
+    /**
+     * Marker interface for all the plan nodes that scan an index, either {@link IndexScan} or {@link ScoredIndexScan}.
+     */
+    public interface AnyIndexScan
+    {
+    }
+
+    abstract static class IndexScan extends Leaf implements AnyIndexScan
     {
         @Nullable
         protected final Expression predicate;
@@ -1562,7 +1569,7 @@ abstract public class Plan
      * Base class for index scans that return results in a computed order (ANN, BM25)
      * rather than the natural index order.
      */
-    abstract static class ScoredIndexScan extends Leaf
+    public abstract static class ScoredIndexScan extends Leaf implements AnyIndexScan
     {
         final Orderer ordering;
 

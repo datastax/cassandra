@@ -1146,6 +1146,7 @@ public class SAITester extends CQLTester
             }
         }
     }
+
     protected PlanSelectionAssertion assertThatPlanFor(String query, Object[]... expectedRows)
     {
         return assertThatPlanFor(query, rs -> assertRowsIgnoringOrder(rs, expectedRows));
@@ -1184,32 +1185,9 @@ public class SAITester extends CQLTester
         }
     }
 
-    protected void assertQueryHasSubplan(String select, Class<? extends Plan> planClass, Object[]... rows)
+    protected void assertQueryHasSubplan(String select, Class<? extends Plan.AnyIndexScan> indexScan, Object[]... rows)
     {
-        assertRows(execute(select), rows);
-
-        ReadCommand command = parseReadCommand(select);
-
-        StorageAttachedIndexQueryPlan indexPlan = (StorageAttachedIndexQueryPlan) command.indexQueryPlan();
-        Assertions.assertThat(indexPlan).isNotNull();
-
-        StorageAttachedIndexSearcher searcher = indexPlan.searcherFor(command);
-        Plan.RowsIteration saiPlan = searcher.buildPlan();
-
-        assertContainsPlan(saiPlan, planClass);
-    }
-
-    private static void assertContainsPlan(Plan plan, Class<? extends Plan> planClass)
-    {
-        Assertions.assertThat(containsPlan(plan, planClass))
-                  .withFailMessage("Expected plan %s to be present in %s", planClass, plan.toStringRecursive(Redaction.NONE))
-                  .isTrue();
-    }
-
-    private static boolean containsPlan(Plan plan, Class<? extends Plan> planClass)
-    {
-        return plan.getClass().equals(planClass) ||
-               plan.subplans().stream().anyMatch(subplan -> containsPlan(subplan, planClass));
+        assertThatPlanFor(select, rows).uses(indexScan);
     }
 
     protected static class PlanSelectionAssertion
@@ -1305,13 +1283,25 @@ public class SAITester extends CQLTester
                       .matches(predicate);
         }
 
+        /**
+         * Asserts that the plan contains index scans of exactly the specified types, and no other type of index scan.
+         */
         @SafeVarargs
-        public final void hasSubplans(Class<? extends Plan>... planClasses)
+        public final void uses(Class<? extends Plan.AnyIndexScan>... planClasses)
         {
-            for (Class<? extends Plan> planClass : planClasses)
-            {
-                assertContainsPlan(plan, planClass);
-            }
+            Set<Class<?>> actual = new HashSet<>();
+            collectIndexScanClasses(plan, actual);
+            Assertions.assertThat(actual)
+                      .withFailMessage("Expected plan to have only index scans of types %s but found %s in:\n%s",
+                                       Arrays.asList(planClasses), actual, plan.toStringRecursive(Redaction.NONE))
+                      .isEqualTo(new HashSet<Class<?>>(Arrays.asList(planClasses)));
+        }
+
+        private static void collectIndexScanClasses(Plan plan, Set<Class<?>> classes)
+        {
+            if (plan instanceof Plan.AnyIndexScan)
+                classes.add(plan.getClass());
+            plan.subplans().forEach(subplan -> collectIndexScanClasses(subplan, classes));
         }
     }
 
