@@ -356,6 +356,16 @@ public abstract class UnfilteredPartitionIterators
 
         public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final int version, final TableMetadata metadata, final ColumnFilter selection, final DeserializationHelper.Flag flag) throws IOException
         {
+            return deserialize(in, version, metadata, selection, flag, false);
+        }
+
+        /**
+         * @param keepDseViewHiddenCells for the data of a materialized view sent by a DSE 6 peer, whether the rows keep DSE's
+         * hidden cells as they are (see {@link org.apache.cassandra.db.SerializationHeader.Serializer#deserializeForMessaging})
+         */
+        public UnfilteredPartitionIterator deserialize(final DataInputPlus in, final int version, final TableMetadata metadata, final ColumnFilter selection, final DeserializationHelper.Flag flag,
+                                                       final boolean keepDseViewHiddenCells) throws IOException
+        {
             // Skip now unused isForThrift boolean
             in.readBoolean();
 
@@ -411,7 +421,7 @@ public abstract class UnfilteredPartitionIterators
                     try
                     {
                         nextReturned = true;
-                        next = UnfilteredRowIteratorSerializer.serializer.deserialize(in, version, metadata, selection, flag);
+                        next = UnfilteredRowIteratorSerializer.serializer.deserialize(in, version, metadata, selection, flag, keepDseViewHiddenCells);
                         return next;
                     }
                     catch (IOException e)

@@ -36,6 +36,7 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.gms.Gossiper;
@@ -537,6 +538,38 @@ public class ColumnFilterTest
         }
         // the FETCH_ALL_STATICS bit (0x08) stays on the wire at 11
         assertThat(serialize(wildcard, MessagingService.VERSION_3014)[0]).isEqualTo((byte) 0x09);
+    }
+
+    /**
+     * DSE 6 compatibility mode: the filter a DSE 6 coordinator sends for a materialized view names DSE's hidden column
+     * ({@code withDseViewHiddenColumn}); the filter the read runs with leaves it out and remembers the one sent
+     * ({@code dseColumnFilter}), which is part of neither its equality, its hash, its text nor its serialized form: it
+     * compares and serializes as the filter built without the column. A filter without the column is returned as it is.
+     */
+    @Test
+    public void dseViewHiddenColumnFilters() throws IOException
+    {
+        ColumnMetadata hidden = ColumnMetadata.regularColumn(metadata, ByteBufferUtil.bytes(".v"), UTF8Type.instance);
+        for (ColumnFilter filter : new ColumnFilter[]{ ColumnFilter.all(metadata),
+                                                       ColumnFilter.allRegularColumnsBuilder(metadata, false).add(v1).build(),
+                                                       ColumnFilter.selection(RegularAndStaticColumns.of(v1)) })
+        {
+            assertThat(filter.dseColumnFilter()).isNull();
+            assertThat(filter.withoutDseViewHiddenColumn(hidden)).isSameAs(filter);
+
+            ColumnFilter sent = filter.withDseViewHiddenColumn(hidden);
+            assertThat(sent.fetchedColumns().regulars.contains(hidden)).isTrue();
+            assertThat(sent.queriedColumns().regulars.contains(hidden)).isTrue();
+            assertThat(sent.dseColumnFilter()).isNull();
+
+            ColumnFilter run = sent.withoutDseViewHiddenColumn(hidden);
+            assertThat(run.dseColumnFilter()).isSameAs(sent);
+            assertThat(run).isEqualTo(filter);
+            assertThat(run.hashCode()).isEqualTo(filter.hashCode());
+            assertThat(run.toString()).isEqualTo(filter.toString());
+            for (int version : new int[]{ MessagingService.VERSION_40, MessagingService.current_version })
+                assertThat(serialize(run, version)).isEqualTo(serialize(filter, version));
+        }
     }
 
     private void checkPre40Layouts() throws IOException

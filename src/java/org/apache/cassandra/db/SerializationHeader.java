@@ -41,6 +41,7 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.db.view.DseViewHiddenColumns;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.exceptions.InvalidColumnTypeException;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -52,6 +53,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.AbstractTypeSerializer;
@@ -76,7 +78,9 @@ public class SerializationHeader
     /**
      * The DSE hidden column whose cells give the rows of a DSE view sstable their liveness (see
      * {@link DseViewHiddenColumns}), or {@code null}: always {@code null} unless the header was read from an
-     * sstable, or the header of an sstable stream, that names such a column.
+     * sstable, or the header of an sstable stream, that names such a column, or from the view data a DSE 6 peer sent
+     * in DSE 6 compatibility mode ({@link DseViewWireFormat}; such a header may not name the column, whose cells its
+     * rows then lack).
      */
     private final ColumnMetadata dseViewLivenessColumn;
 
@@ -168,8 +172,8 @@ public class SerializationHeader
 
     /**
      * The DSE hidden column of a regular base column in the view primary key, when this header was read from
-     * a view sstable written by DSE, or from the header of a stream of one (see {@link DseViewHiddenColumns});
-     * {@code null} otherwise.
+     * a view sstable written by DSE or from the header of a stream of one (see {@link DseViewHiddenColumns}), or from the
+     * view data of a DSE 6 peer (see {@link DseViewWireFormat}); {@code null} otherwise.
      */
     public ColumnMetadata dseViewLivenessColumn()
     {
@@ -266,11 +270,11 @@ public class SerializationHeader
      * it, and its digests would no longer match those of the replicas DSE 6 wrote. From 4.0 on, without the mode and in
      * sstables the bytes are those of the default encoding.
      * <p>
-     * Sstables keep the default encoding: nb, written at {@link org.apache.cassandra.net.MessagingService#VERSION_30},
-     * and the trie-indexed bb sstables that DSE 6 compatibility mode writes and DSE 6 reads after a rollback, whose
-     * LIVE complex deletions a 32-bit reader would thus read as deletions that are not LIVE (digest mismatches after a
-     * rollback, no data lost): a known gap, not changed here. A future writer of big-format {@code me} sstables (at
-     * that same version) will need the encoding of this method.
+     * Sstables keep the default encoding: nb, written at {@link MessagingService#VERSION_30}, and the trie-indexed bb
+     * sstables that DSE 6 compatibility mode writes and DSE 6 reads after a rollback, whose LIVE complex deletions a
+     * 32-bit reader would thus read as deletions that are not LIVE (digest mismatches after a rollback, no data lost):
+     * a known gap, not changed here. A future writer of big-format {@code me} sstables (at that same version) will
+     * need the encoding of this method.
      *
      * @param version the messaging version {@code dt} is serialized at
      */
@@ -780,6 +784,19 @@ public class SerializationHeader
 
         public SerializationHeader deserializeForMessaging(DataInputPlus in, TableMetadata metadata, ColumnFilter selection, boolean hasStatic) throws IOException
         {
+            return deserializeForMessaging(in, metadata, selection, hasStatic, MessagingService.current_version, false);
+        }
+
+        /**
+         * @param version the messaging version of the data
+         * @param keepDseViewHiddenCells in DSE 6 compatibility mode, for the data of a materialized view sent by a DSE 6
+         * peer ({@link DseViewWireFormat#hiddenColumn}), whether its rows keep the cells of DSE's hidden column and the
+         * primary key liveness DSE gave them, as the peer holds them (to compute the digest the peer computes), instead of
+         * getting the liveness of their hidden cell, as everywhere else ({@link #dseViewLivenessColumn()})
+         */
+        public SerializationHeader deserializeForMessaging(DataInputPlus in, TableMetadata metadata, ColumnFilter selection, boolean hasStatic,
+                                                           int version, boolean keepDseViewHiddenCells) throws IOException
+        {
             EncodingStats stats = EncodingStats.serializer.deserialize(in);
 
             AbstractType<?> keyType = metadata.partitionKeyType;
@@ -789,7 +806,7 @@ public class SerializationHeader
             if (selection == null)
             {
                 statics = hasStatic ? Columns.serializer.deserialize(in, metadata) : Columns.NONE;
-                regulars = Columns.serializer.deserialize(in, metadata);
+                regulars = Columns.serializer.deserialize(in, metadata, DseViewWireFormat.translates(metadata, version));
             }
             else
             {
@@ -797,7 +814,15 @@ public class SerializationHeader
                 regulars = Columns.serializer.deserializeSubset(selection.fetchedColumns().regulars, in);
             }
 
-            return new SerializationHeader(false, keyType, clusteringTypes, new RegularAndStaticColumns(statics, regulars), stats, null);
+            // A DSE 6 peer decides the liveness of a view row by its hidden cell alone, whatever the row's primary key
+            // liveness, and so does this header, like the one of a DSE view sstable: even when the peer's header does not
+            // name the column, its rows have no hidden cell and DSE does not consider them live.
+            ColumnMetadata dseViewLivenessColumn = null;
+            ColumnMetadata dseHidden = keepDseViewHiddenCells ? null : DseViewWireFormat.hiddenColumn(metadata, version);
+            if (dseHidden != null)
+                dseViewLivenessColumn = regulars.contains(dseHidden) ? regulars.getSimple(regulars.simpleIdx(dseHidden)) : dseHidden;
+
+            return new SerializationHeader(false, keyType, clusteringTypes, new RegularAndStaticColumns(statics, regulars), stats, null, dseViewLivenessColumn);
         }
 
         public long serializedSizeForMessaging(SerializationHeader header, ColumnFilter selection, boolean hasStatic)

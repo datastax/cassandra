@@ -34,6 +34,7 @@ import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 import org.junit.After;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
@@ -54,6 +55,10 @@ import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaTransformations;
+import org.apache.cassandra.schema.SystemDistributedKeyspace;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.TimeUUID;
@@ -87,6 +92,16 @@ public class DseBatchlogReplayTest extends CQLTester
     private InternodeCompatibilityMode modeBefore;
     /** The mode a test runs in, which decides the expected end of the ERROR about a kept batch. */
     private InternodeCompatibilityMode mode = InternodeCompatibilityMode.NONE;
+
+    /**
+     * The keyspace system_distributed, where the build and the drop of a materialized view are recorded: the tests run
+     * without the network, which creates it otherwise, and each test drops the fixture keyspace with its views.
+     */
+    @BeforeClass
+    public static void createSystemDistributedKeyspace()
+    {
+        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(SystemDistributedKeyspace.metadata(), SystemDistributedKeyspace.GENERATION));
+    }
 
     @Before
     public void createFixtureTables() throws Throwable
@@ -691,6 +706,99 @@ public class DseBatchlogReplayTest extends CQLTester
         assertEquals("no mutation", BatchlogManager.describeTables(Collections.emptyList()));
     }
 
+    @Test
+    public void keptBatchOfAViewAdvisesToRepairTheViewInNoneMode() throws Throwable
+    {
+        keptBatchOfAViewAdvisesToRepairTheView(InternodeCompatibilityMode.NONE);
+    }
+
+    @Test
+    public void keptBatchOfAViewAdvisesToRepairTheViewInDse6Mode() throws Throwable
+    {
+        keptBatchOfAViewAdvisesToRepairTheView(InternodeCompatibilityMode.DSE_6);
+    }
+
+    /**
+     * A kept batch whose mutations write to a materialized view (the batchlog holds the view updates of base writes): the
+     * ERROR advises to repair the view, to repair its base table or to rebuild the view, and to repair the other tables
+     * the batch writes to, each with the timing of the mode.
+     */
+    private void keptBatchOfAViewAdvisesToRepairTheView(InternodeCompatibilityMode mode) throws Throwable
+    {
+        // the schema first, as for the fixture tables: the mode is entered once it is in place
+        String viewName = "t_by_v";
+        createFixtureView(viewName, T68);
+        useMode(mode);
+        TableMetadata view = Schema.instance.getTableMetadata(KS, viewName);
+        String tableT = KS + '.' + T68 + " (" + DseFixtures.fixtureTableId(DseVersion.DSE_6_8_65) + ')';
+        String tableView = KS + '.' + viewName + " (" + view.id + ')';
+
+        TimeUUID viewOnly = batchId(0);
+        TimeUUID viewAndTable = batchId(1);
+        storeBatch(viewOnly, storedVersion(DseVersion.DSE_6_8_65), Arrays.asList(corruptMutation(view.id), corruptMutation(view.id)));
+        storeBatch(viewAndTable, storedVersion(DseVersion.DSE_6_8_65), Arrays.asList(corruptMutation(view.id), corruptMutation()));
+        withLogAppender(BatchlogManager.class, appender -> {
+            BatchlogManager.instance.forceBatchlogReplay();
+
+            assertEquals(new HashSet<>(Arrays.asList(viewOnly, viewAndTable)), BatchlogManager.instance.undecodableBatchIds());
+            List<String> errors = messages(appender.list, Level.ERROR);
+            assertEquals(errors.toString(), 2, errors.size());
+            assertTrue(errors.get(0), errors.get(0).contains(" they write to " + tableView + " (the first table of each mutation). "));
+            assertTrue(errors.get(0), errors.get(0).endsWith("(DELETE FROM system.batches WHERE id = " + viewOnly + ") and " +
+                                                             viewAdvice(T68, viewName) + repairWhen()));
+            assertTrue(errors.get(1), errors.get(1).contains(" they write to " + tableView + ", " + tableT + " (the first table of each mutation). "));
+            assertTrue(errors.get(1), errors.get(1).endsWith("(DELETE FROM system.batches WHERE id = " + viewAndTable + ") and repair the other " +
+                                                             "tables it writes to" + repairWhen() + "; " + viewAdvice(T68, viewName) + repairWhen()));
+        });
+    }
+
+    /**
+     * {@link BatchlogManager#describeRepair} names each view among the first tables of the mutations, with its base table,
+     * once, and the other tables as a whole: a base table with a view, a view no longer in the schema and a mutation that
+     * does not name its table are among the other tables. Each clause ends with the timing given.
+     */
+    @Test
+    public void describeRepair() throws Throwable
+    {
+        createFixtureView("t_by_v", T68);
+        createFixtureView("t69_by_v", T69);
+        createFixtureView("dropped_by_v", T69);
+        TableId droppedId = Schema.instance.getTableMetadata(KS, "dropped_by_v").id;
+        schemaChange("DROP MATERIALIZED VIEW " + KS + ".dropped_by_v");
+        ByteBuffer view = corruptMutation(Schema.instance.getTableMetadata(KS, "t_by_v").id);
+        ByteBuffer view69 = corruptMutation(Schema.instance.getTableMetadata(KS, "t69_by_v").id);
+        ByteBuffer droppedView = corruptMutation(droppedId);
+        // the fixture table, the base table of t_by_v
+        ByteBuffer table = DseFixtures.fixtureHintMutations(DseVersion.DSE_6_8_65).get(0);
+        ByteBuffer tooShort = ByteBuffer.wrap(new byte[]{ 1, 2, 3 });
+        String when = " (once)";
+
+        assertEquals("repair the tables it writes to", BatchlogManager.describeRepair(Collections.emptyList(), ""));
+        assertEquals("repair the tables it writes to" + when, BatchlogManager.describeRepair(Arrays.asList(table, tooShort, droppedView), when));
+        assertEquals(viewAdvice(T68, "t_by_v"), BatchlogManager.describeRepair(Arrays.asList(view, view.duplicate()), ""));
+        assertEquals("repair the other tables it writes to" + when + "; " + viewAdvice(T68, "t_by_v") + when + "; " + viewAdvice(T69, "t69_by_v") + when,
+                     BatchlogManager.describeRepair(Arrays.asList(view, tooShort, view69), when));
+    }
+
+    /** The advice of the ERROR of a kept batch for the view {@code view} of the fixture table {@code base}, without its timing. */
+    private static String viewAdvice(String base, String view)
+    {
+        return "repair the view " + KS + '.' + view + " on every node (the view replicas that miss its updates are usually other nodes), " +
+               "which restores the lost view rows that another replica of the view holds, or repair its base table " + KS + '.' + base +
+               ", which restores the lost view rows only where the replicas of the base table differ, or rebuild the view (drop it and " +
+               "create it again, with materialized_views_enabled: true), which restores all the view rows";
+    }
+
+    /**
+     * Creates the materialized view {@code view} of the table {@code base} of the fixture keyspace, keyed by {@code v}. The
+     * keyspace system_distributed, where the build and the drop of a view are recorded, is created by the class setup.
+     */
+    private void createFixtureView(String view, String base) throws Throwable
+    {
+        schemaChange("CREATE MATERIALIZED VIEW " + KS + '.' + view + " AS SELECT id, ck, v FROM " + KS + '.' + base +
+                     " WHERE v IS NOT NULL AND id IS NOT NULL AND ck IS NOT NULL PRIMARY KEY (v, id, ck)");
+    }
+
     private void assertError(ILoggingEvent error, TimeUUID id, int version, String reason, String tables, boolean traced)
     {
         String message = error.getFormattedMessage();
@@ -801,6 +909,21 @@ public class DseBatchlogReplayTest extends CQLTester
         for (int i = 1 + 16 + 8; i < bytes.length; i++)
             bytes[i] = (byte) 0xF7;
         return ByteBuffer.wrap(bytes);
+    }
+
+    /** {@link #corruptMutation()}, writing to the table {@code tableId} instead of the fixture table. */
+    private static ByteBuffer corruptMutation(TableId tableId) throws IOException
+    {
+        ByteBuffer corrupt = corruptMutation();
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            tableId.serialize(out);
+            // after the number of partition updates (1 byte)
+            ByteBuffer id = out.asNewBuffer();
+            for (int i = 0; i < id.remaining(); i++)
+                corrupt.put(corrupt.position() + 1 + i, id.get(id.position() + i));
+        }
+        return corrupt;
     }
 
     /** A mutation of the fixture table, in this software's layout, cut short after its table id and 8 more bytes. */

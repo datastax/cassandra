@@ -81,6 +81,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.ViewMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.WriteResponseHandler;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -500,11 +501,11 @@ public class BatchlogManager implements BatchlogManagerMBean
                          "write to {} (the first table of each mutation). The batch is tried again at the next start of this node; " +
                          "if it is older than the gc_grace_seconds of its tables, it would not be replayed even if it could be " +
                          "decoded. To drop it, save it (SELECT mutations, version FROM system.batches WHERE id = {}), delete it on " +
-                         "this node (DELETE FROM system.batches WHERE id = {}) and repair the tables it writes to{}";
+                         "this node (DELETE FROM system.batches WHERE id = {}) and {}";
         if (undecodableErrorsLogged < UNDECODABLE_ERROR_MAX_BATCHES)
         {
             ++undecodableErrorsLogged;
-            logger.error(message, id, stored, e.getMessage(), describeTables(serializedMutations), id, id, repairWhen,
+            logger.error(message, id, stored, e.getMessage(), describeTables(serializedMutations), id, id, describeRepair(serializedMutations, repairWhen),
                          cause != null && tracedUndecodableCauses.add(cause.getClass()) ? cause : null);
             return;
         }
@@ -516,7 +517,8 @@ public class BatchlogManager implements BatchlogManagerMBean
                          UNDECODABLE_ERROR_MAX_BATCHES);
         }
         if (logger.isDebugEnabled())
-            logger.debug(message, id, stored, e.getMessage(), describeTables(serializedMutations), id, id, repairWhen, cause);
+            logger.debug(message, id, stored, e.getMessage(), describeTables(serializedMutations), id, id, describeRepair(serializedMutations, repairWhen),
+                         cause);
     }
 
     /**
@@ -539,10 +541,9 @@ public class BatchlogManager implements BatchlogManagerMBean
         Set<String> tables = new LinkedHashSet<>();
         for (ByteBuffer serializedMutation : serializedMutations)
         {
-            try (DataInputBuffer in = new DataInputBuffer(serializedMutation, true))
+            try
             {
-                in.readUnsignedVInt();
-                TableId tableId = TableId.deserialize(in);
+                TableId tableId = firstTableId(serializedMutation);
                 TableMetadata table = Schema.instance.getTableMetadata(tableId);
                 tables.add(table == null ? "unknown table " + tableId : table.keyspace + '.' + table.name + " (" + tableId + ')');
             }
@@ -552,6 +553,63 @@ public class BatchlogManager implements BatchlogManagerMBean
             }
         }
         return tables.isEmpty() ? "no mutation" : String.join(", ", tables);
+    }
+
+    /**
+     * What to repair once a kept batch is dropped, for the operator, from the same first table of each serialized mutation
+     * as {@link #describeTables}, each clause followed by {@code repairWhen}: the tables it writes to, and for a
+     * materialized view among them (the batchlog holds the view updates of base writes) a repair of the view or of its
+     * base table, or a rebuild of the view, in that order. The batchlog holds the view updates for a paired view replica
+     * that is usually another node (all of them while this node starts, joins or moves), so the view is repaired on every
+     * node, not only on this one. The base write usually reached every base replica, each of which sends its view
+     * updates to its paired view replica, so the lost view update is usually held by another view replica: a repair of
+     * the view restores it, in which case a repair of the base table finds no difference. A repair of the base table
+     * streams the base rows its replicas disagree on, which write their view updates again, so it restores only the view
+     * rows of those base rows; a rebuild of the view (drop and create it again) restores all the view rows.
+     */
+    @VisibleForTesting
+    static String describeRepair(List<ByteBuffer> serializedMutations, String repairWhen)
+    {
+        Set<String> views = new LinkedHashSet<>();
+        boolean otherTables = false;
+        for (ByteBuffer serializedMutation : serializedMutations)
+        {
+            ViewMetadata view = null;
+            try
+            {
+                TableMetadata table = Schema.instance.getTableMetadata(firstTableId(serializedMutation));
+                if (table != null && table.isView())
+                    view = Schema.instance.getView(table.keyspace, table.name);
+            }
+            catch (IOException | RuntimeException e)
+            {
+                // a mutation that does not name its table: among the tables it writes to
+            }
+            if (view == null)
+                otherTables = true;
+            else
+                views.add("repair the view " + view.keyspace() + '.' + view.name() + " on every node (the view replicas that miss its " +
+                          "updates are usually other nodes), which restores the lost view rows that another replica of the view holds, or " +
+                          "repair its base table " + view.keyspace() + '.' + view.baseTableName + ", which restores the lost view rows " +
+                          "only where the replicas of the base table differ, or rebuild the view (drop it and create it again, with " +
+                          "materialized_views_enabled: true), which restores all the view rows" + repairWhen);
+        }
+        List<String> advice = new ArrayList<>();
+        if (otherTables || views.isEmpty())
+            advice.add((views.isEmpty() ? "repair the tables it writes to" : "repair the other tables it writes to") + repairWhen);
+        advice.addAll(views);
+        return String.join("; ", advice);
+    }
+
+    /** The id of the table the first partition update of {@code serializedMutation} writes to, in every layout. */
+    private static TableId firstTableId(ByteBuffer serializedMutation) throws IOException
+    {
+        try (DataInputBuffer in = new DataInputBuffer(serializedMutation, true))
+        {
+            // the number of partition updates, then the table id of the first
+            in.readUnsignedVInt();
+            return TableId.deserialize(in);
+        }
     }
 
     /**
