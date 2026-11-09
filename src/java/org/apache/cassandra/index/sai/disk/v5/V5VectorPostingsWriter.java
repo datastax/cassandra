@@ -110,11 +110,17 @@ public class V5VectorPostingsWriter<T>
 
     /**
      * This method describes the mapping done during construction of the graph so that we can easily create
-     * an appropriate V5VectorPostingsWriter.  No ordinal remapping is performed because (V5) compaction writes
-     * vectors to disk as they are added to the graph, so there is no opportunity to reorder the way there is
-     * in a Memtable index.
+     * an appropriate V5VectorPostingsWriter.
+     * <p>
+     * For ONE_TO_ONE and ONE_TO_MANY structures, no ordinal remapping is performed: compaction writes vectors to
+     * disk as they are added to the graph, so there is no opportunity to reorder the way there is in a Memtable
+     * index.
+     * <p>
+     * For ZERO_OR_ONE_TO_MANY, dense ordinal remapping is performed (via {@link #remapForMemtable}) for V5+
+     * index formats so that holes left by deleted vectors are eliminated.  Legacy formats use an identity mapping
+     * via {@link #createGenericIdentityMapping(ChronicleMap, int, int)} because they do not support V5 postings.
      */
-    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, int maxRowId, int maxOrdinal, ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap)
+    public static RemappedPostings describeForCompaction(Structure structure, int graphSize, int maxRowId, int maxOrdinal, ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap, Version version)
     {
         assert !postingsMap.isEmpty(); // flush+compact should skip writing an index component in this case
 
@@ -124,29 +130,29 @@ public class V5VectorPostingsWriter<T>
                                         graphSize - 1,
                                         graphSize - 1,
                                         null,
-                                        null,
                                         new OrdinalMapper.IdentityMapper(graphSize - 1));
         }
 
         if (structure == Structure.ONE_TO_MANY)
         {
             // compute extraOrdinals from the postingsMap
-            var extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
+            Int2IntHashMap extraOrdinals = new Int2IntHashMap(Integer.MIN_VALUE);
             postingsMap.forEachEntry(entry -> {
                 VectorPostings.CompactionVectorPostings.Marshaller.recordExtraOrdinals(entry, extraOrdinals);
             });
 
-            var skippedOrdinals = extraOrdinals.keySet();
+            Set<Integer> skippedOrdinals = extraOrdinals.keySet();
             return new RemappedPostings(Structure.ONE_TO_MANY,
                                         maxOrdinal,
                                         maxRowId,
-                                        null,
                                         extraOrdinals,
                                         new OmissionAwareIdentityMapper(maxOrdinal, skippedOrdinals::contains));
         }
 
         assert structure == Structure.ZERO_OR_ONE_TO_MANY : structure;
-        return createGenericIdentityMapping(postingsMap, maxRowId, maxOrdinal);
+        return (V5OnDiskFormat.writeV5VectorPostings(version))
+               ? createGenericRenumberedMapping(postingsMap, maxRowId, maxOrdinal)
+               : createGenericIdentityMapping(postingsMap, maxRowId, maxOrdinal);
     }
 
     public long writePostings(SequentialWriter writer,
@@ -362,8 +368,8 @@ public class V5VectorPostingsWriter<T>
         /** public api */
         public final OrdinalMapper ordinalMapper;
 
-        /** visible for V2VectorPostingsWriter.remapPostings, everyone else should use factory methods */
-        public RemappedPostings(Structure structure, int maxNewOrdinal, int maxRowId, BiMap<Integer, Integer> ordinalMap, Int2IntHashMap extraPostings, OrdinalMapper ordinalMapper)
+        /** visible for V2VectorPostingsWriter.remapForMemtable, everyone else should use factory methods */
+        public RemappedPostings(Structure structure, int maxNewOrdinal, int maxRowId, Int2IntHashMap extraPostings, OrdinalMapper ordinalMapper)
         {
             this.structure = structure;
             this.maxNewOrdinal = maxNewOrdinal;
@@ -432,9 +438,9 @@ public class V5VectorPostingsWriter<T>
 
         // create the mapping
         if (structure == Structure.ZERO_OR_ONE_TO_MANY)
-            return createGenericRenumberedMapping(ordinalMap.keySet(), maxOldOrdinal, maxRow);
+            return createGenericRenumberedMapping(ordinalMap::containsKey, maxRow, maxOldOrdinal);
         var ordinalMapper = new BiMapMapper(maxNewOrdinal, ordinalMap);
-        return new RemappedPostings(structure, maxNewOrdinal, maxRow, ordinalMap, extraPostings, ordinalMapper);
+        return new RemappedPostings(structure, maxNewOrdinal, maxRow, extraPostings, ordinalMapper);
     }
 
     /**
@@ -451,18 +457,35 @@ public class V5VectorPostingsWriter<T>
     /**
      * return an exhaustive zero-to-many mapping with the live ordinals renumbered sequentially
      */
-    private static RemappedPostings createGenericRenumberedMapping(Set<Integer> liveOrdinals, int maxOldOrdinal, int maxRow)
+    private static RemappedPostings createGenericRenumberedMapping(ChronicleMap<VectorFloat<?>, VectorPostings.CompactionVectorPostings> postingsMap, int maxRowId, int maxOldOrdinal)
+    {
+        // Use Chronicle-specific forEachEntry instead of iterating the map with a for loop to avoid costly deserialization.
+        // Collect into a FixedBitSet so that the subsequent scan over 0..maxOldOrdinal is deterministic
+        // (ascending old-ordinal order), regardless of ChronicleMap iteration order.
+        var liveOrdinals = new FixedBitSet(maxOldOrdinal + 1);
+        postingsMap.forEachEntry(entry ->
+            liveOrdinals.set(VectorPostings.CompactionVectorPostings.Marshaller.extractOrdinal(entry))
+        );
+        return createGenericRenumberedMapping(liveOrdinals::get, maxRowId, maxOldOrdinal);
+    }
+
+    /**
+     * return an exhaustive zero-to-many mapping with the live ordinals renumbered sequentially
+     *
+     * @param isLive predicate that returns {@code true} for each old ordinal that has at least one live row;
+     *               ordinals for which this returns {@code false} are omitted from the new numbering
+     */
+    private static RemappedPostings createGenericRenumberedMapping(IntPredicate isLive, int maxRow, int maxOldOrdinal)
     {
         var oldToNew = new Int2IntHashMap(maxOldOrdinal, 0.65f, Integer.MIN_VALUE);
         int nextOrdinal = 0;
         for (int i = 0; i <= maxOldOrdinal; i++) {
-            if (liveOrdinals.contains(i))
+            if (isLive.test(i))
                 oldToNew.put(i, nextOrdinal++);
         }
         return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
                                     nextOrdinal - 1,
                                     maxRow,
-                                    null,
                                     null,
                                     new OrdinalMapper.MapMapper(oldToNew));
     }
@@ -481,7 +504,6 @@ public class V5VectorPostingsWriter<T>
                                     maxOldOrdinal,
                                     maxRow,
                                     null,
-                                    null,
                                     new OmissionAwareIdentityMapper(maxOldOrdinal, i -> !presentOrdinals.get(i)));
     }
 
@@ -493,14 +515,13 @@ public class V5VectorPostingsWriter<T>
         var presentOrdinals = new FixedBitSet(maxOldOrdinal + 1);
 
         // Iterate the whole map using the low level API that avoids deserialization penalties.
-        postingsMap.forEachEntry(entry -> {
-            presentOrdinals.set(VectorPostings.CompactionVectorPostings.Marshaller.extractOrdinal(entry));
-        });
+        postingsMap.forEachEntry(entry ->
+            presentOrdinals.set(VectorPostings.CompactionVectorPostings.Marshaller.extractOrdinal(entry))
+        );
 
         return new RemappedPostings(Structure.ZERO_OR_ONE_TO_MANY,
                                     maxOldOrdinal,
                                     maxRowId,
-                                    null,
                                     null,
                                     new OmissionAwareIdentityMapper(maxOldOrdinal, i -> !presentOrdinals.get(i)));
     }
