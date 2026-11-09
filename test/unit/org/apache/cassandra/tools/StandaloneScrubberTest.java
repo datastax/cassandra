@@ -47,7 +47,11 @@ public class StandaloneScrubberTest extends OfflineToolUtils
                        "Scrub the sstable for the provided table.\n" + 
                        "--\n" + 
                        "Options are:\n" + 
-                       "    --debug                     display stack traces\n" + 
+                       "    --bump-ttl-timestamp        Only with '--overwrite-ttl NO_TTL': rewrite cells whose TTL is removed with their\n" +
+                       "                                original timestamp incremented by one, so that they supersede un-scrubbed expiring\n" +
+                       "                                copies and expiration tombstones of the same cells. It changes writetime() and can\n" +
+                       "                                override a write or delete made at exactly timestamp + 1.\n" +
+                       "    --debug                     display stack traces\n" +
                        " -e,--header-fix <arg>          Option whether and how to perform a check of the sstable serialization-headers and fix\n" + 
                        "                                known, fixable issues.\n" + 
                        "                                Possible argument values:\n" +
@@ -65,8 +69,10 @@ public class StandaloneScrubberTest extends OfflineToolUtils
                        " -o,--overwrite-ttl <arg>       Overwrite TTL info. Possible argument values:\n" +
                        "                                - NONE: does nothing\n" +
                        "                                - NO_TTL: removes TTL from all cells, including already expired ones (resurrected).\n" +
-                       "                                Cells are rewritten with the original timestamp incremented by one, so that they\n" +
-                       "                                supersede un-scrubbed expiring copies and expiration tombstones of the same cells\n" +
+                       "                                Cells keep their original timestamp, so this is only safe if every copy of the data is\n" +
+                       "                                scrubbed before anything reads or compacts it (e.g. restoring a backup); otherwise\n" +
+                       "                                un-scrubbed expiring copies and expiration tombstones at the same timestamp win over\n" +
+                       "                                the scrubbed cells. See --bump-ttl-timestamp\n" +
                        "                                - REINSERT_OVERFLOWED_TTL: same as --reinsert-overflowed-ttl option\n" +
                        " -r,--reinsert-overflowed-ttl   Rewrites rows with overflowed expiration date affected by CASSANDRA-14092 with the\n" +
                        "                                maximum supported expiration date of 2038-01-19T03:14:06+00:00. The rows are rewritten\n" +
@@ -153,6 +159,34 @@ public class StandaloneScrubberTest extends OfflineToolUtils
         assertThat(tool.getStdout(), CoreMatchers.containsStringIgnoringCase("usage:"));
         assertThat(tool.getCleanedStderr(), CoreMatchers.containsStringIgnoringCase("Invalid argument value"));
         assertEquals(1, tool.getExitCode());
+    }
+
+    @Test
+    public void testBumpTTLTimestampArg()
+    {
+        ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class,
+                                                 "-o", "NO_TTL", "--bump-ttl-timestamp",
+                                                 "system_schema", "tables");
+        Assertions.assertThat(tool.getCleanedStderr()).isEmpty();
+        assertEquals(0, tool.getExitCode());
+        assertCorrectEnvPostTest();
+    }
+
+    @Test
+    public void testBumpTTLTimestampRequiresNoTTLFails()
+    {
+        for (String[] args : new String[][]{ { "--bump-ttl-timestamp" },
+                                             { "-o", "NONE", "--bump-ttl-timestamp" },
+                                             { "-o", "REINSERT_OVERFLOWED_TTL", "--bump-ttl-timestamp" } })
+        {
+            String[] all = Arrays.copyOf(args, args.length + 2);
+            all[args.length] = "system_schema";
+            all[args.length + 1] = "tables";
+            ToolResult tool = ToolRunner.invokeClass(StandaloneScrubber.class, all);
+            assertThat(tool.getStdout(), CoreMatchers.containsStringIgnoringCase("usage:"));
+            assertThat(tool.getCleanedStderr(), CoreMatchers.containsStringIgnoringCase("can only be used with"));
+            assertEquals(1, tool.getExitCode());
+        }
     }
 
     @Test

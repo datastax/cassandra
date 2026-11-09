@@ -45,9 +45,10 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Unit tests for {@link SortedTableScrubber.NoTTLTransformer}: expiring liveness info and cells become permanent
- * with the original timestamp incremented by one (so that they supersede un-scrubbed expiring copies and their
- * expiration tombstones), everything that never had a TTL is left untouched.
+ * Unit tests for {@link SortedTableScrubber.NoTTLTransformer}: expiring liveness info and cells become permanent.
+ * By default they keep their timestamp; when timestamp bumping is requested they get the original timestamp
+ * incremented by one (so that they supersede un-scrubbed expiring copies and their expiration tombstones).
+ * Everything that never had a TTL is left untouched.
  */
 public class NoTTLTransformerTest
 {
@@ -76,6 +77,11 @@ public class NoTTLTransformerTest
         return new SortedTableScrubber.NoTTLTransformer(new OutputHandler.LogOutput(), metadata, metrics);
     }
 
+    private static SortedTableScrubber.NoTTLTransformer bumpingTransformer(SortedTableScrubber.OverwrittenTTLInfoMetrics metrics)
+    {
+        return new SortedTableScrubber.NoTTLTransformer(new OutputHandler.LogOutput(), metadata, metrics, true);
+    }
+
     private static ComplexColumnData complexColumn(Row row, ColumnMetadata column)
     {
         for (ColumnData cd : row)
@@ -85,7 +91,7 @@ public class NoTTLTransformerTest
     }
 
     @Test
-    public void testExpiringLivenessAndCellsAreRewrittenWithTimestampPlusOne()
+    public void testExpiringLivenessAndCellsKeepTheirTimestampByDefault()
     {
         long nowInSec = FBUtilities.nowInSeconds();
         int ttl = 3600;
@@ -101,6 +107,40 @@ public class NoTTLTransformerTest
 
         SortedTableScrubber.OverwrittenTTLInfoMetrics metrics = new SortedTableScrubber.OverwrittenTTLInfoMetrics();
         Row result = transformer(metrics).applyToStatic(row);
+
+        assertEquals(1, metrics.getNoTTLOverwrittenRows());
+        assertFalse(SortedTableScrubber.NoTTLTransformer.hasAnyTTL(result));
+
+        assertFalse(result.primaryKeyLivenessInfo().isExpiring());
+        assertEquals(1000, result.primaryKeyLivenessInfo().timestamp());
+
+        Cell<?> val = result.getCell(valCol);
+        assertFalse(val.isExpiring());
+        assertEquals(1000, val.timestamp());
+        assertEquals(ByteBufferUtil.bytes("val"), val.buffer());
+
+        Cell<?> a = complexColumn(result, mapCol).getCell(CellPath.create(ByteBufferUtil.bytes("a")));
+        assertFalse(a.isExpiring());
+        assertEquals(3000, a.timestamp());
+    }
+
+    @Test
+    public void testExpiringLivenessAndCellsAreRewrittenWithTimestampPlusOneWhenBumping()
+    {
+        long nowInSec = FBUtilities.nowInSeconds();
+        int ttl = 3600;
+
+        Row.Builder builder = BTreeRow.sortedBuilder();
+        builder.newRow(Clustering.EMPTY);
+        builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(1000, ttl, nowInSec));
+        builder.addCell(BufferCell.expiring(mapCol, 3000, ttl, nowInSec, ByteBufferUtil.bytes("va"), CellPath.create(ByteBufferUtil.bytes("a"))));
+        builder.addCell(BufferCell.live(mapCol, 4000, ByteBufferUtil.bytes("vb"), CellPath.create(ByteBufferUtil.bytes("b"))));
+        builder.addCell(BufferCell.expiring(valCol, 1000, ttl, nowInSec, ByteBufferUtil.bytes("val")));
+        builder.addCell(BufferCell.live(permanentCol, 2000, ByteBufferUtil.bytes("perm")));
+        Row row = builder.build();
+
+        SortedTableScrubber.OverwrittenTTLInfoMetrics metrics = new SortedTableScrubber.OverwrittenTTLInfoMetrics();
+        Row result = bumpingTransformer(metrics).applyToStatic(row);
 
         assertEquals(1, metrics.getNoTTLOverwrittenRows());
         assertEquals(row.clustering(), result.clustering());
@@ -131,7 +171,7 @@ public class NoTTLTransformerTest
     }
 
     @Test
-    public void testAlreadyExpiredCellIsResurrectedWithTimestampPlusOne()
+    public void testAlreadyExpiredCellIsResurrectedWithTimestampPlusOneWhenBumping()
     {
         long nowInSec = FBUtilities.nowInSeconds();
         Row.Builder builder = BTreeRow.sortedBuilder();
@@ -143,7 +183,7 @@ public class NoTTLTransformerTest
         assertFalse(row.getCell(valCol).isLive(nowInSec));
 
         SortedTableScrubber.OverwrittenTTLInfoMetrics metrics = new SortedTableScrubber.OverwrittenTTLInfoMetrics();
-        Row result = transformer(metrics).applyToStatic(row);
+        Row result = bumpingTransformer(metrics).applyToStatic(row);
 
         Cell<?> val = result.getCell(valCol);
         assertTrue(val.isLive(nowInSec));
@@ -182,8 +222,8 @@ public class NoTTLTransformerTest
         Row row = builder.build();
 
         SortedTableScrubber.OverwrittenTTLInfoMetrics metrics = new SortedTableScrubber.OverwrittenTTLInfoMetrics();
-        Row once = transformer(metrics).applyToStatic(row);
-        Row twice = transformer(metrics).applyToStatic(once);
+        Row once = bumpingTransformer(metrics).applyToStatic(row);
+        Row twice = bumpingTransformer(metrics).applyToStatic(once);
 
         // a second NO_TTL scrub sees no TTL and must not bump the timestamp again
         assertSame(once, twice);

@@ -51,11 +51,13 @@ public interface IScrubber extends Closeable
      *   <li>{@link #REINSERT_OVERFLOWED_TTL} — fixes cells whose local deletion time overflowed a 32-bit
      *       integer (see CASSANDRA-14092).</li>
      *   <li>{@link #NO_TTL} — strips all TTL information from every cell (including expired cells, which are
-     *       resurrected), turning them into permanent non-expiring data. The rewritten cells carry the original
-     *       timestamp incremented by one, so that they supersede any un-scrubbed expiring copy of the same cell
-     *       (other sstables, the memtable, other replicas) and the tombstones produced when such copies expire;
-     *       at the original timestamp the expiring copy would win the tie (CASSANDRA-14592) and delete the
-     *       permanent cell once the TTL elapses. Same approach as {@link #REINSERT_OVERFLOWED_TTL}.</li>
+     *       resurrected), turning them into permanent non-expiring data. By default the rewritten cells keep their
+     *       original timestamp. At an equal timestamp a tombstone or an expiring cell wins over a non-expiring cell
+     *       (CASSANDRA-14592), so a permanent cell can lose to an un-scrubbed expiring copy of the same cell (other
+     *       sstables, the memtable, other replicas) or to the tombstone produced when such a copy expires. This is
+     *       only safe if every copy of the data is scrubbed before anything reads or compacts it (e.g. restoring a
+     *       backup). When that can't be guaranteed, enable {@link Options.Builder#bumpTTLTimestamp(boolean)}, which
+     *       rewrites the cells with the original timestamp incremented by one so that they supersede those copies.</li>
      * </ul>
      */
     enum OverwriteTTLMode
@@ -98,14 +100,16 @@ public interface IScrubber extends Closeable
         public final boolean skipCorrupted;
         public final boolean overrideTxnIsOffline;
         public final OverwriteTTLMode overwriteTTLMode;
+        public final boolean bumpTTLTimestamp;
 
-        private Options(boolean checkData, boolean reinsertOverflowedTTLRows, boolean skipCorrupted, boolean overrideTxnIsOffline, OverwriteTTLMode overwriteTTLMode)
+        private Options(boolean checkData, boolean reinsertOverflowedTTLRows, boolean skipCorrupted, boolean overrideTxnIsOffline, OverwriteTTLMode overwriteTTLMode, boolean bumpTTLTimestamp)
         {
             this.checkData = checkData;
             this.reinsertOverflowedTTLRows = reinsertOverflowedTTLRows;
             this.skipCorrupted = skipCorrupted;
             this.overrideTxnIsOffline = overrideTxnIsOffline;
             this.overwriteTTLMode = overwriteTTLMode;
+            this.bumpTTLTimestamp = bumpTTLTimestamp;
         }
 
         @Override
@@ -116,6 +120,7 @@ public interface IScrubber extends Closeable
                    .add("reinsertOverflowedTTLRows=" + reinsertOverflowedTTLRows)
                    .add("skipCorrupted=" + skipCorrupted)
                    .add("overwriteTTLMode=" + overwriteTTLMode)
+                   .add("bumpTTLTimestamp=" + bumpTTLTimestamp)
                    .toString();
         }
 
@@ -125,6 +130,7 @@ public interface IScrubber extends Closeable
             private boolean skipCorrupted = false;
             private boolean overrideTxnIsOffline = false;
             private OverwriteTTLMode overwriteTTLMode = OverwriteTTLMode.NONE;
+            private boolean bumpTTLTimestamp = false;
 
             public Builder checkData()
             {
@@ -190,10 +196,22 @@ public interface IScrubber extends Closeable
                 return this;
             }
 
+            /**
+             * Only meaningful with {@link OverwriteTTLMode#NO_TTL}: rewrite the cells whose TTL is removed with their
+             * original timestamp incremented by one.
+             */
+            public Builder bumpTTLTimestamp(boolean bumpTTLTimestamp)
+            {
+                this.bumpTTLTimestamp = bumpTTLTimestamp;
+                return this;
+            }
+
             public Options build()
             {
+                if (bumpTTLTimestamp && overwriteTTLMode != OverwriteTTLMode.NO_TTL)
+                    throw new IllegalArgumentException("bumpTTLTimestamp can only be used with overwriteTTLMode " + OverwriteTTLMode.NO_TTL);
                 boolean reinsert = overwriteTTLMode == OverwriteTTLMode.REINSERT_OVERFLOWED_TTL;
-                return new Options(checkData, reinsert, skipCorrupted, overrideTxnIsOffline, overwriteTTLMode);
+                return new Options(checkData, reinsert, skipCorrupted, overrideTxnIsOffline, overwriteTTLMode, bumpTTLTimestamp);
             }
         }
     }

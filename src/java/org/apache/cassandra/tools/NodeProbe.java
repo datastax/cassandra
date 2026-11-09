@@ -373,9 +373,16 @@ public class NodeProbe implements AutoCloseable
 
     public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, IScrubber.OverwriteTTLMode overwriteTTLMode, int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
     {
+        return scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode, false, jobs, keyspaceName, tables);
+    }
+
+    public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, IScrubber.OverwriteTTLMode overwriteTTLMode, boolean bumpTTLTimestamp, int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
+    {
         // Route through boolean method unless NO_TTL is requested to preserve compatibility with older nodes during rolling upgrades
         if (overwriteTTLMode == IScrubber.OverwriteTTLMode.NO_TTL)
-            return ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode.name(), jobs, keyspaceName, tables);
+            return bumpTTLTimestamp
+                   ? ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode.name(), true, jobs, keyspaceName, tables)
+                   : ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode.name(), jobs, keyspaceName, tables);
         else
             return ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode == IScrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL, jobs, keyspaceName, tables);
     }
@@ -424,9 +431,14 @@ public class NodeProbe implements AutoCloseable
 
     public void scrub(PrintStream out, boolean disableSnapshot, boolean skipCorrupted, boolean checkData, IScrubber.OverwriteTTLMode overwriteTTLMode, int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
     {
+        scrub(out, disableSnapshot, skipCorrupted, checkData, overwriteTTLMode, false, jobs, keyspaceName, tables);
+    }
+
+    public void scrub(PrintStream out, boolean disableSnapshot, boolean skipCorrupted, boolean checkData, IScrubber.OverwriteTTLMode overwriteTTLMode, boolean bumpTTLTimestamp, int jobs, String keyspaceName, String... tables) throws IOException, ExecutionException, InterruptedException
+    {
         checkJobs(out, jobs);
         perform(out, keyspaceName,
-                () -> scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode, jobs, keyspaceName, tables),
+                () -> scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode, bumpTTLTimestamp, jobs, keyspaceName, tables),
                 "scrubbing");
     }
 

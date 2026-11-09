@@ -76,6 +76,7 @@ public class StandaloneScrubber
     private static final String NO_VALIDATE_OPTION = "no-validate";
     private static final String REINSERT_OVERFLOWED_TTL_OPTION = "reinsert-overflowed-ttl";
     private static final String OVERWRITE_TTL_OPTION = "overwrite-ttl";
+    private static final String BUMP_TTL_TIMESTAMP_OPTION = "bump-ttl-timestamp";
     /**
      * This option was logically removed from the code, but to avoid breaking backwards compatability the option remains
      */
@@ -313,6 +314,13 @@ public class StandaloneScrubber
                     }
                 }
 
+                if (cmd.hasOption(BUMP_TTL_TIMESTAMP_OPTION))
+                {
+                    if (!cmd.hasOption(OVERWRITE_TTL_OPTION) || !IScrubber.OverwriteTTLMode.NO_TTL.name().equals(cmd.getOptionValue(OVERWRITE_TTL_OPTION)))
+                        errorMsg(String.format("--%s can only be used with --%s %s.", BUMP_TTL_TIMESTAMP_OPTION, OVERWRITE_TTL_OPTION, IScrubber.OverwriteTTLMode.NO_TTL), options);
+                    opts.bumpTTLTimestamp(true);
+                }
+
                 if (cmd.hasOption(HEADERFIX_OPTION))
                     System.err.println(String.format("Option %s is deprecated and no longer functional", HEADERFIX_OPTION));
                 return opts;
@@ -360,9 +368,15 @@ public class StandaloneScrubber
             options.addOption("o", OVERWRITE_TTL_OPTION, true, "Overwrite TTL info. Possible argument values:\n" +
                                                                  "- NONE: does nothing\n" +
                                                                  "- NO_TTL: removes TTL from all cells, including already expired ones (resurrected).\n" +
-                                                                 "Cells are rewritten with the original timestamp incremented by one, so that they\n" +
-                                                                 "supersede un-scrubbed expiring copies and expiration tombstones of the same cells\n" +
+                                                                 "Cells keep their original timestamp, so this is only safe if every copy of the data is\n" +
+                                                                 "scrubbed before anything reads or compacts it (e.g. restoring a backup); otherwise\n" +
+                                                                 "un-scrubbed expiring copies and expiration tombstones at the same timestamp win over\n" +
+                                                                 "the scrubbed cells. See --bump-ttl-timestamp\n" +
                                                                  "- REINSERT_OVERFLOWED_TTL: same as --reinsert-overflowed-ttl option");
+            options.addOption(null, BUMP_TTL_TIMESTAMP_OPTION, "Only with '--overwrite-ttl NO_TTL': rewrite cells whose TTL is removed " +
+                                                               "with their original timestamp incremented by one, so that they supersede " +
+                                                               "un-scrubbed expiring copies and expiration tombstones of the same cells. " +
+                                                               "It changes writetime() and can override a write or delete made at exactly timestamp + 1.");
             return options;
         }
 

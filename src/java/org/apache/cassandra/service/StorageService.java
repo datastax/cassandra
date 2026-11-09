@@ -4147,18 +4147,29 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, String overwriteTTLMode, int jobs, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
     {
+        return scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode, false, jobs, keyspaceName, tableNames);
+    }
+
+    public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, String overwriteTTLMode, boolean bumpTTLTimestamp, int jobs, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
+    {
         IScrubber.OverwriteTTLMode mode = overwriteTTLMode == null || overwriteTTLMode.isEmpty()
                                           ? IScrubber.OverwriteTTLMode.NONE
                                           : IScrubber.OverwriteTTLMode.valueOf(overwriteTTLMode);
-        return scrub(disableSnapshot, skipCorrupted, checkData, mode, jobs, keyspaceName, tableNames);
+        return scrub(disableSnapshot, skipCorrupted, checkData, mode, bumpTTLTimestamp, jobs, keyspaceName, tableNames);
     }
 
     public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, IScrubber.OverwriteTTLMode overwriteTTLMode, int jobs, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
+    {
+        return scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode, false, jobs, keyspaceName, tableNames);
+    }
+
+    public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, IScrubber.OverwriteTTLMode overwriteTTLMode, boolean bumpTTLTimestamp, int jobs, String keyspaceName, String... tableNames) throws IOException, ExecutionException, InterruptedException
     {
         IScrubber.Options options = IScrubber.options()
                                              .skipCorrupted(skipCorrupted)
                                              .checkData(checkData)
                                              .overwriteTTLMode(overwriteTTLMode)
+                                             .bumpTTLTimestamp(bumpTTLTimestamp)
                                              .build();
         return scrub(disableSnapshot, options, jobs, keyspaceName, tableNames);
     }

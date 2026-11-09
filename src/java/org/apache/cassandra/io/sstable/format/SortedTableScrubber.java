@@ -370,7 +370,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             case REINSERT_OVERFLOWED_TTL:
                 return new FixNegativeLocalDeletionTimeIterator(rowMergingIterator, outputHandler, negativeLocalDeletionInfoMetrics);
             case NO_TTL:
-                return Transformation.apply(rowMergingIterator, new NoTTLTransformer(outputHandler, realm.metadata(), overwrittenTTLInfoMetrics));
+                return Transformation.apply(rowMergingIterator, new NoTTLTransformer(outputHandler, realm.metadata(), overwrittenTTLInfoMetrics, options.bumpTTLTimestamp));
             default:
                 return rowMergingIterator;
         }
@@ -827,12 +827,19 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         private final TableMetadata metadata;
         private final OutputHandler outputHandler;
         private final OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics;
+        private final long timestampBump;
 
         public NoTTLTransformer(OutputHandler outputHandler, TableMetadata metadata, OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics)
+        {
+            this(outputHandler, metadata, overwrittenTTLInfoMetrics, false);
+        }
+
+        public NoTTLTransformer(OutputHandler outputHandler, TableMetadata metadata, OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics, boolean bumpTimestamp)
         {
             this.metadata = metadata;
             this.outputHandler = outputHandler;
             this.overwrittenTTLInfoMetrics = overwrittenTTLInfoMetrics;
+            this.timestampBump = bumpTimestamp ? 1 : 0;
         }
 
         @Override
@@ -848,11 +855,13 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         }
 
         // Rewrites the row replacing expiring liveness/cells with permanent equivalents, preserving the value.
-        // The rewritten liveness/cells get the original timestamp incremented by one: at the original timestamp they
-        // would lose the equal-timestamp tie against any un-scrubbed expiring copy of the same cell (another sstable,
-        // the memtable, another replica) and against the tombstone compaction produces when such a copy expires
-        // (Cells.reconcile, CASSANDRA-14592), i.e. the permanent copy would be deleted once the TTL elapses anywhere.
-        // Same approach as the CASSANDRA-14092 --reinsert-overflowed-ttl path (see fixCellExpirationTime).
+        // By default the rewritten liveness/cells keep the original timestamp. At that timestamp they lose the
+        // equal-timestamp tie against any un-scrubbed expiring copy of the same cell (another sstable, the memtable,
+        // another replica) and against the tombstone compaction produces when such a copy expires
+        // (Cells.reconcile, CASSANDRA-14592), so the permanent copy would be deleted once the TTL elapses anywhere.
+        // That is only safe when every copy is scrubbed before anything reads or compacts it. When bumping is
+        // requested (--bump-ttl-timestamp) the rewritten liveness/cells get the original timestamp incremented by one
+        // to supersede those copies, at the risk of overriding a genuine write or delete at timestamp + 1.
         protected Row removeTTL(Row row)
         {
             if (!hasAnyTTL(row))
@@ -866,7 +875,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
             LivenessInfo livenessInfo = row.primaryKeyLivenessInfo();
             if (livenessInfo.isExpiring())
             {
-                builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(livenessInfo.timestamp() + 1, LivenessInfo.NO_TTL, FBUtilities.nowInSeconds()));
+                builder.addPrimaryKeyLivenessInfo(LivenessInfo.create(livenessInfo.timestamp() + timestampBump, LivenessInfo.NO_TTL, FBUtilities.nowInSeconds()));
                 ttlWasOverwritten = true;
             }
             else
@@ -898,7 +907,7 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         {
             if (cell.isExpiring())
             {
-                builder.addCell(BufferCell.live(cell.column(), cell.timestamp() + 1, cell.buffer(), cell.path()));
+                builder.addCell(BufferCell.live(cell.column(), cell.timestamp() + timestampBump, cell.buffer(), cell.path()));
                 return true;
             }
             builder.addCell(cell);

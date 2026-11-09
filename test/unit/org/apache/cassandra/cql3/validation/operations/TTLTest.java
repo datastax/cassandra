@@ -520,8 +520,27 @@ public class TTLTest extends CQLTester
 
     // ---- stripTTL tests -------------------------------------------------------
 
+    /**
+     * Runs a NO_TTL scrub of the current table, optionally bumping the timestamp of the cells whose TTL is removed.
+     */
+    private void scrubNoTTL(boolean bumpTimestamp) throws Throwable
+    {
+        IScrubber.Options options = IScrubber.options()
+                                             .checkData()
+                                             .overwriteTTLMode(IScrubber.OverwriteTTLMode.NO_TTL)
+                                             .bumpTTLTimestamp(bumpTimestamp)
+                                             .build();
+        getCurrentColumnFamilyStore().scrub(true, options, 1);
+    }
+
     @Test
     public void testNoTTLStatic() throws Throwable
+    {
+        testNoTTLStatic(false);
+        testNoTTLStatic(true);
+    }
+
+    private void testNoTTLStatic(boolean bumpTimestamp) throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, v int, s int static, PRIMARY KEY(k, c))");
         execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 10)");
@@ -532,47 +551,103 @@ public class TTLTest extends CQLTester
 
         flush();
         compact();
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NO_TTL, true, 1);
+        scrubNoTTL(bumpTimestamp);
 
         assertRows(execute("SELECT s, ttl(s) FROM %s"), row(7, null));
     }
 
     /**
-     * Rows without a TTL should pass through a NO_TTL scrub unchanged.
+     * Rows without a TTL should pass through a NO_TTL scrub unchanged, with and without timestamp bumping.
      */
     @Test
     public void testScrubStripTTLNoOpOnNonExpiringRows() throws Throwable
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
-        for (int i = 0; i < 3; i++)
-            execute("INSERT INTO %s (k, v) VALUES (?, ?)", i, "permanent" + i);
+        for (boolean bumpTimestamp : new boolean[]{ false, true })
+        {
+            createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+            for (int i = 0; i < 3; i++)
+                execute("INSERT INTO %s (k, v) VALUES (?, ?) USING TIMESTAMP 1000", i, "permanent" + i);
+            flush();
 
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        flush();
+            scrubNoTTL(bumpTimestamp);
 
-        cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
-
-        assertEquals("Non-TTL rows should be unchanged after stripTTL scrub", 3, execute("SELECT k, v FROM %s").size());
+            assertEquals("Non-TTL rows should be unchanged after stripTTL scrub", 3, execute("SELECT k, v FROM %s").size());
+            for (UntypedResultSet.Row row : execute("SELECT writetime(v) FROM %s"))
+                assertEquals("Non-TTL cells must keep their timestamp", 1000L, row.getLong("writetime(v)"));
+        }
     }
 
     /**
-     * When OverwriteTTLMode is NONE (default), a scrub must not strip TTLs.
+     * When OverwriteTTLMode is NONE (default), a scrub must not strip TTLs nor touch timestamps.
      */
     @Test
     public void testScrubDefaultDoesNotStripTTL() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
         for (int i = 0; i < 3; i++)
-            execute("INSERT INTO %s (k, v) VALUES (?, ?) USING TTL 3600", i, "val" + i);
+            execute("INSERT INTO %s (k, v) VALUES (?, ?) USING TTL 3600 AND TIMESTAMP 1000", i, "val" + i);
 
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         flush();
 
         cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NONE, false, true, 1);
 
-        for (UntypedResultSet.Row row : execute("SELECT k, v, ttl(v) FROM %s"))
+        for (UntypedResultSet.Row row : execute("SELECT k, v, ttl(v), writetime(v) FROM %s"))
+        {
             assertTrue("TTL should still be present when scrub is run with NONE mode", row.getInt("ttl(v)") > 0);
+            assertEquals("Timestamp must not be touched when scrub is run with NONE mode", 1000L, row.getLong("writetime(v)"));
+        }
+    }
+
+    /**
+     * A scrub built with the default options, as used by every non-TTL scrub, must never go through the NO_TTL code:
+     * it removes no TTL, bumps no timestamp and reports no overwritten rows.
+     */
+    @Test
+    public void testDefaultScrubOptionsNeverOverwriteTTLOrTimestamp() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 0, 0) USING TTL 3600 AND TIMESTAMP 1000");
+        flush();
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        IScrubber.Options options = IScrubber.options().checkData().build();
+        assertEquals(IScrubber.OverwriteTTLMode.NONE, options.overwriteTTLMode);
+        assertTrue(!options.bumpTTLTimestamp);
+
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        try (LifecycleTransaction txn = cfs.getTracker().tryModify(Collections.singletonList(sstable), OperationType.SCRUB);
+             IScrubber scrubber = sstable.descriptor.getFormat().getScrubber(cfs, txn, new OutputHandler.LogOutput(), options))
+        {
+            assertEquals(0, scrubber.scrubWithResult().noTTLOverwrittenRows);
+        }
+
+        UntypedResultSet.Row row = execute("SELECT ttl(v), writetime(v) FROM %s WHERE k = 0 AND c = 0").one();
+        assertTrue(row.getInt("ttl(v)") > 0);
+        assertEquals(1000L, row.getLong("writetime(v)"));
+    }
+
+    /**
+     * Scrubbing with a mode other than NO_TTL (NONE or REINSERT_OVERFLOWED_TTL) must not strip TTLs nor touch
+     * timestamps of data that has no overflowed expiration date.
+     */
+    @Test
+    public void testOtherScrubModesDoNotStripTTLOrBumpTimestamp() throws Throwable
+    {
+        for (IScrubber.OverwriteTTLMode mode : new IScrubber.OverwriteTTLMode[]{ IScrubber.OverwriteTTLMode.NONE,
+                                                                                  IScrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL })
+        {
+            createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+            execute("INSERT INTO %s (k, v) VALUES (0, 0) USING TTL 3600 AND TIMESTAMP 1000");
+            flush();
+
+            getCurrentColumnFamilyStore().scrub(true, IScrubber.options().checkData().overwriteTTLMode(mode).build(), 1);
+
+            UntypedResultSet.Row row = execute("SELECT v, ttl(v), writetime(v) FROM %s").one();
+            assertEquals(0, row.getInt("v"));
+            assertTrue("TTL must be kept with " + mode, row.getInt("ttl(v)") > 0);
+            assertEquals("Timestamp must be kept with " + mode, 1000L, row.getLong("writetime(v)"));
+        }
     }
 
     /**
@@ -582,13 +657,16 @@ public class TTLTest extends CQLTester
     @Test
     public void testOverwriteTTL() throws Throwable
     {
-        testOverwriteNOTTLPolicy(true, false);
-        testOverwriteNOTTLPolicy(true, true);
-        testOverwriteNOTTLPolicy(false, false);
-        testOverwriteNOTTLPolicy(false, true);
+        for (boolean bumpTimestamp : new boolean[]{ false, true })
+        {
+            testOverwriteNOTTLPolicy(true, false, bumpTimestamp);
+            testOverwriteNOTTLPolicy(true, true, bumpTimestamp);
+            testOverwriteNOTTLPolicy(false, false, bumpTimestamp);
+            testOverwriteNOTTLPolicy(false, true, bumpTimestamp);
+        }
     }
 
-    private void testOverwriteNOTTLPolicy(boolean simple, boolean clustering) throws Throwable
+    private void testOverwriteNOTTLPolicy(boolean simple, boolean clustering, boolean bumpTimestamp) throws Throwable
     {
         createTable(simple, clustering);
         Keyspace keyspace = Keyspace.open(KEYSPACE);
@@ -641,7 +719,7 @@ public class TTLTest extends CQLTester
         }
 
         flush();
-        cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+        scrubNoTTL(bumpTimestamp);
 
         if (simple)
         {
@@ -667,38 +745,45 @@ public class TTLTest extends CQLTester
     }
 
     /**
-     * Verifies that NO_TTL scrub strips TTL and resurrects rows whose TTL has already expired.
+     * Verifies that NO_TTL scrub strips TTL and resurrects rows whose TTL has already expired, with and without
+     * timestamp bumping.
      */
     @Test
     public void testScrubResurrectsExpiredCells() throws Throwable
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text) WITH gc_grace_seconds = 0");
-        execute("INSERT INTO %s (k, v) VALUES (0, 'expired_val') USING TTL 1");
-        execute("INSERT INTO %s (k, v) VALUES (1, 'permanent_val')");
-        flush();
+        for (boolean bumpTimestamp : new boolean[]{ false, true })
+        {
+            createTable("CREATE TABLE %s (k int PRIMARY KEY, v text) WITH gc_grace_seconds = 0");
+            execute("INSERT INTO %s (k, v) VALUES (0, 'expired_val') USING TTL 1 AND TIMESTAMP 1000");
+            execute("INSERT INTO %s (k, v) VALUES (1, 'permanent_val') USING TIMESTAMP 2000");
+            flush();
 
-        // Wait for row 0 to expire
-        Thread.sleep(2000);
+            // Wait for row 0 to expire
+            Thread.sleep(2000);
 
-        // Before scrub: row 0 is expired and cannot be queried
-        assertRows(execute("SELECT k, v FROM %s"), row(1, "permanent_val"));
+            // Before scrub: row 0 is expired and cannot be queried
+            assertRows(execute("SELECT k, v FROM %s"), row(1, "permanent_val"));
 
-        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
-        cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
+            scrubNoTTL(bumpTimestamp);
 
-        // After NO_TTL scrub: row 0 has been resurrected as permanent without TTL
-        assertRows(execute("SELECT k, v, ttl(v) FROM %s WHERE k = 0"), row(0, "expired_val", null));
-        assertRows(execute("SELECT k, v, ttl(v) FROM %s WHERE k = 1"), row(1, "permanent_val", null));
+            // After NO_TTL scrub: row 0 has been resurrected as permanent without TTL; only its timestamp is bumped,
+            // and only when requested
+            assertRows(execute("SELECT k, v, ttl(v), writetime(v) FROM %s WHERE k = 0"),
+                       row(0, "expired_val", null, bumpTimestamp ? 1001L : 1000L));
+            assertRows(execute("SELECT k, v, ttl(v), writetime(v) FROM %s WHERE k = 1"),
+                       row(1, "permanent_val", null, 2000L));
+        }
     }
 
     /**
-     * NO_TTL rewrites cells with the original timestamp incremented by one. Without the bump, a permanent copy
-     * written by the scrub loses the equal-timestamp tie against any un-scrubbed expiring copy of the same cell
-     * (CASSANDRA-14592: expiring beats non-expiring) and is deleted once that copy expires. Two copies of the same
-     * cell in two sstables stand in for "the memtable", "another sstable" or "another replica"; only one is scrubbed.
+     * With the bump enabled, NO_TTL rewrites cells with the original timestamp incremented by one. Without the bump,
+     * a permanent copy written by the scrub loses the equal-timestamp tie against any un-scrubbed expiring copy of
+     * the same cell (CASSANDRA-14592: expiring beats non-expiring) and is deleted once that copy expires. Two copies
+     * of the same cell in two sstables stand in for "the memtable", "another sstable" or "another replica"; only one
+     * is scrubbed.
      */
     @Test
-    public void testScrubNoTTLSupersedesUnscrubbedExpiringCopy() throws Throwable
+    public void testScrubNoTTLWithBumpSupersedesUnscrubbedExpiringCopy() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v int) WITH gc_grace_seconds = 0");
         execute("INSERT INTO %s (k, v) VALUES (0, 0) USING TTL 2 AND TIMESTAMP 1000");
@@ -709,7 +794,11 @@ public class TTLTest extends CQLTester
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         assertEquals(2, cfs.getLiveSSTables().size());
         SSTableReader toScrub = cfs.getLiveSSTables().iterator().next();
-        IScrubber.Options options = IScrubber.options().checkData().overwriteTTLMode(IScrubber.OverwriteTTLMode.NO_TTL).build();
+        IScrubber.Options options = IScrubber.options()
+                                             .checkData()
+                                             .overwriteTTLMode(IScrubber.OverwriteTTLMode.NO_TTL)
+                                             .bumpTTLTimestamp(true)
+                                             .build();
         try (LifecycleTransaction txn = cfs.getTracker().tryModify(Collections.singletonList(toScrub), OperationType.SCRUB);
              IScrubber scrubber = toScrub.descriptor.getFormat().getScrubber(cfs, txn, new OutputHandler.LogOutput(), options))
         {
@@ -730,11 +819,10 @@ public class TTLTest extends CQLTester
     }
 
     /**
-     * Rows without regular columns only carry the primary-key liveness info; its TTL is stripped and its
-     * timestamp bumped the same way as for cells, while rows and cells that never had a TTL are untouched.
+     * By default NO_TTL only strips the TTL: timestamps are left as they are.
      */
     @Test
-    public void testScrubNoTTLBumpsTimestampOnlyOfExpiringData() throws Throwable
+    public void testScrubNoTTLKeepsTimestampByDefault() throws Throwable
     {
         createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
         execute("INSERT INTO %s (k, c, v) VALUES (0, 0, 0) USING TTL 3600 AND TIMESTAMP 1000");
@@ -746,10 +834,61 @@ public class TTLTest extends CQLTester
         cfs.scrub(true, false, IScrubber.OverwriteTTLMode.NO_TTL, false, true, 1);
 
         assertRows(execute("SELECT c, v, ttl(v), writetime(v) FROM %s"),
+                   row(0, 0, null, 1000L),
+                   row(1, 1, null, 2000L),
+                   row(2, null, null, null));
+        // the row with only primary-key liveness survives as a permanent row
+        assertRows(execute("SELECT c FROM %s WHERE k = 0 AND c = 2"), row(2));
+    }
+
+    /**
+     * Rows without regular columns only carry the primary-key liveness info; with the bump enabled its TTL is
+     * stripped and its timestamp bumped the same way as for cells, while rows and cells that never had a TTL are
+     * untouched.
+     */
+    @Test
+    public void testScrubNoTTLWithBumpBumpsTimestampOnlyOfExpiringData() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 0, 0) USING TTL 3600 AND TIMESTAMP 1000");
+        execute("INSERT INTO %s (k, c, v) VALUES (0, 1, 1) USING TIMESTAMP 2000");
+        execute("INSERT INTO %s (k, c) VALUES (0, 2) USING TTL 3600 AND TIMESTAMP 3000");
+        flush();
+
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        IScrubber.Options options = IScrubber.options()
+                                             .checkData()
+                                             .overwriteTTLMode(IScrubber.OverwriteTTLMode.NO_TTL)
+                                             .bumpTTLTimestamp(true)
+                                             .build();
+        cfs.scrub(true, false, options, 1);
+
+        assertRows(execute("SELECT c, v, ttl(v), writetime(v) FROM %s"),
                    row(0, 0, null, 1001L),
                    row(1, 1, null, 2000L),
                    row(2, null, null, null));
         // the row with only primary-key liveness survives as a permanent row
         assertRows(execute("SELECT c FROM %s WHERE k = 0 AND c = 2"), row(2));
+    }
+
+    /**
+     * Bumping the timestamp only makes sense when TTLs are removed.
+     */
+    @Test
+    public void testBumpTTLTimestampRequiresNoTTLMode()
+    {
+        for (IScrubber.OverwriteTTLMode mode : new IScrubber.OverwriteTTLMode[]{ IScrubber.OverwriteTTLMode.NONE,
+                                                                                  IScrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL })
+        {
+            try
+            {
+                IScrubber.options().overwriteTTLMode(mode).bumpTTLTimestamp(true).build();
+                fail("bumpTTLTimestamp must be rejected with " + mode);
+            }
+            catch (IllegalArgumentException expected)
+            {
+                assertTrue(expected.getMessage().contains("NO_TTL"));
+            }
+        }
     }
 }
