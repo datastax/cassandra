@@ -38,7 +38,7 @@ import org.apache.cassandra.utils.CassandraVersion;
  */
 public final class DseCompat
 {
-    /** The messaging version DSE uses with non-DSE peers: the dialect of DSE 6 peers. */
+    /** The messaging version DSE uses with non-DSE peers, and the only one this software speaks with DSE. */
     public static final int DSE_DIALECT = MessagingService.VERSION_3014;
 
     /** The value DSE puts in the "requested version" byte of its first handshake message. */
@@ -81,7 +81,12 @@ public final class DseCompat
                                                                         DSE_68_VERSION, DSE_681_VERSION, DSE_69_VERSION,
                                                                         DSE_697_VERSION);
 
-    /** A 4-byte second handshake message of at least this value is a DSE messaging version ({@code relative << 8}). */
+    /**
+     * A 4-byte second handshake message of at least this value is decoded as a DSE messaging version
+     * ({@code relative << 8}) and mapped to the dialect ({@link #dialectFor}); {@link #isDseHandshakeVersion} tells a
+     * well-formed one, which a handshake needs to identify a DSE node. A gossiped {@code NET_VERSION} of at least this
+     * value is taken for a DSE version as it is, without that check: DSE gossips only its own version.
+     */
     public static final int DSE_HANDSHAKE_MIN = DSE_60_VERSION;
 
     /** The lowest pre-4.0 version a peer may request; older versions are refused (Cassandra 3.0.0). */
@@ -133,7 +138,7 @@ public final class DseCompat
         return configured;
     }
 
-    /** True in DSE 6 compatibility mode ({@link DatabaseDescriptor#isDse6CompatibilityMode()}): the gate of the pre-4.0 code. */
+    /** True while the node accepts DSE 6 peers: the guard of every pre-4.0 code path. */
     public static boolean enabled()
     {
         return DatabaseDescriptor.isDse6CompatibilityMode();
@@ -159,6 +164,17 @@ public final class DseCompat
     public static int dialectFor(int peerHandshakeVersion)
     {
         return peerHandshakeVersion >= DSE_HANDSHAKE_MIN ? DSE_DIALECT : peerHandshakeVersion;
+    }
+
+    /**
+     * True for a DSE messaging version as DSE writes it in a handshake: its relative version (1 to 255) shifted left by
+     * 8 bits ({@link #DSE_60_VERSION}), so 256 to 65280 ({@code 255 << 8}) and a multiple of 256. Another 4-byte
+     * answer of {@link #DSE_HANDSHAKE_MIN} or more is still mapped to the dialect, but identifies no DSE node and does
+     * not complete a pre-4.0 handshake.
+     */
+    static boolean isDseHandshakeVersion(int version)
+    {
+        return version >= DSE_HANDSHAKE_MIN && version <= 255 << 8 && (version & 0xFF) == 0;
     }
 
     /**

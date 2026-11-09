@@ -47,8 +47,8 @@ import org.apache.cassandra.net.MessagingService;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The record of DSE 6 peers: maintained from the messaging versions the node records (the pre-4.0 dialect, DSE's
- * own gossip values), loaded from the previous run at startup, persisted for the startup checks,
+ * The record of DSE 6 peers: maintained from the messaging versions the node records (the dialect from a
+ * handshake, DSE's own gossip values), loaded from the previous run at startup, persisted for the startup checks,
  * and untouched with {@code internode_compatibility_mode: NONE}.
  */
 public class DsePeersRecordTest

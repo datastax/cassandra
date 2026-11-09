@@ -1732,11 +1732,10 @@ public class DatabaseDescriptor
     /**
      * Reads {@code internode_compatibility_mode} (the {@code cassandra.internode_compatibility_mode} property wins
      * over the yaml) and, for {@link InternodeCompatibilityMode#DSE_6}, checks (and for the sstable settings
-     * forces) the settings DSE 6 needs to read, after a rollback, what this node writes:
-     * {@code storage_compatibility_mode: HCD_1}, the {@code bti} sstable format at trie version {@code bb}, numeric
-     * sstable generations, the default compression selector, {@code flush_compression} {@code fast} or {@code table}
-     * and {@code paxos_variant: v1}. Must run before the sstable formats are loaded, because the trie version is read
-     * once when {@code BtiFormat} initialises.
+     * forces) the settings a DSE peer needs to read what this node writes: {@code storage_compatibility_mode: HCD_1},
+     * the {@code bti} sstable format at trie version {@code bb}, numeric sstable generations, the default compression
+     * selector, {@code flush_compression} {@code fast} or {@code table} and {@code paxos_variant: v1}. Must run before
+     * the sstable formats are loaded, because the trie version is read once when {@code BtiFormat} initialises.
      * <p>
      * Tools and clients do not speak the internode protocol, so for them the mode stays {@code NONE}; they still
      * inherit its on-disk half (trie version {@code bb}, numeric generations, the compressor checks), because what an
@@ -1904,7 +1903,8 @@ public class DatabaseDescriptor
         // logged once the version is known to be the one written
         if (internodeCompatibilityMode.isDse6())
             logger.warn("Running in internode_compatibility_mode DSE_6: the node writes trie {} sstables with numeric generations " +
-                        "and requires paxos_variant v1, until the flag is dropped",
+                        "and requires paxos_variant v1; it speaks with DSE 6 peers the pre-4.0 internode dialect DSE uses with non-DSE " +
+                        "peers, until the flag is dropped",
                         effective);
     }
 
@@ -5705,7 +5705,8 @@ public class DatabaseDescriptor
 
     /**
      * True while the node runs in {@code internode_compatibility_mode: DSE_6} (never for tools and clients); the gate
-     * of the DSE-specific code paths of the node.
+     * of every DSE-specific code path: the on-disk format DSE reads and the pre-4.0 internode dialect spoken with DSE 6
+     * peers.
      */
     public static boolean isDse6CompatibilityMode()
     {

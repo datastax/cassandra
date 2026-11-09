@@ -35,11 +35,11 @@ import org.apache.cassandra.tools.NodeTool;
 
 /**
  * Shows the compatibility modes the node runs with, the sstable format it writes, what it knows about its peers'
- * messaging versions, the DSE 6 peers it has on record, the SAI on-disk version it pins for a rollback to DSE and
- * the requests it refused because of the upgrade: the operator's view during an in-place upgrade from DataStax
- * Enterprise 6.
+ * messaging versions, the DSE peers it sees in gossip or has identified by a handshake, the DSE 6 peers it has on
+ * record, the SAI on-disk version it pins for a rollback to DSE and the requests it refused because of the upgrade:
+ * the operator's view during an in-place upgrade from DataStax Enterprise 6.
  */
-@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE 6 peers on record, the SAI on-disk version pinned and the requests refused during the upgrade")
+@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE peers seen in gossip or identified by a handshake, the DSE 6 peers on record, the SAI on-disk version pinned and the requests refused during the upgrade")
 public class CompatStatus extends NodeTool.NodeToolCmd
 {
     private static final String DSE_6 = InternodeCompatibilityMode.DSE_6.name();
@@ -83,9 +83,15 @@ public class CompatStatus extends NodeTool.NodeToolCmd
             out.printf("  %-45s %d%s%n", e.getKey(), version, note);
         }
 
-        // the record of DSE 6 peers exists in DSE_6 mode only; its entries that are not addresses with port are counted and listed too
+        // the DSE peers and their record exist in DSE_6 mode only; the record's entries that are not addresses with port
+        // are counted and listed too
         boolean dse6 = DSE_6.equals(mode);
         String notInTheMode = " (internode_compatibility_mode " + mode + ')';
+        if (dse6)
+            printDsePeers(probe, out);
+        else
+            out.printf("DSE peers                    : not tracked%s%n", notInTheMode);
+
         List<String> onRecord = dse6 ? ifReported(probe::getDsePeersOnRecord) : null;
         if (!dse6)
             out.printf("DSE 6 peers on record        : not maintained%s%n", notInTheMode);
@@ -134,6 +140,21 @@ public class CompatStatus extends NodeTool.NodeToolCmd
             out.printf("SAI version pinned           : unknown (this node does not report it)%n");
         else
             out.printf("SAI version pinned           : %s%n", pin.orElse("unknown (not checked yet)"));
+    }
+
+    @VisibleForTesting
+    static void printDsePeers(NodeProbe probe, PrintStream out)
+    {
+        Map<String, String> reported = ifReported(probe::getDsePeers);
+        if (reported == null)
+        {
+            out.printf("DSE peers                    : %s%n", NOT_REPORTED);
+            return;
+        }
+        Map<String, String> dsePeers = new TreeMap<>(reported);
+        out.printf("DSE peers                    : %d%n", dsePeers.size());
+        for (Map.Entry<String, String> e : dsePeers.entrySet())
+            out.printf("  %-45s %s%n", e.getKey(), e.getValue());
     }
 
     /**

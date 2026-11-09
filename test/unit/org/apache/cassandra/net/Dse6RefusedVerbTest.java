@@ -17,20 +17,27 @@
 package org.apache.cassandra.net;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.DsePeersRecord;
 
+import static org.apache.cassandra.net.ConnectionType.LARGE_MESSAGES;
+import static org.apache.cassandra.net.ConnectionType.SMALL_MESSAGES;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -41,10 +48,13 @@ import static org.junit.Assert.assertTrue;
 /**
  * DSE 6 compatibility mode: a request whose verb does not exist in the pre-4.0 dialect (repair, Paxos v2, ping, custom
  * verbs...) never reaches a DSE 6 peer. {@code MessagingService} refuses it before it is queued, failing its callback at
- * once. Every refusal is counted for {@code nodetool compatstatus}.
+ * once; one queued before the peer's version was known is refused when it is serialized, and dropped cleanly: the
+ * connection stays up, its reserved capacity is released once, the messages behind it are delivered. Every refusal is
+ * counted for {@code nodetool compatstatus}.
  */
 public class Dse6RefusedVerbTest
 {
+    private static final SocketFactory factory = new SocketFactory();
     private static final String PING_REFUSAL = "verb PING_REQ to a DSE 6 peer";
 
     private InternodeCompatibilityMode modeBefore;
@@ -53,6 +63,12 @@ public class Dse6RefusedVerbTest
     public static void startup()
     {
         DatabaseDescriptor.daemonInitialization();
+    }
+
+    @AfterClass
+    public static void cleanup() throws InterruptedException
+    {
+        factory.shutdownNow();
     }
 
     @Before
@@ -98,6 +114,17 @@ public class Dse6RefusedVerbTest
         {
             forget(messaging, dsePeer, minClusterVersionBefore);
         }
+    }
+
+    /**
+     * A refused message already queued on a connection that turns out to speak the dialect: it fails to serialize, is
+     * dropped once with its capacity released, and the message behind it is delivered on the same connection.
+     */
+    @Test
+    public void refusedWhenSerializedOnAConnectionAtVersion11() throws Throwable
+    {
+        for (ConnectionType type : new ConnectionType[]{ SMALL_MESSAGES, LARGE_MESSAGES })
+            refusedWhenSerialized(type);
     }
 
     /**
@@ -162,5 +189,52 @@ public class Dse6RefusedVerbTest
                 failure.complete(failureReason);
             }
         };
+    }
+
+    private void refusedWhenSerialized(ConnectionType type) throws Throwable
+    {
+        InboundSockets inbound = new InboundSockets(new InboundConnectionSettings().withAcceptMessaging(null));
+        inbound.open().sync();
+        InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
+        MessagingService.instance().versions.set(endpoint, VERSION_3014);
+        CountDownLatch delivered = new CountDownLatch(1);
+        Supplier<? extends IVerbHandler<?>> echoHandler = Verb.ECHO_REQ.unsafeSetHandler(() -> message -> delivered.countDown());
+        OutboundConnectionSettings template = new OutboundConnectionSettings(endpoint).withDefaultReserveLimits()
+                                                                                      .withSocketFactory(factory)
+                                                                                      .withDefaults(ConnectionCategory.MESSAGING);
+        ResourceLimits.EndpointAndGlobal reserve = new ResourceLimits.EndpointAndGlobal(new ResourceLimits.Concurrent(template.applicationSendQueueReserveEndpointCapacityInBytes),
+                                                                                         template.applicationSendQueueReserveGlobalCapacityInBytes);
+        OutboundConnection outbound = new OutboundConnection(type, template, reserve);
+        try
+        {
+            // queued straight on the connection, bypassing the check of MessagingService, as a message queued before
+            // the peer's version was known is: the connection is established at 11 when it is serialized
+            CompletableFuture<RequestFailureReason> failure = new CompletableFuture<>();
+            Message<PingRequest> ping = Message.out(Verb.PING_REQ, PingRequest.forSmall);
+            MessagingService.instance().callbacks.addWithExpiration(failureCallback(failure), ping, endpoint);
+            outbound.enqueue(ping);
+            outbound.enqueue(Message.out(Verb.ECHO_REQ, noPayload));
+
+            assertTrue(type + ": the message behind the refused one is delivered", delivered.await(30, TimeUnit.SECONDS));
+            // its callback fails at once, as for a message refused before it is queued
+            assertSame(type.toString(), RequestFailureReason.UNKNOWN, failure.get(10, TimeUnit.SECONDS));
+            assertNull(MessagingService.instance().callbacks.get(ping.id(), endpoint));
+            Util.spinAssertEquals(0, outbound::pendingCount, 10);
+            assertEquals(type + " connection at the dialect", VERSION_3014, outbound.messagingVersion());
+            assertEquals(type + " refused message dropped once", 1, outbound.errorCount());
+            assertEquals(type + " sent", 1, outbound.sentCount());
+            assertEquals(type + " a single connection, no reconnect", 1, outbound.successfulConnections());
+            assertTrue(outbound.isConnected());
+            Util.spinAssertEquals(0L, () -> reserve.endpoint().using(), 10);
+            assertEquals(1, DseCompatRefusals.count(PING_REFUSAL));
+        }
+        finally
+        {
+            outbound.close(false).get(30, TimeUnit.SECONDS);
+            inbound.close().get(30, TimeUnit.SECONDS);
+            Verb.ECHO_REQ.unsafeSetHandler(echoHandler);
+            MessagingService.instance().versions.reset(endpoint);
+            DseCompatRefusals.reset();
+        }
     }
 }
