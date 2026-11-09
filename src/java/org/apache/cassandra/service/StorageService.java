@@ -1611,7 +1611,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             if (keyspace == null)
             {
-                for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
+                for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces().names())
                     streamer.addRanges(keyspaceName, getLocalReplicas(keyspaceName));
             }
             else if (tokens == null)
@@ -2609,7 +2609,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // some people just want to get a visual representation of things. Allow null and set it to the first
         // non-system keyspace.
         if (keyspace == null)
-            keyspace = Schema.instance.distributedKeyspaces().iterator().next().name;
+            keyspace = Schema.instance.getNonLocalStrategyKeyspaces().iterator().next().name;
 
         Map<List<String>, List<String>> map = new HashMap<>();
         for (Map.Entry<Range<Token>, EndpointsForRange> entry : getTokenMetadata().getPendingRangesMM(keyspace).asMap().entrySet())
@@ -2663,7 +2663,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // some people just want to get a visual representation of things. Allow null and set it to the first
         // non-system keyspace.
         if (keyspace == null)
-            keyspace = Schema.instance.distributedKeyspaces().iterator().next().name;
+            keyspace = Schema.instance.getNonLocalStrategyKeyspaces().iterator().next().name;
 
         List<Range<Token>> ranges = getAllRanges(sortedTokens);
         return constructRangeToEndpointMap(keyspace, ranges);
@@ -3720,7 +3720,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         InetAddressAndPort myAddress = FBUtilities.getBroadcastAddressAndPort();
 
-        for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
+        for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces().names())
         {
             logger.debug("Restoring replica count for keyspace {}", keyspaceName);
             EndpointsByReplica changedReplicas = getChangedReplicasForLeaving(keyspaceName, endpoint, getTokenMetadata(), Keyspace.open(keyspaceName).getReplicationStrategy());
@@ -4988,7 +4988,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         List<Future<?>> futures = new ArrayList<>();
 
-        Keyspaces keyspaces = Schema.instance.distributedKeyspaces();
+        Keyspaces keyspaces = Schema.instance.getNonLocalStrategyKeyspaces();
         for (String ksName : keyspaces.names())
         {
             if (SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES.contains(ksName))
@@ -5616,7 +5616,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         Map<String, EndpointsByReplica> rangesToStream = new HashMap<>();
 
-        for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
+        for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces().names())
         {
             EndpointsByReplica rangesMM = getChangedReplicasForLeaving(keyspaceName, FBUtilities.getBroadcastAddressAndPort(), getTokenMetadata(), Keyspace.open(keyspaceName).getReplicationStrategy());
 
@@ -5741,7 +5741,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             throw new UnsupportedOperationException("This node has more than one token and cannot be moved thusly.");
         }
 
-        List<String> keyspacesToProcess = ImmutableList.copyOf(Schema.instance.distributedKeyspaces().names());
+        List<String> keyspacesToProcess = ImmutableList.copyOf(Schema.instance.getNonLocalStrategyKeyspaces().names());
 
         PendingRangeCalculatorService.instance.blockUntilFinished();
         // checking if data is moving to this node
@@ -5888,7 +5888,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Collection<Token> tokens = getTokenMetadata().getTokens(endpoint);
 
         // Find the endpoints that are going to become responsible for data
-        for (String keyspaceName : Schema.instance.distributedKeyspaces().names())
+        for (String keyspaceName : Schema.instance.getNonLocalStrategyKeyspaces().names())
         {
             // if the replication factor is 1 the data is lost so we shouldn't wait for confirmation
             if (Keyspace.open(keyspaceName).getReplicationStrategy().getReplicationFactor().allReplicas == 1)
@@ -6085,12 +6085,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
             // count CFs first, since forceFlush could block for the flushWriter to get a queue slot empty
             totalCFs = 0;
-            for (Keyspace keyspace : Keyspace.nonLocalStrategy())
+            for (Keyspace keyspace : Keyspace.distributed())
                 totalCFs += keyspace.getColumnFamilyStores().size();
             remainingCFs = totalCFs;
             // flush
             List<Future<?>> flushes = new ArrayList<>();
-            for (Keyspace keyspace : Keyspace.nonLocalStrategy())
+            for (Keyspace keyspace : Keyspace.distributed())
             {
                 for (ColumnFamilyStore cfs : keyspace.getColumnFamilyStores())
                     flushes.add(cfs.forceFlush(ColumnFamilyStore.FlushReason.DRAIN));
@@ -6359,7 +6359,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         }
         else
         {
-            Collection<String> userKeyspaces = Schema.instance.getUserKeyspaces();
+            // the user keyspaces that own token ranges: a LocalStrategy keyspace left by DSE 6 owns none, and its
+            // settings would never match those of the others
+            Collection<String> userKeyspaces = Sets.difference(Schema.instance.getNonLocalStrategyKeyspaces().names(),
+                                                               SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES);
 
             if (!userKeyspaces.isEmpty())
             {
@@ -6440,7 +6443,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public List<String> getNonLocalStrategyKeyspaces()
     {
-        return Lists.newArrayList(Schema.instance.distributedKeyspaces().names());
+        return Lists.newArrayList(Schema.instance.getNonLocalStrategyKeyspaces().names());
     }
 
     public Map<String, String> getViewBuildStatuses(String keyspace, String view, boolean withPort)

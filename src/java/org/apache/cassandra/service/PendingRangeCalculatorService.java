@@ -133,7 +133,7 @@ public class PendingRangeCalculatorService
 
     public void update(Predicate<String> keyspaceNamePredicate)
     {
-        Collection<String> affectedKeyspaces = schema.distributedKeyspaces().names().stream().filter(keyspaceNamePredicate).collect(Collectors.toList());
+        Collection<String> affectedKeyspaces = schema.getNonLocalStrategyKeyspaces().names().stream().filter(keyspaceNamePredicate).collect(Collectors.toList());
         keyspacesWithPendingRanges.addAll(affectedKeyspaces);
         boolean success = update.trigger();
         if (!success) PendingRangeCalculatorServiceDiagnostics.taskRejected(1);
