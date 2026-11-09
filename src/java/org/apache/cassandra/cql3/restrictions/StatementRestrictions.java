@@ -495,15 +495,20 @@ public class StatementRestrictions
                     ColumnMetadata def = restriction.getFirstColumn();
                     if (def.isPartitionKey())
                     {
-                        // All partition key restrictions must be a part of the top-level AND operation.
-                        // The read path filtering logic is currently unable to filter rows based on
-                        // partition key restriction that is a part of a complex expression involving disjunctions.
-                        // ALLOW FILTERING does not cut it, as RowFilter can't handle ORed partition
-                        // key restrictions properly.
-                        if (nestingLevel > 0)
-                            throw invalidRequest(StatementRestrictions.PARTITION_KEY_RESTRICTION_MUST_BE_TOP_LEVEL, def);
+                        if (nestingLevel == 0)
+                        {
+                            partitionKeyRestrictionSet.addRestriction(restriction);
+                        }
+                        else
+                        {
+                            // A partition key restriction nested under OR doesn't select partitions. As with clustering
+                            // columns below, we treat it as a regular column and use its index, if any, or row filtering.
+                            // Only SELECT can do that, and token() has no column value that an index or a filter can read.
+                            if (!type.isSelect() || forView || restriction.isOnToken())
+                                throw invalidRequest(StatementRestrictions.PARTITION_KEY_RESTRICTION_MUST_BE_TOP_LEVEL, def);
 
-                        partitionKeyRestrictionSet.addRestriction(restriction);
+                            nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction());
+                        }
                     }
                     // If a clustering column restriction is nested (under OR operator),
                     // we can't treat it as a real clustering column,
@@ -550,7 +555,8 @@ public class StatementRestrictions
                 hasQueryableClusteringColumnIndex = clusteringColumnsRestrictions.hasSupportingIndex(indexRegistry, indexHints);
                 hasQueryableIndex = element.containsCustomExpressions()
                                     || hasQueryableClusteringColumnIndex
-                                    || partitionKeyRestrictions.hasSupportingIndex(indexRegistry, indexHints)
+                                    // a fully restricted partition key is read directly, it doesn't need its index
+                                    || (partitionKeyRestrictions.needFiltering(table) && partitionKeyRestrictions.hasSupportingIndex(indexRegistry, indexHints))
                                     || nonPrimaryKeyRestrictions.hasSupportingIndex(indexRegistry, indexHints);
             }
 

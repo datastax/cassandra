@@ -108,6 +108,31 @@ public class QueryTracingTest extends SAITester
                            "v ANN OF [1.2, 3.4] DESC");
     }
 
+    /**
+     * An index on the only partition key column is for the relations that need it, not for reading a partition.
+     */
+    @Test
+    public void testIndexOnOnlyPartitionKeyColumnIsNotUsedToReadAPartition()
+    {
+        createTable("CREATE TABLE %s(k int, c int, a int, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX k_idx ON %s(k) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX a_idx ON %s(a) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s(k, c, a) VALUES (0, 0, 0)");
+
+        tracing.getTraces().clear();
+        assertRows(execute("SELECT c FROM %s WHERE k = 0"), row(0));
+        Assertions.assertThat(tracing.getTraces()).noneMatch(trace -> trace.startsWith("Query execution plan"));
+
+        tracing.getTraces().clear();
+        assertRows(execute("SELECT c FROM %s WHERE k = 0 OR a = 1"), row(0));
+        Assertions.assertThat(tracing.getTraces())
+                  .filteredOn(trace -> trace.startsWith("Query execution plan"))
+                  .singleElement()
+                  .asString()
+                  .contains("k_idx")
+                  .contains("a_idx");
+    }
+
     @Test
     public void testMetricsTracing()
     {

@@ -48,6 +48,8 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -304,6 +306,19 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         }
     }
 
+    /**
+     * An equality on the only partition key column is a direct partition read, so such an index used to be pointless.
+     * It isn't for SAI: a relation nested under OR can't select a partition, so it needs the index to avoid a full scan.
+     * Vector and analyzed indexes keep being refused, as they serve neither that lookup nor an existing use case.
+     */
+    private boolean canIndexOnlyPartitionKeyColumn(ColumnMetadata column)
+    {
+        return attrs.isCustom
+               && StorageAttachedIndex.class.getName().equals(IndexMetadata.expandAliases(attrs.customClass))
+               && !column.type.isVector()
+               && !AbstractAnalyzer.isAnalyzed(attrs.getOptions());
+    }
+
     private void validateIndexTarget(TableMetadata table, IndexMetadata.Kind kind, IndexTarget target)
     {
         ColumnMetadata column = table.getColumn(target.column);
@@ -336,7 +351,7 @@ public final class CreateIndexStatement extends AlterSchemaStatement
                 throw new InvalidRequestException(COMPACT_COLUMN_IN_COMPACT_STORAGE);
         }
 
-        if (column.isPartitionKey() && table.partitionKeyColumns().size() == 1)
+        if (column.isPartitionKey() && table.partitionKeyColumns().size() == 1 && !canIndexOnlyPartitionKeyColumn(column))
             throw ire(ONLY_PARTITION_KEY, column);
 
         if (baseType.isCollection() && !baseType.isMultiCell() && target.type != Type.FULL)
