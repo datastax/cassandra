@@ -132,15 +132,18 @@ public class CassandraAuthorizer implements IAuthorizer
     }
 
     /**
-     * Whether the reverse index {@code system_auth.resource_role_permissons_index} is kept up to date: always without
-     * the DSE 6 compatibility mode; in the mode, while {@code system_auth} has the table. Without it, GRANT and REVOKE
-     * update the permissions only, DROP ROLE deletes them, and the roles holding permissions on a dropped resource are
-     * found by filtering the permissions. When the table exists, it is maintained as without the mode.
+     * Whether the reverse index {@code system_auth.resource_role_permissons_index} is kept up to date. In the DSE 6
+     * compatibility mode {@code system_auth} keeps the definition DSE 6 wrote (see {@code DseSystemKeyspaces}), which
+     * may lack the table (the 6.9.26 schema capture has none): then GRANT and REVOKE update the permissions only, DROP
+     * ROLE deletes them, and the roles holding permissions on a dropped resource are found by filtering the
+     * permissions. When DSE's definition has the table, it is maintained as without the mode, so that DSE's own index
+     * stays complete.
      * <p>
-     * An index created by this software on a {@code system_auth} that came from DSE holds none of the grants DSE made:
-     * until it is rebuilt, dropping a table, keyspace or function leaves those grants in {@code role_permissions}, and a
-     * resource created again with the same name gets them back. It must be rebuilt before any DROP, for instance with
-     * cqlsh: {@code COPY system_auth.role_permissions (resource, role) TO 'f.csv'} then
+     * An index created at the first start with {@code internode_compatibility_mode: NONE} holds none of the grants made
+     * before (on DSE or in the mode): until it is rebuilt, dropping a table, keyspace or function leaves those grants
+     * in {@code role_permissions}, and a resource created again with the same name gets them back. It must be rebuilt
+     * after the last restart with {@code NONE} and before any DROP, for instance with cqlsh:
+     * {@code COPY system_auth.role_permissions (resource, role) TO 'f.csv'} then
      * {@code COPY system_auth.resource_role_permissons_index (resource, role) FROM 'f.csv'}.
      */
     private static boolean maintainsResourceIndex()
