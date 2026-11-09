@@ -269,6 +269,16 @@ public class SinglePartitionReadCommandCQLTest extends ReadCommandCQLTester<Sing
         assertToCQLString("SELECT * FROM \"K\".\"T\" WHERE \"K\" = 0 AND \"C\" = 1 ORDER BY \"C\" DESC",
                           "SELECT * FROM \"K\".\"T\" WHERE \"K\" = 0 AND \"C\" = 1 ORDER BY \"C\" DESC ALLOW FILTERING",
                           "SELECT * FROM \"K\".\"T\" WHERE \"K\" = ? AND \"C\" = ? ORDER BY \"C\" DESC ALLOW FILTERING");
+
+        // optimizer options
+        createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX idx ON %s(v) USING 'StorageAttachedIndex'");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 0 WITH optimizer_options = {'intersection_clause_limit': '1'}",
+                          "SELECT * FROM %s WHERE k = 0 AND v = 0 ALLOW FILTERING WITH optimizer_options = {'intersection_clause_limit': 1}",
+                          "SELECT * FROM %s WHERE k = ? AND v = ? ALLOW FILTERING WITH optimizer_options = {'intersection_clause_limit': 1}");
+        assertToCQLString("SELECT * FROM %s WHERE k = 0 AND v = 0 WITH optimizer_options = {'query_optimization_level': '0', 'intersection_clause_limit': '2', 'use_term_statistics': 'true', 'hybrid_sort_order': 'filter_then_sort'}",
+                          "SELECT * FROM %s WHERE k = 0 AND v = 0 ALLOW FILTERING WITH optimizer_options = {'query_optimization_level': 0, 'intersection_clause_limit': 2, 'use_term_statistics': true, 'hybrid_sort_order': 'FILTER_THEN_SORT'}",
+                          "SELECT * FROM %s WHERE k = ? AND v = ? ALLOW FILTERING WITH optimizer_options = {'query_optimization_level': 0, 'intersection_clause_limit': 2, 'use_term_statistics': true, 'hybrid_sort_order': 'FILTER_THEN_SORT'}");
     }
 
     @Override

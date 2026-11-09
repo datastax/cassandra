@@ -105,6 +105,14 @@ public class MultiRangeReadCommandCQLTest extends ReadCommandCQLTester<MultiRang
                           "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND n = 0 ORDER BY v ANN OF [1.0, ... LIMIT 10 ALLOW FILTERING",
                           "SELECT * FROM %s WHERE (token(k) <= ? OR token(k) > ?) AND n = ? ORDER BY v ANN OF ? LIMIT 10 ALLOW FILTERING",
                           truncationError);
+
+        // test with optimizer options
+        createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))");
+        createIndex("CREATE CUSTOM INDEX idx ON %s(v) USING 'StorageAttachedIndex'");
+        assertToCQLString("SELECT * FROM %s WHERE v = 0 WITH optimizer_options = {'intersection_clause_limit': '1'}",
+                          "SELECT * FROM %s WHERE (token(k) <= -1 OR token(k) > -1) AND v = 0 ALLOW FILTERING WITH optimizer_options = {'intersection_clause_limit': 1}",
+                          "SELECT * FROM %s WHERE (token(k) <= ? OR token(k) > ?) AND v = ? ALLOW FILTERING WITH optimizer_options = {'intersection_clause_limit': 1}",
+                          multiRangeError);
     }
 
     @Override
