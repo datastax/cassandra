@@ -107,7 +107,7 @@ public class AbortedSAIQueriesTest extends TestBaseImpl
         for (int i = 0; i < numRows; i++)
             coordinator.execute(format("INSERT INTO %s.%s (k, n, s, a) VALUES (?, ?, ?, ?)"),
                                 ConsistencyLevel.ONE,
-                                i, i % 2, String.valueOf(i % 2), String.valueOf(i % 2), String.valueOf(i % 2));
+                                i, i % 2, String.valueOf(i % 2), String.valueOf(i % 2));
         cluster.forEach(n -> n.flush(KEYSPACE));
     }
 
@@ -176,7 +176,7 @@ public class AbortedSAIQueriesTest extends TestBaseImpl
     }
 
     @Test
-    public void tesBM25OrderingQuery()
+    public void testBM25OrderingQuery()
     {
         delayScoredResultRetriever(true);
         assertAborted("SELECT * FROM %s.%s ORDER BY a BM25 OF '1' LIMIT 100",
