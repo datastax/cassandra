@@ -58,18 +58,19 @@ import org.apache.cassandra.utils.SyncUtil;
  * {@code internode_compatibility_mode: NONE} be refused while a DSE 6 peer was still in the cluster the last
  * time this node ran (the second source of {@code StartupChecks.checkDsePeersWithoutFlag}, next to the upgrade
  * marker). No release-version heuristics are involved. A peer enters the record when the node's own messaging
- * version map ({@code MessagingService.versions}) puts it at a pre-4.0 version: an inbound handshake, or an answer in
- * the dialect to this node's 4.0-style first handshake message, which the node's map records too
- * ({@code DseDialectVersions.answeredInTheDialect}); a raw DSE messaging version (256 or more) is read as the dialect,
- * through {@link DseCompat#messagingVersionFromGossip}. Otherwise an outbound handshake records the version in the copy
- * of the map its connection works from, not in the node's map: a DSE peer this node has only connected to with the
- * pre-4.0 first message is recorded when it connects back or its gossip state arrives, as in any cluster where both
- * sides gossip. The dialect the node's map assumes for a peer stored with a DSE 6 release before any connection
- * ({@code DseDialectVersions.seed}, {@code EndpointMessagingVersions.assume}) is not a sighting and is not recorded. A
- * peer leaves the record only when it is seen at 4.0 or later (it was upgraded) or its version is forgotten (it left
- * the ring). At a {@code DSE_6} start the persisted record is loaded first ({@code StartupChecks.loadDsePeersRecord}),
- * so a DSE peer that stays down during a whole run of this node is not forgotten, and a peer upgraded while this node
- * was down leaves the record when it is seen.
+ * version map ({@code MessagingService.versions}) puts it at a pre-4.0 version: an inbound handshake, or a gossip
+ * {@code NET_VERSION}, which the storage service stores in DSE 6 compatibility mode as the dialect when DSE gossips
+ * its own relative version (256 or more; the record also reads such a raw value as the dialect, through
+ * {@link DseCompat#messagingVersionFromGossip}), or an answer in the dialect to this node's 4.0-style first handshake
+ * message, which the node's map records too ({@code DseDialectVersions.answeredInTheDialect}). Otherwise an outbound
+ * handshake records the version in the copy of the map its connection works from, not in the node's map: a DSE peer
+ * this node has only connected to with the pre-4.0 first message is recorded when it connects back or its gossip state
+ * arrives, as in any cluster where both sides gossip. The dialect the node's map assumes for a peer stored with a DSE 6
+ * release before any connection ({@code DseDialectVersions.seed}, {@code EndpointMessagingVersions.assume}) is not a
+ * sighting and is not recorded. A peer leaves the record only when it is seen at 4.0 or later (it was upgraded) or its
+ * version is forgotten (it left the ring). At a {@code DSE_6} start the persisted record is loaded first
+ * ({@code StartupChecks.loadDsePeersRecord}), so a DSE peer that stays down during a whole run of this node is not
+ * forgotten, and a peer upgraded while this node was down leaves the record when it is seen.
  * <p>
  * The file is rewritten off the calling thread (the version is recorded on event loops and the gossip stage),
  * atomically and synced. Only maintained while the DSE 6 compatibility mode is on; with {@code NONE} nothing

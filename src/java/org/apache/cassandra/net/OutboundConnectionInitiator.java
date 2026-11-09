@@ -436,7 +436,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                     {
                         // our 4.0-style first message was answered by a pre-4.0 peer: reconnect with the pre-4.0 first
                         // message in the only dialect we speak with such peers; a DSE version in the answer tells a DSE
-                        // node from HCD 1.2 at the dialect (DsePeers)
+                        // node from HCD 1.2 at the dialect, for the ordinals of gossip (DsePeers)
                         DsePeers.fromPre40Reply(settings.to, msg.pre40PeerVersion, false);
                         result = retry(DseCompat.DSE_DIALECT);
                     }
