@@ -152,6 +152,35 @@ public class QueryTracingTest extends SAITester
                               "bkdSegmentsHit: 0");
     }
 
+    /**
+     * A query where each branch relaxes the criteria of the previous one only scans the index of the criteria they share.
+     */
+    @Test
+    public void testRedundantDisjunctionBranchesAreNotPlanned()
+    {
+        createTable("CREATE TABLE %s(k int PRIMARY KEY, a int, b int, c int)");
+        createIndex("CREATE CUSTOM INDEX a_idx ON %s(a) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX b_idx ON %s(b) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX c_idx ON %s(c) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s(k, a, b, c) VALUES (0, 0, 0, 0)");
+
+        tracing.getTraces().clear();
+        assertRows(execute("SELECT k FROM %s WHERE (a = 0 AND b = 0 AND c = 0) OR (a = 0 AND b = 0) OR (a = 0)"), row(0));
+        Assertions.assertThat(executionPlan()).contains("a_idx").doesNotContain("Union").doesNotContain("b_idx").doesNotContain("c_idx");
+
+        tracing.getTraces().clear();
+        assertRows(execute("SELECT k FROM %s WHERE (a = 0 AND b = 0) OR (a = 1) OR (c = 0 AND b = 0)"), row(0));
+        Assertions.assertThat(executionPlan()).contains("Union");
+    }
+
+    private String executionPlan()
+    {
+        return tracing.getTraces().stream()
+                      .filter(trace -> trace.startsWith("Query execution plan"))
+                      .findFirst()
+                      .orElseThrow(() -> new AssertionError("Query execution plan not found in traces"));
+    }
+
     private void assertTraceHasMetrics(String query, String... expected)
     {
         assertTraceHas(query, "Index query took", expected);

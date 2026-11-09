@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -622,6 +623,95 @@ public class OperationTest extends IndexingSchemaLoader
         node.add(new Operation.ExpressionNode(new SimpleExpression(value, Operator.EQ, DoubleType.instance.decompose(24.56))));
 
         Assert.assertTrue(node.buildFilter(controllerStatic).isSatisfiedBy(key, row, staticRow));
+    }
+
+    @Test
+    public void testRemoveRedundantDisjunctionBranches()
+    {
+        final ColumnMetadata firstName = getColumn(UTF8Type.instance.decompose("first_name"));
+        final ColumnMetadata age = getColumn(UTF8Type.instance.decompose("age"));
+        final ColumnMetadata height = getColumn(UTF8Type.instance.decompose("height"));
+
+        RowFilter.Expression a = eq(firstName, UTF8Type.instance.decompose("a"));
+        RowFilter.Expression otherA = eq(firstName, UTF8Type.instance.decompose("other"));
+        RowFilter.Expression b = eq(age, Int32Type.instance.decompose(1));
+        RowFilter.Expression c = eq(height, Int32Type.instance.decompose(1));
+
+        // (a AND b AND c) OR (a AND b) OR a -> a, in any order
+        assertSameTree(and(a), simplified(or(List.of(), and(a, b, c), and(a, b), and(a))));
+        assertSameTree(and(a), simplified(or(List.of(a), and(a, b, c), and(a, b))));
+        assertSameTree(and(a, b), simplified(or(List.of(), and(a, b), and(a, b, c))));
+        assertSameTree(and(a, b), simplified(or(List.of(), and(b, a, c), and(a, b))));
+
+        // a OR a -> a
+        assertSameTree(and(a), simplified(or(List.of(a, a))));
+        assertSameTree(and(a, b), simplified(or(List.of(), and(a, b), and(b, a))));
+
+        // a OR (a AND b) OR c -> a OR c
+        assertSameTree(or(List.of(a, c)), simplified(or(List.of(a, c), and(a, b))));
+
+        // nested: c AND (a OR (a AND b)) -> c AND a
+        RowFilter.FilterElement nested = new RowFilter.FilterElement(false, List.of(c), List.of(or(List.of(a), and(a, b))));
+        assertSameTree(new RowFilter.FilterElement(false, List.of(c), List.of(and(a))), simplified(nested));
+
+        // a branch with a nested disjunction is more restrictive, it's removed but it doesn't remove the others
+        RowFilter.FilterElement withDisjunction = new RowFilter.FilterElement(false, List.of(a), List.of(or(List.of(b, c))));
+        assertSameTree(and(a), simplified(or(List.of(), withDisjunction, and(a))));
+        assertUnchanged(or(List.of(), withDisjunction, and(a, b)));
+
+        // nothing to remove
+        assertUnchanged(and(a, b));
+        assertUnchanged(or(List.of(a, otherA)));
+        assertUnchanged(or(List.of(), and(a, b), and(otherA, b)));
+        assertUnchanged(or(List.of(), and(a, b), and(b, c), and(a, c)));
+        assertUnchanged(or(List.of(), and(a, b, c), and(otherA, b)));
+
+        // expressions that aren't compared never make a branch redundant
+        RowFilter.Expression custom = new SimpleExpression(firstName, Operator.EQ, UTF8Type.instance.decompose("a"));
+        assertUnchanged(or(List.of(custom), and(custom, b)));
+        assertUnchanged(or(List.of(), and(custom, a), and(custom, a, b)));
+
+        // an operator or a value that differs is a different expression
+        RowFilter.Expression notA = new RowFilter.SimpleExpression(firstName, Operator.NEQ, UTF8Type.instance.decompose("a"), null, null);
+        assertUnchanged(or(List.of(notA), and(a, b)));
+
+        // an empty conjunction doesn't remove anything
+        assertUnchanged(or(List.of(), and(), and(a, b)));
+    }
+
+    private static RowFilter.Expression eq(ColumnMetadata column, ByteBuffer value)
+    {
+        return new RowFilter.SimpleExpression(column, Operator.EQ, value, null, null);
+    }
+
+    private static RowFilter.FilterElement and(RowFilter.Expression... expressions)
+    {
+        return new RowFilter.FilterElement(false, List.of(expressions), List.of());
+    }
+
+    private static RowFilter.FilterElement or(List<RowFilter.Expression> expressions, RowFilter.FilterElement... children)
+    {
+        return new RowFilter.FilterElement(true, expressions, List.of(children));
+    }
+
+    private static RowFilter.FilterElement simplified(RowFilter.FilterElement element)
+    {
+        return Operation.removeRedundantDisjunctionBranches(element);
+    }
+
+    private static void assertUnchanged(RowFilter.FilterElement element)
+    {
+        Assert.assertSame(element, simplified(element));
+    }
+
+    private static void assertSameTree(RowFilter.FilterElement expected, RowFilter.FilterElement actual)
+    {
+        Assert.assertEquals(expected.isDisjunction(), actual.isDisjunction());
+        Assert.assertEquals(new HashSet<>(expected.expressions()), new HashSet<>(actual.expressions()));
+        Assert.assertEquals(expected.expressions().size(), actual.expressions().size());
+        Assert.assertEquals(expected.children().size(), actual.children().size());
+        for (int i = 0; i < expected.children().size(); i++)
+            assertSameTree(expected.children().get(i), actual.children().get(i));
     }
 
     private static class SimpleExpression extends RowFilter.Expression
