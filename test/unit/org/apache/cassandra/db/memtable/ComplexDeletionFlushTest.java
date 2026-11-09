@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright IBM Corp.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -173,6 +171,34 @@ public class ComplexDeletionFlushTest extends CQLTester
         execute("DELETE st FROM %s WHERE k = 1");
         assertRows(execute("SELECT k, c, v, st FROM %s WHERE k = 1"), row(1, 1, 10, null));
         flushAndCheckSSTables(2);
+        assertRows(execute("SELECT k, c, v, st FROM %s WHERE k = 1"), row(1, 1, 10, null));
+    }
+
+    @Test
+    public void testStaticCollectionWithoutRows() throws Throwable
+    {
+        createTable(withMemtable("CREATE TABLE %s (k int, c int, v int, st set<text> static, PRIMARY KEY (k, c))"));
+        disableCompaction();
+        execute("UPDATE %s SET st = {'a', 'b'} WHERE k = 1");
+        flushAndCheckSSTables(1);
+
+        // the partition in the new memtable holds only the deletion in its static row
+        execute("DELETE st FROM %s WHERE k = 1");
+        assertEmpty(execute("SELECT * FROM %s WHERE k = 1"));
+        flushAndCheckSSTables(2);
+        assertEmpty(execute("SELECT * FROM %s WHERE k = 1"));
+    }
+
+    @Test
+    public void testStaticCollectionSameMemtable() throws Throwable
+    {
+        createTable(withMemtable("CREATE TABLE %s (k int, c int, v int, st set<text> static, PRIMARY KEY (k, c))"));
+        disableCompaction();
+        execute("UPDATE %s SET st = {'a', 'b'} WHERE k = 1");
+        execute("INSERT INTO %s (k, c, v) VALUES (1, 1, 10)");
+        execute("DELETE st FROM %s WHERE k = 1");
+        flushAndCheckSSTables(1);
+
         assertRows(execute("SELECT k, c, v, st FROM %s WHERE k = 1"), row(1, 1, 10, null));
     }
 }

@@ -24,6 +24,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import com.google.common.base.Predicates;
@@ -158,9 +159,10 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         else
             columns = new RegularAndStaticColumns(Columns.NONE, Columns.from(row.columns()));
 
-        putInTrie(makeNoConflictMutator(trie), metadata, metadata.comparator, row);
+        // Only count the row if it has live data, as the other ways of building trie-backed partitions do.
+        boolean hasLiveData = putInTrie(makeNoConflictMutator(trie), metadata, metadata.comparator, row);
 
-        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.deletion().isLive() ? 0 : 1, row.dataSize(), trie);
+        return new TriePartitionUpdate(metadata, key, columns, stats, hasLiveData ? 1 : 0, row.deletion().isLive() ? 0 : 1, row.dataSize(), trie);
     }
 
     /** @see PartitionUpdate.Factory#fromIterator(UnfilteredRowIterator)  */
@@ -455,7 +457,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         // Don't count if it's not a boundary, or if it does not introduce a new deletion
         // (row level marker under covering deletion).
         TrieTombstoneMarker.Covering left = update.leftDeletion();
-        if (right == null || right == left)
+        if (right == null || Objects.equals(right, left))
             return false;
 
         // Note that we will overcount boundaries under a covering deletion (we count once

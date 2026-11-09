@@ -755,6 +755,9 @@ public class TrieMemtable extends AbstractShardedMemtable
             TriePartitionUpdater updater = getAndConfigureUpdater(indexer);
             try
             {
+                // Merge columns before applying the update, because a reader may otherwise miss a column.
+                columns = columns.mergeTo(update.columns());
+
                 try
                 {
                     this.cellDataBufferManager.opOrderGroup = opGroup;
@@ -773,7 +776,6 @@ public class TrieMemtable extends AbstractShardedMemtable
                     updateLiveDataSize(updater.dataSize);
                     updateCurrentOperations(update.operationCount());
 
-                    columns = columns.mergeTo(update.columns());
                     stats = stats.mergeWith(update.stats());
                 }
                 this.cellDataBufferManager.opOrderGroup = null;

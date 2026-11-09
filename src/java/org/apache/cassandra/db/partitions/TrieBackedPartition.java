@@ -106,11 +106,12 @@ public class TrieBackedPartition implements Partition
     protected final RegularAndStaticColumns columns;
     protected final EncodingStats stats;
     /// Number of rows in the partition. This will count only the rows that have live data.
+    protected final int rowCount;
     protected final int rowCountIncludingStatic;
     protected final DeletionTime partitionLevelDeletion;
     /// Number of tombstone boundary pairs on the row-level or above: partition, range and row tombstones.
     protected final int tombstoneCount;
-    boolean hasStaticRow;
+    protected final DeletionAwareTrie<Object, TrieTombstoneMarker> staticRowTrie;
 
     public TrieBackedPartition(DecoratedKey partitionKey,
                                RegularAndStaticColumns columns,
@@ -126,18 +127,25 @@ public class TrieBackedPartition implements Partition
         this.columns = columns;
         this.stats = stats;
         this.rowCountIncludingStatic = rowCountIncludingStatic;
+        if (!columns.statics.isEmpty())
+        {
+            // Prepare the static row in advance, to be able to answer hasStaticRow quickly.
+            // Unlike getRow, staticRow() does not apply any covering deletion to the returned row.
+            this.staticRowTrie = trie.tailTrie(STATIC_CLUSTERING_PATH, false);
+            // rowCountIncludingStatic includes only live rows; only subtract one for the static row if it has a live part.
+            this.rowCount = rowCountIncludingStatic - (staticRowTrie != null && staticRowTrie.get(ByteComparable.EMPTY) != null ? 1 : 0);
+        }
+        else
+        {
+            this.staticRowTrie = null;
+            this.rowCount = rowCountIncludingStatic;
+        }
         this.tombstoneCount = tombstoneCount;
         // A static row may have no live content, only deletions (e.g. a whole complex column deletion).
-        this.hasStaticRow = trie.get(STATIC_CLUSTERING_PATH) != null || hasRowMarker(trie.applicableDeletion(STATIC_CLUSTERING_PATH));
         this.partitionLevelDeletion = TrieTombstoneMarker.applicableDeletionOrLiveAtRoot(trie);
         // There must always be a partition marker.
         assert trie.get(ByteComparable.EMPTY) != null;
         assert stats != null;
-    }
-
-    private static boolean hasRowMarker(TrieTombstoneMarker marker)
-    {
-        return marker != null && marker.hasLevelMarker(TrieTombstoneMarker.LevelMarker.ROW);
     }
 
     public static TrieBackedPartition fromIterator(UnfilteredRowIterator iterator)
@@ -221,10 +229,12 @@ public class TrieBackedPartition implements Partition
     /// @param mutator    destination trie's mutator
     /// @param comparator for converting key to byte-comparable
     /// @param untypedRow content to put
-    protected static void putInTrie(InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>.Mutator<Object, TrieTombstoneMarker> mutator,
-                                    TableMetadata metadata,
-                                    ClusteringComparator comparator,
-                                    Row untypedRow)
+    /// @return true if the row has live data, i.e. content at its root (liveness info, or the empty liveness marker
+    ///         added for rows with cells). Trie-backed partitions only count such rows, see [#rowCount].
+    protected static boolean putInTrie(InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>.Mutator<Object, TrieTombstoneMarker> mutator,
+                                       TableMetadata metadata,
+                                       ClusteringComparator comparator,
+                                       Row untypedRow)
     {
         TrieBackedRow row;
         if (untypedRow instanceof TrieBackedRow)
@@ -242,6 +252,9 @@ public class TrieBackedPartition implements Partition
         {
             throw new AssertionError(e);
         }
+        // The mutators used with this method do not apply existing deletions to the incoming data, so the root
+        // content of the row is now also in the destination trie.
+        return row.trie().get(ByteComparable.EMPTY) != null;
     }
 
     protected static
@@ -354,7 +367,7 @@ public class TrieBackedPartition implements Partition
     @Override
     public int rowCount()
     {
-        return rowCountIncludingStatic - (hasStaticRow() ? 1 : 0);
+        return rowCount;
     }
 
     public ByteComparable path(ClusteringPrefix<?> clustering)
@@ -365,13 +378,10 @@ public class TrieBackedPartition implements Partition
     @Override
     public Row staticRow()
     {
-        if (!hasStaticRow)
+        if (staticRowTrie == null)
             return Rows.EMPTY_STATIC_ROW;
 
-        // Unlike getRow, this method does not apply any covering deletion to the returned row.
-        DeletionAwareTrie<Object, TrieTombstoneMarker> staticRow = trie.tailTrie(STATIC_CLUSTERING_PATH, false);
-        assert staticRow != null; // hasStaticRow would be false if there's no static row
-        return toRow(staticRow, Clustering.STATIC_CLUSTERING);
+        return toRow(staticRowTrie, Clustering.STATIC_CLUSTERING);
     }
 
     @Override
@@ -379,18 +389,14 @@ public class TrieBackedPartition implements Partition
     {
         // We don't count row that only contain deleted columns in tombstoneCount. To account for these, check if the
         // trie has a deletion branch.
+        // However, we may use the fact that we have a tombstone to know that the row is not empty quicker.
         return rowCountIncludingStatic + tombstoneCount == 0 && !trie.hasDeletionBranchAtRoot();
-    }
-
-    private boolean hasStaticRow()
-    {
-        return hasStaticRow;
     }
 
     @Override
     public boolean hasRows()
     {
-        return rowCountIncludingStatic > 1 || rowCountIncludingStatic > 0 && !hasStaticRow();
+        return rowCount > 0;
     }
 
     /// Provides read access to the trie for users that can take advantage of it directly (e.g. `TrieMemtable`).
@@ -787,8 +793,10 @@ public class TrieBackedPartition implements Partition
 
         public ContentBuilder addRow(Row row)
         {
-            putInTrie(mutator, metadata, comparator, row);
-            ++rowCountIncludingStatic;
+            // Only count rows with live data, as the memtable and the partition update builder do. The partition
+            // constructor relies on this to decide whether to exclude the static row from the row count.
+            if (putInTrie(mutator, metadata, comparator, row))
+                ++rowCountIncludingStatic;
             if (collectDataSize)
                 dataSize += row.dataSize();
             if (!row.deletion().isLive())

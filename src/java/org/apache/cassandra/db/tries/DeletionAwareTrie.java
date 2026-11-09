@@ -556,9 +556,7 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
         };
     }
 
-    /// Return a trie representing the deletion branch at the root of the trie, if there is one, or an empty trie.
-    /// This method does not consider any deletion branches introduced below the root and is an efficient alternative to
-    /// [#deletionOnlyTrie], to be used when it is known that the deletion branch must be at the root of the trie.
+    /// Return true iff the trie has a deletion branch at its root.
     default boolean hasDeletionBranchAtRoot()
     {
         return cursor(Direction.FORWARD).deletionBranchCursor(Direction.FORWARD) != null;
