@@ -32,6 +32,7 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -43,8 +44,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Index classes in a schema that came from DataStax Enterprise: the 6.8 name of the storage-attached index
- * resolves to ours, and an index type this software does not have loads as a no-op index while the DSE 6
- * compatibility mode is on (instead of preventing the node from starting).
+ * resolves to ours, an index type this software does not have loads as a no-op index while the DSE 6
+ * compatibility mode is on (instead of preventing the node from starting), and a DSE Search index is refused in
+ * that mode (DSE Search is not supported).
  */
 public class Dse6IndexClassesTest extends CQLTester
 {
@@ -98,7 +100,8 @@ public class Dse6IndexClassesTest extends CQLTester
         .hasMessage("internode_compatibility_mode NONE refused: the schema still contains the DSE-only index " +
                     KEYSPACE + '.' + currentTable() + ".dse_solr_index (com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex). " +
                     "DSE Search and the other DSE features outside DSE core are not supported by this software, and a cluster " +
-                    "using them cannot be upgraded: the index must be dropped on DSE before the upgrade");
+                    "using them cannot be upgraded: the index must be dropped on DSE before the upgrade (a node in DSE_6 mode " +
+                    "refuses a DSE Search index and loads any other as a no-op index)");
         IndexMetadata foreign = IndexMetadata.fromSchemaMetadata("foreign_index",
                                                                  IndexMetadata.Kind.CUSTOM,
                                                                  Map.of(IndexTarget.CUSTOM_INDEX_OPTION_NAME, FOREIGN_INDEX,
@@ -114,8 +117,8 @@ public class Dse6IndexClassesTest extends CQLTester
             // one warning, from the manager; the no-op index does not repeat it (and never logs at ERROR in this mode)
             assertThat(managerLog.list.stream().filter(e -> e.getLevel() == Level.WARN).map(ILoggingEvent::getFormattedMessage))
             .containsExactly("Cannot find index type " + FOREIGN_INDEX + " of index foreign_index; running in " +
-                             "internode_compatibility_mode DSE_6, so it is loaded as a no-op index (drop it before switching " +
-                             "internode_compatibility_mode back to NONE; a node in NONE mode refuses to load it)");
+                             "internode_compatibility_mode DSE_6, so it is loaded as a no-op index (a node in NONE mode refuses to load " +
+                             "it: it must be dropped on DSE before the upgrade)");
             assertThat(managerLog.list).noneMatch(e -> e.getLevel() == Level.ERROR);
             assertThat(noopLog.list).isEmpty();
         }));
@@ -124,15 +127,78 @@ public class Dse6IndexClassesTest extends CQLTester
         assertThat(((NoopIndex) noop).getUnsupportedMessage())
         .isEqualTo("Custom index " + KEYSPACE + ".foreign_index of type '" + FOREIGN_INDEX + "' on column c " +
                    "is not supported by this software. The DSE 6 compatibility mode (internode_compatibility_mode: DSE_6) is enabled " +
-                   "so using a noop index that will ignore writes and won't be queryable. Please drop this index before switching " +
-                   "internode_compatibility_mode back to NONE and/or use a Storage Attached Index (SAI) instead.");
+                   "so using a noop index that will ignore writes and won't be queryable. Please drop this index on DSE before the " +
+                   "upgrade (a node in internode_compatibility_mode NONE refuses to load it) and/or use a Storage Attached Index " +
+                   "(SAI) instead.");
+
+        // but a DSE Search index is refused (DSE Search is not supported): the startup check refuses it first
+        assertThatThrownBy(() -> cfs.indexManager.addIndex(solrLike, true))
+        .hasMessageContaining(searchIndexRefusal("dse_solr_index", SOLR_INDEX));
+        assertThat(cfs.indexManager.getIndexByName("dse_solr_index")).isNull();
+    }
+
+    /** The refusal of an index of the current table of a DSE Search class in DSE_6 mode. */
+    private String searchIndexRefusal(String index, String className)
+    {
+        return "internode_compatibility_mode DSE_6 refused: the schema contains the DSE Search index " + KEYSPACE + '.' + currentTable() + '.' +
+               index + " (" + className + "); DSE Search is not supported by this software. Roll this node back to DSE, drop the search " +
+               "index there (DROP SEARCH INDEX ON " + KEYSPACE + '.' + currentTable() + ") and upgrade it again";
+    }
+
+    @Test
+    public void searchIndexIsRefusedInDse6ModeWhateverTheProperties() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        // every DSE Search class, DSE 6's and the earlier releases' names, whatever the target
+        String[][] searchIndexes = { { "t_solr_query_index", SOLR_INDEX, "solr_query" },
+                                     { "thrift_index", "com.datastax.bdp.search.solr.ThriftSolrSecondaryIndex", "v" },
+                                     { "legacy_index", "com.datastax.bdp.cassandra.index.solr.Cql3SolrSecondaryIndex", "v" } };
+        try (WithProperties properties = new WithProperties().set(CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE, true))
+        {
+            for (String[] search : searchIndexes)
+            {
+                IndexMetadata index = IndexMetadata.fromSchemaMetadata(search[0], IndexMetadata.Kind.CUSTOM,
+                                                                       Map.of(IndexTarget.CUSTOM_INDEX_OPTION_NAME, search[1],
+                                                                              IndexTarget.TARGET_OPTION_NAME, search[2]));
+                assertThatThrownBy(() -> cfs.indexManager.addIndex(index, true))
+                .as(search[1])
+                .hasMessageContaining(searchIndexRefusal(search[0], search[1]));
+                assertThat(cfs.indexManager.getIndexByName(search[0])).isNull();
+                // the validation of a table carrying it refuses it the same way
+                assertThatThrownBy(() -> index.validate(currentTableMetadata()))
+                .as(search[1])
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessage(searchIndexRefusal(search[0], search[1]));
+            }
+        }
+        // another index type this software does not have still validates in the mode
+        IndexMetadata foreign = IndexMetadata.fromSchemaMetadata("foreign_index", IndexMetadata.Kind.CUSTOM,
+                                                                 Map.of(IndexTarget.CUSTOM_INDEX_OPTION_NAME, FOREIGN_INDEX,
+                                                                        IndexTarget.TARGET_OPTION_NAME, "v"));
+        foreign.validate(currentTableMetadata());
+        IndexMetadata thriftSearch = IndexMetadata.fromSchemaMetadata("thrift_index", IndexMetadata.Kind.CUSTOM,
+                                                                      Map.of(IndexTarget.CUSTOM_INDEX_OPTION_NAME, "com.datastax.bdp.search.solr.ThriftSolrSecondaryIndex",
+                                                                             IndexTarget.TARGET_OPTION_NAME, "v"));
+        // without the mode, as before: refused as a missing class, or accepted with the ignore property
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        assertThatThrownBy(() -> thriftSearch.validate(currentTableMetadata()))
+        .hasMessageContaining("Unable to find custom indexer class 'com.datastax.bdp.search.solr.ThriftSolrSecondaryIndex'");
+        try (WithProperties properties = new WithProperties().set(CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE, true))
+        {
+            thriftSearch.validate(currentTableMetadata());
+            // and the ignore property still loads it as a no-op index
+            cfs.indexManager.addIndex(thriftSearch, true);
+            assertThat(cfs.indexManager.getIndexByName("thrift_index")).isInstanceOf(NoopIndex.class);
+        }
     }
 
     @Test
     public void indexOnAPseudoColumnLoadsAsNoopInDse6Mode() throws Throwable
     {
         // an index type this software does not have may target something that is not a column of the table, as DSE search
-        // indexes target solr_query
+        // indexes target solr_query (DSE Search itself is refused in the mode)
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
         ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
         IndexMetadata search = IndexMetadata.fromSchemaMetadata("t_solr_query_index",

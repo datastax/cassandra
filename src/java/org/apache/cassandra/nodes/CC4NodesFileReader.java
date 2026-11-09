@@ -563,7 +563,7 @@ final class CC4NodesFileReader
         // key, native_transport_port_ssl, storage_port_ssl, jmx_port, dse_version, graph, server_id,
         // workload, workloads, cql_version, gossip_generation, native_protocol_version,
         // last_nodesync_checkpoint_time. rpc_address is read only as the last fallback for the native address.
-        // graph, workload and workloads are not imported; readLocalWorkloads reads them on their own.
+        // graph, workload and workloads are not imported; the DSE 6 mode only checks them (readLocalWorkloads).
         @JsonProperty("native_transport_address")
         InetAddress nativeTransportAddress;
         @JsonProperty("rpc_address")
@@ -606,7 +606,7 @@ final class CC4NodesFileReader
         // DSE 6 keys: peer and preferred_ip are plain addresses, their port is storage_port.
         // DSE keys deliberately ignored: native_transport_port_ssl, storage_port_ssl, jmx_port, dse_version,
         // graph, server_id, workload, workloads. rpc_address is read only as the last fallback for the native address.
-        // graph, workload and workloads are not imported; readPeerWorkloads reads them on their own.
+        // graph, workload and workloads are not imported; the DSE 6 mode only checks them (readPeerWorkloads).
         @JsonProperty("native_transport_address")
         InetAddress nativeTransportAddress;
         @JsonProperty("rpc_address")
