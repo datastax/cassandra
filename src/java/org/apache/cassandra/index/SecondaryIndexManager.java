@@ -117,6 +117,7 @@ import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.notifications.SSTableAddedNotification;
@@ -1001,7 +1002,7 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
                 {
                     // ConfigurationException can only be thrown from FBUtilities.classForName(…)
                     //  anything from the index constructor will get wrapped in an InvocationTargetException
-                    if (DatabaseDescriptor.isDse6CompatibilityMode() && Dse6NonCoreTraces.isSearchIndexClass(className))
+                    if (DatabaseDescriptor.isDseCompatibilityMode() && Dse6NonCoreTraces.isSearchIndexClass(className))
                     {
                         // DSE Search is not supported, whatever the properties: the startup check refuses such a schema first
                         throw new ConfigurationException(Dse6NonCoreTraces.searchIndexRefusal(baseCfs.getKeyspaceName(), baseCfs.getTableName(), indexDef.name, className), e);
@@ -1013,13 +1014,14 @@ public class SecondaryIndexManager implements IndexRegistry, INotificationConsum
 
                         indexClass = NoopIndex.class;
                     }
-                    else if (DatabaseDescriptor.isDse6CompatibilityMode())
+                    else if (DatabaseDescriptor.isDseCompatibilityMode())
                     {
                         // an index type this software does not have, in a schema from the product being upgraded from (DSE
-                        // Search indexes are refused above)
-                        logger.warn("Cannot find index type {} of index {}; running in internode_compatibility_mode DSE_6, " +
+                        // Search indexes are refused above), a SASI index of DSE 5.1 among them
+                        logger.warn("Cannot find index type {} of index {}; running in " +
+                                    "internode_compatibility_mode {}, " +
                                     "so it is loaded as a no-op index (a node in NONE mode refuses to load it: it must be dropped on DSE before the " +
-                                    "upgrade)", className, indexDef.name);
+                                    "upgrade)", className, indexDef.name, DseCompat.textMode());
                         indexClass = NoopIndex.class;
                     }
                     else if (className.startsWith(DSE_INDEX_CLASS_PREFIX))

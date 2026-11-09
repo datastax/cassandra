@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -918,6 +919,59 @@ public class DseViewWireFormatTest extends CQLTester
                     "system_schema.hidden_columns on this node does not list as a hidden column of that view; this software refuses the message " +
                     "rather than return or store wrong view rows. Check that the data directories of this node hold the sstables of " +
                     "system_schema.hidden_columns that DSE wrote");
+    }
+
+    /**
+     * In DSE 5.1 compatibility mode, where DSE 5.1 nodes speak the same version 11, a view's data is exchanged as it
+     * is, in both directions: DSE 5.1's views have no hidden column, so even with DSE 6's table listing one for the
+     * view, as the test sets it up, nothing is translated, where DSE_6 mode adds the column {@code .v} to what it
+     * sends.
+     */
+    @Test
+    public void dse51ViewDataIsExchangedAsItIs() throws Throwable
+    {
+        long nowInSec = FBUtilities.nowInSeconds();
+        DecoratedKey key = viewKey("a");
+        ClusteringIndexSliceFilter all = new ClusteringIndexSliceFilter(Slices.ALL, false);
+        SinglePartitionReadCommand read = SinglePartitionReadCommand.create(view, nowInSec, key, ColumnFilter.all(view),
+                                                                            all);
+        PartitionUpdate.Builder builder = PartitionUpdate.builder(view, key, view.regularAndStaticColumns(), 1);
+        builder.add(dseRow(1, LivenessInfo.create(10, nowInSec), null,
+                           BufferCell.live(w, 10, Int32Type.instance.decompose(1))));
+        PartitionUpdate update = builder.build();
+        // the name of the hidden column, with its length as a vint, as the headers and the column filters write it
+        byte[] hiddenName = { 2, '.', 'v' };
+        // in DSE_6 mode both carry the hidden column
+        assertThat(contains(serialize(ReadCommand.serializer, read, VERSION_3014), hiddenName)).isTrue();
+        assertThat(contains(serialize(update, VERSION_3014), hiddenName)).isTrue();
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertThat(DseViewWireFormat.translates(view, VERSION_3014)).isFalse();
+        assertThat(DseViewWireFormat.hiddenColumn(view, VERSION_3014)).isNull();
+        ByteBuffer sentRead = serialize(ReadCommand.serializer, read, VERSION_3014);
+        ByteBuffer sentUpdate = serialize(update, VERSION_3014);
+        assertThat(contains(sentRead, hiddenName)).isFalse();
+        assertThat(contains(sentUpdate, hiddenName)).isFalse();
+        // inbound, as sent: the filter and the rows, with their primary key liveness
+        assertThat(deserialize(ReadCommand.serializer, sentRead, VERSION_3014).columnFilter())
+        .isEqualTo(read.columnFilter());
+        try (DataInputBuffer in = new DataInputBuffer(sentUpdate, true))
+        {
+            List<Row> rows = rowsOf(PartitionUpdate.serializer.deserialize(in, VERSION_3014,
+                                                                           DeserializationHelper.Flag.FROM_REMOTE));
+            assertThat(rows).hasSize(1);
+            assertThat(rows.get(0).primaryKeyLivenessInfo()).isEqualTo(LivenessInfo.create(10, nowInSec));
+            assertThat(rows.get(0).getCell(w).buffer()).isEqualTo(Int32Type.instance.decompose(1));
+        }
+    }
+
+    private static boolean contains(ByteBuffer bytes, byte[] part)
+    {
+        byte[] array = ByteBufferUtil.getArray(bytes);
+        for (int i = 0; i + part.length <= array.length; i++)
+            if (Arrays.equals(array, i, i + part.length, part, 0, part.length))
+                return true;
+        return false;
     }
 
     /**

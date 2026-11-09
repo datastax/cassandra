@@ -35,6 +35,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QualifiedName;
@@ -48,6 +49,8 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -112,6 +115,9 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     private static final String UNKNOWN_INDEX_WARNING = "Index %s was not created. Unknown custom index (%s) is not " +
                                                     "supported. Consult the docs on alternatives (SAI indexes, " +
                                                     "Secondary Indexes).";
+
+    /** The {@code compatstatus} refusal reason of an SAI index refused in {@code DSE_5_1}. */
+    public static final String DSE51_SAI_INDEX = "SAI index with DSE 5.1 nodes";
 
     @VisibleForTesting
     public static final Set<String> DSE_INDEXES = ImmutableSet.of(
@@ -229,6 +235,19 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             return schema;
         }
 
+        // DSE 5.1 has no SAI, and this node sends no schema to DSE 5.1 nodes: an SAI index created here would be in the
+        // schema of the nodes of this software only, until the last node is upgraded; refused with allow_ddl too
+        if (DatabaseDescriptor.isDse51CompatibilityMode() && StorageAttachedIndex.class.getName().equals(className))
+        {
+            DseCompatRefusals.refused(DSE51_SAI_INDEX);
+            throw ire("Index %s was not created: with internode_compatibility_mode DSE_5_1 no Storage Attached Index " +
+                      "(SAI) is created, even with -D%s=true, since DSE 5.1 has no SAI and this node sends its " +
+                      "schema to no DSE 5.1 node, so the index would be in the schema of the nodes of this software " +
+                      "only; create it once the upgrade is complete (internode_compatibility_mode NONE on every " +
+                      "node). A CREATE INDEX without USING creates an SAI index when default_secondary_index is sai",
+                      name, CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL.getKey());
+        }
+
         IndexGuardrails guardRails = IndexGuardrails.forClassName(className);
         String indexDescription = indexName == null ? String.format("on table %s", table.name) : String.format("%s on table %s", indexName, table.name);
 
@@ -259,10 +278,10 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             throw ire(INDEX_DUPLICATE_OF_EXISTING, index.name, equalIndex.name);
         }
 
-        // IndexMetadata#validate accepts an unknown custom class in DSE 6 compatibility mode, so that the no-op
-        // indexes loaded for the DSE index types left in the schema do not make their table un-alterable; a new
-        // index must still name a class that exists
-        if (attrs.isCustom && DatabaseDescriptor.isDse6CompatibilityMode())
+        // IndexMetadata#validate accepts an unknown custom class in the DSE 6 and DSE 5.1 compatibility modes, so that
+        // the no-op indexes loaded for the DSE index types left in the schema do not make their table un-alterable; a
+        // new index must still name a class that exists
+        if (attrs.isCustom && DatabaseDescriptor.isDseCompatibilityMode())
             FBUtilities.classForName(className, "custom indexer");
 
         TableMetadata newTable = table.withSwapped(table.indexes.with(index));

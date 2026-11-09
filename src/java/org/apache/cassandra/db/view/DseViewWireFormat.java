@@ -110,7 +110,8 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * for an unknown column, and such a mutation of the commit log fails its replay. DSE 6.0's batches, decoded at
  * {@link MessagingService#VERSION_40}, are not translated: DSE creates views with hidden columns from DSE 6.7 on.
  * <p>
- * Nothing here runs outside of DSE 6 compatibility mode, nor at messaging versions other than 11 (and
+ * Nothing here runs outside of DSE 6 compatibility mode (in the DSE 5.1 one neither: DSE 5.1's views have no hidden
+ * column, and its view updates are plain mutations), nor at messaging versions other than 11 (and
  * {@link MessagingService#VERSION_DSE_68} for the updates DSE stored), nor for tables that are not views:
  * {@link #hiddenColumn}, {@link #translates} and {@link #translatesStored} return {@code null} and {@code false} there,
  * and the catalog is not read. Outside of the mode a view update DSE stored fails to decode as before.
@@ -131,7 +132,9 @@ public final class DseViewWireFormat
 
     /**
      * Whether a message at {@code version} may name DSE hidden columns of {@code metadata}: the node is in DSE 6
-     * compatibility mode, {@code version} is DSE's dialect (11) and {@code metadata} is a materialized view.
+     * compatibility mode, {@code version} is DSE's dialect (11) and {@code metadata} is a materialized view. Never in
+     * the DSE 5.1 compatibility mode, where DSE 5.1 nodes speak the same version 11: DSE 5.1's views have no hidden
+     * column, so their data is exchanged as it is, as for a view of DSE 6's old format.
      */
     public static boolean translates(TableMetadata metadata, int version)
     {

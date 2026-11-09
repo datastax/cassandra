@@ -194,13 +194,15 @@ public final class IndexMetadata
             }
             catch (ConfigurationException e)
             {
-                // DSE Search is not supported in the DSE 6 mode, as SecondaryIndexManager refuses to load such an index
-                if (DatabaseDescriptor.isDse6CompatibilityMode() && Dse6NonCoreTraces.isSearchIndexClass(className))
+                // DSE Search is not supported in the DSE 6 and DSE 5.1 modes, as SecondaryIndexManager refuses to
+                // load such an index
+                if (DatabaseDescriptor.isDseCompatibilityMode() && Dse6NonCoreTraces.isSearchIndexClass(className))
                     throw new ConfigurationException(Dse6NonCoreTraces.searchIndexRefusal(table.keyspace, table.name, name, className), e);
                 // SecondaryIndexManager loads any other index of an unknown class as a NoopIndex under these same two
                 // conditions; accept it here too, so that the table carrying it can still be altered. There are no
                 // options to validate for it.
-                if (CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE.getBoolean() || DatabaseDescriptor.isDse6CompatibilityMode())
+                if (CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE.getBoolean() ||
+                    DatabaseDescriptor.isDseCompatibilityMode())
                     return;
                 throw e;
             }

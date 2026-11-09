@@ -65,6 +65,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.exceptions.UnauthorizedException;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ClientState;
@@ -102,10 +103,11 @@ public class CassandraAuthorizer implements IAuthorizer
     private static final String DSE_UPDATE = "UPDATE";
     private static final String DSE_TRUNCATE = "TRUNCATE";
     private static final List<String> DSE_MODIFY = ImmutableList.of(DSE_UPDATE, DSE_TRUNCATE);
-    // the permissions of this software that DSE 6 does not have: DSE's own are CREATE, ALTER, DROP, SELECT, MODIFY,
-    // AUTHORIZE, DESCRIBE, EXECUTE, UPDATE, TRUNCATE and BACKUP, and how it reads a name it does not have is not known,
-    // so they are not written on data resources, the only ones with such permissions, to the table DSE nodes read in
-    // the DSE 6 compatibility mode, see grant()
+    // the permissions of this software that DSE 6 and DSE 5.1 do not have: DSE 6's own are CREATE, ALTER, DROP,
+    // SELECT, MODIFY, AUTHORIZE, DESCRIBE, EXECUTE, UPDATE, TRUNCATE and BACKUP, DSE 5.1's the same without UPDATE,
+    // TRUNCATE and BACKUP, and how either reads a name it does not have is not known, so they are not written on data
+    // resources, the only ones with such permissions, to the table DSE nodes read in the DSE 6 and DSE 5.1
+    // compatibility modes, see grant()
     private static final Set<Permission> UNKNOWN_TO_DSE = Sets.immutableEnumSet(EnumSet.complementOf(EnumSet.of(Permission.CREATE,
                                                                                                                  Permission.ALTER,
                                                                                                                  Permission.DROP,
@@ -190,33 +192,42 @@ public class CassandraAuthorizer implements IAuthorizer
      * (and {@code REVOKE MODIFY}, when the row also holds the name {@code MODIFY}). The two names are written whenever
      * {@code MODIFY} is granted in the mode, even if it looks held, since the row is read at {@code LOCAL_ONE}.
      * <p>
-     * In the mode, the permissions DSE 6 does not have ({@code UNMASK}, {@code SELECT_MASKED}) are not written on a data
-     * resource either, since how a DSE node reads a name it does not have is not known: {@code GRANT ALL}, and the
-     * permissions granted to the creator of a keyspace or table (with {@code allow_ddl}), grant the others, and the
-     * client gets a warning naming those not granted, also logged at INFO (they are returned as granted, so that
-     * {@code GRANT} does not report them as already granted: the other callers ignore the result); a {@code GRANT}
-     * naming them is refused, unless it names every permission of the resource, which is {@code GRANT ALL}. Without
-     * the mode only this software's names are written, as before.
+     * In the mode, and in the DSE 5.1 compatibility mode, the permissions DSE does not have ({@code UNMASK},
+     * {@code SELECT_MASKED}) are not written on a data resource either, since how a DSE node reads a name it does not
+     * have is not known: {@code GRANT ALL}, and the permissions granted to the creator of a keyspace or table (with
+     * {@code allow_ddl}), grant the others, and the client gets a warning naming those not granted, also logged at INFO
+     * (they are returned as granted, so that {@code GRANT} does not report them as already granted: the other callers
+     * ignore the result); a {@code GRANT} naming them is refused, unless it names every permission of the resource,
+     * which is {@code GRANT ALL}. DSE 5.1 has neither {@code UPDATE} nor {@code TRUNCATE}: in the DSE 5.1 compatibility
+     * mode {@code MODIFY} is written as the name {@code MODIFY}, as DSE 5.1 writes it. Without a DSE mode only this
+     * software's names are written, as before.
      * <p>
      * The row read to find the permissions held leaves the list of lone grants as it is, and does not log the
      * {@code UPDATE} or {@code TRUNCATE} it holds alone nor the pair it reads as {@code MODIFY}: the authorizer's next
      * read of the row lists and logs a lone name (unless this grant covers it), and logs the pair if that one-off
      * message has not been logged yet.
      *
-     * @throws InvalidRequestException in the DSE 6 compatibility mode, for a {@code GRANT} naming a permission DSE 6
-     *                                 does not have on a data resource, other than {@code GRANT ALL} (or a
-     *                                 {@code GRANT} naming every permission of the resource, the same set)
+     * @throws InvalidRequestException in the DSE 6 and DSE 5.1 compatibility modes, for a {@code GRANT} naming a
+     *                                 permission DSE does not have on a data resource, other than {@code GRANT ALL}
+     *                                 (or a {@code GRANT} naming every permission of the resource, the same set)
      */
     public Set<Permission> grant(AuthenticatedUser performer, Set<Permission> permissions, IResource resource, RoleResource grantee)
     throws RequestValidationException, RequestExecutionException
     {
-        Set<Permission> unknownToDse = writesDseModify(resource) ? Sets.intersection(permissions, UNKNOWN_TO_DSE) : Collections.emptySet();
+        Set<Permission> unknownToDse = writesDsePermissionsOnly(resource)
+                                       ? Sets.intersection(permissions, UNKNOWN_TO_DSE)
+                                       : Collections.emptySet();
         if (!unknownToDse.isEmpty() && !permissions.equals(resource.applicablePermissions()))
-            throw new InvalidRequestException(String.format("%s cannot be granted with internode_compatibility_mode DSE_6: DataStax Enterprise, which reads " +
-                                                            "the same %s.%s, does not have %s. Grant %s once the upgrade is complete " +
+        {
+            String pronoun = unknownToDse.size() == 1 ? "it" : "them";
+            throw new InvalidRequestException(String.format("%s cannot be granted with internode_compatibility_mode " +
+                                                            "%s: DataStax Enterprise, which reads the same %s.%s, " +
+                                                            "does not have %s. Grant %s once the upgrade is complete " +
                                                             "(internode_compatibility_mode NONE on every node)",
-                                                            joined(unknownToDse), SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.ROLE_PERMISSIONS,
-                                                            unknownToDse.size() == 1 ? "it" : "them", unknownToDse.size() == 1 ? "it" : "them"));
+                                                            joined(unknownToDse), DseCompat.textMode(),
+                                                            SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                            AuthKeyspace.ROLE_PERMISSIONS, pronoun, pronoun));
+        }
 
         Set<String> storedNames = storedPermissionNames(grantee, resource);
         Set<Permission> existingPermissions = existingPermissions(grantee, resource, storedNames, permissions);
@@ -236,10 +247,12 @@ public class CassandraAuthorizer implements IAuthorizer
             names.addAll(DSE_MODIFY);
         if (!notGranted.isEmpty())
         {
-            String message = String.format("%s not granted to role '%s' on %s: with internode_compatibility_mode DSE_6 only the " +
-                                           "permissions DataStax Enterprise also has are written. Grant %s once the upgrade is complete " +
-                                           "(internode_compatibility_mode NONE on every node)",
-                                           joined(notGranted), grantee.getRoleName(), resource.getName(), notGranted.size() == 1 ? "it" : "them");
+            String message = String.format("%s not granted to role '%s' on %s: with internode_compatibility_mode %s " +
+                                           "only the permissions DataStax Enterprise also has are written. Grant %s " +
+                                           "once the upgrade is complete (internode_compatibility_mode NONE on every " +
+                                           "node)",
+                                           joined(notGranted), grantee.getRoleName(), resource.getName(),
+                                           DseCompat.textMode(), notGranted.size() == 1 ? "it" : "them");
             logger.info(message);
             ClientWarn.instance.warn(message);
         }
@@ -322,11 +335,19 @@ public class CassandraAuthorizer implements IAuthorizer
         return permissions.stream().sorted().map(Permission::name).collect(Collectors.joining(" and "));
     }
 
-    // whether MODIFY is written as UPDATE + TRUNCATE (what DSE writes for GRANT ALL and a creator's permissions), and
-    // only the permissions DSE has are written: in the DSE 6 compatibility mode, on data resources
+    // whether MODIFY is written as UPDATE + TRUNCATE (what DSE 6 writes for GRANT ALL and a creator's permissions): in
+    // the DSE 6 compatibility mode, on data resources; DSE 5.1 has neither name and writes MODIFY, as this software
+    // does
     private static boolean writesDseModify(IResource resource)
     {
         return DatabaseDescriptor.isDse6CompatibilityMode() && resource instanceof DataResource;
+    }
+
+    // whether only the permissions DSE has are written (UNKNOWN_TO_DSE refused or left out): in the DSE 6 and DSE 5.1
+    // compatibility modes, on data resources
+    private static boolean writesDsePermissionsOnly(IResource resource)
+    {
+        return DatabaseDescriptor.isDseCompatibilityMode() && resource instanceof DataResource;
     }
 
     // Called when deleting a role with DROP ROLE query.
@@ -774,6 +795,9 @@ public class CassandraAuthorizer implements IAuthorizer
             return scan;
         if (DatabaseDescriptor.isDse6CompatibilityMode())
             return "startup check not run yet; only the rows read so far";
+        if (DatabaseDescriptor.isDse51CompatibilityMode())
+            return "the rows read since startup; DSE 5.1 grants neither UPDATE nor TRUNCATE, so the startup check of " +
+                   "internode_compatibility_mode DSE_5_1 does not look for them";
         return "the rows read since startup; no startup check with internode_compatibility_mode " + DatabaseDescriptor.getInternodeCompatibilityMode();
     }
 

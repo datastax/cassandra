@@ -53,6 +53,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.schema.ColumnMetadata.ClusteringOrder;
@@ -1091,7 +1092,56 @@ public final class SchemaKeyspace
         UserFunctions functions = fetchFunctions(keyspaceName, types);
         Tables tables = fetchTables(keyspaceName, types, functions);
         Views views = fetchViews(keyspaceName, types, functions);
+        if (DatabaseDescriptor.isDse51CompatibilityMode())
+            refuseDse51TableRowsOfViews(tables, views);
         return KeyspaceMetadata.create(keyspaceName, params, tables, views, types, functions);
+    }
+
+    /**
+     * In {@code internode_compatibility_mode: DSE_5_1}, refuses a schema where a row of {@code system_schema.tables}
+     * has the name or the id of a materialized view of {@code system_schema.views}: the row DSE 5.1.51 leaves on the
+     * node where {@code UNRESTRICT ROWS} on a view failed, which keeps DSE 5.1.51 itself from starting the node, and
+     * this software too (the two share the id, which fails the build of the schema with an error that does not say
+     * why). The startup check of {@code Dse6AccessControlCheck} refuses such a row before the schema is loaded; this
+     * one stands behind it for every other read of the schema. No repair of the row is attempted, none being
+     * validated.
+     *
+     * @throws ConfigurationException naming each such row and its view ({@link #dse51TableRowsOfViewsRefusal})
+     */
+    @VisibleForTesting
+    static void refuseDse51TableRowsOfViews(Tables tables, Views views)
+    {
+        List<String> found = new ArrayList<>();
+        for (ViewMetadata view : views)
+        {
+            TableMetadata byName = tables.getNullable(view.name());
+            TableMetadata table = byName != null ? byName : tables.getNullable(view.metadata.id);
+            if (table != null)
+                found.add(dse51TableRowOfView(table.toString(), table.id.toString(), view.metadata.toString(),
+                                              view.metadata.id.toString()));
+        }
+        if (!found.isEmpty())
+            throw new ConfigurationException(dse51TableRowsOfViewsRefusal(found));
+    }
+
+    /** One row of {@code system_schema.tables} named after a view, or with its id, as the refusals list it. */
+    public static String dse51TableRowOfView(String table, String tableId, String view, String viewId)
+    {
+        return "the table row " + table + " (id " + tableId + ") beside the materialized view " + view + " (id " +
+               viewId + ')';
+    }
+
+    /**
+     * The refusal of the rows of {@code system_schema.tables} named after a view of {@code system_schema.views}, or
+     * with its id, as {@link #dse51TableRowOfView} describes them.
+     */
+    public static String dse51TableRowsOfViewsRefusal(List<String> found)
+    {
+        return "internode_compatibility_mode DSE_5_1 refused: system_schema.tables holds rows of materialized views " +
+               "of system_schema.views: " + String.join(", ", found) + ". DSE 5.1.51 leaves such a row on the node " +
+               "where UNRESTRICT ROWS on a view failed, after which neither DSE 5.1.51 nor this software can start " +
+               "the node; this software does not repair it, and no repair is validated yet: the node cannot be " +
+               "upgraded while the row is there. Do not run UNRESTRICT ROWS on a view";
     }
 
     private static KeyspaceParams fetchKeyspaceParams(String keyspaceName)

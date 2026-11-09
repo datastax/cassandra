@@ -188,9 +188,10 @@ public interface MessagingServiceMBean
     public List<String> getDsePeersOnRecord();
 
     /**
-     * The last check of the DSE access controls (RESTRICT, row-level grants, tables restricted to rows) this node does
-     * not enforce, in {@code DSE_6} mode: one entry, from how the check was made ({@code a LOCAL_QUORUM read}, ..., or
-     * {@code not checked: <reason>}) to what it found; empty before the first check and outside {@code DSE_6}.
+     * The last check of the DSE access controls (RESTRICT, row-level grants, tables restricted to rows; in
+     * {@code DSE_5_1} the materialized views too) this node does not enforce, in {@code DSE_6} or {@code DSE_5_1} mode:
+     * one entry, from how the check was made ({@code a LOCAL_QUORUM read}, ..., or {@code not checked: <reason>}) to
+     * what it found; empty before the first check and outside those modes.
      */
     public Map<String, List<String>> getDseAccessControlCheck();
 
@@ -204,8 +205,9 @@ public interface MessagingServiceMBean
      * In {@code DSE_6} mode, what the startup check of the DSE features this software does not support found
      * ({@code Dse6NonCoreTraces}): no trace ({@code none}), with the override of the entries of DSE's {@code nodes/peers}
      * named when it is set, or no trace but what of {@code nodes/peers} the override ignored (its entries with a DSE
-     * workload other than Cassandra, or the file itself when it cannot be read); null outside {@code DSE_6} and before
-     * the check.
+     * workload other than Cassandra, or the file itself when it cannot be read); in {@code DSE_5_1} mode the same, the
+     * peers' entries being those of DSE 5.1's {@code system.peers}, and what the periodic check of the gossiped
+     * workloads finds added to it; null outside those modes and before the check.
      */
     public String getDseNonCoreTraces();
 

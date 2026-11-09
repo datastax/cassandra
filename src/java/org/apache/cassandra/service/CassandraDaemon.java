@@ -281,6 +281,19 @@ public class CassandraDaemon
             exitOrFail(e.returnCode, e.getMessage(), e.getCause());
         }
 
+        // DSE 5.1 compatibility: refuse to start on any trace of the DSE features this software does not support, and
+        // on the row a failed UNRESTRICT ROWS on a view leaves, read from the rows of system_schema before the schema
+        // is loaded (its load fails on some of them without naming them) and before the first write to system.local
+        try
+        {
+            Dse6NonCoreTraces.verifyDse51AtStartup();
+            Dse6AccessControlCheck.verifyDse51SchemaRowsAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
         // We need to persist this as soon as possible after startup checks.
         // This should be the first write to SystemKeyspace (CASSANDRA-11742)
         SystemKeyspace.persistLocalMetadata();
@@ -468,6 +481,16 @@ public class CassandraDaemon
             Gossiper.waitToSettle();
         // DSE 6 compatibility mode: the cue that the mode is no longer needed (a no-op otherwise)
         DsePeers.warnIfNoneKnownAtStartup();
+        // DSE 5.1 compatibility: refuse to start while a DSE 5.1 peer gossips a DSE workload this software does not
+        // support, once gossip has settled
+        try
+        {
+            Dse6NonCoreTraces.verifyDse51GossipedWorkloads();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
 
         StorageService.instance.doAuthSetup(false);
 

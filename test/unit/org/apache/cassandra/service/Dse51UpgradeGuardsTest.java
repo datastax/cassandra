@@ -21,6 +21,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import ch.qos.logback.classic.Level;
@@ -31,11 +33,13 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.mockito.Mockito;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
@@ -285,6 +289,69 @@ public class Dse51UpgradeGuardsTest
         assertThat(DseUpgradeGuards.schemaFrozen()).isEqualTo(DseUpgradeGuards.SCHEMA_FROZEN);
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
         assertThat(DseUpgradeGuards.repairWithDsePeer()).isEqualTo(DseUpgradeGuards.REPAIR_WITH_DSE_PEER);
+    }
+
+    /**
+     * In DSE 5.1 compatibility mode the periodic tasks are the status line and the new check of the DSE access
+     * controls, each on its executor, as in {@code DSE_6}.
+     */
+    @Test
+    public void theAccessControlsAreCheckedAgainInDse51Mode()
+    {
+        ScheduledExecutorService status = Mockito.mock(ScheduledExecutorService.class);
+        ScheduledExecutorService recheck = Mockito.mock(ScheduledExecutorService.class);
+        DseUpgradeGuards.schedulePeriodicTasks(status, recheck);
+        long interval = DseUpgradeGuards.STATUS_LOG_INTERVAL_MINUTES;
+        Mockito.verify(status).scheduleWithFixedDelay(Mockito.any(Runnable.class), Mockito.eq(interval),
+                                                      Mockito.eq(interval), Mockito.eq(TimeUnit.MINUTES));
+        Mockito.verify(recheck).scheduleWithFixedDelay(Mockito.any(Runnable.class), Mockito.eq(interval),
+                                                       Mockito.eq(interval), Mockito.eq(TimeUnit.MINUTES));
+        Mockito.verifyNoMoreInteractions(status, recheck);
+    }
+
+    /**
+     * The status task checks again the workloads the DSE 5.1 peers gossip: a peer gossiping the DSE state of the
+     * Search and Graph node of the DSE 5.1.51 fixtures is reported in the status of the check, then forgotten once it
+     * gossips the Cassandra workload alone.
+     */
+    @Test
+    public void theStatusTaskChecksTheGossipedWorkloadsAgain() throws Exception
+    {
+        Dse6NonCoreTraces.resetStatus();
+        try
+        {
+            EndpointState state = stateWithNetVersion(MessagingService.VERSION_3014);
+            state.addApplicationState(ApplicationState.X_11_PADDING,
+                                      VersionedValue.unsafeMakeVersionedValue(searchGraphDseState(), 1));
+            Gossiper.instance.endpointStateMap.put(dse51Peer, state);
+            DseUpgradeGuards.logStatus();
+            assertThat(Dse6NonCoreTraces.status())
+            .isEqualTo("found by the periodic check in gossip: peer 127.0.0.71 (gossip): " +
+                       "workloads [Cassandra, Graph, Search], graph true, workload Search");
+
+            state.addApplicationState(ApplicationState.X_11_PADDING,
+                                      VersionedValue.unsafeMakeVersionedValue("{\"workloads\":\"Cassandra\"," +
+                                                                              "\"workload\":\"Cassandra\"," +
+                                                                              "\"graph\":false}", 2));
+            DseUpgradeGuards.logStatus();
+            assertThat(Dse6NonCoreTraces.status()).isNull();
+        }
+        finally
+        {
+            Dse6NonCoreTraces.resetStatus();
+        }
+    }
+
+    /** The DSE state the Search and Graph node of the DSE 5.1.51 fixtures gossips, at ordinal 9. */
+    private static String searchGraphDseState() throws IOException
+    {
+        for (DseFixtures.GossipState s : DseFixtures.dse51().gossipStates(DseFixtures.dse51().searchGraphGossipInfo(),
+                                                                          "/127.0.51.21"))
+        {
+            if (s.name.equals(ApplicationState.X_11_PADDING.name()))
+                return s.value;
+        }
+        throw new AssertionError("no DSE state in the gossip of the Search and Graph node");
     }
 
     private static EndpointState stateWithNetVersion(int version)

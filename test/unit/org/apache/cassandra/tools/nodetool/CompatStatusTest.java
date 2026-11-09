@@ -62,9 +62,11 @@ import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEER_WORKLOADS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_SAI_VERSION_PIN;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
+import static org.apache.cassandra.cql3.QueryProcessor.executeOnceInternal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -308,6 +310,71 @@ public class CompatStatusTest extends CQLTester
         }
     }
 
+    /**
+     * In DSE_5_1 mode a cluster-wide read of the access controls that cannot be made (a replica of system_auth down)
+     * is followed by the check of this node's replica, which compatstatus shows as the source.
+     */
+    @Test
+    public void printsTheLocalFallbackOfTheAccessControlCheckInDse51Mode() throws Throwable
+    {
+        InetAddressAndPort down = InetAddressAndPort.getByName("127.0.0.48:7000");
+        // a ring member that is not alive: the partitions it replicates cannot be read at LOCAL_QUORUM
+        StorageService.instance.getTokenMetadata()
+                               .updateNormalToken(DatabaseDescriptor.getPartitioner().getRandomToken(), down);
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try (WithProperties wait = new WithProperties()
+                                   .set(INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS, 0))
+        {
+            Dse6AccessControlCheck.resetLastCheck();
+            Dse6AccessControlCheck.verifyAfterJoin();
+            assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout())
+            .contains("DSE access controls ignored  : at least 0 (found by this node's replica only: the " +
+                      "cluster-wide read failed (Cannot achieve consistency level LOCAL_QUORUM))\n");
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+            StorageService.instance.getTokenMetadata().removeEndpoint(down);
+            Dse6AccessControlCheck.resetLastCheck();
+        }
+    }
+
+    /**
+     * In DSE_5_1 mode the line of the non-core traces reports the check before the schema load, which also looks for
+     * the compaction strategies this software no longer has: none on this node; after a refusal on a table compacted
+     * by DateTieredCompactionStrategy it no longer says none.
+     */
+    @Test
+    public void printsTheNonCoreTracesInDse51Mode() throws Throwable
+    {
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try
+        {
+            Dse6NonCoreTraces.resetStatus();
+            Dse6NonCoreTraces.verifyDse51AtStartup();
+            assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout())
+            .contains("Non-core DSE traces          : none\n");
+
+            executeOnceInternal("UPDATE system_schema.tables SET compaction = " +
+                                "{'class': 'DateTieredCompactionStrategy'} WHERE keyspace_name = ? AND table_name = ?",
+                                KEYSPACE, table);
+            assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
+            .hasMessageContaining("a compaction strategy this software no longer has: table " + KEYSPACE + '.' + table);
+            assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout())
+            .contains("Non-core DSE traces          : unknown (not checked yet)\n");
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+            Dse6NonCoreTraces.resetStatus();
+            // dropped here, so that the row the test changed is not left behind for the next test
+            schemaChange("DROP TABLE " + KEYSPACE + '.' + table);
+        }
+    }
+
     @Test
     public void printsTheNonCoreTracesInDse6Mode() throws Exception
     {
@@ -368,8 +435,8 @@ public class CompatStatusTest extends CQLTester
     }
 
     /**
-     * In DSE_5_1 mode the mode line names it, the DSE 5.1 peers and their record are reported, and nothing only the DSE
-     * 6 upgrade keeps (the SAI pin, the non-core traces, the access controls) is checked.
+     * In DSE_5_1 mode the mode line names it, the DSE 5.1 peers and their record are reported, the non-core traces and
+     * the access controls are checked (here not yet), and the SAI pin, which only the DSE 6 upgrade keeps, is not.
      */
     @Test
     public void printsTheModeInDse51Mode()
@@ -386,8 +453,8 @@ public class CompatStatusTest extends CQLTester
                                        "DSE peers                    : 0",
                                        "DSE 5.1 peers on record      : 0",
                                        "SAI version pinned           : not checked" + inTheMode,
-                                       "Non-core DSE traces          : not checked" + inTheMode,
-                                       "DSE access controls ignored  : not checked" + inTheMode);
+                                       "Non-core DSE traces          : unknown (not checked yet)",
+                                       "DSE access controls ignored  : unknown (not checked yet)");
         }
         finally
         {

@@ -239,7 +239,8 @@ public class Dse6GuardsTest extends TestBaseImpl
     /**
      * In {@code DSE_5_1} mode the same guards apply, their texts naming DSE 5.1 and the mode: the schema freeze, lifted
      * by the property, and the refused operations, counted by {@code compatstatus}, which lists the DSE 5.1 peers and
-     * their record; the periodic status line is scheduled, without the DSE 6 access-control check. The nodes are
+     * their record, with the checks of the non-core traces and of the access controls, which find nothing; the
+     * periodic status line and the access-control check are scheduled. The nodes are
      * started without the mode first, on the storage settings DSE 5.1 requires ({@code big}, {@code HCD_1}, numeric
      * generations), as upgraded DSE 5.1 nodes. The removal of a lost DSE 5.1 node is checked in
      * {@code Dse51UpgradeGuardsTest}: no DSE 5.1 node runs in this harness.
@@ -303,9 +304,12 @@ public class Dse6GuardsTest extends TestBaseImpl
             assertThat(out).contains("Requests refused (upgrade)   : 7\n");
             assertThat(out).containsPattern("  schema change +2\n");
             assertThat(out).containsPattern("  repair +1\n");
-            assertThat(node.logs().grep("The DSE 5.1 upgrade status will be logged every 10 minutes").getResult())
+            // the DSE access controls are checked again in DSE_5_1 too
+            assertThat(node.logs().grep("The DSE 5.1 upgrade status will be logged, and the DSE access controls " +
+                                        "checked again, every 10 minutes").getResult())
             .isNotEmpty();
-            assertThat(node.logs().grep("DSE access controls checked again").getResult()).isEmpty();
+            assertThat(out).contains("Non-core DSE traces          : none\n");
+            assertThat(out).contains("DSE access controls ignored  : 0 (found by a LOCAL_QUORUM read)\n");
         }
     }
 

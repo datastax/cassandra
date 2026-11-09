@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -68,7 +69,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * DSE writes {@code UPDATE} + {@code TRUNCATE} for {@code GRANT ALL} and a creator's permissions (its
  * {@code GRANT MODIFY} writes the name {@code MODIFY}): the pair is read as {@code MODIFY}, one of them alone is
  * dropped and listed; this software's GRANT MODIFY writes DSE's two names in the DSE 6 compatibility mode, and its
- * REVOKE MODIFY removes them (DSE's own REVOKE MODIFY leaves them, see {@link CassandraAuthorizer#grant}).
+ * REVOKE MODIFY removes them (DSE's own REVOKE MODIFY leaves them, see {@link CassandraAuthorizer#grant}). DSE 5.1
+ * has neither name: its rows, and this software's GRANT MODIFY in the DSE 5.1 compatibility mode, hold {@code MODIFY}.
  */
 public class CassandraAuthorizerDseRowsTest extends CQLTester
 {
@@ -838,6 +840,139 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
     }
 
     /**
+     * The rows of {@code system_auth.role_permissions} DSE 5.1.51 wrote: the sstable of the DSE 5.1.51 schema fixture,
+     * node 1's replica, which holds the partition of the role {@code cassandra} only ({@code system_auth} has one
+     * replica there), and the rows of every role as {@code cqlsh} read them across the cluster
+     * ({@code select-system-auth.txt}), which the authorizer is given. DSE 5.1 writes {@code MODIFY} as one name, also
+     * for a creator's permissions, and no {@code UPDATE} or {@code TRUNCATE}, so nothing is granted alone; its
+     * {@code PROXY.LOGIN} and {@code PROXY.EXECUTE} on a role and its {@code rows/<target>/...} resources, the row
+     * grants, which this software does not have, grant nothing here. The fixture has no grant on DSE 5.1's
+     * {@code rpc}, {@code authentication_schemes}, work pool or submission resources: the WARN of those resource types,
+     * which DSE 6 has too, is asserted by the other tests of this class.
+     */
+    @Test
+    public void rowsWrittenByDse5151() throws Throwable
+    {
+        useSuperUser();
+        // DSE 5.1's definition of role_permissions (no restricted, no grantables), under another name, to read its
+        // sstable
+        createTable("CREATE TABLE %s (role text, resource text, permissions set<text>, PRIMARY KEY (role, resource))");
+        Path fixture = DseFixtures.dse51().schemaDataDirectory().resolve("system_auth")
+                       .resolve("role_permissions-3afbe79f219431a7add7f5ab90d8ec9c");
+        // the importer takes the keyspace and table from the two last directories of the path
+        Path temp = Files.createTempDirectory("dse51-role-permissions");
+        PathUtils.deleteRecursiveOnExit(temp);
+        Path copy = Files.createDirectories(temp.resolve(KEYSPACE).resolve(currentTable()));
+        try (Stream<Path> files = Files.list(fixture))
+        {
+            for (Path file : (Iterable<Path>) files::iterator)
+                Files.copy(file, copy.resolve(file.getFileName()));
+        }
+        assertThat(getCurrentColumnFamilyStore().importNewSSTables(Set.of(copy.toString()), false, false, false, false,
+                                                                   false, false, false)).isEmpty();
+        UntypedResultSet replica = execute("SELECT role, resource, permissions FROM %s");
+        assertThat(replica.size()).isEqualTo(3);
+        Map<Pair<String, String>, Set<String>> rows = selectedRolePermissions();
+        assertThat(rows).hasSize(7);
+        for (UntypedResultSet.Row row : replica)
+            assertThat(row.getSet("permissions", UTF8Type.instance)).as(row.getString("resource"))
+            .isEqualTo(rows.get(Pair.create(row.getString("role"), row.getString("resource"))));
+        assertThat(storedNamesIn(replica, "cassandra", "data/test_ks/rlac"))
+        .containsExactlyInAnyOrder("ALTER", "AUTHORIZE", "DROP", "MODIFY", "SELECT");
+        assertThat(rows.get(Pair.create("writer", "data/test_ks/t"))).containsExactly("MODIFY");
+        Set<String> unknown = new HashSet<>();
+        List<String> unknownResources = new ArrayList<>();
+        for (Map.Entry<Pair<String, String>, Set<String>> row : rows.entrySet())
+        {
+            String resource = row.getKey().right;
+            Set<String> names = row.getValue();
+            assertThat(names).as(resource).doesNotContain("UPDATE", "TRUNCATE");
+            assertThat(CassandraAuthorizer.dseLoneWriteGrantName(resource, names)).as(resource).isNull();
+            if (!CassandraAuthorizer.isKnownResourceName(resource))
+                unknownResources.add(resource);
+            unknown.addAll(CassandraAuthorizer.unknownPermissionNames(resource, names));
+        }
+        assertThat(unknown).containsExactlyInAnyOrder("PROXY.EXECUTE", "PROXY.LOGIN");
+        assertThat(unknownResources).containsExactlyInAnyOrder("rows/EU/data/test_ks/rlac",
+                                                               "rows/EU/data/test_ks/rlac_by_v");
+
+        for (String role : List.of("reader", "writer"))
+            executeNet(format("CREATE ROLE %s WITH login = true AND password = '%s'", role, PASSWORD));
+        for (Map.Entry<Pair<String, String>, Set<String>> row : rows.entrySet())
+            execute("INSERT INTO system_auth.role_permissions (role, resource, permissions) VALUES (?, ?, ?)",
+                    row.getKey().left, row.getKey().right, row.getValue());
+        try
+        {
+            withMode(InternodeCompatibilityMode.DSE_5_1, () -> {
+                IAuthorizer authorizer = DatabaseDescriptor.getAuthorizer();
+                AuthenticatedUser writer = new AuthenticatedUser("writer");
+                assertThat(authorizer.authorize(writer, DataResource.table("test_ks", "t")))
+                .containsExactly(Permission.MODIFY);
+                assertThat(authorizer.authorize(writer, DataResource.keyspace("test_ks")))
+                .containsExactly(Permission.SELECT);
+                // the row grants of reader grant nothing on the tables they restrict (and refuse the start, see
+                // Dse6AccessControlCheckTest)
+                AuthenticatedUser reader = new AuthenticatedUser("reader");
+                assertThat(authorizer.authorize(reader, DataResource.table("test_ks", "rlac"))).isEmpty();
+                assertThat(authorizer.authorize(reader, DataResource.table("test_ks", "rlac_by_v"))).isEmpty();
+                assertThat(CassandraAuthorizer.loneDseWriteGrants()).isEmpty();
+            });
+        }
+        finally
+        {
+            for (Pair<String, String> row : rows.keySet())
+                execute("DELETE FROM system_auth.role_permissions WHERE role = ? AND resource = ?",
+                        row.left, row.right);
+            for (String role : List.of("reader", "writer"))
+                executeNet(format("DROP ROLE %s", role));
+        }
+    }
+
+    /**
+     * In DSE 5.1 compatibility mode GRANT writes only the permissions DSE 5.1 has on data resources, as in DSE_6, but
+     * {@code MODIFY} as the one name DSE 5.1 writes, not as DSE 6's {@code UPDATE} + {@code TRUNCATE}; REVOKE MODIFY
+     * removes it. A GRANT naming {@code UNMASK} or {@code SELECT_MASKED} is refused, GRANT ALL leaves them out with a
+     * warning, the texts naming the mode.
+     */
+    @Test
+    public void grantsInDse51ModeWriteWhatDse51Has() throws Throwable
+    {
+        String role = "dse51_grantee";
+        useSuperUser();
+        String table = createRoleAndTable(role);
+        String resource = dataResource(table);
+        try
+        {
+            withMode(InternodeCompatibilityMode.DSE_5_1, () -> {
+                executeNet(format("GRANT MODIFY ON %s.%s TO %s", KEYSPACE, table, role));
+                assertThat(storedNames(role, table)).containsExactly("MODIFY");
+                executeNet(format("REVOKE MODIFY ON %s.%s FROM %s", KEYSPACE, table, role));
+                assertThat(storedNames(role, table)).isEmpty();
+
+                ResultSet all = executeNet(format("GRANT ALL ON %s.%s TO %s", KEYSPACE, table, role));
+                assertThat(all.getExecutionInfo().getWarnings())
+                .containsExactly("UNMASK and SELECT_MASKED not granted to role '" + role + "' on " + resource + ": " +
+                                 "with internode_compatibility_mode DSE_5_1 only the permissions DataStax Enterprise " +
+                                 "also has are written. Grant them once the upgrade is complete " +
+                                 "(internode_compatibility_mode NONE on every node)");
+                assertThat(storedNames(role, table))
+                .containsExactlyInAnyOrder("ALTER", "DROP", "SELECT", "MODIFY", "AUTHORIZE");
+                executeNet(format("REVOKE ALL ON %s.%s FROM %s", KEYSPACE, table, role));
+
+                assertThatThrownBy(() -> executeNet(format("GRANT UNMASK ON %s.%s TO %s", KEYSPACE, table, role)))
+                .hasMessage("UNMASK cannot be granted with internode_compatibility_mode DSE_5_1: DataStax " +
+                            "Enterprise, which reads the same system_auth.role_permissions, does not have it. Grant " +
+                            "it once the upgrade is complete (internode_compatibility_mode NONE on every node)");
+                assertThat(storedNames(role, table)).isEmpty();
+            });
+        }
+        finally
+        {
+            executeNet(format("DROP ROLE %s", role));
+        }
+    }
+
+    /**
      * setup() reads nothing, in the mode or not: in the mode the lone grants are listed by the scans of the
      * access-control check ({@code Dse6AccessControlCheckTest}).
      */
@@ -965,6 +1100,30 @@ public class CassandraAuthorizerDseRowsTest extends CQLTester
     private interface ThrowingRunnable
     {
         void run() throws Throwable;
+    }
+
+    /**
+     * The rows of {@code role_permissions} in the {@code cqlsh} output of the DSE 5.1.51 schema fixture
+     * ({@code select-system-auth.txt}, its first table), as {@code (role, resource) -> permissions}.
+     */
+    private static Map<Pair<String, String>, Set<String>> selectedRolePermissions() throws Exception
+    {
+        Map<Pair<String, String>, Set<String>> rows = new LinkedHashMap<>();
+        for (String line : Files.readAllLines(DseFixtures.dse51().schemaFile("select-system-auth.txt")))
+        {
+            String[] columns = line.split("\\|");
+            if (columns.length != 3 || !columns[2].trim().startsWith("{"))
+            {
+                if (!rows.isEmpty())
+                    break;
+                continue;
+            }
+            Set<String> permissions = new HashSet<>();
+            for (String name : columns[2].trim().replaceAll("[{}' ]", "").split(","))
+                permissions.add(name);
+            rows.put(Pair.create(columns[0].trim(), columns[1].trim()), permissions);
+        }
+        return rows;
     }
 
     private static Set<String> storedNamesIn(UntypedResultSet rows, String role, String resource)

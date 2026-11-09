@@ -263,6 +263,69 @@ public class Dse6SchemaFreezeTest extends CQLTester
         assertThat(DseCompatRefusals.count(DseUpgradeGuards.SCHEMA_CHANGE)).isEqualTo(statements.length + 1);
     }
 
+    /**
+     * In DSE 5.1 compatibility mode no SAI index is created, even with the freeze lifted: DSE 5.1 has no SAI, and this
+     * node sends its schema to no DSE 5.1 node; also when {@code default_secondary_index} makes a
+     * {@code CREATE INDEX} an SAI index. The refusal is counted, and an index of another class is created.
+     */
+    @Test
+    public void noSaiIndexIsCreatedInDse51ModeEvenWithTheFreezeLifted() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int, w int)");
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+        {
+            String refusal = " was not created: with internode_compatibility_mode DSE_5_1 no Storage Attached Index " +
+                             "(SAI) is created, even with -Dcassandra.internode_compatibility_mode.allow_ddl=true, " +
+                             "since DSE 5.1 has no SAI and this node sends its schema to no DSE 5.1 node, so the " +
+                             "index would be in the schema of the nodes of this software only; create it once the " +
+                             "upgrade is complete (internode_compatibility_mode NONE on every node). A CREATE INDEX " +
+                             "without USING creates an SAI index when default_secondary_index is sai";
+            String[] names = { "StorageAttachedIndex", "sai", "org.apache.cassandra.index.sai.StorageAttachedIndex" };
+            for (String using : names)
+            {
+                assertThatThrownBy(() -> execute("CREATE CUSTOM INDEX dse51_sai ON %s (v) USING '" + using + '\''))
+                .as(using)
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage("Index dse51_sai" + refusal);
+            }
+            // an SAI index by default_secondary_index, without USING
+            String defaultIndex = DatabaseDescriptor.getDefaultSecondaryIndex();
+            DatabaseDescriptor.setDefaultSecondaryIndex("sai");
+            try
+            {
+                assertThatThrownBy(() -> execute("CREATE INDEX dse51_default ON %s (v)"))
+                .isInstanceOf(InvalidRequestException.class)
+                .hasMessage("Index dse51_default" + refusal);
+            }
+            finally
+            {
+                DatabaseDescriptor.setDefaultSecondaryIndex(defaultIndex);
+            }
+            String overTheClientPath = "CREATE CUSTOM INDEX dse51_sai ON " + KEYSPACE + '.' + currentTable() +
+                                       " (v) USING 'sai'";
+            assertThatThrownBy(() -> executeNet(overTheClientPath))
+            .isInstanceOf(InvalidQueryException.class)
+            .hasMessageStartingWith("Index dse51_sai was not created: with internode_compatibility_mode DSE_5_1 no " +
+                                    "Storage Attached");
+            assertThat(DseCompatRefusals.count(CreateIndexStatement.DSE51_SAI_INDEX)).isEqualTo(5);
+            assertThat(Schema.instance.getKeyspaceMetadata(KEYSPACE).findIndexedTable("dse51_sai")).isEmpty();
+            assertThat(Schema.instance.getKeyspaceMetadata(KEYSPACE).findIndexedTable("dse51_default")).isEmpty();
+
+            // a legacy secondary index is created, the freeze lifted
+            execute("CREATE INDEX dse51_legacy ON %s (w)");
+            assertThat(Schema.instance.getKeyspaceMetadata(KEYSPACE).findIndexedTable("dse51_legacy")).isPresent();
+        }
+        // in DSE_6 mode, with the freeze lifted, an SAI index is created as before
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+        {
+            execute("CREATE CUSTOM INDEX dse6_sai ON %s (v) USING 'StorageAttachedIndex'");
+        }
+        assertThat(Schema.instance.getKeyspaceMetadata(KEYSPACE).findIndexedTable("dse6_sai")).isPresent();
+        assertThat(DseCompatRefusals.count(CreateIndexStatement.DSE51_SAI_INDEX)).isEqualTo(5);
+    }
+
     @Test
     public void noneModeIsUnchanged() throws Throwable
     {
