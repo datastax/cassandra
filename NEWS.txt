@@ -98,6 +98,12 @@ New features
 
 Upgrading
 ---------
+    - Indexes on a component of the partition key now find partitions that only have a static row after a compaction
+      or an index build. The on-disk format doesn't change: sstables written earlier by those operations don't have
+      these entries until they are compacted again, or the index is rebuilt.
+    - Creating a SAI index on a table with static columns and existing sstables, while another SAI index exists, could
+      fail or, in some cases, build an index that returns wrong rows if some partition had no static row. This no longer
+      happens. An index that was built that way and returns wrong rows must be rebuilt.
     - Use static and regular columns under the same OR only once all nodes are upgraded: older replicas evaluate
       those filters with the old semantics and may silently miss rows at consistency levels where they are the
       only replica read.

@@ -411,7 +411,7 @@ public class TrieMemoryIndex extends MemoryIndex
         {
             return KeyRangeIterator.empty();
         }
-        return new FilteringKeyRangeIterator(new SortedSetKeyRangeIterator(primaryKeys.keys()), keyRange);
+        return new FilteringKeyRangeIterator(new SortedSetKeyRangeIterator(primaryKeys.keys(), indexContext.getDefinition().isStatic()), keyRange);
     }
 
     /**
@@ -602,9 +602,9 @@ public class TrieMemoryIndex extends MemoryIndex
             this.keySets = new SortingSingletonOrSetIterator(keySets);
         }
 
-        static Builder builder(AbstractBounds<PartitionPosition> keyRange, PrimaryKey.Factory factory, int capacity)
+        static Builder builder(AbstractBounds<PartitionPosition> keyRange, PrimaryKey.Factory factory, int capacity, boolean isStaticColumn)
         {
-            return new Builder(keyRange, factory, capacity);
+            return new Builder(keyRange, factory, capacity, isStaticColumn);
         }
 
         @Override
@@ -635,10 +635,11 @@ public class TrieMemoryIndex extends MemoryIndex
             private final PrimaryKey min;
             private final PrimaryKey max;
             private long count;
+            private final boolean isStaticColumn;
 
-
-            Builder(AbstractBounds<PartitionPosition> keyRange, PrimaryKey.Factory factory, int capacity)
+            Builder(AbstractBounds<PartitionPosition> keyRange, PrimaryKey.Factory factory, int capacity, boolean isStaticColumn)
             {
+                this.isStaticColumn = isStaticColumn;
                 this.min = factory.createTokenOnly(keyRange.left.getToken());
                 this.max = factory.createTokenOnly(keyRange.right.getToken());
                 this.keySets = new ArrayList<>(capacity);
@@ -654,7 +655,7 @@ public class TrieMemoryIndex extends MemoryIndex
                 if (size == 1)
                     keySets.add(keys.first());
                 else
-                    keySets.add(new SortedSetKeyRangeIterator(keys, min, max, size));
+                    keySets.add(new SortedSetKeyRangeIterator(keys, min, max, size, isStaticColumn));
 
                 count += size;
             }
@@ -681,17 +682,20 @@ public class TrieMemoryIndex extends MemoryIndex
         private SortedSet<PrimaryKey> primaryKeySet;
         private Iterator<PrimaryKey> iterator;
         private PrimaryKey lastComputedKey;
+        private final boolean isStaticColumn;
 
-        public SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source)
+        public SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source, boolean isStaticColumn)
         {
             super(source.first(), source.last(), source.size());
             this.primaryKeySet = source;
+            this.isStaticColumn = isStaticColumn;
         }
 
-        private SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source, PrimaryKey min, PrimaryKey max, long count)
+        private SortedSetKeyRangeIterator(SortedSet<PrimaryKey> source, PrimaryKey min, PrimaryKey max, long count, boolean isStaticColumn)
         {
             super(min, max, count);
             this.primaryKeySet = source;
+            this.isStaticColumn = isStaticColumn;
         }
 
 
@@ -712,10 +716,12 @@ public class TrieMemoryIndex extends MemoryIndex
             if (lastComputedKey != null && nextKey.compareTo(lastComputedKey) <= 0)
                 return;
 
-            // If this set holds static-row keys, convert the skip target to the static form of
-            // the same partition so that tailSet does not skip past the static key.  This mirrors
-            // the identical conversion in PostingListKeyRangeIterator.performSkipTo().
-            if (!primaryKeySet.isEmpty() && primaryKeySet.first().isStaticRow() && !nextKey.isStaticRow())
+            // An index on a static column only has static-row keys, so convert the skip target to the static form
+            // of the same partition so that tailSet does not skip past the static key. This mirrors the identical
+            // conversion in PostingListKeyRangeIterator.performSkipTo(). Other indexes can have static-row keys too,
+            // an index on a partition key column does, but they also have the keys of the rows, and going back to
+            // the start of the partition would return keys smaller than the target.
+            if (isStaticColumn && !nextKey.isStaticRow())
                 nextKey = nextKey.forStaticRow();
 
             primaryKeySet = primaryKeySet.tailSet(nextKey);
@@ -769,7 +775,7 @@ public class TrieMemoryIndex extends MemoryIndex
             throw new IllegalStateException("Automaton matching is only supported on non-composite literal indexes");
 
         var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
-        var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
+        var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity, indexContext.getDefinition().isStatic());
         lastQueueSize.set(mergingIteratorBuilder.size());
 
         acceptedEntries(subtrie.entrySet().iterator(), automaton).forEachRemaining(entry -> mergingIteratorBuilder.add(entry.getValue()));
@@ -782,7 +788,7 @@ public class TrieMemoryIndex extends MemoryIndex
     private KeyRangeIterator iterateSubtrie(Trie<PrimaryKeys> subtrie, Expression expression, AbstractBounds<PartitionPosition> keyRange)
     {
         var capacity = Math.max(MINIMUM_QUEUE_SIZE, lastQueueSize.get());
-        var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity);
+        var mergingIteratorBuilder = MergingKeyRangeIterator.builder(keyBounds, indexContext.keyFactory(), capacity, indexContext.getDefinition().isStatic());
         lastQueueSize.set(mergingIteratorBuilder.size());
 
         if (!version.onOrAfter(Version.DB) && TypeUtil.isComposite(expression.validator))
