@@ -200,10 +200,29 @@ public class NativeIndexDDLTest extends SAITester
     }
 
     @Test
-    public void shouldFailCreationOnPartitionKey()
+    public void shouldCreateOnOnlyPartitionKeyColumn()
     {
         createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
-        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(id) USING 'StorageAttachedIndex'"))
+        executeNet("CREATE CUSTOM INDEX ON %s(id) USING 'StorageAttachedIndex'");
+    }
+
+    @Test
+    public void shouldFailAnalyzedCreationOnOnlyPartitionKeyColumn()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(id) USING 'StorageAttachedIndex' WITH OPTIONS = {'index_analyzer': 'standard'}"))
+                .isInstanceOf(InvalidQueryException.class)
+                .hasMessageContaining("Cannot create secondary index on the only partition key column id");
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(id) USING 'StorageAttachedIndex' WITH OPTIONS = {'case_sensitive': 'false'}"))
+                .isInstanceOf(InvalidQueryException.class)
+                .hasMessageContaining("Cannot create secondary index on the only partition key column id");
+    }
+
+    @Test
+    public void shouldFailLegacyCreationOnOnlyPartitionKeyColumn()
+    {
+        createTable("CREATE TABLE %s (id text PRIMARY KEY, val text)");
+        assertThatThrownBy(() -> executeNet("CREATE CUSTOM INDEX ON %s(id) USING 'org.apache.cassandra.index.internal.CassandraIndex'"))
                 .isInstanceOf(InvalidQueryException.class)
                 .hasMessageContaining("Cannot create secondary index on the only partition key column id");
     }

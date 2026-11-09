@@ -168,6 +168,45 @@ public class ReplicaFilteringWithStaticsTest extends TestBaseImpl
     }
 
     @Test
+    public void testDisjunctionWithPartitionKey()
+    {
+        testDisjunctionWithPartitionKey(false);
+    }
+
+    @Test
+    public void testDisjunctionWithPartitionKeySAI()
+    {
+        testDisjunctionWithPartitionKey(true);
+    }
+
+    public void testDisjunctionWithPartitionKey(boolean sai)
+    {
+        String table = "partition_key_or_regular" + (sai ? "_sai" : "");
+        CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s." + table + " (pk int, ck int, v int, PRIMARY KEY (pk, ck)) WITH read_repair = 'NONE'"));
+        disableCompaction(CLUSTER, KEYSPACE, table);
+
+        if (sai)
+        {
+            CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s." + table + "(pk) USING 'sai'"));
+            CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s." + table + "(v) USING 'sai'"));
+            SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
+        }
+
+        CLUSTER.coordinator(1).execute(withKeyspace("INSERT INTO %s." + table + " (pk, ck, v) VALUES (1, 1, 10)"), ALL);
+        CLUSTER.coordinator(1).execute(withKeyspace("INSERT INTO %s." + table + " (pk, ck, v) VALUES (2, 1, 20)"), ALL);
+        CLUSTER.coordinator(1).execute(withKeyspace("INSERT INTO %s." + table + " (pk, ck, v) VALUES (3, 1, 30)"), ALL);
+
+        // Only one replica knows this row now matches.
+        CLUSTER.get(1).executeInternal(withKeyspace("UPDATE %s." + table + " USING TIMESTAMP " + (Long.MAX_VALUE / 2) + " SET v = 40 WHERE pk = 3 AND ck = 1"));
+
+        String filtering = sai ? "" : " ALLOW FILTERING";
+        assertRows(CLUSTER.coordinator(1).executeWithPaging(withKeyspace("SELECT pk, ck FROM %s." + table + " WHERE pk = 1 OR v = 40" + filtering), ALL, 1),
+                   row(1, 1), row(3, 1));
+        assertRows(CLUSTER.coordinator(1).executeWithPaging(withKeyspace("SELECT pk, ck FROM %s." + table + " WHERE pk = 2 OR v = 30" + filtering), ALL, 1),
+                   row(2, 1));
+    }
+
+    @Test
     public void testMissingStaticRowWithNonStaticExpression()
     {
         testMissingStaticRowWithNonStaticExpression(false);

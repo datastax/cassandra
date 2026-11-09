@@ -95,9 +95,20 @@ New features
     - Storage-attached indexes (SAI) on non-tokenized string columns support LIKE restrictions with the '%' and
       '_' wildcards and optional escaping with ESCAPE, e.g. LIKE 'a!_%' ESCAPE '!'. No index rebuild, new index
       version or messaging change is needed.
+    - SELECT accepts partition key columns under the OR operator, e.g. pk = 1 OR a = 2. The key columns are filtered
+      like any other column: use a SAI index on them, or ALLOW FILTERING, which scans the table. token() under OR is
+      still rejected.
+    - A SAI index can be created on the only partition key column of a table, except vector and analyzed indexes. It
+      serves relations under OR and those that don't select a partition by its key, such as pk > x or pk LIKE 'a%',
+      without ALLOW FILTERING; an equality on the partition key is still read directly. It adds an entry per row, and
+      a key longer than the term size limit of the index isn't indexed, as for any other column, so these relations
+      don't find it.
 
 Upgrading
 ---------
+    - Use partition key columns under OR only once all nodes are upgraded: older nodes reject them, and older replicas
+      evaluate those filters with the old semantics and may silently miss rows at consistency levels where they are
+      the only replica read.
     - Indexes on a component of the partition key now find partitions that only have a static row after a compaction
       or an index build. The on-disk format doesn't change: sstables written earlier by those operations don't have
       these entries until they are compacted again, or the index is rebuilt.
