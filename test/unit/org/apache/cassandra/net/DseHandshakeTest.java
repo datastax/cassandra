@@ -258,6 +258,32 @@ public class DseHandshakeTest
         }
     }
 
+    /**
+     * The legacy SSL port is used only in DSE_6 mode, for a peer below 4.0, over TLS, with the legacy port enabled, when
+     * the peer's DSE version is not known (the choice by DSE version is {@code DseTlsPortsTest}'s).
+     */
+    @Test
+    public void legacySslPortOnlyForPre40PeersInDse6Mode() throws Exception
+    {
+        InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.90:" + DatabaseDescriptor.getStoragePort());
+        ServerEncryptionOptions legacy = new ServerEncryptionOptions().withInternodeEncryption(ServerEncryptionOptions.InternodeEncryption.all)
+                                                                      .withLegacySslStoragePort(true);
+        ServerEncryptionOptions modern = new ServerEncryptionOptions().withInternodeEncryption(ServerEncryptionOptions.InternodeEncryption.all);
+        OutboundConnectionSettings withLegacy = new OutboundConnectionSettings(peer).withConnectTo(peer).withEncryption(legacy);
+        OutboundConnectionSettings withModern = new OutboundConnectionSettings(peer).withConnectTo(peer).withEncryption(modern);
+        OutboundConnectionSettings plain = new OutboundConnectionSettings(peer).withConnectTo(peer);
+
+        none();
+        assertThat(withLegacy.withLegacyPortIfNecessary(DseCompat.DSE_DIALECT)).isSameAs(withLegacy);
+
+        dse6();
+        assertThat(withLegacy.withLegacyPortIfNecessary(DseCompat.DSE_DIALECT).connectTo())
+        .isEqualTo(peer.withPort(DatabaseDescriptor.getSSLStoragePort()));
+        assertThat(withLegacy.withLegacyPortIfNecessary(current_version)).isSameAs(withLegacy);
+        assertThat(withModern.withLegacyPortIfNecessary(DseCompat.DSE_DIALECT)).isSameAs(withModern);
+        assertThat(plain.withLegacyPortIfNecessary(DseCompat.DSE_DIALECT)).isSameAs(plain);
+    }
+
     /** The encryption pre-check looks a pre-4.0 peer up by IP address and default storage port, not its ephemeral source port. */
     @Test
     public void pre40EncryptionCheckUsesTheDefaultStoragePort() throws Exception
