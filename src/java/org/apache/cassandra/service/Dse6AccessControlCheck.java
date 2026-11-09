@@ -248,7 +248,7 @@ public final class Dse6AccessControlCheck
     @VisibleForTesting
     static void verifyAtStartup(Function<ConsistencyLevel, Findings> localScan) throws StartupException
     {
-        if (!DseCompat.enabled())
+        if (!DseCompat.isDse6())
             return;
         // a wrong value refuses the start before the node joins the ring, not only at the second pass
         waitSeconds();
@@ -313,7 +313,7 @@ public final class Dse6AccessControlCheck
      */
     public static void verifyAfterJoin() throws StartupException
     {
-        if (!DseCompat.enabled())
+        if (!DseCompat.isDse6())
             return;
         long waitSeconds = waitSeconds();
         boolean fallbackChosen = CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY.getBoolean() ||
@@ -500,7 +500,7 @@ public final class Dse6AccessControlCheck
     @VisibleForTesting
     public static List<String> recheck(Function<ConsistencyLevel, Findings> scan)
     {
-        if (!DseCompat.enabled())
+        if (!DseCompat.isDse6())
             return List.of();
         Findings findings;
         String source;

@@ -336,7 +336,8 @@ public class VersionedValue implements Comparable<VersionedValue>
          */
         public VersionedValue networkVersion()
         {
-            return new VersionedValue(String.valueOf(DseCompat.enabled() ? DseCompat.NET_VERSION_PUBLISHED : MessagingService.current_version));
+            return new VersionedValue(String.valueOf(DseCompat.isDse6() ? DseCompat.NET_VERSION_PUBLISHED
+                                                                        : MessagingService.current_version));
         }
 
         /**

@@ -135,7 +135,7 @@ public final class DseViewWireFormat
      */
     public static boolean translates(TableMetadata metadata, int version)
     {
-        return metadata.isView() && version == DseCompat.DSE_DIALECT && DseCompat.enabled();
+        return metadata.isView() && version == DseCompat.DSE_DIALECT && DseCompat.isDse6();
     }
 
     /**
@@ -188,7 +188,7 @@ public final class DseViewWireFormat
      */
     public static boolean translatesStored(TableMetadata metadata, int version)
     {
-        return metadata.isView() && version == MessagingService.VERSION_DSE_68 && DseCompat.enabled();
+        return metadata.isView() && version == MessagingService.VERSION_DSE_68 && DseCompat.isDse6();
     }
 
     /**

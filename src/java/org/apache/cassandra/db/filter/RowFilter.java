@@ -82,7 +82,9 @@ import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.DseCompatRefusals;
+import org.apache.cassandra.net.DseRefusedMessageException;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -1300,6 +1302,19 @@ public class RowFilter
             public Expression deserialize(DataInputPlus in, int version, TableMetadata metadata, IndexHints indexHints) throws IOException
             {
                 Kind kind = Kind.fromVal(in.readByte());
+
+                // Thrift's dynamic column expression of Apache Cassandra 3.x (kind 2), which a DSE 5.1 coordinator
+                // forwards for a Thrift client only: refused in the DSE 5.1 compatibility mode before its bytes are
+                // read
+                if (kind == Kind.UNUSED1 && DseCompat.isDse51() && DseCompat.isPre40Layout(version))
+                {
+                    DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_THRIFT_READ);
+                    throw new DseRefusedMessageException("Received a row filter with the Thrift dynamic column " +
+                                                         "expression (kind 2) at messaging version " + version +
+                                                         ": a DSE 5.1 node forwards a query of a Thrift client, " +
+                                                         "which this software does not serve; stop the Thrift " +
+                                                         "clients (start_rpc: false on the DSE 5.1 nodes)");
+                }
 
                 // custom expressions (3.0+ only) do not contain a column or operator, only a value
                 if (kind == Kind.CUSTOM)

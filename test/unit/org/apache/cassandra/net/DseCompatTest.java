@@ -422,18 +422,60 @@ public class DseCompatTest
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
         assertThat(DseCompat.isDse51()).isTrue();
         assertThat(DseCompat.isDse6()).isFalse();
-        assertThat(DseCompat.enabled()).isFalse();
-        assertThat(DseCompat.isPre40Layout(MessagingService.VERSION_3014)).isFalse();
-        assertThatThrownBy(() -> DseCompat.checkPre40Layout(MessagingService.VERSION_3014))
-        .isInstanceOf(AssertionError.class)
-        .hasMessage("pre-4.0 serialization version 11");
+        // the pre-4.0 dialect is open to DSE 5.1 peers
+        assertThat(DseCompat.enabled()).isTrue();
+        assertThat(DseCompat.isPre40Layout(MessagingService.VERSION_3014)).isTrue();
+        assertThat(DseCompat.isPre40Layout(MessagingService.VERSION_40)).isFalse();
+        DseCompat.checkPre40Layout(MessagingService.VERSION_3014);
+        assertThat(DseCompat.source()).isEqualTo("DSE 5.1");
+        assertThat(DseCompat.textMode()).isEqualTo(InternodeCompatibilityMode.DSE_5_1);
+        assertThat(DseCompat.refusedVerb(Verb.PING_REQ)).isEqualTo("verb PING_REQ to a DSE 5.1 peer");
 
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
         assertThat(DseCompat.isDse51()).isFalse();
         assertThat(DseCompat.isDse6()).isTrue();
+        assertThat(DseCompat.enabled()).isTrue();
+        assertThat(DseCompat.source()).isEqualTo("DSE 6");
+        assertThat(DseCompat.textMode()).isEqualTo(InternodeCompatibilityMode.DSE_6);
+        assertThat(DseCompat.refusedVerb(Verb.PING_REQ)).isEqualTo("verb PING_REQ to a DSE 6 peer");
 
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
         assertThat(DseCompat.isDse51()).isFalse();
         assertThat(DseCompat.isDse6()).isFalse();
+        assertThat(DseCompat.enabled()).isFalse();
+        assertThatThrownBy(() -> DseCompat.checkPre40Layout(MessagingService.VERSION_3014))
+        .isInstanceOf(AssertionError.class)
+        .hasMessage("pre-4.0 serialization version 11");
+        // the texts of a NONE node name DSE 6, as before the DSE 5.1 mode existed
+        assertThat(DseCompat.source()).isEqualTo("DSE 6");
+    }
+
+    /**
+     * The versions 10 and 11 at which DSE 5.1 stores its batches and Paxos rows are decoded at 4.0 with NONE and in
+     * DSE_5_1, where they have no pre-4.0 path after the flag drop, and keep their pre-4.0 layout in DSE_6; the DSE 6
+     * versions map the same way in every mode. The rows at 11 of the DSE 5.1.51 fixtures are read in
+     * {@code DseBatchlogReplayTest} and {@code DsePaxosRowsTest}.
+     */
+    @Test
+    public void storedVersionsOfDse51AreDecodedAt40OutsideDse6()
+    {
+        for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            for (int pre40 : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_3014 })
+            {
+                int expected = mode.isDse6() ? pre40 : MessagingService.VERSION_40;
+                assertThat(DseCompat.storedDecodingVersion(pre40)).as("%s in %s", pre40, mode).isEqualTo(expected);
+                assertThat(DseCompat.isUnknownStoredDseVersion(pre40)).as("%s in %s", pre40, mode).isFalse();
+            }
+            // below 3.0 and this software's versions are returned as they are
+            for (int other : new int[]{ 9, MessagingService.VERSION_40, MessagingService.VERSION_50,
+                                        MessagingService.VERSION_DS_20 })
+                assertThat(DseCompat.storedDecodingVersion(other)).as("%s in %s", other, mode).isEqualTo(other);
+            assertThat(DseCompat.storedDecodingVersion(DseCompat.DSE_60_VERSION))
+            .as("%s", mode).isEqualTo(MessagingService.VERSION_40);
+            assertThat(DseCompat.storedDecodingVersion(DseCompat.DSE_697_VERSION))
+            .as("%s", mode).isEqualTo(MessagingService.VERSION_DSE_68);
+        }
     }
 }

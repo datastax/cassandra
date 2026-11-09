@@ -33,12 +33,16 @@ package org.apache.cassandra.config;
  * numeric sstable generations, refuses the compressors DSE 5.1 does not read, and refuses the authenticators and
  * authorizers that read tables of {@code system_auth} DSE 5.1 does not have. At start it refuses the files a node in
  * the mode never writes (sstables of the {@code bti} format or another format than {@code big}, big sstables newer than
- * {@code oa}, non-numeric generations, commit log segments above version 7), writes the marker of the upgrade from
- * DSE 5.1 (which refuses a later start with {@code NONE}) and moves aside the commit log segments of DSE 5.1 it
- * replayed; it writes the transaction logs and the sstable statistics as DSE 5.1 reads them. The node still writes
- * big sstables of version {@code nb}, which DSE 5.1 does not read, and speaks no pre-4.0 dialect, so it cannot connect
- * to DSE 5.1 nodes. Offline tools inherit only the checks of the on-disk settings and the transaction logs and
- * statistics of the mode (they write big {@code oa}, without the storage mode); clients, which do not read
+ * {@code oa}, non-numeric generations, commit log segments above version 7), writes the marker of the upgrade from DSE
+ * 5.1 (which refuses a later start with {@code NONE} or {@code DSE_6}) and moves aside the commit log segments of DSE
+ * 5.1 it replayed; it writes the transaction logs and the sstable statistics as DSE 5.1 reads them. The node still
+ * writes big sstables of version {@code nb}, which DSE 5.1 does not read. A node in the mode speaks, with DSE 5.1
+ * peers, the pre-4.0 handshake and the Apache Cassandra 3.11 dialect DSE 5.1 uses (messaging version 11, with Apache
+ * Cassandra 3.11's limit ordinals), with this software's gossip ordinals, and applies the operational guards and the
+ * schema freeze of {@link #DSE_6} (a schema statement, a schema change received or a JMX compression change that sets a
+ * compressor DSE 5.1 does not read is refused too); it neither sends its schema to DSE 5.1 nodes nor applies theirs,
+ * and refuses their repair messages. Offline tools inherit only the checks of the on-disk settings and the transaction
+ * logs and statistics of the mode (they write big {@code oa}, without the storage mode); clients, which do not read
  * {@code cassandra.yaml}, get the {@code big} format and numeric generations forced.
  * <p>
  * The mode is removed with a rolling restart once every node runs this software.

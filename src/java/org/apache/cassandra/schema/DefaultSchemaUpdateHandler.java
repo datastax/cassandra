@@ -21,6 +21,7 @@ package org.apache.cassandra.schema;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -65,16 +66,19 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
 {
     private static final Logger logger = LoggerFactory.getLogger(DefaultSchemaUpdateHandler.class);
 
-    /** The reason under which, in the DSE 6 compatibility mode, the schema pulls answered with no schema are counted. */
+    /**
+     * The reason under which, in the DSE 6 and DSE 5.1 compatibility modes, the schema pulls answered with no schema
+     * are counted.
+     */
     public static final String SCHEMA_PULL_WITHOUT_SCHEMA = "schema pull (answered with no schema)";
 
-    /** The reason under which, in the DSE 6 compatibility mode, the ignored schema pushes are counted. */
+    /** The reason under which, in the DSE 6 and DSE 5.1 compatibility modes, the ignored schema pushes are counted. */
     public static final String SCHEMA_PUSH_IGNORED = "schema push (ignored)";
 
     @VisibleForTesting
     final MigrationCoordinator migrationCoordinator;
 
-    /** The messaging service whose peer versions tell a DSE 6 peer from a node of this software; read in the mode only. */
+    /** The messaging service whose peer versions tell a DSE peer from a node of this software; read in a DSE mode. */
     private final MessagingService messagingService;
 
     private final boolean requireSchemas;
@@ -117,7 +121,7 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
             }
             synchronized (this)
             {
-                if (requestedReset == null)
+                if (requestedReset == null && !refusesDse51Compressors(msg.from(), msg.payload))
                     applyMutations(msg.payload);
             }
         });
@@ -358,8 +362,11 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
             return schema.getVersion();
     }
 
-    private synchronized void applyMutationsFromCoordinator(InetAddressAndPort from, Collection<Mutation> mutations)
+    @VisibleForTesting
+    synchronized void applyMutationsFromCoordinator(InetAddressAndPort from, Collection<Mutation> mutations)
     {
+        if (refusesDse51Compressors(from, mutations))
+            return;
         if (requestedReset != null && !mutations.isEmpty())
         {
             schema = DistributedSchema.EMPTY;
@@ -371,11 +378,37 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
     }
 
     /**
-     * The answer to a schema pull from the peer: this node's schema, or, in the DSE 6 compatibility mode, for a peer this
-     * node does not exchange its schema with ({@link MigrationCoordinator#exchangesSchemaWith}):
+     * In {@code internode_compatibility_mode: DSE_5_1}, whether the schema {@code mutations} received from
+     * {@code from}, pushed or answering a pull, are not applied because they give a table or a view a compressor DSE
+     * 5.1 does not read, or encryption ({@link Dse51Compressors#refusedSchemaMutations}): none of them is applied, the
+     * refusal is counted in {@code nodetool compatstatus} and logged at WARN at most once every ten minutes. Only a
+     * node of this software not in the mode can send them (a configuration mistake, or the flag drop under way);
+     * applying them would make the next start of this node refuse. The schema versions of the two nodes then disagree,
+     * so this node pulls the schema of the sender, whose answer, the whole schema with that table, is dropped and
+     * counted the same way, every later change of the sender included, until the change is reverted there; a later push
+     * that does not carry the table is applied. False outside the mode, where nothing is checked.
+     */
+    private static boolean refusesDse51Compressors(InetAddressAndPort from, Collection<Mutation> mutations)
+    {
+        List<String> refused = Dse51Compressors.refusedSchemaMutations(mutations);
+        if (refused.isEmpty())
+            return false;
+        DseCompatRefusals.refused(Dse51Compressors.REFUSED_SCHEMA_CHANGE);
+        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 10, TimeUnit.MINUTES,
+                         "Not applying a schema change from {} in internode_compatibility_mode DSE_5_1: it " +
+                         "compresses {} with a compressor DSE 5.1 does not read, or encrypts them (DSE 5.1 reads " +
+                         "LZ4Compressor, SnappyCompressor and DeflateCompressor). Only a node not in the mode sends " +
+                         "such a change: this node's schema disagrees with that node's, and the schema this node " +
+                         "pulls from it is not applied either, until the change is reverted there", from, refused);
+        return true;
+    }
+
+    /**
+     * The answer to a schema pull from the peer: this node's schema, or, in the DSE 6 and DSE 5.1 compatibility modes,
+     * for a peer this node does not exchange its schema with ({@link MigrationCoordinator#exchangesSchemaWith}):
      * <ul>
-     * <li>no schema for a DSE 6 peer (known at the pre-4.0 dialect, or identified as DSE), counted in
-     *     {@code nodetool compatstatus} and logged at most once every ten minutes;</li>
+     * <li>no schema for a DSE peer (known at the pre-4.0 dialect, or identified as a DSE node of the mode's release),
+     *     counted in {@code nodetool compatstatus} and logged at most once every ten minutes;</li>
      * <li>null for any other peer (its messaging version unknown, or another 4.0 or later version than this node's), to
      *     be answered with a failure: the requester takes an empty answer as the schema received and would not pull that
      *     schema version again, while a failure makes it retry, possibly from another node.</li>
@@ -390,36 +423,41 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
             if (!DseDialectVersions.isPre40(messagingService.versions, from) && !DsePeers.isDse(from))
             {
                 NoSpamLogger.log(logger, NoSpamLogger.Level.INFO, 10, TimeUnit.MINUTES,
-                                 "Answering with a failure the schema pulls of peers whose messaging version is neither this node's " +
-                                 "nor DSE 6's (for example {}): in internode_compatibility_mode DSE_6 this node's schema is sent " +
-                                 "only to peers speaking its messaging version; the peer retries", from);
+                                 "Answering with a failure the schema pulls of peers whose messaging version is " +
+                                 "neither this node's nor {}'s (for example {}): in internode_compatibility_mode {} " +
+                                 "this node's schema is sent only to peers speaking its messaging version; the peer " +
+                                 "retries",
+                                 DseCompat.source(), from, DseCompat.textMode());
                 return null;
             }
             DseCompatRefusals.refused(SCHEMA_PULL_WITHOUT_SCHEMA);
             NoSpamLogger.log(logger, NoSpamLogger.Level.INFO, 10, TimeUnit.MINUTES,
-                             "Answering with no schema the schema pulls of peers that do not speak this node's messaging version, " +
-                             "DSE 6 nodes in the first place (for example {}): in internode_compatibility_mode DSE_6 the schema is " +
-                             "frozen and this node's schema must not reach the DSE 6 nodes", from);
+                             "Answering with no schema the schema pulls of peers that do not speak this node's " +
+                             "messaging version, {} nodes in the first place (for example {}): in " +
+                             "internode_compatibility_mode {} the schema is frozen and this node's schema must not " +
+                             "reach the {} nodes", DseCompat.source(), from, DseCompat.textMode(), DseCompat.source());
             return Collections.emptyList();
         }
         return getSchemaMutations();
     }
 
     /**
-     * In the DSE 6 compatibility mode, drops a schema push from a peer this node does not exchange its schema with
-     * ({@link MigrationCoordinator#exchangesSchemaWith}): the schema is frozen during the upgrade, so a schema change
-     * made on a DSE 6 node does not reach this node. Counted in {@code nodetool compatstatus} and logged at most once
-     * every ten minutes. A push from a node of this software whose messaging version this node does not know at that
-     * moment is dropped too: its schema change reaches this node by the pull that follows its gossiped schema version,
-     * once the version is known.
+     * In the DSE 6 and DSE 5.1 compatibility modes, drops a schema push from a peer this node does not exchange its
+     * schema with ({@link MigrationCoordinator#exchangesSchemaWith}): the schema is frozen during the upgrade, so a
+     * schema change made on a DSE node does not reach this node. A DSE 5.1 node pushes its schema changes to this node,
+     * and pulls its schema, whenever it stored the version 11 a handshake answered for this node. Counted in
+     * {@code nodetool compatstatus} and logged at most once every ten minutes. A push from a node of this software
+     * whose messaging version this node does not know at that moment is dropped too: its schema change reaches this
+     * node by the pull that follows its gossiped schema version, once the version is known.
      */
     private static void ignoreSchemaPush(InetAddressAndPort from)
     {
         DseCompatRefusals.refused(SCHEMA_PUSH_IGNORED);
         NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 10, TimeUnit.MINUTES,
-                         "Ignoring the schema pushes of peers that do not speak this node's messaging version, DSE 6 nodes in the " +
-                         "first place (for example {}): in internode_compatibility_mode DSE_6 the schema is frozen, and a schema " +
-                         "change made on a DSE 6 node during the upgrade does not reach this node", from);
+                         "Ignoring the schema pushes of peers that do not speak this node's messaging version, {} " +
+                         "nodes in the first place (for example {}): in internode_compatibility_mode {} the schema " +
+                         "is frozen, and a schema change made on a {} node during the upgrade does not reach this node",
+                         DseCompat.source(), from, DseCompat.textMode(), DseCompat.source());
     }
 
     private synchronized Collection<Mutation> getSchemaMutations()

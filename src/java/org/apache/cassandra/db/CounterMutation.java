@@ -488,7 +488,7 @@ public class CounterMutation implements IMutation
     }
 
     /**
-     * The sizes at the pre-4.0 versions 10 and 11, used in DSE 6 compatibility mode only: allocated on first use, so
+     * The sizes at the pre-4.0 versions 10 and 11, used in a DSE compatibility mode only: allocated on first use, so
      * that the mode costs a single reference when it is off.
      */
     private int[] serializedSizesPre40;

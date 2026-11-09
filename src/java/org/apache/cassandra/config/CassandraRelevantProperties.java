@@ -557,8 +557,10 @@ public enum CassandraRelevantProperties
      */
     INTERNODE_COMPATIBILITY_MODE("cassandra.internode_compatibility_mode"),
     /**
-     * Lifts the schema freeze of {@code internode_compatibility_mode: DSE_6}: schema changes are refused while
-     * the mode is on unless this is set (DSE 6 peers would not understand the schema this software writes).
+     * Lifts the schema freeze of {@code internode_compatibility_mode: DSE_6} and {@code DSE_5_1}: schema changes are
+     * refused while the mode is on unless this is set (DSE peers would not understand the schema this software writes).
+     * In {@code DSE_5_1} a statement giving a table or a view a compressor DSE 5.1 does not read, or encryption, is
+     * refused even when this is set.
      */
     INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL("cassandra.internode_compatibility_mode.allow_ddl", "false"),
     /**
@@ -589,7 +591,11 @@ public enum CassandraRelevantProperties
     /**
      * Lets a node start with {@code internode_compatibility_mode: NONE} although the DSE 6 upgrade marker file
      * or the record of DSE 6 peers is still present in its metadata directory (for example a marker left behind,
-     * or a DSE 6 peer that was removed while this node was down).
+     * or a DSE 6 peer that was removed while this node was down). It lets a node start in the same way with
+     * {@code NONE} or {@code DSE_6} although the marker or the record of the upgrade from DSE 5.1 is present, and in
+     * {@code DSE_5_1} although the DSE 6 ones are; the files found are logged at WARN. Started so in {@code DSE_6}, the
+     * node still writes the DSE 6 upgrade marker, which then refuses its start in {@code DSE_5_1} until it is deleted;
+     * the DSE 5.1 files stay, so each later start in {@code DSE_6} needs the property too.
      */
     INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS("cassandra.internode_compatibility_mode.ignore_dse_peers", "false"),
     /**
@@ -621,9 +627,10 @@ public enum CassandraRelevantProperties
     INTERNODE_COMPATIBILITY_MODE_IGNORE_SAI_VERSION_PIN("cassandra.internode_compatibility_mode.ignore_sai_version_pin", "false"),
     /**
      * How long, in seconds, nothing must have been heard of a node that is down for it to count as lost for good while
-     * the DSE 6 upgrade is in progress, so that it can be removed ({@code DseUpgradeGuards#isLostNode}). Unset by
-     * default: the largest of 30 minutes, {@code max_hint_window} and twice the ring delay. Checked at startup: a value
-     * below the larger of one minute and twice the ring delay, or one that is not a whole number, refuses the start.
+     * a DSE upgrade (from DSE 6 or DSE 5.1) is in progress, so that it can be removed
+     * ({@code DseUpgradeGuards#isLostNode}). Unset by default: the largest of 30 minutes, {@code max_hint_window} and
+     * twice the ring delay. Checked at startup: a value below the larger of one minute and twice the ring delay, or one
+     * that is not a whole number, refuses the start.
      */
     INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS("cassandra.internode_compatibility_mode.lost_node_silence_seconds"),
     INTERNODE_EVENT_THREADS("cassandra.internode-event-threads"),

@@ -456,7 +456,7 @@ public class OutboundConnectionSettings
      */
     public OutboundConnectionSettings withLegacyPortIfNecessary(int messagingVersion)
     {
-        if (!DseCompat.enabled() || messagingVersion >= MessagingService.VERSION_40 || encryption == null
+        if (!DseCompat.isDse6() || messagingVersion >= MessagingService.VERSION_40 || encryption == null
             || !DseTlsPorts.dialsSslStoragePort(to, encryption.legacy_ssl_storage_port_enabled))
             return this;
 

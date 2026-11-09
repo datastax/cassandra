@@ -59,6 +59,7 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.PaxosRow;
 import org.apache.cassandra.io.util.File;
@@ -99,6 +100,11 @@ public class DsePaxosRowsTest extends CQLTester
     private static final String DSE_6_9_26_KEYSPACE = "dse_6926";
     /** When the DSE 6.9.26 sstable is read: 2026-10-03T12:00:00Z, after its last commit and before its first cell expires. */
     private static final long DSE_6_9_26_READ_AT = 1791028800L;
+    /**
+     * When the DSE 5.1.51 sstable is read: 2026-11-06T12:00:00Z, after its last commit and before its cells expire, ten
+     * days after it.
+     */
+    private static final long DSE_5_1_51_READ_AT = 1793966400L;
     /** The gc_grace_seconds of that table here: not DSE's TTL, so that the test tells which of the two expires a commit. */
     private static final int DSE_6_9_26_GC_GRACE_SECONDS = 432000;
 
@@ -136,11 +142,15 @@ public class DsePaxosRowsTest extends CQLTester
     @Test
     public void decodingVersions()
     {
-        // every messaging version of this software, and whatever else lies below DSE's range, is decoded as it is
+        // every messaging version of this software, and whatever else lies below DSE's range, is decoded as it is, but
+        // the pre-4.0 versions 10 and 11 at which DSE 5.1 stores its rows, decoded at 4.0 outside DSE_6 (this test runs
+        // with NONE; DseCompatTest checks every mode)
         for (MessagingService.Version version : MessagingService.Version.values())
         {
             assertFalse(isUnknownStoredDseVersion(version.value));
-            assertEquals(version.value, storedDecodingVersion(version.value));
+            boolean pre40 = version.value == MessagingService.VERSION_30
+                            || version.value == MessagingService.VERSION_3014;
+            assertEquals(pre40 ? MessagingService.VERSION_40 : version.value, storedDecodingVersion(version.value));
         }
         for (int version : new int[]{ Integer.MIN_VALUE, -1, 0, 255 })
         {
@@ -391,12 +401,19 @@ public class DsePaxosRowsTest extends CQLTester
     /** Copies the DSE 6.9.26 sstable of system.paxos and imports the copy into {@code paxos}, as an operator imports sstables. */
     private static void importDse6926PaxosSSTable(ColumnFamilyStore paxos) throws IOException
     {
-        Path root = Files.createTempDirectory("dse-6.9.26-paxos");
+        importPaxosSSTable(paxos, "dse-6.9.26-paxos", DseFixtures.dse6926PaxosSSTableComponents());
+    }
+
+    /** Imports the {@code system.paxos} sstable of {@code components} into {@code paxos}, as DSE left it. */
+    private static void importPaxosSSTable(ColumnFamilyStore paxos, String prefix, List<Path> components)
+    throws IOException
+    {
+        Path root = Files.createTempDirectory(prefix);
         try
         {
             Path directory = root.resolve(SchemaConstants.SYSTEM_KEYSPACE_NAME).resolve(SystemKeyspace.PAXOS + '-' + paxos.metadata.id.toHexString());
             Files.createDirectories(directory);
-            for (Path component : DseFixtures.dse6926PaxosSSTableComponents())
+            for (Path component : components)
                 Files.copy(component, directory.resolve(component.getFileName()));
             boolean resetLevel = false, clearRepaired = false, verifySSTables = false, verifyTokens = false, invalidateCaches = false,
                     extendedVerify = false, copyData = false, failOnMissingIndex = false, validateIndexChecksum = false;
@@ -409,6 +426,80 @@ public class DsePaxosRowsTest extends CQLTester
         finally
         {
             FileUtils.deleteRecursive(new File(root));
+        }
+    }
+
+    @Test
+    public void loadsDse5151PaxosSSTableInDse51() throws Throwable
+    {
+        loadsDse5151PaxosSSTable(InternodeCompatibilityMode.DSE_5_1);
+    }
+
+    @Test
+    public void loadsDse5151PaxosSSTableAfterTheFlagDrop() throws Throwable
+    {
+        loadsDse5151PaxosSSTable(InternodeCompatibilityMode.NONE);
+    }
+
+    /**
+     * The {@code system.paxos} sstable DSE 5.1.51 left on a node of its test cluster
+     * ({@link Dse51Fixtures#paxosSSTableDirectory()}), imported as DSE left it: two committed rounds of
+     * {@code test_ks.lwt}, every version 11, the commits in the 3.0 layout, which this software decodes at 4.0 in
+     * {@code DSE_5_1} and after the flag drop ({@code NONE}). Read at {@link #DSE_5_1_51_READ_AT}, before DSE's TTL
+     * ends.
+     */
+    private void loadsDse5151PaxosSSTable(InternodeCompatibilityMode mode) throws Throwable
+    {
+        schemaChange("CREATE KEYSPACE IF NOT EXISTS test_ks WITH replication = " +
+                     "{'class': 'SimpleStrategy', 'replication_factor': 1}");
+        schemaChange("CREATE TABLE IF NOT EXISTS test_ks.lwt (id int PRIMARY KEY, v int) WITH ID = " +
+                     Dse51Fixtures.LWT_TABLE_ID);
+        TableMetadata metadata = Schema.instance.getTableMetadata(TableId.fromUUID(Dse51Fixtures.LWT_TABLE_ID));
+        ColumnFamilyStore paxos = Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME)
+                                          .getColumnFamilyStore(SystemKeyspace.PAXOS);
+        boolean autoCompactionWasDisabled = paxos.isAutoCompactionDisabled();
+        paxos.disableAutoCompaction();
+        try
+        {
+            Dse51Fixtures dse51 = DseFixtures.dse51();
+            importPaxosSSTable(paxos, "dse-5.1.51-paxos", dse51.sstableComponents(dse51.paxosSSTableDirectory()));
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            // INSERT (1, 1) IF NOT EXISTS, then UPDATE SET v = 2 WHERE id = 1 IF v = 1, and INSERT (2, 1) IF NOT EXISTS
+            int[] committed = { 0, 2, 1 };
+            List<Integer> ids = new ArrayList<>();
+            for (UntypedResultSet.Row row : QueryProcessor.executeInternalWithNowInSec("SELECT * FROM system.paxos",
+                                                                                       DSE_5_1_51_READ_AT))
+            {
+                ByteBuffer rowKey = row.getBytes("row_key");
+                int id = ByteBufferUtil.toInt(rowKey);
+                ids.add(id);
+                assertEquals(Dse51Fixtures.LWT_TABLE_ID, row.getUUID("cf_id"));
+                assertEquals(Dse51Fixtures.MESSAGING_VERSION, row.getInt("most_recent_commit_version"));
+                assertEquals(Dse51Fixtures.MESSAGING_VERSION, row.getInt("proposal_version"));
+                assertFalse(row.has("proposal"));
+
+                DecoratedKey key = metadata.partitioner.decorateKey(rowKey);
+                PaxosState.Snapshot state = SystemKeyspace.loadPaxosState(key, metadata, DSE_5_1_51_READ_AT);
+                Ballot committedAt = Ballot.fromUuid(row.getUUID("most_recent_commit_at"));
+                assertEquals(committedAt, state.committed.ballot);
+                assertEquals(key, state.committed.update.partitionKey());
+                assertEquals(metadata.id, state.committed.update.metadata().id);
+                assertNull(state.accepted);
+                assertEquals(Collections.singletonList("=" + committed[id]), committedValues(state.committed.update));
+
+                Row paxosRow = paxosRow(key, Dse51Fixtures.LWT_TABLE_ID, DSE_5_1_51_READ_AT);
+                PaxosKeyState keyState = PaxosRows.getCommitState(key, paxosRow, null);
+                assertNotNull(keyState);
+                assertTrue(keyState.committed);
+                assertEquals(committedAt, keyState.ballot);
+            }
+            ids.sort(null);
+            assertEquals(Arrays.asList(1, 2), ids);
+        }
+        finally
+        {
+            if (!autoCompactionWasDisabled)
+                paxos.enableAutoCompaction();
         }
     }
 

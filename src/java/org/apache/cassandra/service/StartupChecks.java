@@ -765,10 +765,11 @@ public class StartupChecks
      * with a non-numeric identifier; commit log segments of a version above the 4.0 line, DSE's {@code 680} included
      * (DSE 5.1 writes version 6, the node in the mode version 7). Every file listed is one DSE 5.1 could not read after
      * a rollback. Once every check has passed, the post action writes the marker of the upgrade from DSE 5.1, which a
-     * later start in {@code NONE} is refused by. When that marker does not exist yet (a new upgrade), the post action
-     * first deletes the record of the values of DSE 5.1's columns of {@code system.local} and {@code system.peers} an
-     * earlier upgrade left ({@link Dse51SystemTables#deleteRecordOfAnEarlierUpgrade}); when that record cannot be
-     * deleted, the marker is not written, and the start is refused ({@link Dse51SystemTables#loadOrReadAtStart}).
+     * later start in {@code NONE} or {@code DSE_6} is refused by. When that marker does not exist yet (a new upgrade),
+     * the post action first deletes the record of the values of DSE 5.1's columns of {@code system.local} and
+     * {@code system.peers} an earlier upgrade left ({@link Dse51SystemTables#deleteRecordOfAnEarlierUpgrade}); when
+     * that record cannot be deleted, the marker is not written, and the start is refused
+     * ({@link Dse51SystemTables#loadOrReadAtStart}).
      */
     public static final StartupCheck checkDse6Artefacts = new StartupCheck()
     {
@@ -858,13 +859,13 @@ public class StartupChecks
         {
             if (Files.exists(path))
                 logger.warn("Unable to write the content of the {} upgrade marker {}; the file exists, which is all " +
-                            "that matters: a later start with internode_compatibility_mode NONE is refused while it does",
-                            source, path, e);
+                            "that matters: a later start with internode_compatibility_mode {} is refused while it does",
+                            source, path, mode.isDse51() ? "NONE or DSE_6" : "NONE", e);
             else if (mode.isDse51())
                 logger.error("Unable to write the {} upgrade marker {}: unless the file exists, a later start with " +
-                             "internode_compatibility_mode NONE will not be refused while {} peers may remain; " +
-                             "create it by hand. Until it exists, every start also discards the record of the values " +
-                             "of DSE 5.1's columns of system.local and system.peers",
+                             "internode_compatibility_mode NONE or DSE_6 will not be refused while {} peers may " +
+                             "remain; create it by hand. Until it exists, every start also discards the record of " +
+                             "the values of DSE 5.1's columns of system.local and system.peers",
                              source, path, source, e);
             else
                 logger.error("Unable to write the {} upgrade marker {}: unless the file exists, a later start with " +
@@ -1025,7 +1026,8 @@ public class StartupChecks
      * Refuses to start when {@code cassandra.internode_compatibility_mode.lost_node_silence_seconds} is set to a value
      * that is not a whole number of seconds or is below the larger of one minute and twice the ring delay, and logs the
      * silence when it is set ({@link DseUpgradeGuards#checkLostNodeSilence}). In every mode, since the removal of a node
-     * lost during the DSE 6 upgrade is allowed in both; a no-op when the property is not set.
+     * lost during the DSE upgrade is allowed with {@code NONE} and in the DSE modes; a no-op when the property is not
+     * set. The texts name DSE 5.1 in {@code DSE_5_1}, DSE 6 otherwise.
      */
     public static final StartupCheck checkLostNodeSilence = new StartupCheck()
     {
@@ -1042,8 +1044,10 @@ public class StartupChecks
                 throw new StartupException(StartupException.ERR_WRONG_CONFIG, e.getMessage());
             }
             if (seconds >= 0)
-                logger.info("A node that is down counts as lost during the DSE 6 upgrade once nothing has been heard of it for {} seconds ({}={})",
-                            seconds, CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey(), seconds);
+                logger.info("A node that is down counts as lost during the {} upgrade once nothing has been heard " +
+                            "of it for {} seconds ({}={})", DseCompat.source(), seconds,
+                            CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey(),
+                            seconds);
         }
     };
 
@@ -1061,10 +1065,21 @@ public class StartupChecks
      * (the files {@code DSE_5_1} writes, {@link DseUpgradeMarker#path(InternodeCompatibilityMode)} and
      * {@link DsePeersRecord#path(InternodeCompatibilityMode)}), naming DSE 5.1 and {@code DSE_5_1}. The DSE 6 files are
      * checked first, and the DSE 5.1 ones only when no DSE 6 file is found (a node of one upgrade has no file of the
-     * other): with the override property set, the WARN names the DSE 6 files alone, on purpose, so that its text is
-     * that of a node of the upgrade from DSE 6 whatever else the metadata directory holds (one that cannot be read
-     * included, where every file "may be present"). A start in {@code DSE_5_1} is not refused by its own files, nor one
-     * in {@code DSE_6} by them.
+     * other, unless it was started in {@code DSE_6} with the override despite the DSE 5.1 files, below; the DSE 5.1
+     * files are then refused once the DSE 6 ones are deleted): with the override property set, the WARN names the DSE 6
+     * files alone, on purpose, so that its text is that of a node of the upgrade from DSE 6 whatever else the metadata
+     * directory holds (one that cannot be read included, where every file "may be present"). A start in {@code DSE_5_1}
+     * is not refused by its own files.
+     * <p>
+     * With {@code DSE_6} it refuses, in the same way, while the marker of the upgrade from DSE 5.1 is present or its
+     * record lists a peer: such a node took part in the upgrade from DSE 5.1, and started in {@code DSE_6} by mistake
+     * it would speak DSE 6's dialect to its DSE 5.1 peers. Only files known to be there ({@code Files.exists}) count,
+     * so that a {@code DSE_6} node that never ran in {@code DSE_5_1} is not affected, nor is one whose metadata
+     * directory is not a directory or cannot be searched, where {@code Files.exists} is false. A record that is there
+     * but cannot be read refuses the start, as with {@code NONE}. The DSE 6 files are not read. With the override
+     * property set the start goes on and writes the DSE 6 upgrade marker, as every start in {@code DSE_6} does, which
+     * then refuses the start in {@code DSE_5_1} until it is deleted; the DSE 5.1 files stay, and refuse a start with
+     * {@code NONE} once the DSE 6 ones are deleted.
      */
     public static final StartupCheck checkDsePeersWithoutFlag = new StartupCheck()
     {
@@ -1073,7 +1088,13 @@ public class StartupChecks
         {
             InternodeCompatibilityMode mode = DatabaseDescriptor.getInternodeCompatibilityMode();
             if (mode.isDse6())
+            {
+                // only the DSE_5_1 mode writes these files: a node that never ran in it has neither
+                if (Files.exists(DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1)) ||
+                    Files.exists(DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1)))
+                    refuseWhileDsePeersMayRemain(mode, InternodeCompatibilityMode.DSE_5_1);
                 return;
+            }
             boolean dse6Found = refuseWhileDsePeersMayRemain(mode, InternodeCompatibilityMode.DSE_6);
             if (!dse6Found && !mode.isDse51())
                 refuseWhileDsePeersMayRemain(mode, InternodeCompatibilityMode.DSE_5_1);
@@ -1123,8 +1144,10 @@ public class StartupChecks
         String found = String.join(" and ", evidence);
         if (CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS.getBoolean())
         {
-            logger.warn("{} but ignored ({}=true); {} peers, if any, will be unreachable",
-                        Character.toUpperCase(found.charAt(0)) + found.substring(1), ignoreKey, release);
+            // a node in DSE_6 speaks DSE 6's dialect to them, which does not make them unreachable
+            String consequence = mode.isDse6() ? "will be spoken to as DSE 6 nodes" : "will be unreachable";
+            logger.warn("{} but ignored ({}=true); {} peers, if any, {}",
+                        Character.toUpperCase(found.charAt(0)) + found.substring(1), ignoreKey, release, consequence);
             return true;
         }
         StringBuilder remedy = new StringBuilder();
@@ -1136,14 +1159,11 @@ public class StartupChecks
         else if (!dsePeers.isEmpty())
         {
             remedy.append(marker ? "; " : "");
-            // only the DSE 6 record is maintained, and so empties itself
-            if (source.isDse6())
-                remedy.append("the record empties itself once this node has seen every listed peer at messaging ")
-                      .append("version 4.0 or later (run once more with ").append(source)
-                      .append(" after the last upgrade); delete it by hand only after checking that the listed peers ")
-                      .append("have left the cluster");
-            else
-                remedy.append("delete it by hand once every listed peer runs this software or has left the cluster");
+            // the node maintains the record of either upgrade while it runs in that mode, so it empties itself
+            remedy.append("the record empties itself once this node has seen every listed peer at messaging ")
+                  .append("version 4.0 or later (run once more with ").append(source)
+                  .append(" after the last upgrade); delete it by hand only after checking that the listed peers ")
+                  .append("have left the cluster");
             List<String> notAddresses = new ArrayList<>();
             for (String entry : dsePeers)
             {
@@ -1184,8 +1204,9 @@ public class StartupChecks
     };
 
     /**
-     * In {@code DSE_6} mode, loads the record of DSE 6 peers persisted by the previous run ({@link DsePeersRecord})
-     * before any connection is made, so that a DSE peer that stays down during this run is not forgotten.
+     * In {@code DSE_6} or {@code DSE_5_1} mode, loads the record of the mode's DSE peers persisted by the previous run
+     * ({@link DsePeersRecord}) before any connection is made, so that a DSE peer that stays down during this run is not
+     * forgotten.
      */
     public static final StartupCheck loadDsePeersRecord = new StartupCheck()
     {

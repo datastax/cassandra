@@ -20,6 +20,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 
@@ -74,6 +75,30 @@ public class DseSystemKeyspacesTest
         .isEqualTo("table system_distributed.partition_denylist is missing in internode_compatibility_mode DSE_6 (DSE 6 does not " +
                    "have it): the replicated system keyspaces keep DSE 6's definitions during the upgrade, and this software " +
                    "creates its own tables in them at the first start with internode_compatibility_mode NONE");
+    }
+
+    /** In DSE 5.1 compatibility mode the text names that mode and DSE 5.1, whose definitions the keyspaces keep. */
+    @Test
+    public void theRefusalTextNamesDse51InItsMode()
+    {
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try
+        {
+            assertThat(DseSystemKeyspaces.deferredTable("system_distributed.partition_denylist"))
+            .isEqualTo("table system_distributed.partition_denylist is missing in internode_compatibility_mode " +
+                       "DSE_5_1 (DSE 5.1 does not have it): the replicated system keyspaces keep DSE 5.1's " +
+                       "definitions during the upgrade, and this software creates its own tables in them at the " +
+                       "first start with internode_compatibility_mode NONE");
+            // the DSE 6 text, which the DSE 6 refusals read, does not depend on the mode
+            assertThat(DseSystemKeyspaces.DEFERRED).isEqualTo(DseSystemKeyspaces.deferred("DSE 6"));
+            assertThat(DseSystemKeyspaces.deferredTable("ks.t", InternodeCompatibilityMode.DSE_6))
+            .startsWith("table ks.t is missing in internode_compatibility_mode DSE_6 (DSE 6 does not have it)");
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
     }
 
     private static TableMetadata.Builder table(String name)

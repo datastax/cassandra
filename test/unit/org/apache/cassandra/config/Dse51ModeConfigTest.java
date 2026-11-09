@@ -149,9 +149,10 @@ public class Dse51ModeConfigTest
         assertThat(DatabaseDescriptor.isDse51SSTableOutput()).isTrue();
         assertThat(TRIE_INDEX_FORMAT_VERSION.isPresent()).isFalse();
         assertThatCode(DatabaseDescriptor::verifyDse6SSTableFormat).doesNotThrowAnyException();
-        // and no pre-4.0 dialect: the gate of every pre-4.0 code path stays closed
-        assertThat(DseCompat.enabled()).isFalse();
-        assertThat(DseCompat.isPre40Layout(MessagingService.VERSION_3014)).isFalse();
+        // the pre-4.0 dialect of DSE 5.1: the gate of every pre-4.0 code path is open, those of DSE 6 only stay closed
+        assertThat(DseCompat.enabled()).isTrue();
+        assertThat(DseCompat.isPre40Layout(MessagingService.VERSION_3014)).isTrue();
+        assertThat(DseCompat.isDse6()).isFalse();
     }
 
     /**
@@ -185,8 +186,10 @@ public class Dse51ModeConfigTest
         SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
         String announcement = "Running in internode_compatibility_mode DSE_5_1: the node writes " + format.name() +
                               ' ' + format.getLatestVersion().version + " sstables, which DSE 5.1 does not read, " +
-                              "with numeric generations, and requires paxos_variant v1; it does not connect to " +
-                              "DSE 5.1 nodes";
+                              "with numeric generations, and requires paxos_variant v1; it speaks the pre-4.0 " +
+                              "dialect with DSE 5.1 nodes, with the schema frozen (unless allow_ddl is set; a " +
+                              "compressor DSE 5.1 does not read is refused even then) and repair and topology " +
+                              "changes refused";
         assertThat(appender.list).hasSize(1)
                                  .allMatch(e -> e.getLevel() == Level.WARN &&
                                                 e.getFormattedMessage().equals(announcement));
@@ -294,10 +297,11 @@ public class Dse51ModeConfigTest
             assertThatThrownBy(() -> DatabaseDescriptor.setPaxosVariant(variant))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessage(refusal);
-            // the MBean operation: the guards of the upgrade are not active in this mode, the check of the variant is
+            // the MBean operation: refused by the guards of the upgrade, as in DSE_6
             assertThatThrownBy(() -> StorageProxy.instance.setPaxosVariant(variant.name()))
-            .isInstanceOf(IllegalArgumentException.class)
-            .hasMessage(refusal);
+            .isInstanceOf(UnsupportedOperationException.class)
+            .hasMessageStartingWith("changing paxos_variant to " + variant + " is refused while the DSE 5.1 " +
+                                    "upgrade is in progress (internode_compatibility_mode: DSE_5_1");
             assertThat(Paxos.getPaxosVariant()).isEqualTo(Config.PaxosVariant.v1);
             assertThat(DatabaseDescriptor.getPaxosVariant()).isEqualTo(Config.PaxosVariant.v1);
         }

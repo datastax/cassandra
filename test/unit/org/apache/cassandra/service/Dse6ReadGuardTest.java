@@ -216,6 +216,52 @@ public class Dse6ReadGuardTest extends CQLTester
         assertEquals(1, DseCompatRefusals.total());
     }
 
+    /**
+     * In DSE 5.1 compatibility mode the same rules apply, DSE 5.1 speaking the same pre-4.0 layout: no ANN, no operator
+     * above 14, no index hint, no disjunction; the refusal names DSE 5.1, and is counted under the same reasons.
+     */
+    @Test
+    public void refusesInDse51ModeNamingDse51() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v text, vec vector<float, 2>, PRIMARY KEY (k, c))");
+        TableMetadata metadata = currentTableMetadata();
+        ByteBuffer text = UTF8Type.instance.decompose("x");
+        ReadCommand notIn = read(metadata, filter(column(metadata, "v"), Operator.NOT_IN, text));
+        RowFilter.Builder ann = RowFilter.builder(false);
+        ann.addANNExpression(column(metadata, "vec"), text, ANNOptions.NONE);
+        ReadCommand annRead = read(metadata, ann.build());
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        String suffix = " is not available while the upgrade from DSE 5.1 is in progress; run the query once " +
+                        "internode_compatibility_mode is NONE on every node";
+        InvalidRequestException refused = assertThrows(InvalidRequestException.class,
+                                                       () -> DseReadGuard.checkReadCommand(notIn));
+        assertEquals("DSE 5.1 compatibility mode: the " + Operator.NOT_IN + " operator" + suffix, refused.getMessage());
+        refused = assertThrows(InvalidRequestException.class,
+                               () -> DseReadGuard.checkReadCommands(Arrays.asList(annRead)));
+        assertEquals("DSE 5.1 compatibility mode: the " + Operator.ANN + " operator" + suffix, refused.getMessage());
+        assertEquals(1, DseCompatRefusals.count("read with the " + Operator.NOT_IN + " operator"));
+        assertEquals(1, DseCompatRefusals.count("read with the " + Operator.ANN + " operator"));
+        DseReadGuard.checkReadCommand(read(metadata, RowFilter.none()));
+        assertEquals(2, DseCompatRefusals.total());
+    }
+
+    @Test
+    public void refusesDisjunctionsAndIndexHintsAtTheCoordinatorInDse51Mode() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, v text)");
+        String index = createIndex("CREATE INDEX ON %s(v) USING 'sai'");
+        execute("INSERT INTO %s (k, v) VALUES (1, 'one')");
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertInvalidMessageNet("DSE 5.1 compatibility mode: a disjunction (OR) in the WHERE clause is not " +
+                                "available while the upgrade from DSE 5.1 is in progress",
+                                "SELECT k FROM %s WHERE v = 'one' OR v = 'two' ALLOW FILTERING");
+        assertInvalidMessageNet("DSE 5.1 compatibility mode: an index hint is not available",
+                                "SELECT k FROM %s WHERE v = 'one' WITH included_indexes = {" + index + '}');
+        assertRowsNet(executeNet("SELECT k FROM %s WHERE v = 'one'"), row(1));
+        assertEquals(2, DseCompatRefusals.total());
+    }
+
     /** The guard sits in StorageProxy.read, before the choice between a regular and a SERIAL (Paxos) read. */
     @Test
     public void refusesSinglePartitionReadsAtEveryConsistencyLevel() throws Throwable

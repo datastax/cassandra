@@ -47,6 +47,8 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseCompatRefusals;
+import org.apache.cassandra.net.DseRefusedMessageException;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -146,7 +148,8 @@ public abstract class DataLimits
          * The ordinal DSE uses for this kind, written and read at
          * {@link org.apache.cassandra.net.MessagingService.Version#VERSION_30} (the older DSE &lt;-&gt; CC migration dialect)
          * and, in DSE 6 compatibility mode, at {@link org.apache.cassandra.net.MessagingService.Version#VERSION_3014}
-         * (DSE writes its own ordinals there too). DSE doesn't know {@link #THRIFT_LIMIT} and
+         * (DSE writes its own ordinals there too). The DSE 5.1 compatibility mode writes and reads the ordinals of the
+         * enum at both, as Apache Cassandra 3.11 and DSE 5.1 do. DSE doesn't know {@link #THRIFT_LIMIT} and
          * {@link #SUPER_COLUMN_COUNTING_LIMIT}, so the compatibility ordinals of the GROUP BY kinds are shifted by 2.
          */
         private final int dseCompatibilityOrdinal;
@@ -1474,7 +1477,11 @@ public abstract class DataLimits
             // mode speaks VERSION_3014 with DSE. DSE doesn't know THRIFT_LIMIT(2) and SUPER_COLUMN_COUNTING_LIMIT(3), so
             // DSE ordinals must be used here (DSE writes its own ordinals at OSS_3014 too). With the mode off,
             // VERSION_3014 keeps the ordinals of the enum and VERSION_30 its checks, as before the mode existed.
-            if (DseCompat.isPre40Layout(version))
+            // in the DSE 5.1 compatibility mode the pre-4.0 layout is Apache Cassandra 3.11's, which DSE 5.1 speaks:
+            // the ordinals of the enum, GROUP BY at 4 and 5
+            if (DseCompat.isPre40Layout(version) && DseCompat.isDse51())
+                out.writeByte(limits.kind().ordinal());
+            else if (DseCompat.isPre40Layout(version))
                 out.writeByte(pre40DseCompatibilityOrdinal(limits.kind(), version));
             else if (version == MessagingService.VERSION_30)
                 out.writeByte(limits.kind().dseCompatibilityOrdinal());
@@ -1526,7 +1533,24 @@ public abstract class DataLimits
         {
             int ordinal = in.readUnsignedByte();
             Kind kind;
-            if (DseCompat.isPre40Layout(version))
+            if (DseCompat.isPre40Layout(version) && DseCompat.isDse51())
+            {
+                kind = ordinal < Kind.values().length ? Kind.values()[ordinal] : null;
+                if (kind == null)
+                    throw new IOException("Unknown DataLimits.Kind ordinal " + ordinal + " at messaging version " +
+                                          version);
+                // a DSE 5.1 coordinator sends these two for a Thrift query only
+                if (kind == Kind.THRIFT_LIMIT || kind == Kind.SUPER_COLUMN_COUNTING_LIMIT)
+                {
+                    DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_THRIFT_READ);
+                    throw new DseRefusedMessageException("Received the Thrift limits " + kind + " (ordinal " + ordinal +
+                                                         ") at messaging version " + version + ": a DSE 5.1 node " +
+                                                         "forwards a query of a Thrift client, which this software " +
+                                                         "does not serve; stop the Thrift clients (start_rpc: false " +
+                                                         "on the DSE 5.1 nodes)");
+                }
+            }
+            else if (DseCompat.isPre40Layout(version))
             {
                 // an ordinal a DSE 6 peer sends for no kind is refused with an explicit error
                 kind = ordinal < Kind.DSE_COMPATIBILITY_VALUES.length ? Kind.DSE_COMPATIBILITY_VALUES[ordinal] : null;

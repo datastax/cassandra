@@ -908,6 +908,7 @@ public class Dse6StartupChecksTest
         for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
         {
             DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            String upgrade = mode.isDse51() ? "DSE 5.1" : "DSE 6";
             try (WithProperties properties = new WithProperties().clear(INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS)
                                                                  .set(RING_DELAY, 30000))
             {
@@ -917,9 +918,9 @@ public class Dse6StartupChecksTest
                 assertThatThrownBy(() -> StartupChecks.checkLostNodeSilence.execute(OPTIONS)).as(mode.name())
                 .isInstanceOf(StartupException.class)
                 .hasMessage("-Dcassandra.internode_compatibility_mode.lost_node_silence_seconds=59 is refused: the silence after which a node " +
-                            "that is down counts as lost during the DSE 6 upgrade must be at least 60 seconds, the larger of one minute and " +
-                            "twice the ring delay; unset it for the default (the largest of 30 minutes, max_hint_window and twice the ring " +
-                            "delay)")
+                            "that is down counts as lost during the " + upgrade + " upgrade must be at least 60 " +
+                            "seconds, the larger of one minute and twice the ring delay; unset it for the default " +
+                            "(the largest of 30 minutes, max_hint_window and twice the ring delay)")
                 .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
                 properties.set(INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS, "ten");
                 assertThatThrownBy(() -> StartupChecks.checkLostNodeSilence.execute(OPTIONS)).as(mode.name())
@@ -929,7 +930,8 @@ public class Dse6StartupChecksTest
                 // the previous value is not a number: set as a string
                 properties.set(INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS, "600");
                 assertThat(logsOf(Level.INFO, () -> StartupChecks.checkLostNodeSilence.execute(OPTIONS))).as(mode.name())
-                .containsExactly("A node that is down counts as lost during the DSE 6 upgrade once nothing has been heard of it for 600 seconds " +
+                .containsExactly("A node that is down counts as lost during the " + upgrade + " upgrade once " +
+                                 "nothing has been heard of it for 600 seconds " +
                                  "(cassandra.internode_compatibility_mode.lost_node_silence_seconds=600)");
             }
         }

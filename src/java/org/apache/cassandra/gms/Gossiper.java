@@ -785,7 +785,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         expireTimeEndpointMap.remove(endpoint);
         IFailureDetector.instance.remove(endpoint);
         DsePeers.forget(endpoint);
-        if (DseCompat.enabled())
+        if (DseCompat.isDse6())
             dseEchoRetries.forget(endpoint);
         quarantineEndpoint(endpoint);
         if (logger.isDebugEnabled())
@@ -813,7 +813,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         }
 
         inflightEcho.remove(endpoint);
-        if (DseCompat.enabled())
+        if (DseCompat.isDse6())
             dseEchoRetries.forget(endpoint);
         if (disableEndpointRemoval)
             return;
@@ -1644,7 +1644,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
         EndpointState prevState = inflightEcho.put(addr, localState);
         boolean sendEcho = !localState.equals(prevState);
         // DSE 6 compatibility mode: the echo request a peer left unanswered, or answered with a failure, is sent again (DseEchoRetries)
-        boolean dse = DseCompat.enabled();
+        boolean dse = DseCompat.isDse6();
         if (!sendEcho && dse)
             sendEcho = dseEchoRetries.isDue(addr, localState);
         if (sendEcho)
@@ -1751,7 +1751,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
     {
         localState.markDead();
         inflightEcho.remove(addr);
-        if (DseCompat.enabled())
+        if (DseCompat.isDse6())
             dseEchoRetries.forget(addr);
         if (!disableEndpointRemoval)
         {
@@ -1960,7 +1960,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean, 
             EndpointState remoteState = entry.getValue();
 
             // DSE 6 compatibility mode: a DSE node gossips its addresses and ports as separate states
-            if (DseCompat.enabled())
+            if (DseCompat.isDse6())
                 DseGossipStates.deriveAddressesAndPorts(ep, remoteState, localEpStatePtr);
 
             if (!hasMajorVersion3Nodes)

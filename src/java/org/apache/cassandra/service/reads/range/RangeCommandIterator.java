@@ -186,7 +186,7 @@ public abstract class RangeCommandIterator extends AbstractIterator<RowIterator>
         if (command.isDigestQuery())
             return false;
 
-        // A DSE 6 replica has no multi-range read verb: in DSE 6 compatibility mode every range is
+        // A DSE 6 or DSE 5.1 replica has no multi-range read verb: in a DSE compatibility mode every range is
         // queried on its own, whichever replicas would be chosen
         if (DseCompat.enabled())
             return false;

@@ -53,6 +53,8 @@ import org.apache.cassandra.exceptions.QueryCancelledException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseCompatRefusals;
+import org.apache.cassandra.net.DseRefusedMessageException;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
@@ -1290,7 +1292,7 @@ public abstract class ReadCommand extends AbstractReadQuery
         public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
         {
             out.writeByte(command.kind.ordinal());
-            // The pre-4.0 layout a DSE 6 peer reads (DSE_6 mode only) has no NEEDS_RECONCILIATION bit (its flags are digest,
+            // The pre-4.0 layout a DSE peer reads (DSE modes) has no NEEDS_RECONCILIATION bit (its flags are digest,
             // thrift and index only). Such a replica filters strictly, as every replica did before CASSANDRA-19018. Replica
             // filtering protection still runs at the coordinator and fixes a stale match on one replica that another replica
             // has overwritten, but it cannot recover a row whose matching values were written to different replicas by
@@ -1331,10 +1333,23 @@ public abstract class ReadCommand extends AbstractReadQuery
             // Shouldn't happen or it's a user error (see comment above) but
             // better complain loudly than doing the wrong thing.
             if (isForThrift(flags))
-                throw new IllegalStateException("Received a command with the thrift flag set. "
-                                               + "This means thrift is in use in a mixed 3.0/3.X and 4.0+ cluster, "
-                                               + "which is unsupported. Make sure to stop using thrift before "
-                                               + "upgrading to 4.0");
+            {
+                String refusal = "Received a command with the thrift flag set. "
+                                 + "This means thrift is in use in a mixed 3.0/3.X and 4.0+ cluster, "
+                                 + "which is unsupported. Make sure to stop using thrift before "
+                                 + "upgrading to 4.0";
+                // the DSE 5.1 compatibility mode counts it at the pre-4.0 versions, and refuses it as expected, with
+                // the remedy of the other Thrift refusals: a DSE 5.1 coordinator forwards the reads of its Thrift
+                // clients
+                if (DseCompat.isDse51() && DseCompat.isPre40Layout(version))
+                {
+                    DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_THRIFT_READ);
+                    throw new DseRefusedMessageException(refusal + ": a DSE 5.1 node forwards a query of a Thrift " +
+                                                         "client, which this software does not serve; stop the " +
+                                                         "Thrift clients (start_rpc: false on the DSE 5.1 nodes)");
+                }
+                throw new IllegalStateException(refusal);
+            }
 
             boolean hasIndex = hasIndex(flags);
             int digestVersion = isDigest ? in.readUnsignedVInt32() : 0;
