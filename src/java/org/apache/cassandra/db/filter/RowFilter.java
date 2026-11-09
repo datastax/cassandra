@@ -526,7 +526,7 @@ public class RowFilter
      */
     public boolean isUnsatisfiable()
     {
-        return root.isAlwaysFalse();
+        return root.isNeverSatisfied();
     }
 
     @Override
@@ -604,7 +604,7 @@ public class RowFilter
         {
             FilterElement root = doBuild(restrictions, table, options, annOptions);
 
-            if (root.isAlwaysFalse())
+            if (root.isNeverSatisfied())
                 return ALL;
 
             if (Guardrails.queryFilters.enabled(state))
@@ -650,11 +650,11 @@ public class RowFilter
                 FilterElement childElement = doBuild(child, table, options, annOptions);
 
                 // `OR FALSE` elements can be skipped in disjunctions.
-                if (childElement.isAlwaysFalse())
+                if (childElement.isNeverSatisfied())
                     continue;
 
                 // `OR TRUE` swallows all other restrictions in disjunctions.
-                if (childElement.isAlwaysTrue())
+                if (childElement.isAlwaysSatisfied())
                     return FilterElement.NONE;
 
                 disjunction.children.add(childElement);
@@ -685,11 +685,11 @@ public class RowFilter
                 FilterElement childElement = doBuild(child, table, options, annOptions);
 
                 // `AND FALSE` swallows all other restrictions in conjunctions.
-                if (childElement.isAlwaysFalse())
+                if (childElement.isNeverSatisfied())
                     return FilterElement.ALL;
 
                 // `AND TRUE` does nothing in conjunctions, so don't add it.
-                if (!childElement.isAlwaysTrue())
+                if (!childElement.isAlwaysSatisfied())
                     conjunction.children.add(childElement);
             }
 
@@ -952,12 +952,20 @@ public class RowFilter
             return expressions.isEmpty() && children.isEmpty();
         }
 
-        public boolean isAlwaysTrue()
+        /**
+         * @return whether this filter element is always satisfied by any row, that is, whether
+         * {@link #isSatisfiedBy(TableMetadata, DecoratedKey, Row, long)} always returns {@code true} for any row.
+         */
+        public boolean isAlwaysSatisfied()
         {
             return !isDisjunction && isEmpty();
         }
 
-        public boolean isAlwaysFalse()
+        /**
+         * @return whether this filter element is never satisfied by any row, that is, whether
+         * {@link #isSatisfiedBy(TableMetadata, DecoratedKey, Row, long)} always returns {@code false} for any row.
+         */
+        public boolean isNeverSatisfied()
         {
             return isDisjunction && isEmpty();
         }
