@@ -555,7 +555,9 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
 
         public B setSerializationHeader(SerializationHeader serializationHeader)
         {
-            this.serializationHeader = serializationHeader;
+            // A header read from a DSE view sstable (scrub, cleanup and streaming reuse the header of their input)
+            // names a hidden column whose cells never reach the rows written here: the new sstable must not name it.
+            this.serializationHeader = serializationHeader == null ? null : serializationHeader.withoutDseViewLivenessColumn();
             return (B) this;
         }
 
