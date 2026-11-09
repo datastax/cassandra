@@ -130,6 +130,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_
  * Once the node has joined and gossip has settled, {@link #verifyDse51GossipedWorkloads} refuses the start too when a
  * DSE 5.1 peer gossips a workload other than {@code Cassandra} (live values, which the override does not cover), and
  * the status task of {@code DseUpgradeGuards} checks them again periodically ({@link #recheckDse51GossipedWorkloads}).
+ * The preflight tool gathers the same traces of a DSE 5.1 node, offline, with the same rules ({@link Dse51Markers}).
  */
 public final class Dse6NonCoreTraces
 {
@@ -144,7 +145,7 @@ public final class Dse6NonCoreTraces
     static final String UNKNOWN_WORKLOAD = "Unknown";
 
     /** The DSE features this software does not support, in the order a refusal lists them. */
-    enum Feature
+    public enum Feature
     {
         WORKLOADS("DSE workloads other than Cassandra"),
         SEARCH("DSE Search"),
@@ -163,6 +164,12 @@ public final class Dse6NonCoreTraces
         Feature(String displayName)
         {
             this.displayName = displayName;
+        }
+
+        /** The name the refusal gives the feature, such as {@code DSE Search}. */
+        public String displayName()
+        {
+            return displayName;
         }
     }
 
@@ -399,15 +406,11 @@ public final class Dse6NonCoreTraces
         addDse51KeyspaceTraces(traces, keyspaces);
         String indexColumns = "keyspace_name, table_name, index_name, options";
         for (UntypedResultSet.Row row : schemaRows(indexColumns, SchemaKeyspaceTables.INDEXES))
-        {
-            String className = row.has("options")
-                               ? row.getFrozenTextMap("options").get(IndexTarget.CUSTOM_INDEX_OPTION_NAME)
-                               : null;
-            if (isSearchIndexClass(className))
-                traces.add(Kind.SEARCH_INDEX, "index " + row.getString("keyspace_name") + '.' +
-                                              row.getString("table_name") + '.' + row.getString("index_name") +
-                                              " (" + className + ')');
-        }
+            addDse51SearchIndexTrace(traces, row.getString("keyspace_name"), row.getString("table_name"),
+                                     row.getString("index_name"),
+                                     row.has("options")
+                                     ? row.getFrozenTextMap("options").get(IndexTarget.CUSTOM_INDEX_OPTION_NAME)
+                                     : null);
         String tableColumns = "keyspace_name, table_name, compaction";
         for (UntypedResultSet.Row row : schemaRows(tableColumns, SchemaKeyspaceTables.TABLES))
             addCompactionTrace(traces, "table " + row.getString("keyspace_name") + '.' + row.getString("table_name"),
@@ -436,15 +439,95 @@ public final class Dse6NonCoreTraces
     static void addDse51WorkloadTraces(Traces traces, List<Dse51SystemTables.StoredColumns> stored)
     {
         for (Dse51SystemTables.StoredColumns columns : stored)
+            addDse51WorkloadTrace(traces, columns.nodeWorkloads());
+    }
+
+    /**
+     * The workload trace of one row DSE 5.1 wrote, of {@code system.local} ({@code workloads.peer} null) or of
+     * {@code system.peers}; none when it records the Cassandra workload only.
+     */
+    private static void addDse51WorkloadTrace(Traces traces, DseNodeWorkloads workloads)
+    {
+        List<String> nonCore = nonCore(workloads);
+        if (nonCore.isEmpty())
+            return;
+        if (workloads.peer == null)
+            traces.add(Kind.WORKLOADS_OF_THIS_NODE, THIS_NODE_DSE51 + ": " + String.join(", ", nonCore));
+        else
+            traces.add(Kind.PEER_ENTRY, "peer " + workloads.peer.getHostAddress() + " (system.peers): " +
+                                        String.join(", ", nonCore));
+    }
+
+    /** The trace of an index of {@code system_schema.indexes} when its class is a DSE Search class. */
+    private static void addDse51SearchIndexTrace(Traces traces, String keyspace, String table, String index,
+                                                 @Nullable String className)
+    {
+        if (isSearchIndexClass(className))
+            traces.add(Kind.SEARCH_INDEX, "index " + keyspace + '.' + table + '.' + index + " (" + className + ')');
+    }
+
+    /**
+     * The traces {@link #verifyDse51AtStartup} refuses, gathered offline from the files of a DSE 5.1 node by the
+     * preflight tool, which reads the rows itself (from the sstables of {@code system.local}, {@code system.peers} and
+     * {@code system_schema}) and passes them here one by one: the same rules, in the same order, with nothing refused
+     * or logged. Not thread-safe.
+     */
+    public static final class Dse51Markers
+    {
+        private final Traces traces = new Traces();
+
+        /** The workloads DSE 5.1 wrote in a row of {@code system.local} ({@code peer} null) or {@code system.peers}. */
+        public Dse51Markers workloads(DseNodeWorkloads workloads)
         {
-            List<String> nonCore = nonCore(columns.nodeWorkloads());
-            if (nonCore.isEmpty())
-                continue;
-            if (columns.peer == null)
-                traces.add(Kind.WORKLOADS_OF_THIS_NODE, THIS_NODE_DSE51 + ": " + String.join(", ", nonCore));
-            else
-                traces.add(Kind.PEER_ENTRY, "peer " + columns.peer.getHostAddress() + " (system.peers): " +
-                                            String.join(", ", nonCore));
+            addDse51WorkloadTrace(traces, workloads);
+            return this;
+        }
+
+        /** Every keyspace of {@code system_schema.keyspaces}, with the class of its replication (null when absent). */
+        public Dse51Markers keyspaces(Map<String, String> replicationClassByKeyspace)
+        {
+            addDse51KeyspaceTraces(traces, new TreeMap<>(replicationClassByKeyspace));
+            return this;
+        }
+
+        /** One row of {@code system_schema.indexes}, with the {@code class_name} of its options (null when absent). */
+        public Dse51Markers index(String keyspace, String table, String index, @Nullable String className)
+        {
+            addDse51SearchIndexTrace(traces, keyspace, table, index, className);
+            return this;
+        }
+
+        /** One row of {@code system_schema.tables}, with the class of its compaction (null when absent). */
+        public Dse51Markers table(String keyspace, String table, @Nullable String compactionClass)
+        {
+            addCompactionTrace(traces, "table " + keyspace + '.' + table, compactionClass);
+            return this;
+        }
+
+        /** One row of {@code system_schema.views}, with the class of its compaction (null when absent). */
+        public Dse51Markers view(String keyspace, String view, @Nullable String compactionClass)
+        {
+            addCompactionTrace(traces, "materialized view " + keyspace + '.' + view, compactionClass);
+            return this;
+        }
+
+        /** The {@code solr.data} directories of the data directories. */
+        public Dse51Markers solrData(File[] dataDirectories)
+        {
+            addSolrDataTraces(traces, dataDirectories);
+            return this;
+        }
+
+        /**
+         * The descriptions of the traces found, by feature in the order the refusal lists the features, each list in
+         * the order the traces were found, such as {@code table ks.t (compaction DateTieredCompactionStrategy)}.
+         */
+        public Map<Feature, List<String>> byFeature()
+        {
+            Map<Feature, List<String>> found = new EnumMap<>(Feature.class);
+            for (Trace trace : traces.all)
+                found.computeIfAbsent(trace.feature, f -> new ArrayList<>()).add(trace.description);
+            return found;
         }
     }
 

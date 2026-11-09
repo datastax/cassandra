@@ -42,18 +42,21 @@ import org.apache.commons.cli.ParseException;
 
 import org.apache.cassandra.config.CassandraRelevantEnv;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.sstable.format.big.BigSSTableReaderLoadingBuilder;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
 
 /**
- * {@code dsepreflight}: the preflight inspection of a DataStax Enterprise 6.8/6.9 node before its in-place upgrade to
- * HCD 2.0. Run on every DSE node, DSE running or stopped, from the unpacked HCD 2.0 tarball; it reads the node's files
- * and never writes to them. It reports whether and how the node can be upgraded, and exits with {@value #EXIT_BLOCKED}
- * when it finds a feature that forbids the upgrade. The aggregate mode checks the reports of every node of a cluster
- * together.
+ * {@code dsepreflight}: the preflight inspection of a DataStax Enterprise 6.8/6.9 node, or of a DSE 5.1.51 node,
+ * before its in-place upgrade to HCD 2.0. Run on every DSE node, DSE running or stopped, from the unpacked HCD 2.0
+ * tarball; it reads the node's files and never writes to them. It reports whether and how the node can be upgraded, and
+ * exits with {@value #EXIT_BLOCKED} when it finds a feature that forbids the upgrade. The release of the node decides
+ * which inspection runs ({@link #isDse51Node}): DSE 6's ({@link NodeInspector}) or DSE 5.1's
+ * ({@link Dse51NodeInspector}). The aggregate mode checks the reports of every node of a cluster together.
  * <p>
  * Exit codes: {@value #EXIT_READY} ready (warnings allowed), {@value #EXIT_BLOCKED} blocking findings (or, in the
  * aggregate mode, a cluster that is not ready), {@value #EXIT_ERROR} wrong usage or an error that stopped the inspection.
@@ -65,13 +68,16 @@ public final class DsePreflight
     public static final int EXIT_ERROR = 2;
 
     static final long DEFAULT_NODETOOL_TIMEOUT_SECONDS = 120;
-    static final String USAGE = "dsepreflight [options]                                 inspect this DSE node\n" +
+    static final String USAGE = "dsepreflight [options]                                 " +
+                                "inspect this DSE 6 or DSE 5.1 node\n" +
                                 "       dsepreflight --aggregate <directory> [--json <file>]   check the reports of a cluster\n" +
                                 "       dsepreflight --paxos-rollback [options]                list the open Paxos rounds of a node to roll back to DSE";
     /** The options of the Paxos rollback mode only. */
     static final List<String> PAXOS_ROLLBACK_ONLY = List.of("snapshot", "paxos-dir", "not-restored", "dc", "serial-consistency", "cql");
     /** The options the Paxos rollback mode does not take. */
-    static final List<String> PAXOS_ROLLBACK_EXCLUDED = List.of("aggregate", "nodetool", "nodetool-arg", "nodetool-timeout", "commitlog-dir", "hints-dir");
+    static final List<String> PAXOS_ROLLBACK_EXCLUDED = List.of("aggregate", "nodetool", "nodetool-arg",
+                                                                "nodetool-timeout", "commitlog-dir", "hints-dir",
+                                                                "jvm-options");
     /** The options the aggregate mode takes; it refuses every other, so that none is silently ignored. */
     static final Set<String> AGGREGATE_OPTIONS = Set.of("aggregate", "json", "help");
 
@@ -91,12 +97,15 @@ public final class DsePreflight
      * inspection is a finding: the statistics of an sstable read by the tool can hold a partition size or cell
      * count histogram with values beyond the largest bucket of this software, which it logs with a warning as it clears
      * that bucket, and a transaction log the scan cannot read (finding TXN_LOG_UNREADABLE) is also logged with the whole
-     * listing of its directory.
+     * listing of its directory; a big sstable of a DSE 5.1 node, opened offline without its bloom filter, is logged
+     * with a warning on the performance of reads, which the tool does not make.
      */
     private static void quietLibraryWarnings()
     {
         quiet(StatsMetadata.class.getName(), "ERROR");
         quiet("org.apache.cassandra.db.lifecycle", "OFF");
+        // a big sstable opened offline has no bloom filter loaded, which its loader warns about
+        quiet(BigSSTableReaderLoadingBuilder.class.getName(), "ERROR");
     }
 
     private static void quiet(String logger, String level)
@@ -180,6 +189,7 @@ public final class DsePreflight
         layoutOptions.cassandraYaml = path(cmd, "cassandra-yaml");
         layoutOptions.dseYaml = path(cmd, "dse-yaml");
         layoutOptions.rackdc = path(cmd, "rackdc");
+        layoutOptions.jvmOptions = path(cmd, "jvm-options");
         if (cmd.hasOption("data-dir"))
             for (String dataDirectory : cmd.getOptionValues("data-dir"))
                 layoutOptions.dataDirectories.add(Path.of(dataDirectory));
@@ -193,6 +203,13 @@ public final class DsePreflight
     private static int inspect(CommandLine cmd, PrintStream out, PrintStream err) throws IOException
     {
         NodeLayout layout = layout(cmd);
+        boolean dse51 = isDse51Node(layout);
+        if (!dse51 && cmd.hasOption("jvm-options"))
+        {
+            // an option is never ignored silently
+            err.println("--jvm-options applies to DSE 5.1 nodes only, and this node is inspected as a DSE 6 node");
+            return EXIT_ERROR;
+        }
 
         Map<String, NodeReport.LiveCommand> live = null;
         if (cmd.hasOption("nodetool"))
@@ -215,15 +232,82 @@ public final class DsePreflight
                 }
             }
             String[] extra = cmd.getOptionValues("nodetool-arg");
-            live = LiveState.collect(cmd.getOptionValue("nodetool"), extra == null ? List.of() : List.of(extra), timeout);
+            live = LiveState.collect(cmd.getOptionValue("nodetool"), extra == null ? List.of() : List.of(extra),
+                                     timeout, dse51 ? LiveState.DSE51_COMMANDS : LiveState.COMMANDS);
         }
 
-        NodeReport report = new NodeInspector(layout, live).inspect(hostname());
+        NodeReport report = dse51 ? new Dse51NodeInspector(layout, live).inspect(hostname())
+                                  : new NodeInspector(layout, live).inspect(hostname());
         // printed first, so that a report that cannot be written as JSON still leaves the findings with the operator
         printNodeReport(report, out);
         if (cmd.hasOption("json"))
             writeAtomically(Path.of(cmd.getOptionValue("json")), JsonUtils.JSON_OBJECT_PRETTY_WRITER.writeValueAsBytes(report));
         return report.blocked() ? EXIT_BLOCKED : EXIT_READY;
+    }
+
+    /**
+     * Whether the node is a DSE 5.1 node, inspected by {@link Dse51NodeInspector}: DSE 6's {@code nodes} directory
+     * ({@code nodes/local} or its {@code local.old}) is absent from the metadata directory, and the installation's
+     * {@code ds_version.txt} names a release before DSE 6 (DSE 5.1, or an older one, which that inspection refuses),
+     * or, without one, a data directory holds {@code system.local} (its directory {@code local-<id>}, or {@code local}
+     * for a table created before Cassandra 2.1) in big sstables of a 3.x version ({@code m*}), which DSE 5.1 writes and
+     * DSE 6 does not. Any other node is inspected as a DSE 6 node, whose report says what is missing.
+     */
+    @VisibleForTesting
+    static boolean isDse51Node(NodeLayout layout)
+    {
+        Path nodes = layout.metadataDirectory.toPath().resolve("nodes");
+        if (Files.exists(nodes.resolve("local")) || Files.exists(nodes.resolve("local.old")))
+            return false;
+        String installed;
+        try
+        {
+            installed = layout.installedDseVersion();
+        }
+        catch (IOException | RuntimeException e)
+        {
+            installed = null;
+        }
+        // a DSE release before DSE 6 is inspected as DSE 5.1, whose inspection says which release it accepts
+        if (installed != null)
+            return majorOf(installed) < 6;
+        for (File dataDirectory : layout.dataDirectories)
+        {
+            File system = new File(dataDirectory, SchemaConstants.SYSTEM_KEYSPACE_NAME);
+            if (!system.isDirectory())
+                continue;
+            try
+            {
+                for (File table : system.listUnchecked(f -> f.isDirectory() &&
+                                                            (DseTableReader.isDirectoryOf(f.name(), "local") ||
+                                                             f.name().equals("local"))))
+                {
+                    File[] bigData = table.listUnchecked(f -> f.name().startsWith("m") &&
+                                                              f.name().endsWith("-big-Data.db"));
+                    if (bigData.length > 0)
+                        return true;
+                }
+            }
+            catch (RuntimeException e)
+            {
+                // a directory that cannot be listed tells nothing: the inspection reports it
+            }
+        }
+        return false;
+    }
+
+    /** The major version of a DSE version such as {@code 5.1.51-db2fde3}; {@link Integer#MAX_VALUE} when none. */
+    private static int majorOf(String dseVersion)
+    {
+        int dot = dseVersion.indexOf('.');
+        try
+        {
+            return Integer.parseInt(dot < 0 ? dseVersion.trim() : dseVersion.substring(0, dot).trim());
+        }
+        catch (NumberFormatException e)
+        {
+            return Integer.MAX_VALUE;
+        }
     }
 
     /** Why the options given do not go together; null when they do. */
@@ -375,6 +459,11 @@ public final class DsePreflight
 
     static void printNodeReport(NodeReport report, PrintStream out)
     {
+        if (report.dse51 != null)
+        {
+            printDse51NodeReport(report, out);
+            return;
+        }
         NodeReport.Node node = report.node;
         out.println("DSE 6 preflight inspection for the upgrade to HCD 2.0 (" + NodeReport.TOOL + ' ' + report.softwareVersion + ')');
         out.println("Node: " + (node.broadcastAddress != null ? node.broadcastAddress : report.hostname) + " (host " + report.hostname + ", host id " + node.hostId +
@@ -397,6 +486,41 @@ public final class DsePreflight
             out.println();
             out.println("Live state (nodetool):");
             report.live.forEach((command, result) -> out.println("  " + command + ": " + (result.error != null ? result.error : "exit code " + result.exitCode)));
+        }
+    }
+
+    /** {@link #printNodeReport} of a DSE 5.1 node: its identity from {@code system.local}, no SAI version to pin. */
+    private static void printDse51NodeReport(NodeReport report, PrintStream out)
+    {
+        NodeReport.Node node = report.node;
+        out.println("DSE 5.1 preflight inspection for the upgrade to HCD 2.0 (" + NodeReport.TOOL + ' ' +
+                    report.softwareVersion + ')');
+        out.println("Node: " + (node.broadcastAddress != null ? node.broadcastAddress : report.hostname) + " (host " +
+                    report.hostname + ", host id " + node.hostId + ", data center " + node.dataCenter + ", rack " +
+                    node.rack + ", cluster " + node.clusterName + ')');
+        out.println("DSE release: " + (report.upgradePath.dseRelease == null ? "unknown"
+                                                                            : report.upgradePath.dseRelease));
+        out.println("Peers in system.peers: " + report.peers.size() +
+                    (report.peers.stream().anyMatch(p -> p.upgraded) ? " (some already upgraded)" : ""));
+        out.println();
+        out.println("Result: " + report.result + " (" + report.count(Finding.Severity.BLOCKING) + " blocking, " +
+                    report.count(Finding.Severity.WARNING) + " warnings, " + report.count(Finding.Severity.INFO) +
+                    " notes)");
+        printFindings(report.findings, out);
+        out.println();
+        out.println("Upgrade path:");
+        out.println("  Settings to carry into HCD 2.0:");
+        report.upgradePath.settings.forEach((key, value) -> out.println("    " + key + ": " + value));
+        out.println("  Upgrade steps for this node:");
+        report.upgradePath.upgradeSteps.forEach(step -> out.println("    - " + step));
+        if (!report.live.isEmpty())
+        {
+            out.println();
+            out.println("Live state (nodetool):");
+            report.live.forEach((command, result) -> {
+                String outcome = result.error != null ? result.error : "exit code " + result.exitCode;
+                out.println("  " + command + ": " + outcome);
+            });
         }
     }
 
@@ -539,6 +663,9 @@ public final class DsePreflight
                                 .desc("DSE's dse.yaml; default /etc/dse/dse.yaml, else <dse home>/resources/dse/conf/dse.yaml").build());
         options.addOption(Option.builder().longOpt("rackdc").hasArg().argName("file")
                                 .desc("DSE's cassandra-rackdc.properties; default next to cassandra.yaml").build());
+        options.addOption(Option.builder().longOpt("jvm-options").hasArg().argName("file")
+                                .desc("DSE 5.1's jvm.options, read on a DSE 5.1 node only; default next to " +
+                                      "cassandra.yaml").build());
         options.addOption(Option.builder().longOpt("data-dir").hasArg().argName("dir")
                                 .desc("a data directory, instead of data_file_directories of cassandra.yaml (repeat for each)").build());
         options.addOption(Option.builder().longOpt("metadata-dir").hasArg().argName("dir").desc("instead of metadata_directory of cassandra.yaml").build());
@@ -587,7 +714,8 @@ public final class DsePreflight
     {
         PrintWriter writer = new PrintWriter(new OutputStreamWriter(stream, StandardCharsets.UTF_8));
         new HelpFormatter().printHelp(writer, 120, USAGE,
-                                      "\nInspects a DSE 6.8/6.9 node, read-only, before its upgrade to HCD 2.0. " +
+                                      "\nInspects a DSE 6.8/6.9 or DSE 5.1.51 node, read-only, before its upgrade " +
+                                      "to HCD 2.0. " +
                                       "With --aggregate, checks the JSON reports of the nodes of a cluster together. " +
                                       "With --paxos-rollback, lists the open Paxos rounds of a node to roll back to DSE and writes their serial reads.\n\n",
                                       options, 2, 2,

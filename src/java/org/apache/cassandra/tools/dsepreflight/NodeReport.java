@@ -30,7 +30,10 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * The report of the preflight inspection of one DSE node, written as JSON with {@code --json} and read back by the
  * aggregate mode, which takes only complete reports of {@link #FORMAT_VERSION} written by the release of the tool it
  * runs. Plain fields; unknown properties of the report and of its sections are ignored on reading (not those of a
- * {@link Finding}, whose fields are fixed), and {@link #FORMAT_VERSION} changes only when a field changes meaning.
+ * {@link Finding}, whose fields are fixed), and {@link #FORMAT_VERSION} changes only when a field changes meaning. The
+ * report of a DSE 5.1 node has the same fields, read from DSE 5.1's {@code system.local} and {@code system.peers} where
+ * those of DSE 6 come from {@code nodes/local} and {@code nodes/peers}, and a section of its own ({@link #dse51}),
+ * absent from the report of a DSE 6 node.
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -79,6 +82,9 @@ public final class NodeReport
     /** the output of each {@code nodetool} command run with {@code --nodetool}, by command */
     @JsonProperty("live")
     public Map<String, LiveCommand> live = new LinkedHashMap<>();
+    /** what the inspection of a DSE 5.1 node read beyond the fields of a DSE 6 node's report; null for a DSE 6 node */
+    @JsonProperty("dse51")
+    public Dse51 dse51;
 
     /** This node, from DSE's {@code nodes/local} and the {@code ds_version.txt} of its installation. */
     @JsonIgnoreProperties(ignoreUnknown = true)
@@ -164,6 +170,46 @@ public final class NodeReport
         /** the rows of {@code system_auth.role_permissions} read from this node's replica; 0 when no data directory holds the table, null when it could not be read */
         @JsonProperty("role_permissions_rows")
         public Integer rolePermissionsRows;
+    }
+
+    /** The settings of a DSE 5.1 node the upgrade depends on, as the inspection read them. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static final class Dse51
+    {
+        /** the DSE release the report is of: {@code DSE 5.1} */
+        @JsonProperty("source")
+        public String source;
+        /** {@code start_rpc} of DSE's {@code cassandra.yaml} as written; null when it does not set it */
+        @JsonProperty("start_rpc")
+        public String startRpc;
+        /** the value of {@code -Dcassandra.start_rpc} in DSE's {@code jvm.options}; null when absent */
+        @JsonProperty("start_rpc_jvm_option")
+        public String startRpcJvmOption;
+        /** whether Thrift starts with DSE, from the two above ({@code true} when neither sets it) */
+        @JsonProperty("thrift_on")
+        public Boolean thriftOn;
+        /** the output of {@code nodetool statusthrift}, with {@code --nodetool}; null otherwise */
+        @JsonProperty("thrift_live")
+        public String thriftLive;
+        /** {@code native_transport_port} of DSE's {@code cassandra.yaml}, or its default */
+        @JsonProperty("native_transport_port")
+        public String nativeTransportPort;
+        /** {@code native_transport_port_ssl} of DSE's {@code cassandra.yaml}; null when it does not set it */
+        @JsonProperty("native_transport_port_ssl")
+        public String nativeTransportPortSsl;
+        /**
+         * whether DSE enforces row-level access control: {@code DseAuthorizer}, {@code authorization_options.enabled}
+         * and {@code allow_row_level_security}; null when it is not known
+         */
+        @JsonProperty("row_level_access_control_enforced")
+        public Boolean rowLevelAccessControlEnforced;
+        /** the Java feature release the tool runs on, the one HCD 2.0 is to run on */
+        @JsonProperty("tool_java_version")
+        public String toolJavaVersion;
+        /** the TLS settings of {@code server_encryption_options} and {@code client_encryption_options}, by key */
+        @JsonProperty("tls")
+        public Map<String, String> tls = new LinkedHashMap<>();
     }
 
     /** One {@code nodetool} command. */

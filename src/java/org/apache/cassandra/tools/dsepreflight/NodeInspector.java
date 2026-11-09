@@ -38,6 +38,8 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
+import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -759,7 +761,7 @@ final class NodeInspector
                                  "add enabled: false under nodesync: in DSE's cassandra.yaml and run nodetool nodesyncservice disable on every DSE node"));
 
         if (!yaml.isEmpty())
-            checkAuthentication(yaml, dse);
+            checkAuthentication(yaml, dse, findings);
         if (isTrue(get(dse, "authorization_options", "allow_row_level_security")))
             findings.add(blocking("ROW_LEVEL_ACCESS",
                                   "authorization_options.allow_row_level_security is true in dse.yaml: DSE row-level access control is on, and HCD 2.0 does not " +
@@ -767,6 +769,21 @@ final class NodeInspector
                                   "UNRESTRICT ROWS on every restricted table, REVOKE the row-level grants, then set allow_row_level_security: false"));
         checkSnitch(yaml, dse);
         checkInternodeTls(yaml);
+        checkPartitioner(yaml, findings);
+        checkCommitLogEncryption(yaml);
+        checkHintsCompression(yaml);
+        if (dse.isEmpty())
+            return;
+        checkSystemInfoEncryption(dse);
+        checkDseYamlFeatures(dse, findings);
+    }
+
+    /**
+     * The partitioner of DSE's {@code cassandra.yaml}, which must be in HCD 2.0; moved out of DSE 6's inspection as it
+     * was, for both inspections.
+     */
+    static void checkPartitioner(Map<String, Object> yaml, List<Finding> findings)
+    {
         String partitioner = getString(yaml, "partitioner");
         if (partitioner != null)
         {
@@ -780,6 +797,11 @@ final class NodeInspector
                                       "the partitioner of a cluster cannot change: this cluster cannot be upgraded in place"));
             }
         }
+    }
+
+    /** DSE 6's encrypted commit log. */
+    private void checkCommitLogEncryption(Map<String, Object> yaml)
+    {
         if (isTrue(get(yaml, "transparent_data_encryption_options", "enabled")))
             findings.add(blocking("TDE_COMMITLOG",
                                   "transparent_data_encryption_options.enabled is true in DSE's cassandra.yaml: the commit log DSE writes is encrypted; " +
@@ -788,6 +810,11 @@ final class NodeInspector
                                   "set enabled: false under transparent_data_encryption_options and restart DSE on every node, with the keystore that " +
                                   "section names still in place, so that DSE replays the commit log segments written before and writes its segments " +
                                   "unencrypted from then on, before the upgrade"));
+    }
+
+    /** The compressed hints files DSE 6 writes, which HCD 2.0 cannot convert. */
+    private void checkHintsCompression(Map<String, Object> yaml)
+    {
         Object hintsCompression = yaml.get("hints_compression");
         if (isSetValue(hintsCompression))
             findings.add(blocking("HINTS_COMPRESSION",
@@ -797,9 +824,11 @@ final class NodeInspector
                                   "then on are not compressed; the files written before keep their compression: with every node up, wait until DSE has " +
                                   "delivered them and they are gone from its hints directory, before the first node of the cluster is upgraded (this tool " +
                                   "names the compressed or encrypted files left)"));
+    }
 
-        if (dse.isEmpty())
-            return;
+    /** DSE 6's encryption of its system tables, commit log, saved caches and hints files. */
+    private void checkSystemInfoEncryption(Map<String, Object> dse)
+    {
         if (isTrue(get(dse, "system_info_encryption", "enabled")))
             findings.add(blocking("TDE_TABLE",
                                   "system_info_encryption.enabled is true in dse.yaml: DSE encrypts " + SYSTEM_INFO_ENCRYPTED_TABLES + ", its commit " +
@@ -809,6 +838,14 @@ final class NodeInspector
                                   "caches and hints files unencrypted from then on (HCD 2.0 skips a saved cache it cannot read); then run " +
                                   SYSTEM_INFO_REWRITE + ", so that those tables are rewritten unencrypted (this tool does not check that the rewrite " +
                                   "is done); and " + SYSTEM_INFO_KEEP_UNTIL));
+    }
+
+    /**
+     * The settings of {@code dse.yaml} that name a feature HCD 2.0 does not have, or a configuration it does not read;
+     * moved out of DSE 6's inspection as they were, for both inspections.
+     */
+    static void checkDseYamlFeatures(Map<String, Object> dse, List<Finding> findings)
+    {
         if (isTrue(get(dse, "config_encryption_active")))
             findings.add(warning("CONFIG_ENCRYPTION",
                                  "config_encryption_active is true in dse.yaml: some values of DSE's configuration files are encrypted, and the tool sees them " +
@@ -887,7 +924,11 @@ final class NodeInspector
         return name == null || name.equals("dsefs") ? null : name;
     }
 
-    private void checkAuthentication(Map<String, Object> yaml, Map<String, Object> dse)
+    /**
+     * DSE's authentication, role management and authorization, mapped to HCD 2.0's classes; moved out of DSE 6's
+     * inspection as it was, for both inspections.
+     */
+    static void checkAuthentication(Map<String, Object> yaml, Map<String, Object> dse, List<Finding> findings)
     {
         String authenticator = getString(yaml, "authenticator");
         String authorizer = getString(yaml, "authorizer");
@@ -1411,7 +1452,7 @@ final class NodeInspector
      * The compressor of a {@code hints_compression} setting, a list of one {@code class_name} with its {@code parameters}
      * in a {@code cassandra.yaml}: its {@code class_name}, or the value as written when it holds none.
      */
-    private static String compressorOf(Object hintsCompression)
+    static String compressorOf(Object hintsCompression)
     {
         if (hintsCompression instanceof List && !((List<?>) hintsCompression).isEmpty() && ((List<?>) hintsCompression).get(0) instanceof Map)
         {
@@ -1422,7 +1463,7 @@ final class NodeInspector
         return String.valueOf(hintsCompression);
     }
 
-    private static boolean isDseClass(@Nullable String className)
+    static boolean isDseClass(@Nullable String className)
     {
         return className != null && className.startsWith(DSE_CLASS_PREFIX);
     }
@@ -1473,7 +1514,7 @@ final class NodeInspector
     }
 
     /** Whether a class named in a configuration, possibly by its simple name in {@code defaultPackage}, is in this software. */
-    private static boolean loadable(String className, String defaultPackage)
+    static boolean loadable(String className, String defaultPackage)
     {
         try
         {
@@ -1491,57 +1532,17 @@ final class NodeInspector
     private void inspectDataDirectories()
     {
         Map<String, Map<String, List<String>>> formatProblemsFound = new TreeMap<>();
-        boolean complete = true;
-        for (File dataDirectory : layout.dataDirectories)
-        {
-            if (!dataDirectory.isDirectory())
-            {
-                findings.add(blocking("UNREADABLE_INPUT", "the data directory " + dataDirectory + " does not exist or is not a directory",
-                                      "point the tool at the data directories of this DSE node (--data-dir)"));
-                complete = false;
-                continue;
-            }
+        Consumer<File> solrDataCheck = dataDirectory -> {
             File solrData = new File(dataDirectory, Dse6NonCoreTraces.SOLR_DATA);
             if (solrData.exists())
                 findings.add(blocking("SOLR_DATA",
-                                      "the DSE Search data directory " + solrData + " exists; an upgraded node refuses to start with it",
+                                      "the DSE Search data directory " + solrData + " exists; an upgraded node " +
+                                      "refuses to start with it",
                                       "drop every search index on DSE, then delete it"));
-            long bytes = 0;
-            try
-            {
-                for (File keyspace : dataDirectory.listUnchecked(File::isDirectory))
-                {
-                    // every directory of a keyspace directory is a table directory, named <table>-<id>, or <table> for a table
-                    // created before Cassandra 2.1; snapshots and backups live inside table directories
-                    if (keyspace.name().equals(Dse6NonCoreTraces.SOLR_DATA))
-                        continue; // reported above, and its index files are no sstables
-                    for (File table : keyspace.listUnchecked(File::isDirectory))
-                    {
-                        try
-                        {
-                            bytes += inspectTableDirectory(keyspace.name() + '.' + tableName(table.name()), table, formatProblemsFound);
-                        }
-                        catch (RuntimeException e)
-                        {
-                            // a table DSE drops during the scan takes its directory away: nothing left to check
-                            if (table.exists())
-                            {
-                                findings.add(blocking("UNREADABLE_INPUT", "cannot list the table directory " + table + " (" + rootCause(e) + ')',
-                                                      "run the tool as the user DSE runs as (or as root)"));
-                                complete = false;
-                            }
-                        }
-                    }
-                }
-            }
-            catch (RuntimeException e)
-            {
-                findings.add(blocking("UNREADABLE_INPUT", "cannot list the data directory " + dataDirectory + " (" + e.getMessage() + ')',
-                                      "run the tool as the user DSE runs as (or as root)"));
-                complete = false;
-            }
-            liveBytesByDataDirectory.put(dataDirectory.toString(), bytes);
-        }
+        };
+        boolean complete = scanDataDirectories(layout.dataDirectories, solrDataCheck, NodeInspector::sstableProblem,
+                                               WITHOUT_TOC, formatProblemsFound, liveBytesByDataDirectory,
+                                               unreadableTransactionLogs, findings);
         for (Map.Entry<String, Map<String, List<String>>> problem : formatProblemsFound.entrySet())
         {
             List<String> items = new ArrayList<>();
@@ -1566,14 +1567,96 @@ final class NodeInspector
         }
         dataDirectoriesScanned = complete;
         if (!unreadableTransactionLogs.isEmpty())
-            findings.add(warning("TXN_LOG_UNREADABLE",
-                                 "transaction logs that cannot be read: " + list(unreadableTransactionLogs) + "; every sstable of these table directories " +
-                                 "was checked instead, so a blocking format finding there may come from an sstable a DSE operation has already replaced, and " +
-                                 "HCD 2.0 refuses to start while such a log remains",
-                                 "run the tool again once DSE has finished the operation in progress; a log that remains must be gone once DSE is drained and " +
-                                 "stopped (restart DSE, which completes or rolls back its transactions, if it is not) before the node is upgraded"));
+            findings.add(transactionLogsUnreadable(unreadableTransactionLogs));
         report.inputs.put("live_sstable_bytes", new LinkedHashMap<>(liveBytesByDataDirectory));
-        checkDiskSpace();
+        checkDiskSpace(layout.dataDirectories, liveBytesByDataDirectory, findings, report.inputs);
+    }
+
+    /**
+     * The scan of the data directories both inspections make, DSE 6's and DSE 5.1's: for each data directory, missing
+     * or not a directory (a blocking {@code UNREADABLE_INPUT}), {@code beforeEach} first, then every table directory of
+     * every keyspace directory but {@code solr.data} ({@link #scanTableDirectory}: each problem {@code classify} gives
+     * for a {@code -Data.db} file name of a committed transaction added to {@code problems} by kind and table, and
+     * {@code withoutToc} for an sstable without a {@code TOC.txt}), its size added to {@code liveBytes}; a directory
+     * that cannot be listed is a blocking {@code UNREADABLE_INPUT}, a table directory whose transaction logs cannot be
+     * read is added to {@code unreadableTransactionLogs}. Moved out of DSE 6's inspection as it was.
+     *
+     * @return whether every data directory was listed completely
+     */
+    static boolean scanDataDirectories(List<File> dataDirectories, Consumer<File> beforeEach,
+                                       Function<String, String> classify, String withoutToc,
+                                       Map<String, Map<String, List<String>>> problems, Map<String, Long> liveBytes,
+                                       List<String> unreadableTransactionLogs, List<Finding> findings)
+    {
+        boolean complete = true;
+        for (File dataDirectory : dataDirectories)
+        {
+            if (!dataDirectory.isDirectory())
+            {
+                findings.add(blocking("UNREADABLE_INPUT",
+                                      "the data directory " + dataDirectory + " does not exist or is not a directory",
+                                      "point the tool at the data directories of this DSE node (--data-dir)"));
+                complete = false;
+                continue;
+            }
+            beforeEach.accept(dataDirectory);
+            long bytes = 0;
+            try
+            {
+                for (File keyspace : dataDirectory.listUnchecked(File::isDirectory))
+                {
+                    // every directory of a keyspace directory is a table directory, named <table>-<id>, or <table>
+                    // for a table created before Cassandra 2.1; snapshots and backups live inside table directories
+                    if (keyspace.name().equals(Dse6NonCoreTraces.SOLR_DATA))
+                        continue; // reported by the caller, and its index files are no sstables
+                    for (File table : keyspace.listUnchecked(File::isDirectory))
+                    {
+                        try
+                        {
+                            bytes += scanTableDirectory(keyspace.name() + '.' + tableName(table.name()), table,
+                                                        classify, withoutToc, problems, unreadableTransactionLogs);
+                        }
+                        catch (RuntimeException e)
+                        {
+                            // a table DSE drops during the scan takes its directory away: nothing left to check
+                            if (table.exists())
+                            {
+                                findings.add(blocking("UNREADABLE_INPUT",
+                                                      "cannot list the table directory " + table + " (" +
+                                                      rootCause(e) + ')',
+                                                      "run the tool as the user DSE runs as (or as root)"));
+                                complete = false;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (RuntimeException e)
+            {
+                findings.add(blocking("UNREADABLE_INPUT",
+                                      "cannot list the data directory " + dataDirectory + " (" + e.getMessage() + ')',
+                                      "run the tool as the user DSE runs as (or as root)"));
+                complete = false;
+            }
+            liveBytes.put(dataDirectory.toString(), bytes);
+        }
+        return complete;
+    }
+
+    /**
+     * The warning on the transaction logs the scan of the data directories could not read; moved out of DSE 6's
+     * inspection as it was.
+     */
+    static Finding transactionLogsUnreadable(List<String> unreadableTransactionLogs)
+    {
+        return warning("TXN_LOG_UNREADABLE",
+                       "transaction logs that cannot be read: " + list(unreadableTransactionLogs) + "; every sstable " +
+                       "of these table directories was checked instead, so a blocking format finding there may come " +
+                       "from an sstable a DSE operation has already replaced, and HCD 2.0 refuses to start while " +
+                       "such a log remains",
+                       "run the tool again once DSE has finished the operation in progress; a log that remains must " +
+                       "be gone once DSE is drained and stopped (restart DSE, which completes or rolls back its " +
+                       "transactions, if it is not) before the node is upgraded");
     }
 
     /**
@@ -1611,7 +1694,7 @@ final class NodeInspector
      * The first {@link #WITHOUT_TOC_LISTED} of the sstables without a TOC.txt of a table, by generation (numeric ones
      * first), then by name, and how many more there are.
      */
-    private static String withoutTocNames(List<String> files)
+    static String withoutTocNames(List<String> files)
     {
         List<String> sorted = new ArrayList<>(files);
         sorted.sort(Comparator.comparingLong(NodeInspector::numericGeneration).thenComparing(Comparator.naturalOrder()));
@@ -1654,8 +1737,13 @@ final class NodeInspector
         return dash > 0 && DseTableReader.isDirectoryOf(directoryName, directoryName.substring(0, dash)) ? directoryName.substring(0, dash) : directoryName;
     }
 
-    /** Checks the sstables of a table directory (and of its secondary index directories); returns their size in bytes. */
-    private long inspectTableDirectory(String table, File directory, Map<String, Map<String, List<String>>> problems)
+    /**
+     * Checks the sstables of a table directory (and of its secondary index directories) with {@code classify}, as
+     * {@link #scanDataDirectories} says; returns their size in bytes. Moved out of DSE 6's inspection as it was.
+     */
+    static long scanTableDirectory(String table, File directory, Function<String, String> classify, String withoutToc,
+                                   Map<String, Map<String, List<String>>> problems,
+                                   List<String> unreadableTransactionLogs)
     {
         long bytes = 0;
         for (File file : directory.listUnchecked(f -> true))
@@ -1664,7 +1752,8 @@ final class NodeInspector
             {
                 // .<index name> holds the sstables of a legacy secondary index; snapshots and backups are not live
                 if (file.name().startsWith("."))
-                    bytes += inspectTableDirectory(table + " (index " + file.name().substring(1) + ')', file, problems);
+                    bytes += scanTableDirectory(table + " (index " + file.name().substring(1) + ')', file, classify,
+                                                withoutToc, problems, unreadableTransactionLogs);
                 continue;
             }
             bytes += file.length();
@@ -1691,11 +1780,13 @@ final class NodeInspector
         for (File file : committed)
         {
             String name = file.name();
-            String problem = sstableProblem(name);
+            String problem = classify.apply(name);
             if (problem != null)
                 problems.computeIfAbsent(problem, p -> new TreeMap<>()).computeIfAbsent(table, t -> new ArrayList<>()).add(name);
             if (!new File(directory, name.substring(0, name.length() - "Data.db".length()) + "TOC.txt").exists())
-                problems.computeIfAbsent(WITHOUT_TOC, p -> new TreeMap<>()).computeIfAbsent(table, t -> new ArrayList<>()).add(name);
+                problems.computeIfAbsent(withoutToc, p -> new TreeMap<>())
+                        .computeIfAbsent(table, t -> new ArrayList<>())
+                        .add(name);
         }
         return bytes;
     }
@@ -1760,11 +1851,17 @@ final class NodeInspector
         return "find out what wrote these files: DSE cannot read them either; move them out of the data directories once their data is safe";
     }
 
-    private void checkDiskSpace()
+    /**
+     * The free space of the file systems of the data directories against the sstables they hold
+     * ({@code liveBytesByDataDirectory}), a {@code LOW_DISK_SPACE} warning where the upgrade snapshot may not fit, and
+     * what was measured recorded in {@code inputs}; moved out of DSE 6's inspection as it was.
+     */
+    static void checkDiskSpace(List<File> dataDirectories, Map<String, Long> liveBytesByDataDirectory,
+                               List<Finding> findings, Map<String, Object> inputs)
     {
         Map<FileStore, Long> liveBytes = new LinkedHashMap<>();
         Map<FileStore, List<String>> directories = new LinkedHashMap<>();
-        for (File dataDirectory : layout.dataDirectories)
+        for (File dataDirectory : dataDirectories)
         {
             Long bytes = liveBytesByDataDirectory.get(dataDirectory.toString());
             if (bytes == null || !dataDirectory.isDirectory())
@@ -1800,7 +1897,7 @@ final class NodeInspector
                 findings.add(warning("LOW_DISK_SPACE", "cannot read the free space of " + directories.get(entry.getKey()) + " (" + e.getMessage() + ')', "check it with df"));
             }
         }
-        report.inputs.put("disk_space", space);
+        inputs.put("disk_space", space);
     }
 
     // ---- hints, commit log, metadata ----
@@ -2065,70 +2162,122 @@ final class NodeInspector
     private void inspectLive()
     {
         report.live.putAll(live);
-        List<String> unavailable = new ArrayList<>();
-        List<String> unknownCommands = new ArrayList<>();
-        live.forEach((command, result) -> {
-            if (result.error == null && result.exitCode != null && result.exitCode != 0 && result.output != null && result.output.contains(UNKNOWN_COMMAND))
-                unknownCommands.add("nodetool " + command);
-            else if (result.error != null || result.exitCode == null || result.exitCode != 0)
-                unavailable.add("nodetool " + command + ": " + (result.error != null ? result.error : "exit code " + result.exitCode + ' ' + firstLine(result.output)));
-        });
-        if (!unknownCommands.isEmpty())
-            findings.add(info("LIVE_COMMAND_UNKNOWN", "commands the nodetool of this DSE release does not have, skipped: " + list(unknownCommands) +
-                                                      " (the hints directory is checked on disk)"));
-        if (!unavailable.isEmpty())
-            findings.add(warning("LIVE_UNAVAILABLE", "the live state could not be read completely: " + list(unavailable),
-                                 "check that DSE runs and that nodetool reaches it (host, port, user and password file: --nodetool-arg, with -pwf " +
-                                 "<file> rather than -pw <password>, which the process list shows)"));
-
-        String status = output("status");
-        if (status != null)
-        {
-            List<String> notUp = new ArrayList<>();
-            for (String line : status.split("\n"))
-            {
-                String trimmed = line.trim();
-                if (isStatusLine(trimmed) && !trimmed.startsWith("UN"))
-                    notUp.add(trimmed.split("\\s+")[0] + ' ' + trimmed.split("\\s+")[1]);
-            }
-            if (!notUp.isEmpty())
-                findings.add(warning("LIVE_STATUS", "nodes not up and normal (nodetool status): " + list(notUp),
-                                     "every node must be UN before a node is upgraded"));
-        }
-        String describe = output("describecluster");
-        if (describe != null)
-        {
-            Set<String> versions = new TreeSet<>();
-            Matcher matcher = Pattern.compile("([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\s*:").matcher(describe);
-            while (matcher.find())
-                versions.add(matcher.group(1));
-            if (versions.size() > 1)
-                findings.add(warning("LIVE_SCHEMA", "the cluster has " + versions.size() + " schema versions (nodetool describecluster): " + versions,
-                                     "one schema version before the first upgrade; exactly two (DSE nodes, upgraded nodes) during the mixed phase"));
-        }
+        checkLiveCommands(live, findings);
+        checkLiveStatus(output(live, "status"), findings);
+        checkLiveSchema(output(live, "describecluster"), findings);
         String nodesync = output("nodesyncservice status");
-        if (nodesync != null && nodesync.toLowerCase().contains("running") && !nodesync.toLowerCase().contains("not running"))
+        if (nodesync != null && nodesync.toLowerCase().contains("running") &&
+            !nodesync.toLowerCase().contains("not running"))
             findings.add(warning("LIVE_NODESYNC", "the NodeSync service is running (nodetool nodesyncservice status)",
                                  "run nodetool nodesyncservice disable on every DSE node"));
-        String compactions = output("compactionstats");
-        if (compactions != null)
-        {
-            Matcher pending = Pattern.compile("pending tasks:\\s*(\\d+)").matcher(compactions);
-            if (pending.find() && Long.parseLong(pending.group(1)) > 0)
-                findings.add(warning("LIVE_COMPACTIONS", "compactions are pending (nodetool compactionstats: pending tasks " + pending.group(1) + ')',
-                                     "let them finish before the node is upgraded"));
-            if (compactions.contains("Validation") || compactions.contains("Anticompaction"))
-                findings.add(warning("LIVE_REPAIR", "a repair is running (Validation or Anticompaction in nodetool compactionstats)",
-                                     "let it finish; no repair may run during the upgrade"));
-        }
-        String netstats = output("netstats");
-        if (netstats != null && !netstats.contains("Not sending any streams"))
-            findings.add(warning("LIVE_STREAMS", "streams are running (nodetool netstats)",
-                                 "let them finish before the node is upgraded"));
+        checkLiveCompactions(output(live, "compactionstats"), findings);
+        checkLiveStreams(output(live, "netstats"), findings);
         String hints = output("listpendinghints");
         if (hints != null && !hints.contains("does not have any pending hints") && !hints.trim().isEmpty())
             findings.add(warning("LIVE_HINTS", "the node has pending hints (nodetool listpendinghints)",
                                  "wait until the hints for DSE nodes are delivered before the node is upgraded"));
+    }
+
+    /**
+     * The commands of the live state the DSE release does not have ({@code LIVE_COMMAND_UNKNOWN}) and those that did
+     * not succeed ({@code LIVE_UNAVAILABLE}); moved out of DSE 6's inspection as it was, for both inspections.
+     */
+    static void checkLiveCommands(Map<String, NodeReport.LiveCommand> live, List<Finding> findings)
+    {
+        List<String> unavailable = new ArrayList<>();
+        List<String> unknownCommands = new ArrayList<>();
+        live.forEach((command, result) -> {
+            if (result.error == null && result.exitCode != null && result.exitCode != 0 && result.output != null &&
+                result.output.contains(UNKNOWN_COMMAND))
+                unknownCommands.add("nodetool " + command);
+            else if (result.error != null || result.exitCode == null || result.exitCode != 0)
+                unavailable.add("nodetool " + command + ": " +
+                                (result.error != null
+                                 ? result.error
+                                 : "exit code " + result.exitCode + ' ' + firstLine(result.output)));
+        });
+        if (!unknownCommands.isEmpty())
+            findings.add(info("LIVE_COMMAND_UNKNOWN",
+                              "commands the nodetool of this DSE release does not have, skipped: " +
+                              list(unknownCommands) + " (the hints directory is checked on disk)"));
+        if (!unavailable.isEmpty())
+            findings.add(warning("LIVE_UNAVAILABLE",
+                                 "the live state could not be read completely: " + list(unavailable),
+                                 "check that DSE runs and that nodetool reaches it (host, port, user and password " +
+                                 "file: --nodetool-arg, with -pwf <file> rather than -pw <password>, which the " +
+                                 "process list shows)"));
+    }
+
+    /**
+     * The nodes {@code nodetool status} shows not up and normal; nothing when {@code status} is null. Moved out of DSE
+     * 6's inspection as it was.
+     */
+    static void checkLiveStatus(@Nullable String status, List<Finding> findings)
+    {
+        if (status == null)
+            return;
+        List<String> notUp = new ArrayList<>();
+        for (String line : status.split("\n"))
+        {
+            String trimmed = line.trim();
+            if (isStatusLine(trimmed) && !trimmed.startsWith("UN"))
+                notUp.add(trimmed.split("\\s+")[0] + ' ' + trimmed.split("\\s+")[1]);
+        }
+        if (!notUp.isEmpty())
+            findings.add(warning("LIVE_STATUS", "nodes not up and normal (nodetool status): " + list(notUp),
+                                 "every node must be UN before a node is upgraded"));
+    }
+
+    /**
+     * The schema versions {@code nodetool describecluster} shows; nothing when {@code describe} is null. Moved out of
+     * DSE 6's inspection as it was.
+     */
+    static void checkLiveSchema(@Nullable String describe, List<Finding> findings)
+    {
+        if (describe == null)
+            return;
+        Set<String> versions = new TreeSet<>();
+        Matcher matcher = Pattern.compile("([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\\s*:")
+                                 .matcher(describe);
+        while (matcher.find())
+            versions.add(matcher.group(1));
+        if (versions.size() > 1)
+            findings.add(warning("LIVE_SCHEMA",
+                                 "the cluster has " + versions.size() + " schema versions (nodetool " +
+                                 "describecluster): " + versions,
+                                 "one schema version before the first upgrade; exactly two (DSE nodes, upgraded " +
+                                 "nodes) during the mixed phase"));
+    }
+
+    /**
+     * The compactions and repairs {@code nodetool compactionstats} shows; nothing when it is null. Moved out of DSE
+     * 6's inspection as it was.
+     */
+    static void checkLiveCompactions(@Nullable String compactions, List<Finding> findings)
+    {
+        if (compactions == null)
+            return;
+        Matcher pending = Pattern.compile("pending tasks:\\s*(\\d+)").matcher(compactions);
+        if (pending.find() && Long.parseLong(pending.group(1)) > 0)
+            findings.add(warning("LIVE_COMPACTIONS",
+                                 "compactions are pending (nodetool compactionstats: pending tasks " +
+                                 pending.group(1) + ')',
+                                 "let them finish before the node is upgraded"));
+        if (compactions.contains("Validation") || compactions.contains("Anticompaction"))
+            findings.add(warning("LIVE_REPAIR",
+                                 "a repair is running (Validation or Anticompaction in nodetool compactionstats)",
+                                 "let it finish; no repair may run during the upgrade"));
+    }
+
+    /**
+     * The streams {@code nodetool netstats} shows; nothing when {@code netstats} is null. Moved out of DSE 6's
+     * inspection as it was.
+     */
+    static void checkLiveStreams(@Nullable String netstats, List<Finding> findings)
+    {
+        if (netstats != null && !netstats.contains("Not sending any streams"))
+            findings.add(warning("LIVE_STREAMS", "streams are running (nodetool netstats)",
+                                 "let them finish before the node is upgraded"));
     }
 
     /**
@@ -2158,6 +2307,13 @@ final class NodeInspector
     /** The output of a live command that succeeded; null otherwise. */
     @Nullable
     private String output(String command)
+    {
+        return output(live, command);
+    }
+
+    /** The output of the command {@code command} of {@code live} when it succeeded; null otherwise. */
+    @Nullable
+    static String output(Map<String, NodeReport.LiveCommand> live, String command)
     {
         NodeReport.LiveCommand result = live.get(command);
         return result == null || result.error != null || !Objects.equals(result.exitCode, 0) ? null : result.output;
@@ -2387,7 +2543,7 @@ final class NodeInspector
             settings.put(key, value.toString());
     }
 
-    private static String seedsOf(List<?> seedProviders)
+    static String seedsOf(List<?> seedProviders)
     {
         Object first = seedProviders.get(0);
         if (first instanceof Map)
@@ -2422,7 +2578,7 @@ final class NodeInspector
     }
 
     /** The message of the innermost cause of an error, which names what went wrong rather than what failed with it. */
-    private static String rootCause(Throwable e)
+    static String rootCause(Throwable e)
     {
         Throwable root = Throwables.getRootCause(e);
         return root.getClass().getSimpleName() + ": " + root.getMessage();
@@ -2456,13 +2612,13 @@ final class NodeInspector
     }
 
     @Nullable
-    private static String string(@Nullable UUID uuid)
+    static String string(@Nullable UUID uuid)
     {
         return uuid == null ? null : uuid.toString();
     }
 
     @Nullable
-    private static String address(@Nullable InetAddress address)
+    static String address(@Nullable InetAddress address)
     {
         return address == null ? null : address.getHostAddress();
     }
