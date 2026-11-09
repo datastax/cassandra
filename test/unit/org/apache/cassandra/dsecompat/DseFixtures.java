@@ -37,7 +37,22 @@ import java.util.stream.Stream;
 import java.util.zip.CRC32;
 import java.util.zip.GZIPInputStream;
 
+import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.LivenessInfo;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.paxos.Ballot;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.vint.VIntCoding;
@@ -60,6 +75,9 @@ import static org.junit.Assert.assertTrue;
 public final class DseFixtures
 {
     public static final Path ROOT = Paths.get("test", "data", "dse-compat");
+
+    /** The size of DSE's hints file header without its parameters: version, timestamp, host id, parameters length, two CRC32s. */
+    private static final int HINTS_HEADER_SIZE = 4 + 8 + 16 + 4 + 4 + 4;
 
     /** The two DSE versions the fixtures were produced with. */
     public enum DseVersion
@@ -529,8 +547,33 @@ public final class DseFixtures
     public static Path writeDseHintsFile(DseVersion version, Path directory, UUID hostId, long timestamp, long creationTime,
                                          int descriptorVersion, String parametersJson) throws IOException
     {
+        List<byte[]> hints = new ArrayList<>();
+        for (byte[] record : hintsRecords(version))
+        {
+            byte[] hint = record.clone();
+            ByteBuffer.wrap(hint).putLong(0, creationTime);
+            hints.add(hint);
+        }
+        return writeDseHintsFile(directory, hostId, timestamp, descriptorVersion, parametersJson, hints);
+    }
+
+    /**
+     * As {@link #writeDseHintsFile(DseVersion, Path, UUID, long, long)}, with the given hints (see {@link #dseHint}) instead
+     * of those of a fixture file: a hints file as DSE writes one, holding hints a test built.
+     */
+    public static Path writeDseHintsFile(Path directory, UUID hostId, long timestamp, List<byte[]> hints) throws IOException
+    {
+        return writeDseHintsFile(directory, hostId, timestamp, -1, "{}", hints);
+    }
+
+    private static Path writeDseHintsFile(Path directory, UUID hostId, long timestamp, int descriptorVersion, String parametersJson,
+                                          List<byte[]> hints) throws IOException
+    {
         byte[] parameters = parametersJson.getBytes(StandardCharsets.UTF_8);
-        ByteBuffer out = ByteBuffer.allocate(Math.toIntExact(Files.size(hintsFile(version))) + parameters.length);
+        int size = HINTS_HEADER_SIZE + parameters.length;
+        for (byte[] hint : hints)
+            size += 3 * Integer.BYTES + hint.length;
+        ByteBuffer out = ByteBuffer.allocate(size);
         CRC32 crc = new CRC32();
         out.putInt(descriptorVersion);
         updateChecksumInt(crc, descriptorVersion);
@@ -547,10 +590,8 @@ public final class DseFixtures
         crc.update(parameters);
         out.putInt((int) crc.getValue());
 
-        for (byte[] record : hintsRecords(version))
+        for (byte[] hint : hints)
         {
-            byte[] hint = record.clone();
-            ByteBuffer.wrap(hint).putLong(0, creationTime);
             crc.reset();
             updateChecksumInt(crc, hint.length);
             out.putInt(hint.length);
@@ -562,6 +603,72 @@ public final class DseFixtures
         Path file = Files.createDirectories(directory).resolve(hostId + "-" + timestamp + "-v1.hints");
         Files.write(file, Arrays.copyOf(out.array(), out.position()));
         return file;
+    }
+
+    /**
+     * A hint as DSE serializes it in its hints files: its creation time (8 bytes), its gc grace seconds (unsigned vint),
+     * then its mutation in DSE's layout ({@link #dse68Mutation}, or {@link #hintMutation} of a fixture hint).
+     */
+    public static byte[] dseHint(long creationTime, int gcgs, ByteBuffer mutation)
+    {
+        ByteBuffer hint = ByteBuffer.allocate(Long.BYTES + VIntCoding.computeUnsignedVIntSize(gcgs) + mutation.remaining());
+        hint.putLong(creationTime);
+        VIntCoding.writeUnsignedVInt32(gcgs, hint);
+        hint.put(mutation.duplicate());
+        return hint.array();
+    }
+
+    /**
+     * {@code mutation}, of one partition update, in the layout DSE 6.8 and 6.9 store it with in their batchlog, hints files
+     * and commit log segments, the one this software decodes at {@link MessagingService#VERSION_DSE_68}: the layout of
+     * {@link MessagingService#VERSION_40} with DSE's maximum timestamp of the update (8 bytes) after its table id, as in
+     * the hints of the fixtures. A mutation of a table whose metadata has a DSE hidden column among its regular columns
+     * is written with its cells, as DSE writes the update of a materialized view.
+     */
+    public static ByteBuffer dse68Mutation(Mutation mutation) throws IOException
+    {
+        assertEquals("partition updates of the mutation", 1, mutation.getPartitionUpdates().size());
+        long maxTimestamp = mutation.getPartitionUpdates().iterator().next().maxTimestamp();
+        byte[] bytes;
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            Mutation.serializer.serialize(mutation, out, MessagingService.VERSION_40);
+            bytes = out.toByteArray();
+        }
+        assertEquals("partition updates of the mutation", 1, bytes[0]);
+        // the number of partition updates (1 byte) and the table id (16 bytes), then the maximum timestamp
+        ByteBuffer dse68 = ByteBuffer.allocate(bytes.length + Long.BYTES);
+        dse68.put(bytes, 0, 1 + 16).putLong(maxTimestamp).put(bytes, 1 + 16, bytes.length - (1 + 16));
+        dse68.flip();
+        return dse68;
+    }
+
+    /**
+     * The update DSE writes into the partition {@code v} of {@code view}, a view of the fixture table
+     * ({@link #FIXTURE_KEYSPACE}{@code .t}) keyed by {@code (v, id, ck)}, on the view as DSE knows it, with its hidden
+     * column {@code .v}: the live entry {@code (1, 'a')}, and the entry {@code (2, 'b')} DSE holds dead after its base cell
+     * changed, a primary key liveness next to a hidden tombstone.
+     */
+    public static Mutation dseViewUpdate(TableMetadata view, String v)
+    {
+        TableMetadata dseView = view.unbuild().addRegularColumn(".v", UTF8Type.instance).build();
+        ColumnMetadata hidden = dseView.getColumn(ByteBufferUtil.bytes(".v"));
+        long timestamp = FBUtilities.timestampMicros();
+        long nowInSec = FBUtilities.nowInSeconds();
+        PartitionUpdate.Builder builder = PartitionUpdate.builder(dseView, dseView.partitioner.decorateKey(ByteBufferUtil.bytes(v)),
+                                                                  dseView.regularAndStaticColumns(), 2);
+        builder.add(dseViewRow(1, "a", LivenessInfo.create(timestamp, nowInSec), BufferCell.live(hidden, timestamp, ByteBufferUtil.EMPTY_BYTE_BUFFER)));
+        builder.add(dseViewRow(2, "b", LivenessInfo.create(timestamp, nowInSec), BufferCell.tombstone(hidden, timestamp, nowInSec)));
+        return new Mutation(builder.build());
+    }
+
+    private static Row dseViewRow(int id, String ck, LivenessInfo liveness, Cell<?> hidden)
+    {
+        Row.Builder builder = BTreeRow.unsortedBuilder();
+        builder.newRow(Clustering.make(Int32Type.instance.decompose(id), UTF8Type.instance.decompose(ck)));
+        builder.addPrimaryKeyLivenessInfo(liveness);
+        builder.addCell(hidden);
+        return builder.build();
     }
 
     // the checksum helpers are deliberately independent of FBUtilities and HintsDescriptor: DseFixturesTest checks the

@@ -80,7 +80,8 @@ import static org.apache.cassandra.utils.Clock.Global.currentTimeMillis;
  * hint, CRC32 of the size and the hint), and each hint decodes with the layout of the DSE 6.8 messaging version. The
  * hints of a file are dropped and counted when the host is not a peer in the ring, when the hint's table is unknown
  * here, when the hint names a column the table does not have here (a DSE-only column; the record passed both its
- * checksums, so it is whole as DSE wrote it), or when the hint is past its TTL (computed as {@link Hint#isLive()}
+ * checksums, so it is whole as DSE wrote it; the hidden column of a DSE materialized view is translated instead, when
+ * the translation is certain, see {@link org.apache.cassandra.db.view.DseViewWireFormat}), or when the hint is past its TTL (computed as {@link Hint#isLive()}
  * does); a WARN names the host not in the ring and the unknown columns. The others are written, with their creation
  * time and gc grace seconds, into one new hints file of this software for the same host, named with the timestamp of
  * the DSE file (after a restart the catalog sorts it before newer files; at the conversion it is queued after the files

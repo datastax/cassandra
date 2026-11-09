@@ -19,6 +19,11 @@ package org.apache.cassandra.db.view;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.LivenessInfo;
@@ -43,8 +48,10 @@ import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.DseCompatRefusals;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -90,19 +97,33 @@ import org.apache.cassandra.utils.ByteBufferUtil;
  * sides: a read of it at a consistency level above ONE that involves both a DSE replica and a replica of this software
  * always falls back to a data read (a digest mismatch), whose data reconciles to the same rows and repairs nothing.
  * <p>
- * Not translated: the mutations DSE stored on its own disk before the upgrade, in its batchlog and its hints, which this
- * software decodes at DSE's own messaging version, not at 11. A DSE view update that writes the hidden cell (every
- * update of a live view entry) names {@code .v} there, so such a batch is kept in the batchlog as one that cannot be
- * decoded, its ERROR saying how to restore the view, and such a hint is dropped by the conversion of DSE's hints,
- * counted among the hints for an unknown column.
+ * The view updates DSE 6.8 and 6.9 stored on their own disk before the upgrade, in the batches of the batchlog, the
+ * hints files and the commit log segments, are in DSE's own layout, which this software decodes at
+ * {@link MessagingService#VERSION_DSE_68}, a version it never sends data at ({@link #translatesStored}). A DSE view
+ * update that writes the hidden cell (every update of a live view entry) names {@code .v} there too, and its rows are
+ * translated as the inbound rows above, with the same column of the same catalog: the batch is then replayed, the hint
+ * delivered and the mutation of the commit log replayed. Only when the translation is certain: when the catalog cannot
+ * be read, refuses the view, lists no hidden column for it or lists another one, the column named is not translated
+ * ({@link #resolveStoredHiddenColumn}, with a WARN once per view saying why), and the update fails to decode as one
+ * naming a column unknown here, as it did before: such a batch is kept in the batchlog as one that cannot be decoded, its
+ * ERROR saying how to restore the view, such a hint is dropped by the conversion of DSE's hints, counted among the hints
+ * for an unknown column, and such a mutation of the commit log fails its replay. DSE 6.0's batches, decoded at
+ * {@link MessagingService#VERSION_40}, are not translated: DSE creates views with hidden columns from DSE 6.7 on.
  * <p>
- * Nothing here runs outside of DSE 6 compatibility mode, nor at messaging versions other than 11, nor for tables that
- * are not views: {@link #hiddenColumn} and {@link #translates} return {@code null} and {@code false} there.
+ * Nothing here runs outside of DSE 6 compatibility mode, nor at messaging versions other than 11 (and
+ * {@link MessagingService#VERSION_DSE_68} for the updates DSE stored), nor for tables that are not views:
+ * {@link #hiddenColumn}, {@link #translates} and {@link #translatesStored} return {@code null} and {@code false} there,
+ * and the catalog is not read. Outside of the mode a view update DSE stored fails to decode as before.
  */
 public final class DseViewWireFormat
 {
     /** The {@code compatstatus} refusal reason of a read of a view from a DSE 6 peer filtering on a DSE hidden column. */
     public static final String REFUSED_HIDDEN_COLUMN_FILTER = "read of a materialized view filtering on a DSE hidden column";
+
+    private static final Logger logger = LoggerFactory.getLogger(DseViewWireFormat.class);
+
+    /** The views a view update DSE stored was not translated for, by id: the WARN saying why is logged once per view. */
+    private static final Set<TableId> untranslatedStoredViews = ConcurrentHashMap.newKeySet();
 
     private DseViewWireFormat()
     {
@@ -143,19 +164,8 @@ public final class DseViewWireFormat
      */
     public static ColumnMetadata resolveHiddenColumn(TableMetadata metadata, ByteBuffer name) throws UnknownColumnException
     {
-        String columnName;
-        try
-        {
-            columnName = ByteBufferUtil.string(name);
-        }
-        catch (CharacterCodingException e)
-        {
-            return null;
-        }
-        if (columnName.length() < 2 || !columnName.startsWith(DseViewHiddenColumns.HIDDEN_COLUMN_PREFIX))
-            return null;
-        // a view dropped meanwhile: an unknown column, as for any other table
-        if (Schema.instance.getView(metadata.keyspace, metadata.name) == null)
+        String columnName = hiddenColumnName(metadata, name);
+        if (columnName == null)
             return null;
 
         ColumnMetadata hidden = DseViewHiddenColumnCatalog.instance().translatedColumn(metadata);
@@ -167,6 +177,116 @@ public final class DseViewWireFormat
                                                        "rather than return or store wrong view rows. Check that the data directories of this node hold the " +
                                                        "sstables of system_schema.%s that DSE wrote",
                                                        columnName, metadata, DseViewHiddenColumnCatalog.HIDDEN_COLUMNS, DseViewHiddenColumnCatalog.HIDDEN_COLUMNS));
+    }
+
+    /**
+     * Whether data decoded at {@code version} may be a view update DSE 6.8 or 6.9 stored on the disk of this node before
+     * the upgrade, naming DSE's hidden column of the view: the node is in DSE 6 compatibility mode, {@code version} is
+     * {@link MessagingService#VERSION_DSE_68}, the layout this software decodes the batches DSE left in the batchlog, its
+     * hints files and its commit log segments with, and never sends data at (the serializer of partition updates refuses
+     * it), and {@code metadata} is a materialized view.
+     */
+    public static boolean translatesStored(TableMetadata metadata, int version)
+    {
+        return metadata.isView() && version == MessagingService.VERSION_DSE_68 && DseCompat.enabled();
+    }
+
+    /**
+     * The DSE hidden column whose cells give their liveness to the rows of the data of {@code metadata} decoded at
+     * {@code version}, inbound: the one of {@link #hiddenColumn} for the data of a DSE 6 peer, and for a view update DSE
+     * stored ({@link #translatesStored}) the column the catalog translates for the view, or {@code null} when the catalog
+     * cannot decide it (it cannot be read, or refuses the view; not counted as a refusal of view data, since no DSE 6 node
+     * is involved): such an update is then decoded as it was before, and one that names the hidden column fails to decode
+     * ({@link #resolveStoredHiddenColumn}).
+     *
+     * @throws IllegalStateException as {@link #hiddenColumn}, for the data of a DSE 6 peer only
+     */
+    public static ColumnMetadata inboundHiddenColumn(TableMetadata metadata, int version)
+    {
+        if (!translatesStored(metadata, version))
+            return hiddenColumn(metadata, version);
+        DseViewHiddenColumnCatalog catalog = DseViewHiddenColumnCatalog.readableInstance();
+        try
+        {
+            return catalog == null ? null : catalog.storedTranslatedColumn(metadata);
+        }
+        catch (IllegalStateException e)
+        {
+            return null;
+        }
+    }
+
+    /**
+     * Resolves a column name of a view update DSE stored on the disk of this node ({@link #translatesStored}) that is
+     * neither a column nor a dropped column of the view {@code metadata}: the hidden column the catalog translates for the
+     * view, when {@code name} is exactly its name. Otherwise the update is not translated, and {@code null} is returned,
+     * with a WARN once per view when {@code name} is the name of a DSE hidden column, saying why: the catalog cannot be
+     * read, refuses the view, lists no hidden column for it or lists another one. The caller then fails as before, with
+     * the error of a column unknown here: no view row is written from an update whose translation is not certain.
+     *
+     * @return the hidden column, or {@code null} when it is not certain, when {@code name} is not the name of a DSE hidden
+     * column, or when the view is no longer in the schema
+     */
+    public static ColumnMetadata resolveStoredHiddenColumn(TableMetadata metadata, ByteBuffer name)
+    {
+        String columnName = hiddenColumnName(metadata, name);
+        if (columnName == null)
+            return null;
+
+        String reason;
+        DseViewHiddenColumnCatalog catalog = DseViewHiddenColumnCatalog.readableInstance();
+        if (catalog == null)
+        {
+            String failure = DseViewHiddenColumnCatalog.loadFailure();
+            reason = failure == null ? "DSE's system_schema." + DseViewHiddenColumnCatalog.HIDDEN_COLUMNS + " on this node cannot be read" : failure;
+        }
+        else
+        {
+            try
+            {
+                ColumnMetadata hidden = catalog.storedTranslatedColumn(metadata);
+                if (hidden != null && hidden.name.bytes.equals(name))
+                    return hidden;
+                reason = hidden == null
+                         ? "DSE's system_schema." + DseViewHiddenColumnCatalog.HIDDEN_COLUMNS + " on this node lists no hidden column for that view"
+                         : "DSE's system_schema." + DseViewHiddenColumnCatalog.HIDDEN_COLUMNS + " on this node lists the hidden column " + hidden.name + " for that view";
+            }
+            catch (IllegalStateException e)
+            {
+                reason = e.getMessage();
+            }
+        }
+        if (untranslatedStoredViews.add(metadata.id))
+            logger.warn("DSE 6 compatibility mode: a view update DSE 6 stored on the disk of this node before the upgrade (in a batch of its batchlog, " +
+                        "a hint of its hints files or a mutation of its commit log) names the column {} of materialized view {}, which is not " +
+                        "translated: {}. The update is read as one naming a column unknown here (a batch is kept in the batchlog, a hint is " +
+                        "dropped, a mutation of the commit log fails its replay), rather than written as view rows that may be wrong; this is " +
+                        "logged once per view",
+                        columnName, metadata, reason);
+        return null;
+    }
+
+    /**
+     * {@code name} as a string when it is the name of a DSE hidden column ({@link DseViewHiddenColumns#HIDDEN_COLUMN_PREFIX}
+     * and at least one more character) and the view {@code metadata} is in the schema; {@code null} otherwise (a view
+     * dropped meanwhile: an unknown column, as for any other table).
+     */
+    private static String hiddenColumnName(TableMetadata metadata, ByteBuffer name)
+    {
+        String columnName;
+        try
+        {
+            columnName = ByteBufferUtil.string(name);
+        }
+        catch (CharacterCodingException e)
+        {
+            return null;
+        }
+        if (columnName.length() < 2 || !columnName.startsWith(DseViewHiddenColumns.HIDDEN_COLUMN_PREFIX))
+            return null;
+        if (Schema.instance.getView(metadata.keyspace, metadata.name) == null)
+            return null;
+        return columnName;
     }
 
     /**
