@@ -1,0 +1,21 @@
+
+ keyspace_name | table_name     | extensions
+---------------+----------------+-------------------------------
+       test_ks |             bt |                              {}
+       test_ks |  compact_dense |                              {}
+       test_ks | compact_static |                              {}
+       test_ks |            lwt |                              {}
+       test_ks |            rep |                              {}
+       test_ks |           rlac | {'DSE_RLACA': 0x726567696f6e}
+       test_ks |         sasi_t |                              {}
+       test_ks |              t |                              {}
+       test_ks |           wide |                              {}
+
+(9 rows)
+
+ keyspace_name | view_name | extensions
+---------------+-----------+-------------------------------
+       test_ks | rlac_by_v | {'DSE_RLACA': 0x726567696f6e}
+       test_ks | wide_by_v |                              {}
+
+(2 rows)

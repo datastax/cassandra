@@ -1,0 +1,34 @@
+Now Expanded output is enabled
+
+@ Row 1
+-------------------------+---------------------------------------------
+ key                     | local
+ bootstrapped            | COMPLETED
+ broadcast_address       | 127.0.51.21
+ cluster_name            | Test Cluster
+ cql_version             | 3.4.4
+ data_center             | SearchGraph
+ dse_version             | 5.1.51
+ gossip_generation       | 1793959866
+ graph                   | True
+ host_id                 | 5f5e669a-efde-460d-bba4-5a89e25f26c3
+ listen_address          | 127.0.51.21
+ native_protocol_version | 4
+ partitioner             | org.apache.cassandra.dht.Murmur3Partitioner
+ rack                    | rack1
+ release_version         | 3.11.3.5151
+ rpc_address             | 127.0.51.21
+ schema_version          | 1fbe9764-5df9-3109-a348-ee77b5c391fe
+ server_id               | 14-B5-CD-55-FA-6B
+ thrift_version          | 20.1.0
+ tokens                  | {'-231011715724534521'}
+ truncated_at            | null
+ workload                | Search
+ workloads               | {'Cassandra', 'Graph', 'Search'}
+
+(1 rows)
+
+ peer | data_center | dse_version | graph | host_id | preferred_ip | rack | release_version | rpc_address | schema_version | server_id | tokens | workload | workloads
+------+-------------+-------------+-------+---------+--------------+------+-----------------+-------------+----------------+-----------+--------+----------+-----------
+
+(0 rows)

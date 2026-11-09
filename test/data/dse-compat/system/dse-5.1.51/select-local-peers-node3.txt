@@ -1,0 +1,65 @@
+Now Expanded output is enabled
+
+@ Row 1
+-------------------------+---------------------------------------------
+ key                     | local
+ bootstrapped            | COMPLETED
+ broadcast_address       | 127.0.51.13
+ cluster_name            | Test Cluster
+ cql_version             | 3.4.4
+ data_center             | Cassandra
+ dse_version             | 5.1.51
+ gossip_generation       | 1793958378
+ graph                   | False
+ host_id                 | 1971c79a-2f22-4458-8f99-61dab1d68f7f
+ listen_address          | 127.0.51.3
+ native_protocol_version | 4
+ partitioner             | org.apache.cassandra.dht.Murmur3Partitioner
+ rack                    | rack1
+ release_version         | 3.11.3.5151
+ rpc_address             | 127.0.51.3
+ schema_version          | 8e43d429-1d22-341e-b29f-f6883e09ed75
+ server_id               | 14-B5-CD-55-FA-6B
+ thrift_version          | 20.1.0
+ tokens                  | {'-2751153962405162262'}
+ truncated_at            | null
+ workload                | Cassandra
+ workloads               | {'Cassandra'}
+
+(1 rows)
+
+@ Row 1
+-----------------+--------------------------------------
+ peer            | 127.0.51.11
+ data_center     | Cassandra
+ dse_version     | 5.1.51
+ graph           | False
+ host_id         | c8896567-fb1e-4ce9-bb92-c8a31586e679
+ preferred_ip    | null
+ rack            | rack1
+ release_version | 3.11.3.5151
+ rpc_address     | 127.0.51.1
+ schema_version  | 8e43d429-1d22-341e-b29f-f6883e09ed75
+ server_id       | 14-B5-CD-55-FA-6B
+ tokens          | {'1021152624147296821'}
+ workload        | Cassandra
+ workloads       | {'Cassandra'}
+
+@ Row 2
+-----------------+--------------------------------------
+ peer            | 127.0.51.12
+ data_center     | Cassandra
+ dse_version     | 5.1.51
+ graph           | False
+ host_id         | a7314433-9ca0-4bbc-9d7a-6163c4ce7ce9
+ preferred_ip    | null
+ rack            | rack1
+ release_version | 3.11.3.5151
+ rpc_address     | 127.0.51.2
+ schema_version  | 8e43d429-1d22-341e-b29f-f6883e09ed75
+ server_id       | 14-B5-CD-55-FA-6B
+ tokens          | {'-1824726619835567993'}
+ workload        | Cassandra
+ workloads       | {'Cassandra'}
+
+(2 rows)
