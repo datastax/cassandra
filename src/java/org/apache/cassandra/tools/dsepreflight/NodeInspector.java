@@ -385,7 +385,7 @@ final class NodeInspector
             return blocking("UNREADABLE_INPUT",
                             cannotRead("nodes/peers") + "its attributes cannot be read (" + error + "), so the peers of this node are not known" +
                             PEERS_NOT_CHECKED,
-                            "run the tool as the user DSE runs as (or as root)");
+                            RUN_AS_DSE_USER);
         if (!before.sameAs(after))
             return peersChanged();
         if (oldExists)
@@ -462,8 +462,14 @@ final class NodeInspector
         if (oldExists)
             return peersOldLeft();
         return blocking("UNREADABLE_INPUT", cannotRead("nodes/peers") + error + PEERS_NOT_CHECKED,
-                        "run the tool as the user DSE runs as (or as root); a damaged nodes/peers must be repaired on DSE first");
+                        RUN_AS_DSE_USER + "; a damaged nodes/peers must be repaired on DSE first");
     }
+
+    /** The remedy of a DSE node's directory or file that cannot be read or listed. */
+    static final String RUN_AS_DSE_USER = "run the tool as the user DSE runs as (or as root)";
+    /** The remedy of a data directory that does not exist. */
+    static final String POINT_AT_DATA_DIRECTORIES = "point the tool at the data directories of this DSE node " +
+                                                    "(--data-dir)";
 
     /**
      * The start of the message of an {@code UNREADABLE_INPUT} finding for the input {@code what} ({@link NodeLayout}'s
@@ -509,7 +515,7 @@ final class NodeInspector
         catch (RuntimeException e)
         {
             findings.add(blocking("UNREADABLE_INPUT", cannotRead("nodes/local") + e.getMessage(),
-                                  "run the tool as the user DSE runs as (or as root); a damaged nodes/local must be repaired on DSE first"));
+                                  RUN_AS_DSE_USER + "; a damaged nodes/local must be repaired on DSE first"));
         }
         // a node without a peer has an empty nodes/peers map, or no file at all: seen on a single DSE 6.9.26 node that
         // never had a peer; a missing file reads as no peer, as DseNodesFiles reads it, unless DSE is writing it or was
@@ -1595,7 +1601,7 @@ final class NodeInspector
             {
                 findings.add(blocking("UNREADABLE_INPUT",
                                       "the data directory " + dataDirectory + " does not exist or is not a directory",
-                                      "point the tool at the data directories of this DSE node (--data-dir)"));
+                                      POINT_AT_DATA_DIRECTORIES));
                 complete = false;
                 continue;
             }
@@ -1624,7 +1630,7 @@ final class NodeInspector
                                 findings.add(blocking("UNREADABLE_INPUT",
                                                       "cannot list the table directory " + table + " (" +
                                                       rootCause(e) + ')',
-                                                      "run the tool as the user DSE runs as (or as root)"));
+                                                      RUN_AS_DSE_USER));
                                 complete = false;
                             }
                         }
@@ -1635,7 +1641,7 @@ final class NodeInspector
             {
                 findings.add(blocking("UNREADABLE_INPUT",
                                       "cannot list the data directory " + dataDirectory + " (" + e.getMessage() + ')',
-                                      "run the tool as the user DSE runs as (or as root)"));
+                                      RUN_AS_DSE_USER));
                 complete = false;
             }
             liveBytes.put(dataDirectory.toString(), bytes);
@@ -2027,16 +2033,50 @@ final class NodeInspector
     @VisibleForTesting
     static Map<String, Object> hintsFileParameters(Path file) throws IOException
     {
+        HintsFileHeader header = hintsFileHeader(file);
+        return header == null ? Map.of() : header.parameters;
+    }
+
+    /** The version, the host id and the parameters of the descriptor at the start of a hints file. */
+    static final class HintsFileHeader
+    {
+        /** the version of the descriptor, 1 for the files of DSE 5.1 and Apache Cassandra 3.x */
+        final int version;
+        /** the host the hints of the file are for */
+        final UUID hostId;
+        /** the JSON parameters of the descriptor: its compression or encryption, if any */
+        final Map<String, Object> parameters;
+
+        HintsFileHeader(int version, UUID hostId, Map<String, Object> parameters)
+        {
+            this.version = version;
+            this.hostId = hostId;
+            this.parameters = parameters;
+        }
+    }
+
+    /**
+     * The descriptor at the start of a hints file, read as {@link #hintsFileParameters} reads it, with its version;
+     * null for an empty file.
+     *
+     * @throws IOException when the descriptor cannot be read whole or does not match its checksums
+     */
+    @Nullable
+    static HintsFileHeader hintsFileHeader(Path file) throws IOException
+    {
         if (Files.size(file) == 0)
-            return Map.of();
+            return null;
         try (DataInputStream in = new DataInputStream(new BufferedInputStream(Files.newInputStream(file, StandardOpenOption.READ))))
         {
             CRC32 crc = new CRC32();
-            FBUtilities.updateChecksumInt(crc, in.readInt());
+            int version = in.readInt();
+            FBUtilities.updateChecksumInt(crc, version);
+            long[] values = new long[3];
             for (int i = 0; i < 3; i++)
             {
                 // the timestamp and the two halves of the host id, each checksummed low half first
                 long value = in.readLong();
+                values[i] = value;
                 FBUtilities.updateChecksumInt(crc, (int) (value & 0xFFFFFFFFL));
                 FBUtilities.updateChecksumInt(crc, (int) (value >>> 32));
             }
@@ -2051,7 +2091,7 @@ final class NodeInspector
             crc.update(parameters, 0, length);
             if (in.readInt() != (int) crc.getValue())
                 throw new IOException("the checksum of its parameters does not match");
-            return JsonUtils.fromJsonMap(parameters);
+            return new HintsFileHeader(version, new UUID(values[1], values[2]), JsonUtils.fromJsonMap(parameters));
         }
     }
 

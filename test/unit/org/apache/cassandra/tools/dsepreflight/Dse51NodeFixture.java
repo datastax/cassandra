@@ -130,6 +130,22 @@ final class Dse51NodeFixture
         return args.toArray(new String[0]);
     }
 
+    /**
+     * The arguments of the rollback check of this node, followed by {@code extra}: those of {@link #args} but
+     * {@code --dse-yaml}, which the check does not read and so refuses.
+     */
+    String[] rollbackCheckArgs(String... extra)
+    {
+        List<String> args = new ArrayList<>(Arrays.asList(args("--rollback-check")));
+        int dseYaml = args.indexOf("--dse-yaml");
+        if (dseYaml < 0)
+            throw new IllegalStateException("no --dse-yaml in " + args);
+        args.remove(dseYaml + 1);
+        args.remove(dseYaml);
+        args.addAll(Arrays.asList(extra));
+        return args.toArray(new String[0]);
+    }
+
     /** Replaces {@code from} with {@code to} in a file of the configuration directory, which must hold it. */
     void replace(String file, String from, String to) throws IOException
     {

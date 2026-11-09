@@ -34,6 +34,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -104,6 +105,13 @@ import org.apache.cassandra.utils.FBUtilities;
  * per partition that a serial read or an LWT touched within the TTL of {@code system.paxos} without a later commit
  * (empty proposals included). A cluster with very many such partitions needs a larger heap than the 512M of
  * {@code tools/bin/dsepreflight} ({@code MAX_HEAP_SIZE}) and {@code --cql}.
+ * <p>
+ * On a node to roll back to DSE 5.1 ({@link Options#dse51}), which has no nodes files and whose sstables are all big
+ * ({@code me}, written by DSE 5.1 and by HCD 2.0 in {@code DSE_5_1} mode), the sstables are read from scratch copies
+ * ({@link DseTableReader#readBig}), the data centers are taken from the {@code system.local} and {@code system.peers}
+ * of the snapshot, what DSE 5.1 recorded before the upgrade, and the rows DSE 5.1 stored at messaging version 10 or 11
+ * are decoded through {@link DseCompat#storedDecodingVersion}, which maps them to the 3.0 layout this software reads
+ * at {@link MessagingService#VERSION_40}; the rule of an open round is the same.
  */
 final class PaxosRollback
 {
@@ -113,6 +121,12 @@ final class PaxosRollback
     private static final String DATA_DIRECTORY = "data directory";
     private static final String HCD = "HCD 2.0";
     private static final String DSE = "DSE";
+    /** The release a node rolled back to DSE 5.1 goes back to, as the report names it. */
+    static final String DSE_51 = "DSE 5.1";
+    /** What tells the data centers of the cluster on a node rolled back to DSE 6. */
+    private static final String NODES_FILES = "the nodes files";
+    /** What tells the data centers of the cluster on a node rolled back to DSE 5.1. */
+    private static final String SNAPSHOT_SYSTEM_TABLES = "system.local and system.peers of the snapshot";
     private static final String PAXOS_DIRECTORY_OPTION = "--paxos-dir";
     /**
      * What a nodes file that cannot be read or trusted means for the rollback, after the nodes directory: the reads the
@@ -121,8 +135,6 @@ final class PaxosRollback
     private static final String DATA_CENTERS_UNKNOWN = ": the data centers of the cluster are unknown, so the reads of the keyspaces whose " +
                                                        "replicas may span data centers are left to choose: name their consistency with " +
                                                        "--serial-consistency <keyspace>=<level>; do not start DSE before every read has succeeded";
-    /** The remedy of a nodes file that cannot be read for its permissions, which holds with both products stopped. */
-    private static final String RUN_AS_DSE_USER = "run the tool as the user DSE runs as (or as root)";
     /** The key of {@code --serial-consistency} that applies to every keyspace not named. */
     private static final String ALL_KEYSPACES = "*";
     private static final List<String> PAXOS_KEY = List.of("row_key");
@@ -150,6 +162,8 @@ final class PaxosRollback
     /** What the operator gave on the command line, and the layout of the node. */
     static final class Options
     {
+        /** whether the node goes back to DSE 5.1 rather than to DSE 6 ({@link DsePreflight#isDse51Node}) */
+        boolean dse51;
         List<File> dataDirectories = new ArrayList<>();
         File metadataDirectory;
         /** DSE's {@code cassandra-rackdc.properties}, the last source of the data center */
@@ -298,15 +312,25 @@ final class PaxosRollback
      * may name the directories given that hold some), so that the problems keep the order of the directories read.
      */
     private final List<NoPaxosSSTable> noPaxosSSTables = new ArrayList<>();
-    /** the number of nodes in each data center by the nodes files; null when they cannot tell */
+    /** the number of nodes in each data center by {@link #nodesSource}; null when they cannot tell */
     @Nullable
     private Map<String, Integer> nodesByDataCenter;
     /** the time of the run, in seconds: the expiry of a commit is compared with it */
     private final long nowInSeconds = FBUtilities.nowInSeconds();
 
+    /** What tells the data centers of the cluster: the nodes files, or the system tables of the snapshot. */
+    private final String nodesSource;
+
     PaxosRollback(Options options)
     {
         this.options = options;
+        this.nodesSource = nodesSourceOf(options.dse51);
+    }
+
+    /** What tells the data centers of the cluster, on a node rolled back to DSE 5.1 or to DSE 6. */
+    private static String nodesSourceOf(boolean dse51)
+    {
+        return dse51 ? SNAPSHOT_SYSTEM_TABLES : NODES_FILES;
     }
 
     /**
@@ -319,6 +343,7 @@ final class PaxosRollback
         report.softwareVersion = options.softwareVersion;
         report.generatedAt = options.generatedAt;
         report.hostname = options.hostname;
+        report.rollbackTo = options.dse51 ? DSE_51 : null;
         options.dataDirectories.forEach(d -> report.dataDirectories.add(d.toString()));
         report.defaultsAssumed.addAll(options.defaultsAssumed);
         report.notRestored = options.notRestored;
@@ -333,7 +358,10 @@ final class PaxosRollback
         }
         String snapshot = snapshot();
         report.snapshot = snapshot;
-        readDataCenters();
+        if (options.dse51)
+            readDse51DataCenters(snapshot);
+        else
+            readDataCenters();
         readSchema(snapshot);
         checkDataCenter();
         checkSerialConsistencies();
@@ -364,9 +392,9 @@ final class PaxosRollback
     /** The tag of the snapshot to read: the one given, else the only {@code pre-hcd-*} snapshot of the node. */
     private String snapshot() throws UsageException
     {
-        if (options.snapshot != null && (options.snapshot.isEmpty() || options.snapshot.equals(".") || options.snapshot.equals("..") ||
-                                         options.snapshot.contains("/")))
-            throw new UsageException("--snapshot takes the tag of a snapshot, not a path: " + options.snapshot);
+        String notATag = notASnapshotTag(options.snapshot);
+        if (notATag != null)
+            throw new UsageException(notATag);
         Set<String> tags = new TreeSet<>();
         for (File dataDirectory : options.dataDirectories)
             for (String keyspace : List.of(SchemaConstants.SYSTEM_KEYSPACE_NAME, SchemaConstants.SCHEMA_KEYSPACE_NAME))
@@ -389,6 +417,19 @@ final class PaxosRollback
             throw new UsageException("several " + SNAPSHOT_PREFIX + "<timestamp> snapshots in the data directories: " + String.join(", ", tags) +
                                      "; pass --snapshot <tag>, the one the rollback restores" + problemsSoFar());
         return tags.iterator().next();
+    }
+
+    /**
+     * Why a value of {@code --snapshot} is not the tag of a snapshot (empty, {@code .}, {@code ..}, or with a
+     * {@code /}); null when it is one, or when none is given. Shared by both rollback modes.
+     */
+    @Nullable
+    static String notASnapshotTag(@Nullable String snapshot)
+    {
+        if (snapshot != null && (snapshot.isEmpty() || snapshot.equals(".") || snapshot.equals("..") ||
+                                 snapshot.contains("/")))
+            return "--snapshot takes the tag of a snapshot, not a path: " + snapshot;
+        return null;
     }
 
     /** The problems found before a usage error, which may be its cause, appended to its message; empty when there is none. */
@@ -610,7 +651,7 @@ final class PaxosRollback
         catch (RuntimeException e)
         {
             report.problems.add(NodeInspector.cannotRead("nodes/local") + e.getMessage() + " (" + nodes + ')' + DATA_CENTERS_UNKNOWN +
-                                "; if the file cannot be read for its permissions, " + RUN_AS_DSE_USER);
+                                "; if the file cannot be read for its permissions, " + NodeInspector.RUN_AS_DSE_USER);
         }
         try
         {
@@ -671,6 +712,98 @@ final class PaxosRollback
     }
 
     /**
+     * This node's data center, and the nodes of each data center, on a node rolled back to DSE 5.1, which has no nodes
+     * files: from the options and the {@code system.local} and {@code system.peers} of the snapshot, what DSE 5.1
+     * recorded before the upgrade (those HCD 2.0 left in the data directories are replaced by the restore). A table
+     * that cannot be read, or has no row of this node, is a problem, and the data centers stay unknown; a peer without
+     * a data center leaves the nodes of each data center unknown.
+     */
+    private void readDse51DataCenters(String snapshot)
+    {
+        String where = " of the snapshot " + snapshot;
+        String localSource = SchemaConstants.SYSTEM_KEYSPACE_NAME + '.' + SystemKeyspace.LOCAL + where;
+        boolean localRead = false;
+        String localDataCenter = null;
+        try
+        {
+            DseTableReader.TableRows local = DseTableReader.readBig(options.dataDirectories, snapshot,
+                                                                    SchemaConstants.SYSTEM_KEYSPACE_NAME,
+                                                                    SystemKeyspace.LOCAL, List.of("key"), List.of());
+            if (local.rows.isEmpty())
+            {
+                report.problems.add("no row in " + localSource + " (" + (local.found ? "its sstables hold none"
+                                                                                     : "it has no directory") + ')' +
+                                    DATA_CENTERS_UNKNOWN);
+            }
+            else
+            {
+                localRead = true;
+                UntypedResultSet.Row row = local.rows.get(0);
+                localDataCenter = row.has("data_center") ? row.getString("data_center") : null;
+            }
+        }
+        catch (IOException | RuntimeException e)
+        {
+            report.problems.add("cannot read " + localSource + " (" + e + ')' + DATA_CENTERS_UNKNOWN);
+        }
+        List<String> peerDataCenters = null;
+        String peersSource = SchemaConstants.SYSTEM_KEYSPACE_NAME + '.' + SystemKeyspace.LEGACY_PEERS + where;
+        try
+        {
+            DseTableReader.TableRows peers = DseTableReader.readBig(options.dataDirectories, snapshot,
+                                                                    SchemaConstants.SYSTEM_KEYSPACE_NAME,
+                                                                    SystemKeyspace.LEGACY_PEERS, List.of("peer"),
+                                                                    List.of());
+            // a snapshot holds a directory of every table, sstables or not: one without it is incomplete
+            if (!peers.found)
+            {
+                report.problems.add("no directory of " + peersSource + DATA_CENTERS_UNKNOWN);
+            }
+            else
+            {
+                peerDataCenters = new ArrayList<>();
+                for (UntypedResultSet.Row row : peers.rows)
+                    peerDataCenters.add(row.has("data_center") ? row.getString("data_center") : null);
+            }
+        }
+        catch (IOException | RuntimeException e)
+        {
+            report.problems.add("cannot read " + peersSource + " (" + e + ')' + DATA_CENTERS_UNKNOWN);
+        }
+        if (options.dataCenter != null)
+        {
+            report.dataCenter = options.dataCenter;
+            report.dataCenterSource = "--dc";
+            if (localDataCenter != null && !localDataCenter.equals(options.dataCenter))
+                report.problems.add("--dc " + options.dataCenter + " but " + localSource + " records data center " +
+                                    localDataCenter + ": check --dc");
+        }
+        else if (localDataCenter != null)
+        {
+            report.dataCenter = localDataCenter;
+            report.dataCenterSource = localSource;
+        }
+        else if (options.rackdcDataCenter != null)
+        {
+            report.dataCenter = options.rackdcDataCenter;
+            report.dataCenterSource = "cassandra-rackdc.properties";
+        }
+        if (report.dataCenter == null && options.rackdcUnreadable != null)
+            report.problems.add("cannot read cassandra-rackdc.properties " + options.rackdcUnreadable + ", and " +
+                                localSource + (localRead ? " names no data center" : " cannot tell the data center") +
+                                " for this node: pass --dc, or --rackdc <file>");
+        if (localDataCenter != null && peerDataCenters != null && peerDataCenters.stream().allMatch(dc -> dc != null))
+        {
+            Map<String, Integer> counts = new TreeMap<>();
+            counts.merge(localDataCenter, 1, Integer::sum);
+            for (String dataCenter : peerDataCenters)
+                counts.merge(dataCenter, 1, Integer::sum);
+            nodesByDataCenter = counts;
+            report.singleDataCenter = counts.size() == 1;
+        }
+    }
+
+    /**
      * The problem of a {@code nodes/peers} not used: what the node inspection says of it, without its clause on the
      * releases of the peers, then what it means here. Not the node inspection's remedies that start DSE or run the tool
      * again: this runs before DSE starts, with the restored node metadata, which nothing rewrites while both products
@@ -680,10 +813,12 @@ final class PaxosRollback
     static String peersNotUsed(Finding problem, Path nodes)
     {
         return problem.message.replace(NodeInspector.PEERS_NOT_CHECKED, "") + " (" + nodes + ')' + DATA_CENTERS_UNKNOWN +
-               (problem.remedy.startsWith(RUN_AS_DSE_USER) ? "; if the file cannot be read for its permissions, " + RUN_AS_DSE_USER : "");
+               (problem.remedy.startsWith(NodeInspector.RUN_AS_DSE_USER)
+                ? "; if the file cannot be read for its permissions, " + NodeInspector.RUN_AS_DSE_USER
+                : "");
     }
 
-    /** That this node's data center is one the nodes files or the replication of some keyspace name. */
+    /** That this node's data center is one {@link #nodesSource} or the replication of some keyspace name. */
     private void checkDataCenter()
     {
         if (report.dataCenter == null)
@@ -695,8 +830,9 @@ final class PaxosRollback
             if (NETWORK_TOPOLOGY_STRATEGY.equals(simpleName(replication.getOrDefault("class", ""))))
                 replication.keySet().stream().filter(k -> !"class".equals(k) && !"replication_factor".equals(k)).forEach(known::add);
         if (!known.isEmpty() && !known.contains(report.dataCenter))
-            report.problems.add("data center " + report.dataCenter + " (" + report.dataCenterSource + ") is neither in the nodes files nor in the replication of any " +
-                                "keyspace (" + String.join(", ", known) + "): check --dc");
+            report.problems.add("data center " + report.dataCenter + " (" + report.dataCenterSource + ") is " +
+                                "neither in " + nodesSource + " nor in the replication of any keyspace (" +
+                                String.join(", ", known) + "): check --dc");
     }
 
     /** That every keyspace named with {@code --serial-consistency} is in the schema. */
@@ -743,11 +879,15 @@ final class PaxosRollback
         String schema = SchemaConstants.SCHEMA_KEYSPACE_NAME;
         try
         {
-            DseTableReader.TableRows keyspaceRows = DseTableReader.read(options.dataDirectories, snapshot, schema, SchemaKeyspaceTables.KEYSPACES, List.of("keyspace_name"), List.of());
-            DseTableReader.TableRows tableRows = DseTableReader.read(options.dataDirectories, snapshot, schema, SchemaKeyspaceTables.TABLES, List.of("keyspace_name"), List.of("table_name"));
-            DseTableReader.TableRows columnRows = DseTableReader.read(options.dataDirectories, snapshot, schema, SchemaKeyspaceTables.COLUMNS, List.of("keyspace_name"),
-                                                                      List.of("table_name", "column_name"));
-            DseTableReader.TableRows typeRows = DseTableReader.read(options.dataDirectories, snapshot, schema, SchemaKeyspaceTables.TYPES, List.of("keyspace_name"), List.of("type_name"));
+            List<String> keyspaceName = List.of("keyspace_name");
+            DseTableReader.TableRows keyspaceRows = readTable(snapshot, schema, SchemaKeyspaceTables.KEYSPACES,
+                                                              keyspaceName, List.of());
+            DseTableReader.TableRows tableRows = readTable(snapshot, schema, SchemaKeyspaceTables.TABLES, keyspaceName,
+                                                           List.of("table_name"));
+            DseTableReader.TableRows columnRows = readTable(snapshot, schema, SchemaKeyspaceTables.COLUMNS,
+                                                            keyspaceName, List.of("table_name", "column_name"));
+            DseTableReader.TableRows typeRows = readTable(snapshot, schema, SchemaKeyspaceTables.TYPES, keyspaceName,
+                                                          List.of("type_name"));
             if (keyspaceRows.rows.isEmpty() || tableRows.rows.isEmpty() || columnRows.rows.isEmpty())
             {
                 absent.add("no schema in system_schema of the " + label + " (keyspaces, tables or columns has no row)");
@@ -799,6 +939,18 @@ final class PaxosRollback
             unreadable.add("cannot read system_schema of the " + label + " (" + e + ')');
             return false;
         }
+    }
+
+    /**
+     * The rows of a table of the data directories, or of the snapshot {@code snapshot} when not null: of its trie
+     * sstables on a node rolled back to DSE 6, of its big sstables, from scratch copies, on one rolled back to DSE 5.1.
+     */
+    private DseTableReader.TableRows readTable(@Nullable String snapshot, String keyspace, String table,
+                                               List<String> partitionKey, List<String> clustering) throws IOException
+    {
+        List<File> directories = options.dataDirectories;
+        return options.dse51 ? DseTableReader.readBig(directories, snapshot, keyspace, table, partitionKey, clustering)
+                             : DseTableReader.read(directories, snapshot, keyspace, table, partitionKey, clustering);
     }
 
     private static Table table(String keyspace, String table, List<UntypedResultSet.Row> keyColumnRows, Types types, @Nullable String typeProblem)
@@ -871,9 +1023,10 @@ final class PaxosRollback
             try
             {
                 // streamed: a system.paxos sstable of a cluster with many LWTs is large; only the open rows are kept
-                DseTableReader.readSSTable(descriptor, PAXOS_KEY, PAXOS_CLUSTERING, (row, cells) -> {
+                BiConsumer<UntypedResultSet.Row, Row> paxosRow = (row, cells) -> {
                     sstable.rows++;
-                    PaxosRollbackReport.OpenRow open = openRow(row, cells, nowInSeconds, source.label, descriptor.baseFile().name());
+                    PaxosRollbackReport.OpenRow open = openRow(row, cells, nowInSeconds, source.label,
+                                                               descriptor.baseFile().name(), options.dse51);
                     if (open == null)
                         return;
                     sstable.openRows++;
@@ -885,7 +1038,11 @@ final class PaxosRollback
                         p.rowKey = rowKey;
                         return p;
                     }).openRows.add(open);
-                });
+                };
+                if (options.dse51)
+                    DseTableReader.readBigSSTable(descriptor, PAXOS_KEY, PAXOS_CLUSTERING, paxosRow);
+                else
+                    DseTableReader.readSSTable(descriptor, PAXOS_KEY, PAXOS_CLUSTERING, paxosRow);
             }
             catch (IOException | RuntimeException e)
             {
@@ -1127,12 +1284,16 @@ final class PaxosRollback
      * whose proposal or proposal version is missing is listed too: Paxos would ignore such a proposal, so the read is only
      * one too many. A proposal no later than the commit of its row is listed too when the commit expires before it and
      * within {@link #COMMIT_EXPIRY_MARGIN_SECONDS} of the run (a proposal accepted after its commit, with an older ballot):
-     * once the commit has expired, DSE would read the proposal alone.
+     * once the commit has expired, DSE would read the proposal alone. On a node rolled back to DSE 5.1
+     * ({@code dse51}), a proposal stored at 10 or 11 is DSE 5.1's, decoded at the version
+     * {@link DseCompat#storedDecodingVersion} maps it to; one at a DSE 6 version is written by neither release of the
+     * cluster, and is listed without being decoded.
      *
      * @param cells the live cells of the row
      */
     @Nullable
-    private static PaxosRollbackReport.OpenRow openRow(UntypedResultSet.Row row, Row cells, long nowInSeconds, String source, String sstable)
+    private static PaxosRollbackReport.OpenRow openRow(UntypedResultSet.Row row, Row cells, long nowInSeconds,
+                                                       String source, String sstable, boolean dse51)
     {
         if (!row.has("proposal_ballot"))
             return null;
@@ -1160,14 +1321,25 @@ final class PaxosRollback
         open.mostRecentCommitAt = commit == null ? null : commit.toString();
         Integer proposalVersion = row.has("proposal_version") ? row.getInt("proposal_version") : null;
         open.version = proposalVersion;
-        open.writtenBy = proposalVersion == null || proposalVersion < MessagingService.VERSION_40 ? "unknown"
+        open.writtenBy = dse51 ? writtenByOnDse51Node(proposalVersion)
+                         : proposalVersion == null || proposalVersion < MessagingService.VERSION_40 ? "unknown"
                          : proposalVersion >= DseCompat.DSE_60_VERSION ? DSE : HCD;
         ByteBuffer update = row.has("proposal") ? row.getBytes("proposal") : null;
         if (update == null || !update.hasRemaining() || proposalVersion == null)
         {
             notes.add("the proposal or its version is missing: listed conservatively, Paxos ignores such a proposal");
         }
-        else if (proposalVersion < MessagingService.VERSION_40)
+        else if (dse51 && proposalVersion < MessagingService.VERSION_30)
+        {
+            notes.add("proposal_version " + proposalVersion + " is below 3.0, neither DSE 5.1 nor HCD 2.0: whether " +
+                      "the proposal is empty is unknown");
+        }
+        else if (dse51 && proposalVersion >= DseCompat.DSE_60_VERSION)
+        {
+            notes.add("proposal_version " + proposalVersion + " is a DSE 6 version, which neither DSE 5.1 nor " +
+                      "HCD 2.0 in DSE_5_1 mode writes: whether the proposal is empty is unknown");
+        }
+        else if (!dse51 && proposalVersion < MessagingService.VERSION_40)
         {
             notes.add("proposal_version " + proposalVersion + " is below 4.0, neither DSE 6 nor HCD 2.0: whether the proposal is empty is unknown");
         }
@@ -1189,6 +1361,17 @@ final class PaxosRollback
         }
         open.note = notes.isEmpty() ? null : String.join("; ", notes);
         return open;
+    }
+
+    /**
+     * Who wrote a proposal stored at {@code version} on a node rolled back to DSE 5.1: DSE 5.1 at 10 or 11, HCD 2.0 at
+     * a version of its own (in {@code DSE_5_1} mode it stores {@link MessagingService#VERSION_40}), else unknown.
+     */
+    private static String writtenByOnDse51Node(@Nullable Integer version)
+    {
+        if (version == null || version < MessagingService.VERSION_30 || version >= DseCompat.DSE_60_VERSION)
+            return "unknown";
+        return version < MessagingService.VERSION_40 ? DSE_51 : HCD;
     }
 
     /** The cell of a column of a row; null when the row has none. */
@@ -1235,8 +1418,9 @@ final class PaxosRollback
                                     (Integer.valueOf(0).equals(replication.total) ? "the replication places no replica of the keyspace"
                                                                                   : "the replication places no replica in data center " + report.dataCenter + " (" +
                                                                                     report.dataCenterSource + ')') +
-                                    ", yet this node holds Paxos state of it: the replication (the schema, or the nodes files for EverywhereStrategy) " +
-                                    "or this node's data center is wrong; no read is listed, check them");
+                                    ", yet this node holds Paxos state of it: the replication (the schema, or " +
+                                    nodesSource + " for EverywhereStrategy) or this node's data center is wrong; no " +
+                                    "read is listed, check them");
             return;
         }
         String given = options.serialConsistencies.get(table.keyspace);
@@ -1293,7 +1477,7 @@ final class PaxosRollback
         return className.startsWith(LOCATOR_PACKAGE) ? className.substring(LOCATOR_PACKAGE.length()) : className;
     }
 
-    /** The replication of a keyspace, from its schema row, this node's data center and the nodes files. */
+    /** The replication of a keyspace, from its schema row, this node's data center and {@link #nodesSource}. */
     private Replication replication(String keyspace)
     {
         Map<String, String> options = keyspaces.getOrDefault(keyspace, Map.of());
@@ -1313,8 +1497,11 @@ final class PaxosRollback
                         return new Replication(description, replicas, replicas, null, true, false);
                     return new Replication(description, replicas, null,
                                            dataCenter == null ? dataCenterUnknown
-                                                              : "the nodes files do not say that the cluster has a single data center, and SimpleStrategy " +
-                                                                "places replicas regardless of data centers, so the replicas in data center " + dataCenter + " are unknown",
+                                                              : nodesSource + " do not say that the cluster has a " +
+                                                                "single data center, and SimpleStrategy places " +
+                                                                "replicas regardless of data centers, so the " +
+                                                                "replicas in data center " + dataCenter +
+                                                                " are unknown",
                                            false, false);
                 }
                 case NETWORK_TOPOLOGY_STRATEGY:
@@ -1333,15 +1520,18 @@ final class PaxosRollback
                 }
                 case EVERYWHERE_STRATEGY:
                 {
-                    // DSE's strategy of a replica on every node: as many replicas as the nodes files list nodes
+                    // DSE's strategy of a replica on every node: as many replicas as the nodes files (or the system
+                    // tables of the snapshot) list nodes
                     String description = "keyspace " + keyspace + ": EverywhereStrategy";
                     if (nodesByDataCenter == null || dataCenter == null)
-                        return new Replication(description, null, null, "EverywhereStrategy places a replica on every node, and the nodes files do not tell " +
-                                                                        "how many nodes each data center has", false, false);
+                        return new Replication(description, null, null,
+                                               "EverywhereStrategy places a replica on every node, and " + nodesSource +
+                                               " do not tell how many nodes each data center has", false, false);
                     int total = nodesByDataCenter.values().stream().mapToInt(Integer::intValue).sum();
                     int local = nodesByDataCenter.getOrDefault(dataCenter, 0);
-                    return new Replication(description + " (" + total + " nodes in the nodes files, " + local + " in data center " + dataCenter + ')',
-                                           total, local, null, local == total, false);
+                    return new Replication(description + " (" + total + " nodes in " + nodesSource + ", " + local +
+                                           " in data center " + dataCenter + ')', total, local, null, local == total,
+                                           false);
                 }
                 case LOCAL_STRATEGY:
                     return new Replication("keyspace " + keyspace + ": LocalStrategy", null, null, null, true, true);
@@ -1574,12 +1764,16 @@ final class PaxosRollback
 
     static void print(PaxosRollbackReport report, String serialCql, String localSerialCql, PrintStream out)
     {
-        out.println("DSE 6 rollback: open Paxos rounds of this node (" + NodeReport.TOOL + ' ' + report.softwareVersion + ')');
+        boolean dse51 = DSE_51.equals(report.rollbackTo);
+        out.println((dse51 ? "DSE 5.1" : "DSE 6") + " rollback: open Paxos rounds of this node (" + NodeReport.TOOL +
+                    ' ' + report.softwareVersion + ')');
         out.println("Precondition, not verified by the tool: HCD 2.0 stopped after a successful drain (nodetool drain exited 0, DRAINED in system.log), DSE not started.");
         out.println(validity(report));
         out.println("Host: " + report.hostname + "; data center: " + (report.dataCenter == null ? "unknown" : report.dataCenter + " (" + report.dataCenterSource + ')') +
-                    (report.singleDataCenter == null ? "; the nodes files do not tell whether the cluster has one data center"
-                                                     : report.singleDataCenter ? "; one data center in the nodes files" : "; several data centers in the nodes files"));
+                    (report.singleDataCenter == null ? "; " + nodesSourceOf(dse51) + " do not tell whether the " +
+                                                       "cluster has one data center"
+                     : report.singleDataCenter ? "; one data center in " + nodesSourceOf(dse51)
+                     : "; several data centers in " + nodesSourceOf(dse51)));
         out.println("Data directories: " + String.join(", ", report.dataDirectories) +
                     (report.defaultsAssumed.isEmpty() ? "" : " (DSE's defaults assumed: " + String.join(", ", report.defaultsAssumed) + ')'));
         out.println("Snapshot: " + report.snapshot + "; schema read from: " + String.join(", ", report.schemas));

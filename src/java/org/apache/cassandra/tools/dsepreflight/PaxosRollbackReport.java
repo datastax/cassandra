@@ -77,6 +77,12 @@ public final class PaxosRollbackReport
     public String generatedAt;
     @JsonProperty("hostname")
     public String hostname;
+    /**
+     * {@code DSE 5.1} for a node rolled back to DSE 5.1, whose data centers come from the system tables of the
+     * snapshot; absent for a node rolled back to DSE 6, whose data centers come from its nodes files
+     */
+    @JsonProperty("rollback_to")
+    public String rollbackTo;
     /** {@link #NOTHING_TO_READ}, {@link #READS_LISTED}, {@link #NO_READ_NEEDED} or {@link #NEEDS_ATTENTION} */
     @JsonProperty("result")
     public String result;
@@ -86,7 +92,10 @@ public final class PaxosRollbackReport
     /** where {@link #dataCenter} comes from */
     @JsonProperty("data_center_source")
     public String dataCenterSource;
-    /** whether nodes/local and nodes/peers name a single data center; null when they cannot tell */
+    /**
+     * whether nodes/local and nodes/peers (the snapshot's system.local and system.peers for DSE 5.1) name a single data
+     * center; null when they cannot tell
+     */
     @JsonProperty("single_data_center")
     public Boolean singleDataCenter;
     @JsonProperty("data_directories")

@@ -1450,7 +1450,9 @@ final class Dse51NodeInspector
      * The files HCD 2.0 writes in its metadata directory in {@code DSE_5_1} mode, read by their names: the marker of
      * the upgrade from DSE 5.1, the record of the DSE 5.1 peers, and the record of the values of DSE 5.1's columns of
      * {@code system.local} and {@code system.peers}, with its temporary file and its copies set aside. Each is the
-     * sign of an earlier run of HCD 2.0 on this node, rolled back; none blocks. DSE 6's marker and record block, where
+     * sign of an earlier run of HCD 2.0 on this node, rolled back; none blocks, but for the record of the values of
+     * DSE 5.1's columns beside the marker, which a rollback removes while it keeps the marker: with both, the next
+     * start in {@code DSE_5_1} mode would load values read before the rollback. DSE 6's marker and record block, where
      * they refuse a start in {@code DSE_5_1} mode.
      */
     private void inspectMetadataDirectory()
@@ -1484,8 +1486,55 @@ final class Dse51NodeInspector
                                   "upgrade from DSE 6; delete them before the first start of HCD 2.0 in DSE_5_1 mode " +
                                   "once no DSE 6 node is in the cluster"));
         String record = Dse51SystemTables.RECORD_FILE_NAME;
-        Path marker = directory.toPath().resolve(DseUpgradeMarker.DSE_51_FILE_NAME);
-        if (new File(marker).exists())
+        String markerName = DseUpgradeMarker.DSE_51_FILE_NAME;
+        String peersRecordName = DsePeersRecord.DSE_51_FILE_NAME;
+        Path marker = directory.toPath().resolve(markerName);
+        // listed first: in a directory that can be listed but not searched, the names tell what is there
+        List<String> records = new ArrayList<>();
+        boolean listed = false;
+        boolean markerListed = false;
+        boolean peersRecordListed = false;
+        boolean recordUnchecked = false;
+        if (directory.isDirectory())
+        {
+            try
+            {
+                String temporary = record + Dse51SystemTables.TEMPORARY_SUFFIX;
+                String unreadable = record + Dse51SystemTables.UNREADABLE_SUFFIX + '-';
+                for (File file : directory.listUnchecked(f -> f.name().equals(record) || f.name().equals(temporary) ||
+                                                              f.name().startsWith(unreadable) ||
+                                                              f.name().equals(markerName) ||
+                                                              f.name().equals(peersRecordName)))
+                {
+                    if (file.name().equals(markerName))
+                        markerListed = true;
+                    else if (file.name().equals(peersRecordName))
+                        peersRecordListed = true;
+                    else
+                        records.add(file.name());
+                }
+                listed = true;
+            }
+            catch (RuntimeException e)
+            {
+                findings.add(warning("UNREADABLE_INPUT",
+                                     "cannot list the metadata directory " + directory + " (" + rootCause(e) + ')',
+                                     "check by hand whether it holds " + markerName + ", " + record + ", " +
+                                     DseUpgradeMarker.FILE_NAME + " or " + DsePeersRecord.FILE_NAME + ": HCD 2.0 " +
+                                     "refuses to start in DSE_5_1 mode while the presence of the last two cannot be " +
+                                     "checked"));
+                // a directory that can be searched but not listed still answers for the record by its name; in one
+                // that can be neither searched nor listed the record may be there, and counts, as the marker does
+                Path recordPath = directory.toPath().resolve(record);
+                if (!Files.notExists(recordPath))
+                {
+                    records.add(record);
+                    recordUnchecked = !Files.exists(recordPath);
+                }
+            }
+        }
+        boolean markerPresent = markerListed || Files.exists(marker);
+        if (markerPresent)
             findings.add(info("MIXED_PHASE_MARKER",
                               "the DSE 5.1 upgrade marker " + marker + " exists" + where + ": HCD 2.0 writes it at " +
                               "its first start in DSE_5_1 mode, and a rollback leaves it; keep it while any node " +
@@ -1494,34 +1543,37 @@ final class Dse51NodeInspector
                               "node stopped and set to internode_compatibility_mode NONE, or when the upgrade is " +
                               "abandoned for good; while it exists, HCD 2.0 refuses to start on this node with NONE " +
                               "or DSE_6; DSE 5.1 does not read it"));
-        if (new File(directory, DsePeersRecord.DSE_51_FILE_NAME).exists())
+        if (peersRecordListed || Files.exists(directory.toPath().resolve(peersRecordName)))
             findings.add(info("NODE_RAN_HCD",
-                              "the metadata directory" + where + " holds " + DsePeersRecord.DSE_51_FILE_NAME + ", a " +
+                              "the metadata directory" + where + " holds " + peersRecordName + ", a " +
                               "file of an earlier run of HCD 2.0 on this node in DSE_5_1 mode (it was rolled back to " +
                               "DSE 5.1)"));
-        List<String> records = new ArrayList<>();
-        if (directory.isDirectory())
-        {
-            try
-            {
-                String temporary = record + Dse51SystemTables.TEMPORARY_SUFFIX;
-                String unreadable = record + Dse51SystemTables.UNREADABLE_SUFFIX + '-';
-                for (File file : directory.listUnchecked(f -> f.name().equals(record) || f.name().equals(temporary) ||
-                                                              f.name().startsWith(unreadable)))
-                    records.add(file.name());
-            }
-            catch (RuntimeException e)
-            {
-                findings.add(warning("UNREADABLE_INPUT",
-                                     "cannot list the metadata directory " + directory + " (" + rootCause(e) + ')',
-                                     "check by hand whether it holds " + DseUpgradeMarker.DSE_51_FILE_NAME + ", " +
-                                     record + ", " + DseUpgradeMarker.FILE_NAME + " or " + DsePeersRecord.FILE_NAME +
-                                     ": HCD 2.0 refuses to start in DSE_5_1 mode while the presence of the last two " +
-                                     "cannot be checked"));
-            }
-        }
         records.sort(Comparator.naturalOrder());
-        if (!records.isEmpty())
+        // a rollback keeps the marker and removes the record: with both, the next start in DSE_5_1 mode keeps the
+        // record and loads the values it holds, read before that rollback. The marker counts as there unless it is
+        // known to be absent, as the start of HCD 2.0 counts it, which cannot read a directory's names
+        String unchecked = " (or may hold it: its presence cannot be checked)";
+        String markerText = markerPresent ? ""
+                            : listed ? " (not listed, but HCD 2.0's start cannot check it and counts it as there)"
+                            : unchecked;
+        // a listed marker keeps counting even if it goes away between the listing and this look
+        if (records.contains(record) && (markerPresent || !Files.notExists(marker)))
+            findings.add(blocking("DSE51_SYSTEM_COLUMNS",
+                                  "the metadata directory" + where + " holds " + list(records) +
+                                  (recordUnchecked ? unchecked : "") + " and the DSE 5.1 upgrade marker" + markerText +
+                                  ": a rollback to DSE 5.1 " + (recordUnchecked || !markerPresent ? "may have kept"
+                                                                                                    : "kept") +
+                                  " the record and the marker, so the next start of HCD 2.0 in DSE_5_1 mode on this " +
+                                  "node would load the values of DSE 5.1's columns of system.local and system.peers " +
+                                  "recorded before that rollback, instead of reading those DSE 5.1 wrote since",
+                                  (markerPresent ? ""
+                                                 : "give the user HCD 2.0 runs as read and search permission on " +
+                                                   directory + " (HCD 2.0 cannot work in it otherwise), then, if " +
+                                                   markerName + " is there, ") +
+                                  "delete " + directory.toPath().resolve(record) + " and its " +
+                                  Dse51SystemTables.TEMPORARY_SUFFIX + " file, if there, before the upgrade; keep " +
+                                  markerName + ", as the rollback to DSE 5.1 does"));
+        else if (!records.isEmpty())
             findings.add(info("DSE51_SYSTEM_COLUMNS",
                               "the metadata directory" + where + " holds " + list(records) + ": the values of DSE " +
                               "5.1's columns of system.local and system.peers that HCD 2.0 read at its first start " +

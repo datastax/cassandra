@@ -934,7 +934,7 @@ public class Dse51PreflightTest
         Files.write(node.metadata.resolve(DseUpgradeMarker.DSE_51_FILE_NAME), new byte[0]);
         Files.write(node.metadata.resolve(DsePeersRecord.DSE_51_FILE_NAME), new byte[0]);
         String record = Dse51SystemTables.RECORD_FILE_NAME;
-        for (String name : List.of(record, record + Dse51SystemTables.TEMPORARY_SUFFIX,
+        for (String name : List.of(record + Dse51SystemTables.TEMPORARY_SUFFIX,
                                    record + Dse51SystemTables.UNREADABLE_SUFFIX + "-1793958236846"))
             Files.write(node.metadata.resolve(name), new byte[0]);
         DsePreflightTest.Run run = assertReady(run(node));
@@ -945,8 +945,93 @@ public class Dse51PreflightTest
         assertThat(run.findings("DSE6_UPGRADE_FILES")).isEmpty();
         assertThat(run.messages("NODE_RAN_HCD")).contains("holds dse51-peers-seen");
         assertThat(run.messages("DSE51_SYSTEM_COLUMNS"))
-        .contains("holds dse51-system-columns, dse51-system-columns.tmp, " +
-                  "dse51-system-columns.unreadable-1793958236846: ");
+        .contains("holds dse51-system-columns.tmp, dse51-system-columns.unreadable-1793958236846: ");
+
+        // a rollback keeps the marker and removes the record: one that kept both blocks the next upgrade
+        Files.write(node.metadata.resolve(record), new byte[0]);
+        DsePreflightTest.Run both = assertBlocked(run(node), "DSE51_SYSTEM_COLUMNS");
+        assertThat(both.messages("DSE51_SYSTEM_COLUMNS"))
+        .isEqualTo("the metadata directory (DSE 5.1 has no metadata directory: " + node.metadata + " is the one read " +
+                   "for HCD 2.0's files, given by --metadata-dir) holds dse51-system-columns, " +
+                   "dse51-system-columns.tmp, dse51-system-columns.unreadable-1793958236846 and the DSE 5.1 upgrade " +
+                   "marker: a rollback to DSE 5.1 kept the record and the marker, so the next start of HCD 2.0 in " +
+                   "DSE_5_1 mode on this node would load the values of DSE 5.1's columns of system.local and " +
+                   "system.peers recorded before that rollback, instead of reading those DSE 5.1 wrote since");
+        assertThat(both.findings("DSE51_SYSTEM_COLUMNS").get(0).remedy)
+        .isEqualTo("delete " + node.metadata.resolve(record) + " and its .tmp file, if there, before the upgrade; " +
+                   "keep dse51-upgrade-in-progress, as the rollback to DSE 5.1 does");
+        // without the marker the next start deletes the record itself
+        Files.delete(node.metadata.resolve(DseUpgradeMarker.DSE_51_FILE_NAME));
+        assertThat(assertReady(run(node)).findings("DSE51_SYSTEM_COLUMNS"))
+        .singleElement().satisfies(f -> assertThat(f.severity).isEqualTo(Finding.Severity.INFO));
+    }
+
+    /**
+     * The record of DSE 5.1's columns beside the marker blocks in a metadata directory that can be listed but not
+     * searched (the marker found by its name, or, not listed, counted as there, as the start counts it), in one that
+     * can be searched but not listed (the record found by its name), and in one that can be neither.
+     */
+    @Test
+    public void theRecordBesideTheMarkerBlocksInADirectoryOnlyPartlyReadable() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        Files.write(node.metadata.resolve(DseUpgradeMarker.DSE_51_FILE_NAME), new byte[0]);
+        Files.write(node.metadata.resolve(Dse51SystemTables.RECORD_FILE_NAME), new byte[0]);
+        Files.write(node.metadata.resolve(DsePeersRecord.DSE_51_FILE_NAME), new byte[0]);
+        String unchecked = " (or may hold it: its presence cannot be checked)";
+        Map<String, String> held = Map.of("r--------", "holds dse51-system-columns and the DSE 5.1 upgrade marker: " +
+                                                       "a rollback to DSE 5.1 kept",
+                                          "--x------", "holds dse51-system-columns and the DSE 5.1 upgrade marker: " +
+                                                       "a rollback to DSE 5.1 kept",
+                                          "---------", "holds dse51-system-columns" + unchecked + " and the DSE 5.1 " +
+                                                       "upgrade marker" + unchecked + ": a rollback to DSE 5.1 may " +
+                                                       "have kept");
+        for (String permissions : List.of("r--------", "--x------", "---------"))
+        {
+            Files.setPosixFilePermissions(node.metadata, PosixFilePermissions.fromString(permissions));
+            try
+            {
+                Assume.assumeFalse("the permissions do not apply to this user",
+                                   Files.isExecutable(node.metadata) && Files.isReadable(node.metadata));
+                DsePreflightTest.Run run = assertBlocked(run(node), "DSE51_SYSTEM_COLUMNS");
+                assertThat(run.messages("DSE51_SYSTEM_COLUMNS")).as(permissions).contains(held.get(permissions));
+                if (permissions.equals("---------"))
+                {
+                    assertThat(run.codes(Finding.Severity.BLOCKING)).contains("DSE6_UPGRADE_FILES");
+                    assertThat(run.findings("MIXED_PHASE_MARKER")).isEmpty();
+                    assertThat(run.findings("NODE_RAN_HCD")).isEmpty();
+                }
+                if (permissions.equals("r--------"))
+                {
+                    // both known from the listing alone
+                    assertThat(run.findings("MIXED_PHASE_MARKER")).hasSize(1);
+                    assertThat(run.findings("NODE_RAN_HCD")).hasSize(1);
+                }
+            }
+            finally
+            {
+                Files.setPosixFilePermissions(node.metadata, PosixFilePermissions.fromString("rwx------"));
+            }
+        }
+        // listed without the marker: the start still counts it as there, and the finding says why
+        Files.delete(node.metadata.resolve(DseUpgradeMarker.DSE_51_FILE_NAME));
+        Files.setPosixFilePermissions(node.metadata, PosixFilePermissions.fromString("r--------"));
+        try
+        {
+            Assume.assumeFalse("the permissions do not apply to this user", Files.isExecutable(node.metadata));
+            DsePreflightTest.Run run = assertBlocked(run(node), "DSE51_SYSTEM_COLUMNS");
+            assertThat(run.messages("DSE51_SYSTEM_COLUMNS"))
+            .contains("holds dse51-system-columns and the DSE 5.1 upgrade marker (not listed, but HCD 2.0's start " +
+                      "cannot check it and counts it as there): a rollback to DSE 5.1 may have kept");
+            assertThat(run.findings("DSE51_SYSTEM_COLUMNS").get(0).remedy)
+            .startsWith("give the user HCD 2.0 runs as read and search permission on " + node.metadata +
+                        " (HCD 2.0 cannot work in it otherwise), then, if dse51-upgrade-in-progress is there, delete ");
+            assertThat(run.findings("MIXED_PHASE_MARKER")).isEmpty();
+        }
+        finally
+        {
+            Files.setPosixFilePermissions(node.metadata, PosixFilePermissions.fromString("rwx------"));
+        }
     }
 
     /** A metadata directory that can be listed but not searched: DSE 6's files may be there, as the start says. */

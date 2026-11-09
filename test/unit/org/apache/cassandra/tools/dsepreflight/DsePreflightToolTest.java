@@ -27,6 +27,7 @@ import org.junit.rules.TemporaryFolder;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.tools.OfflineToolUtils;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
@@ -128,6 +129,43 @@ public class DsePreflightToolTest extends OfflineToolUtils
         assertKeyspaceNotLoaded();
         assertSystemKSNotLoaded();
         assertCLSMNotLoaded();
+        assertServerNotLoaded();
+        assertNoUnexpectedThreadsStarted(OPTIONAL_THREADS, false);
+    }
+
+    /**
+     * The rollback check of a node going back to DSE 5.1 through {@code main}: its commit log segment is read without
+     * loading {@code CommitLogSegment}, whose initialisation lists the commit log directory of this software's
+     * configuration, and nothing of the server is loaded.
+     */
+    @Test
+    public void theRollbackCheckRunsAsAnOfflineClientThroughMain() throws IOException
+    {
+        Dse51NodeFixture node = Dse51NodeFixture.create(temporaryFolder.newFolder().toPath());
+        Map<String, String> before = node.fingerprint();
+        Path json = temporaryFolder.getRoot().toPath().resolve("rollback.json");
+        ToolResult tool = ToolRunner.invokeClass(DsePreflight.class, node.rollbackCheckArgs("--json", json.toString()));
+        // the node as DSE 5.1.51 left it: its commit log segment holds mutations, and it has no snapshot
+        assertThat(tool.getExitCode()).as("%s%s", tool.getStdout(), tool.getStderr())
+                                      .isEqualTo(DsePreflight.EXIT_BLOCKED);
+        assertThat(tool.getStdout()).startsWith("DSE 5.1 rollback check of this node")
+                                    .contains("[COMMITLOG_UNFLUSHED]")
+                                    .contains("[SNAPSHOT_MISSING]");
+        assertThat(node.fingerprint()).isEqualTo(before);
+        Map<String, Object> report = JsonUtils.JSON_OBJECT_MAPPER.readValue(Files.readAllBytes(json),
+                                                                            new TypeReference<>() {});
+        assertThat(report).containsEntry("kind", Dse51RollbackInspection.KIND)
+                          .containsEntry("result", NodeReport.BLOCKED);
+        // system.peers is read in the configuration of the tool: the target of the captured hints file is known
+        assertThat(report.get("hints_by_target").toString())
+        .contains(Dse51Fixtures.HOST_IDS.get(2) + " (").contains(", release " + Dse51Fixtures.RELEASE_VERSION + ")");
+        assertThat(tool.getStdout()).doesNotContain("HINTS_TARGETS_UNKNOWN");
+
+        assertSchemaNotLoaded();
+        assertKeyspaceNotLoaded();
+        assertSystemKSNotLoaded();
+        assertCLSMNotLoaded();
+        assertClassNotLoaded("org.apache.cassandra.db.commitlog.CommitLogSegment");
         assertServerNotLoaded();
         assertNoUnexpectedThreadsStarted(OPTIONAL_THREADS, false);
     }

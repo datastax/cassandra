@@ -1035,12 +1035,13 @@ public final class Dse6NonCoreTraces
                           ") and upgrade it again");
         }
         // this node keeps what it read of DSE 5.1's system.local and system.peers in a record of the upgrade, which
-        // the next start loads while the marker of the upgrade exists: the rollback removes both
+        // the next start loads while the marker of the upgrade exists: the rollback keeps the marker, as for DSE 6,
+        // and removes the record
         if (dse51 && (kinds.contains(Kind.WORKLOADS_OF_THIS_NODE) || kinds.contains(Kind.PEER_ENTRY)))
-            sentences.add("The rollback must delete " + DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1) +
-                          " and " + Dse51SystemTables.recordPath() + ", which hold what this node read of " +
-                          "system.local and system.peers at its first start in DSE_5_1 mode, or the next start reads " +
-                          "the same workloads again");
+            sentences.add("The rollback must delete " + Dse51SystemTables.recordPath() + ", which holds what this " +
+                          "node read of system.local and system.peers at its first start in DSE_5_1 mode, or the " +
+                          "next start, with " + DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1) + " kept " +
+                          "as the rollback keeps it, reads the same workloads again");
         // what removes a workload a peer gossips is on that peer, not on this node (the gossip is checked on its own)
         if (kinds.contains(Kind.GOSSIPED_WORKLOADS))
             sentences.add("Restart the DSE 5.1 peers listed from gossip as plain Cassandra nodes (dse cassandra " +

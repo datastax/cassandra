@@ -310,14 +310,16 @@ public final class Dse51SystemTables
      * compaction of that table. In the other modes it only empties {@link #stored}.
      * <p>
      * The record belongs to one upgrade: the startup checks delete it before they write the DSE 5.1 upgrade marker
-     * ({@link #deleteRecordOfAnEarlierUpgrade}), and it is deleted by hand with that marker. A record that cannot be
-     * read is renamed aside ({@link #UNREADABLE_SUFFIX} and the time) with a WARN, and the values are read again from
-     * the sstables, which a compaction may have rewritten, and recorded again; a record that cannot be renamed aside
-     * or written is reported with an ERROR. When an sstable could not be read ({@link #read}), the values are not
-     * recorded, with a WARN, so that the next start, the cause removed, reads them again; a partition whose values
-     * cannot be decoded, a lasting fault, is only left out of the record. When the startup checks could not delete the
-     * record of an earlier upgrade (they then do not write the marker), the start is refused, so that the next one
-     * tries again.
+     * ({@link #deleteRecordOfAnEarlierUpgrade}), and it is deleted by hand with that marker at the flag drop, and
+     * alone at a rollback to DSE 5.1, which keeps the marker (the rollback check of the preflight tool lists the
+     * record for removal, and its node inspection of the next upgrade refuses a node that kept both). A record that
+     * cannot be read is renamed aside ({@link #UNREADABLE_SUFFIX} and the time) with a WARN, and the values are read
+     * again from the sstables, which a compaction may have rewritten, and recorded again; a record that cannot be
+     * renamed aside or written is reported with an ERROR. When an sstable could not be read ({@link #read}), the
+     * values are not recorded, with a WARN, so that the next start, the cause removed, reads them again; a partition
+     * whose values cannot be decoded, a lasting fault, is only left out of the record. When the startup checks could
+     * not delete the record of an earlier upgrade (they then do not write the marker), the start is refused, so that
+     * the next one tries again.
      *
      * @throws StartupException when the record of an earlier upgrade could not be deleted
      */

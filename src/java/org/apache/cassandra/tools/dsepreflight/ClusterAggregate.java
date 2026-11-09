@@ -63,14 +63,15 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.list;
  * of its node), and it fails closed: a file of the directory that is not a complete node report of this tool, of this
  * report format, written by the release of the tool that aggregates, blocks the cluster, as does a report written more
  * than {@link #MAX_REPORT_AGE} before the aggregate. Aggregate reports in the directory are skipped, and so are the
- * entries that are not regular files (links are not followed). The cluster is ready when: every report reads and comes
- * from this tool; no report is blocked; every node runs the same DSE release, with one schema version and one cluster
- * name; no node is reported twice (one host id or one broadcast address); every node a report lists as a DSE peer has a
- * report of its own (a peer recorded with a release of this software is an upgraded node and needs none); no ready
- * node records no peer while another node has a report ({@code NO_PEERS_RECORDED}: its {@code nodes/peers} is missing
- * or empty, so its report counted it alone, as on a single node, while the cluster has other nodes); and every
- * node has the same {@code storage_port} ({@code MIXED_STORAGE_PORTS}: DSE's pre-4.0 messages carry addresses without a
- * port, which HCD 2.0 completes with its own {@code storage_port}, so the port must be one and the same on every node).
+ * reports of the Paxos rollback mode and of the rollback check, and the entries that are not regular files (links are
+ * not followed). The cluster is ready when: every report reads and comes from this tool; no report is blocked; every
+ * node runs the same DSE release, with one schema version and one cluster name; no node is reported twice (one host
+ * id or one broadcast address); every node a report lists as a DSE peer has a report of its own (a peer recorded with
+ * a release of this software is an upgraded node and needs none); no ready node records no peer while another node
+ * has a report ({@code NO_PEERS_RECORDED}: its {@code nodes/peers} is missing or empty, so its report counted it
+ * alone, as on a single node, while the cluster has other nodes); and every node has the same {@code storage_port}
+ * ({@code MIXED_STORAGE_PORTS}: DSE's pre-4.0 messages carry addresses without a port, which HCD 2.0 completes with
+ * its own {@code storage_port}, so the port must be one and the same on every node).
  * It warns when the DSE nodes differ in their internode TLS settings ({@code internode_encryption},
  * {@code ssl_storage_port}), and when the reports record a node with more than one data center or rack, in its own
  * {@code nodes/local} and in the {@code nodes/peers} of the others ({@code TOPOLOGY_MISMATCH}). A node report whose
@@ -188,6 +189,7 @@ final class ClusterAggregate
         List<String> unreadable = new ArrayList<>();
         List<String> skipped = new ArrayList<>();
         List<String> skippedPaxos = new ArrayList<>();
+        List<String> skippedRollbackChecks = new ArrayList<>();
         List<String> notFiles = new ArrayList<>();
         List<String> stale = new ArrayList<>();
         List<String> dse51Reports = new ArrayList<>();
@@ -222,6 +224,12 @@ final class ClusterAggregate
                         PaxosRollbackReport.KIND.equals(tree.path("kind").textValue()))
                     {
                         skippedPaxos.add(name);
+                        continue;
+                    }
+                    if (tree != null && tree.isObject() && NodeReport.TOOL.equals(tree.path("tool").textValue()) &&
+                        Dse51RollbackInspection.KIND.equals(tree.path("kind").textValue()))
+                    {
+                        skippedRollbackChecks.add(name);
                         continue;
                     }
                     String problem = problem(tree);
@@ -294,6 +302,10 @@ final class ClusterAggregate
             findings.add(info("AGGREGATE_REPORT_SKIPPED", "aggregate reports in the directory, skipped: " + list(skipped)));
         if (!skippedPaxos.isEmpty())
             findings.add(info("PAXOS_ROLLBACK_REPORT_SKIPPED", "Paxos rollback reports (--paxos-rollback) in the directory, skipped: " + list(skippedPaxos)));
+        if (!skippedRollbackChecks.isEmpty())
+            findings.add(info("ROLLBACK_CHECK_REPORT_SKIPPED",
+                              "reports of the rollback check (--rollback-check) in the directory, skipped: " +
+                              list(skippedRollbackChecks)));
 
         Map<String, List<String>> releases = new TreeMap<>();
         Map<String, List<String>> schemaVersions = new TreeMap<>();
