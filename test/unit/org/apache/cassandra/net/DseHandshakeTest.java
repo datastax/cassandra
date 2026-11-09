@@ -63,6 +63,7 @@ import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.dsecompat.DseFixtures.Handshake;
@@ -101,7 +102,8 @@ import static org.assertj.core.api.InstanceOfAssertFactories.STRING;
  * real sockets: DSE's first message is answered with the 3.0.14 dialect and the third message completes
  * the handshake; our first message to a known DSE peer is the pre-4.0 one; a DSE reply to our 4.0-style
  * first message makes us reconnect at the dialect. With the mode off, every pre-4.0 byte sequence is
- * rejected exactly as before.
+ * rejected exactly as before. In DSE 5.1 compatibility mode, the handshakes captured between DSE 5.1.51 nodes complete
+ * at 11, a DSE 5.1 node at 10 is refused naming the property that sets it, and DSE 6's handshakes are refused.
  */
 public class DseHandshakeTest
 {
@@ -996,6 +998,8 @@ public class DseHandshakeTest
         volatile Runnable beforeFirstAnswer;
         /** Run before every answer, after {@link #beforeFirstAnswer}; null for nothing. */
         volatile Runnable beforeEachAnswer;
+        /** Whether the client may close the socket instead of sending the third message after an answer it accepts. */
+        volatile boolean mayCloseBeforeTheThirdMessage;
         /** When each answer was written, in {@code nanoTime}. */
         final List<Long> answeredAtNanos = new CopyOnWriteArrayList<>();
         /**
@@ -1128,7 +1132,17 @@ public class DseHandshakeTest
                 // the requested version, or at the dialect a DSE version (relative << 8, relative 1 to 255), is followed
                 // by our third message: version and address in the 3.0 layout
                 byte[] version = new byte[4];
-                in.readFully(version);
+                try
+                {
+                    in.readFully(version);
+                }
+                catch (EOFException e)
+                {
+                    // a client that refuses the answer closes the socket instead (DSE_5_1 mode, a DSE 6 version)
+                    if (!mayCloseBeforeTheThirdMessage)
+                        throw e;
+                    return false;
+                }
                 int size = in.readUnsignedByte();
                 byte[] address = new byte[size];
                 in.readFully(address);
@@ -1948,5 +1962,250 @@ public class DseHandshakeTest
                 assertThat(timedOut.log).as(as).hasSize(1);
             }
         }
+    }
+
+    // ---- DSE_5_1 mode: the handshake of DSE 5.1.51 nodes ----
+
+    private static void dse51()
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+    }
+
+    /**
+     * The handshakes captured between DSE 5.1.51 nodes, replayed against our inbound side in DSE_5_1 mode: the
+     * first message at 11 is answered with exactly the second message DSE 5.1.51 answered, 11; the third message, the
+     * version and the address only (no DSE parameter), completes the handshake at 11 and identifies the peer as a DSE
+     * 5.1 node; the first message DSE 5.1 sent after it, sent with the third message, reaches the messaging pipeline.
+     */
+    @Test
+    public void theCapturedDse51HandshakesCompleteAt11() throws Exception
+    {
+        dse51();
+        InboundSockets inbound = openInbound();
+        try
+        {
+            InetAddressAndPort endpoint = bindAddress(inbound);
+            for (Dse51Fixtures.Handshake captured : DseFixtures.dse51().handshakes())
+            {
+                // the third message names the client by its address only: the peer is recorded with the default storage
+                // port
+                InetAddressAndPort client = InetAddressAndPort.getByAddress(InetAddressAndPort.getByName(captured.client).getAddress());
+                assertThat(captured.msg1).containsExactly(0xCA, 0x55, 0x2D, 0xFA, 0x00, 0x00, 0x0B, 0x00);
+                assertThat(captured.msg3).hasSize(9).startsWith(0, 0, 0, 11, 4);
+                CountDownLatch delivered = new CountDownLatch(1);
+                Predicate<Message<?>> sink = message -> {
+                    if (message.verb() != Verb.GOSSIP_DIGEST_SYN || !message.from().equals(client))
+                        return true;
+                    delivered.countDown();
+                    return false;
+                };
+                MessagingService.instance().inboundSink.add(sink);
+                try (Socket socket = new Socket(endpoint.getAddress(), endpoint.getPort()))
+                {
+                    socket.setSoTimeout(10_000);
+                    DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                    out.write(captured.msg1);
+                    out.flush();
+                    byte[] reply = new byte[4];
+                    new DataInputStream(socket.getInputStream()).readFully(reply);
+                    assertThat(reply).as(captured.client).containsExactly(captured.msg2);
+                    out.write(concat(captured.msg3, captured.message1));
+                    out.flush();
+                    awaitKnown(client);
+                    assertThat(MessagingService.instance().versions.getRaw(client)).isEqualTo(DseCompat.DSE_DIALECT);
+                    assertThat(DsePeers.snapshot()).containsEntry(client, "pre-4.0 first handshake message requesting version 11");
+                    assertThat(delivered.await(10, TimeUnit.SECONDS)).as("the message sent with the third message").isTrue();
+                }
+                finally
+                {
+                    MessagingService.instance().inboundSink.remove(sink);
+                    MessagingService.instance().versions.reset(client);
+                }
+            }
+        }
+        finally
+        {
+            inbound.close().await(1L, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * Our side of the handshake with a DSE 5.1.51 node, which answers every first message with its own version, 11: to
+     * a peer known at the dialect, the 8-byte first message at 11 (the captured one, but for the connection type bits,
+     * which DSE 5.1 ignores) and, once answered with 11, the third message with the version and the address only, as
+     * DSE 5.1.51 sends it; the 4.0-style probe of a peer not known, answered with 11, retries at 11. Either answer
+     * identifies a DSE 5.1 node.
+     */
+    @Test
+    public void weConnectToADse51NodeAsDse51NodesDo() throws Exception
+    {
+        dse51();
+        Dse51Fixtures.Handshake captured = DseFixtures.dse51().handshakes().get(0);
+        try (FakeDse dse51 = new FakeDse(1, DseCompat.DSE_DIALECT))
+        {
+            OutboundConnectionSettings settings = settings(dse51.endpoint());
+            Result<MessagingSuccess> result = connect(dse51.endpoint(), DseCompat.DSE_DIALECT).get(20, TimeUnit.SECONDS);
+            assertThat(result.outcome).isEqualTo(Result.Outcome.SUCCESS);
+            assertThat(result.success().messagingVersion).isEqualTo(DseCompat.DSE_DIALECT);
+            byte[] sent = dse51.firstMessages.get(0);
+            assertThat(sent).hasSameSizeAs(captured.msg1);
+            assertThat(Arrays.copyOf(sent, 7)).containsExactly(Arrays.copyOf(captured.msg1, 7));
+            assertThat(dse51.answers).containsExactly(ByteBuffer.wrap(captured.msg2).getInt());
+            result.success().channel.close();
+            dse51.thread.join(10_000);
+            assertThat(dse51.thirdMessages).singleElement()
+                                           .satisfies(third -> {
+                                               assertThat(third).hasSameSizeAs(captured.msg3);
+                                               assertThat(third).containsExactly(concat(new byte[]{ 0, 0, 0, 11, 4 }, settings.from.getAddress().getAddress()));
+                                           });
+            assertThat(DsePeers.snapshot()).containsEntry(settings.to, "pre-4.0 handshake reply with the messaging version 11");
+        }
+
+        DsePeers.reset();
+        try (FakeDse dse51 = new FakeDse(1, DseCompat.DSE_DIALECT))
+        {
+            Result<MessagingSuccess> probe = connect(dse51.endpoint(), current_version).get(20, TimeUnit.SECONDS);
+            assertThat(probe.outcome).isEqualTo(Result.Outcome.RETRY);
+            assertThat(probe.retry().withMessagingVersion).isEqualTo(DseCompat.DSE_DIALECT);
+            assertThat(DsePeers.snapshot()).containsEntry(settings(dse51.endpoint()).to, "handshake reply with the messaging version 11");
+        }
+    }
+
+    /** The replies, the state of the channel and the WARN lines of our inbound handler after the given bytes. */
+    private static final class Fed
+    {
+        final List<byte[]> replies = new ArrayList<>();
+        final List<String> warnings = new ArrayList<>();
+        boolean open;
+    }
+
+    private static Fed feedInbound(byte[]... received)
+    {
+        Logger initiatorLogger = (Logger) LoggerFactory.getLogger(InboundConnectionInitiator.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        initiatorLogger.addAppender(appender);
+        InboundChannel channel = new InboundChannel();
+        Fed fed = new Fed();
+        try
+        {
+            channel.pipeline().addLast("handshake", new InboundConnectionInitiator.Handler(inboundSettings()));
+            for (byte[] bytes : received)
+                channel.writeInbound(Unpooled.wrappedBuffer(bytes));
+            ByteBuf reply;
+            while ((reply = channel.readOutbound()) != null)
+                fed.replies.add(bytes(reply));
+            fed.open = channel.isOpen();
+            for (ILoggingEvent event : appender.list)
+                if (event.getLevel() == Level.WARN && event.getFormattedMessage().contains(ABANDONING_PEER.toString()))
+                    fed.warnings.add(event.getFormattedMessage());
+        }
+        finally
+        {
+            channel.finishAndReleaseAll();
+            initiatorLogger.detachAppender(appender);
+        }
+        return fed;
+    }
+
+    /**
+     * A DSE 5.1 node started with -Dcassandra.force_3_0_protocol_version=true speaks 10: it asks for 10, takes our
+     * answer of 11, and confirms with 10, which is refused as before; in DSE_5_1 mode the WARN names the property. Our
+     * first message at 11 answered with 10 is incompatible, also when the node is known at 10 (it gossips 10), since
+     * DSE_5_1 mode still requests 11 then; the message of the failure names the property in DSE_5_1 mode only.
+     */
+    @Test
+    public void aDse51NodeAt10IsRefusedNamingTheProperty() throws Exception
+    {
+        InetAddressAndPort peer = InetAddressAndPort.getByAddress(InetAddressAndPort.getByName("127.0.51.13").getAddress());
+        String refusal = "peer " + ABANDONING_PEER + " (" + peer + ") confirmed the pre-4.0 handshake with version 10 instead of the 11 we answered; closing";
+        String advice = "a DSE 5.1 node speaks messaging version 10 only when started with -Dcassandra.force_3_0_protocol_version=true, " +
+                        "which internode_compatibility_mode DSE_5_1 does not support: restart that node without the property";
+        for (InternodeCompatibilityMode mode : new InternodeCompatibilityMode[]{ InternodeCompatibilityMode.DSE_5_1, InternodeCompatibilityMode.DSE_6 })
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            // the pre-4.0 address layout of the third message is written in a DSE mode only
+            byte[] third = bytes(new ConfirmOutboundPre40(VERSION_30, peer).encode());
+            Fed fed = feedInbound(plainFirstMessage(VERSION_30), third);
+            assertThat(fed.replies).as(mode.name()).singleElement().satisfies(r -> assertThat(r).containsExactly(0, 0, 0, 11));
+            assertThat(fed.open).as(mode.name()).isFalse();
+            assertThat(fed.warnings).as(mode.name()).containsExactly(mode == InternodeCompatibilityMode.DSE_5_1 ? refusal + ": " + advice : refusal);
+            assertThat(MessagingService.instance().versions.knows(peer)).as(mode.name()).isFalse();
+        }
+
+        dse51();
+        try (FakeDse forced = new FakeDse(1, VERSION_30))
+        {
+            Result<MessagingSuccess> result = connect(forced.endpoint(), DseCompat.DSE_DIALECT).get(20, TimeUnit.SECONDS);
+            assertThat(result.outcome).isEqualTo(Result.Outcome.INCOMPATIBLE);
+            assertThat(result.incompatible().maxMessagingVersion).isEqualTo(VERSION_30);
+            assertThat(OutboundConnection.incompatiblePeerMessage(forced.endpoint(), VERSION_30))
+            .isEqualTo("Incompatible peer: " + forced.endpoint() + ", messaging version: 10: " + advice);
+        }
+        // known at 10, as such a node gossips it: still asked for 11, never connected to at 10
+        try (FakeDse forced = new FakeDse(1, VERSION_30))
+        {
+            Result<MessagingSuccess> result = connect(forced.endpoint(), VERSION_30).get(20, TimeUnit.SECONDS);
+            assertThat(result.outcome).isEqualTo(Result.Outcome.INCOMPATIBLE);
+            assertThat(result.incompatible().maxMessagingVersion).isEqualTo(VERSION_30);
+            assertThat(forced.firstMessages.get(0)[6]).as("the version requested").isEqualTo((byte) DseCompat.DSE_DIALECT);
+            assertThat(forced.thirdMessages).isEmpty();
+        }
+        assertThat(OutboundConnectionInitiator.dse51RequestedVersion(VERSION_30)).isEqualTo(DseCompat.DSE_DIALECT);
+        assertThat(OutboundConnectionInitiator.dse51RequestedVersion(DseCompat.DSE_DIALECT)).isEqualTo(DseCompat.DSE_DIALECT);
+        assertThat(OutboundConnectionInitiator.dse51RequestedVersion(current_version)).isEqualTo(current_version);
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        assertThat(OutboundConnectionInitiator.dse51RequestedVersion(VERSION_30)).as("DSE_6: as requested").isEqualTo(VERSION_30);
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        assertThat(OutboundConnectionInitiator.dse51RequestedVersion(VERSION_30)).as("NONE: as requested").isEqualTo(VERSION_30);
+        for (InternodeCompatibilityMode mode : new InternodeCompatibilityMode[]{ InternodeCompatibilityMode.DSE_6, InternodeCompatibilityMode.NONE })
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            assertThat(OutboundConnection.incompatiblePeerMessage(peer, VERSION_30)).as(mode.name())
+                                                                                   .isEqualTo("Incompatible peer: " + peer + ", messaging version: 10");
+        }
+    }
+
+    /**
+     * DSE_5_1 mode: no DSE 6 node can be in a cluster under the DSE 5.1 upgrade, so the first messages only DSE 6 sends
+     * (DSE-flagged, or pre-4.0-shaped requesting 12) are refused without an answer, with a WARN, and an answer with a
+     * DSE 6 messaging version, to our pre-4.0 first message or to our 4.0-style probe, is incompatible. In DSE_6 mode
+     * the same bytes connect, as before (the tests above).
+     */
+    @Test
+    public void dse6HandshakesAreRefusedInDse51Mode() throws Exception
+    {
+        dse51();
+        String reason = ": internode_compatibility_mode DSE_5_1 connects to DSE 5.1 nodes and nodes of this software only, and " +
+                        "no DSE 6 node can be in a cluster under the DSE 5.1 upgrade; closing";
+        Fed flagged = feedInbound(flaggedMsg1(DseVersion.DSE_6_9_26));
+        assertThat(flagged.replies).isEmpty();
+        assertThat(flagged.open).isFalse();
+        assertThat(flagged.warnings).containsExactly("peer " + ABANDONING_PEER + " sent a first handshake message only a DSE 6 node sends (DSE-flagged)" + reason);
+        Fed at12 = feedInbound(PLAIN_PRE40_AT_12);
+        assertThat(at12.replies).isEmpty();
+        assertThat(at12.open).isFalse();
+        assertThat(at12.warnings).containsExactly("peer " + ABANDONING_PEER + " sent a first handshake message only a DSE 6 node sends " +
+                                                  "(pre-4.0, requesting version 12)" + reason);
+
+        try (FakeDse dse6 = new FakeDse(1, DseCompat.DSE_681_VERSION))
+        {
+            dse6.mayCloseBeforeTheThirdMessage = true;
+            Result<MessagingSuccess> result = connect(dse6.endpoint(), DseCompat.DSE_DIALECT).get(20, TimeUnit.SECONDS);
+            assertThat(result.outcome).isEqualTo(Result.Outcome.INCOMPATIBLE);
+            assertThat(result.incompatible().maxMessagingVersion).isEqualTo(DseCompat.DSE_681_VERSION);
+            assertThat(dse6.thirdMessages).isEmpty();
+        }
+        try (FakeDse dse6 = new FakeDse(1))
+        {
+            Result<MessagingSuccess> probe = connect(dse6.endpoint(), current_version).get(20, TimeUnit.SECONDS);
+            assertThat(probe.outcome).isEqualTo(Result.Outcome.INCOMPATIBLE);
+            assertThat(probe.incompatible().maxMessagingVersion).isEqualTo(DSE_697_HANDSHAKE_VERSION);
+            assertThat(OutboundConnection.incompatiblePeerMessage(dse6.endpoint(), DSE_697_HANDSHAKE_VERSION))
+            .isEqualTo("Incompatible peer: " + dse6.endpoint() + ", messaging version: 1536: a DSE 6 messaging version, and " +
+                       "internode_compatibility_mode DSE_5_1 connects to DSE 5.1 nodes and nodes of this software only (no DSE 6 " +
+                       "node can be in a cluster under the DSE 5.1 upgrade)");
+        }
+        assertThat(DsePeers.snapshot()).isEmpty();
     }
 }

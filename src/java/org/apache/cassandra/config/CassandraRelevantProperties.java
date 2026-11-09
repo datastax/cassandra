@@ -584,8 +584,10 @@ public enum CassandraRelevantProperties
     /**
      * The DSE version a node in {@code internode_compatibility_mode: DSE_6} gossips to DSE nodes as its
      * {@code dse_version}: 6.8.0 or 6.8.1, below 6.8.2, so that the DSE nodes send it the range reads of index queries
-     * with a verb this software understands, or {@code none} to gossip none. Read only in that mode; any other value
-     * refuses the start (see {@code DseCompat#gossipedDseVersion}).
+     * with a verb this software understands, or {@code none} to gossip none. In
+     * {@code internode_compatibility_mode: DSE_5_1} the version gossiped to DSE 5.1 nodes: {@code 5.1.51} only, which
+     * is also the default in that mode (the default below is DSE 6's), and {@code none} is refused. Read only in those
+     * two modes; any other value refuses the start (see {@code DseCompat#gossipedDseVersion}).
      */
     INTERNODE_COMPATIBILITY_MODE_DSE_VERSION("cassandra.internode_compatibility_mode.dse_version", "6.8.1"),
     /**

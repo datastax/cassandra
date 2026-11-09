@@ -103,6 +103,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
      * 3.0.14 dialect) the first message is the pre-4.0 one and the handshake has three messages; otherwise it goes,
      * raised to at least 13 ({@code VERSION_50}, since DSE echoes 12, as the source of DSE 6.9 has it), in the legacy
      * version byte of the 4.0-style first message. With {@code NONE} that byte keeps carrying {@code acceptVersions.min}.
+     * In the DSE 5.1 compatibility mode a pre-4.0 version below 11 is requested as 11 ({@link #dse51RequestedVersion}).
      */
     private final int requestMessagingVersion;
     private final Promise<Result<SuccessType>> resultPromise;
@@ -114,8 +115,22 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         this.type = type;
         this.sslConnectionType = sslConnectionType;
         this.settings = settings;
-        this.requestMessagingVersion = requestMessagingVersion;
+        this.requestMessagingVersion = dse51RequestedVersion(requestMessagingVersion);
         this.resultPromise = resultPromise;
+    }
+
+    /**
+     * The version requested instead of {@code requestMessagingVersion}: in the DSE 5.1 compatibility mode a pre-4.0
+     * version below the dialect, 10, which a DSE 5.1 node started with
+     * {@code -Dcassandra.force_3_0_protocol_version=true} gossips, is requested as 11, the only version this software
+     * speaks with DSE 5.1 nodes, so that such a node answers 10 and is refused as incompatible, as it is refused
+     * inbound; in every other case {@code requestMessagingVersion} itself.
+     */
+    @VisibleForTesting
+    static int dse51RequestedVersion(int requestMessagingVersion)
+    {
+        return DseCompat.isDse51() && requestMessagingVersion < DseCompat.DSE_DIALECT ? DseCompat.DSE_DIALECT
+                                                                                       : requestMessagingVersion;
     }
 
     /**
@@ -410,8 +425,11 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                         // observed with both; HCD 1.2 accepts any answer it maps to the version it requested, or above
                         // its maximum for its tests), and we conclude with the third message; any other answer is final
                         // (never retried, so no ping-pong), reported with the version the peer sent
+                        // (in the DSE 5.1 compatibility mode a DSE version is not accepted: no DSE 6 node can be in the
+                        // cluster, and a DSE 5.1 node echoes 11)
                         int answer = msg.pre40PeerVersion;
-                        if (answer == requestMessagingVersion || (requestMessagingVersion == DseCompat.DSE_DIALECT && DseCompat.isDseHandshakeVersion(answer)))
+                        if (answer == requestMessagingVersion
+                            || (requestMessagingVersion == DseCompat.DSE_DIALECT && !DseCompat.isDse51() && DseCompat.isDseHandshakeVersion(answer)))
                         {
                             // a DSE version identifies a DSE node (DsePeers), which its plain first messages at 11 do not
                             DsePeers.fromPre40Reply(settings.to, answer, true);
@@ -431,6 +449,12 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                     else if (peerMessagingVersion < DseCompat.OLDEST_PRE40_VERSION)
                     {
                         result = incompatible(-1, peerMessagingVersion);
+                    }
+                    else if (DseCompat.isDse51() && DseCompat.isDseHandshakeVersion(msg.pre40PeerVersion))
+                    {
+                        // the DSE 5.1 compatibility mode: a DSE 6 node's own version, which no peer of a cluster under
+                        // the DSE 5.1 upgrade answers (a DSE 5.1 node answers 11)
+                        result = incompatible(-1, msg.pre40PeerVersion);
                     }
                     else
                     {

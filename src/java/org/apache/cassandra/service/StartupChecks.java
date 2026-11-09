@@ -996,14 +996,16 @@ public class StartupChecks
     /**
      * With {@code internode_compatibility_mode: DSE_6}, refuses to start when the DSE version this node is to gossip to
      * DSE nodes ({@code cassandra.internode_compatibility_mode.dse_version}) is not one it may gossip, before the node
-     * contacts any peer, and warns when it gossips none (see {@link DseCompat#gossipedDseVersion}).
+     * contacts any peer, and warns when it gossips none (see {@link DseCompat#gossipedDseVersion}). With
+     * {@code DSE_5_1}, refuses to start when that property is set to anything but 5.1.51, {@code none} included, so
+     * that the node never gossips a value DSE 5.1 cannot parse, nor none.
      */
     public static final StartupCheck checkDse6GossipedDseVersion = new StartupCheck()
     {
         @Override
         public void execute(StartupChecksOptions options) throws StartupException
         {
-            if (!DatabaseDescriptor.isDse6CompatibilityMode())
+            if (!DatabaseDescriptor.isDseCompatibilityMode())
                 return;
             String dseVersion;
             try

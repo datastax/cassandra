@@ -51,6 +51,7 @@ import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.concurrent.SucceededFuture;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.MessagingSuccess;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
@@ -1256,8 +1257,7 @@ public class OutboundConnection
 
                     case INCOMPATIBLE:
                         // we cannot communicate with this peer given its messaging version; mark this as any other failure, and continue trying
-                        Throwable t = new IOException(String.format("Incompatible peer: %s, messaging version: %s",
-                                                                    settings.to, result.incompatible().maxMessagingVersion));
+                        Throwable t = new IOException(incompatiblePeerMessage(settings.to, result.incompatible().maxMessagingVersion));
                         t.fillInStackTrace();
                         onFailure(t);
                         break;
@@ -1303,7 +1303,7 @@ public class OutboundConnection
                 if (messagingVersion > settings.acceptVersions.max)
                     messagingVersion = settings.acceptVersions.max;
 
-                // DSE 6 compatibility mode: a DSE 6 peer may need ssl_storage_port (DseTlsPorts; a no-op otherwise)
+                // DSE compatibility modes: a DSE peer may need ssl_storage_port (DseTlsPorts; a no-op otherwise)
                 settings = settings.withLegacyPortIfNecessary(messagingVersion);
 
                 // In mixed mode operation, some nodes might be configured to use SSL for internode connections and
@@ -1316,7 +1316,7 @@ public class OutboundConnection
                 int index = sslFallbackEnabled && settings.withEncryption() && settings.encryption.getOptional() ?
                             (int) (connectionAttempts - 1) % fallBackSslFallbackConnectionTypes.length : 0;
                 SslFallbackConnectionType sslConnectionType = fallBackSslFallbackConnectionTypes[index];
-                // DSE 6 compatibility mode: no plain-text retry of an encrypted connection to a peer not known at 4.0 or
+                // DSE compatibility modes: no plain-text retry of an encrypted connection to a peer not known at 4.0 or
                 // later (DseTlsPorts; a no-op otherwise)
                 sslConnectionType = DseTlsPorts.sslFallback(settings, messagingVersion, sslConnectionType);
                 if (sslConnectionType != SslFallbackConnectionType.SERVER_CONFIG)
@@ -1810,6 +1810,26 @@ public class OutboundConnection
         if (a == null || b == null)
             return a == null ? b : a;
         return () -> { a.run(); b.run(); };
+    }
+
+    /**
+     * The message of the failure of a connection attempt to {@code to} that the peer's messaging version
+     * {@code maxMessagingVersion} made incompatible, as before; in the DSE 5.1 compatibility mode, for a DSE 5.1 node
+     * at 10 or a peer answering with a DSE 6 messaging version, followed by the reason the mode refuses it.
+     */
+    @VisibleForTesting
+    static String incompatiblePeerMessage(InetAddressAndPort to, int maxMessagingVersion)
+    {
+        String message = String.format("Incompatible peer: %s, messaging version: %s", to, maxMessagingVersion);
+        if (!DseCompat.isDse51())
+            return message;
+        if (maxMessagingVersion == MessagingService.VERSION_30)
+            return message + ": " + DseCompat.dse51Version10Advice();
+        if (DseCompat.isDseHandshakeVersion(maxMessagingVersion))
+            return message + ": a DSE 6 messaging version, and internode_compatibility_mode DSE_5_1 connects to " +
+                   "DSE 5.1 nodes and nodes of this software only (no DSE 6 node can be in a cluster under the DSE 5.1 " +
+                   "upgrade)";
+        return message;
     }
 
     @VisibleForTesting

@@ -129,6 +129,20 @@ public final class DseCompat
     public static final String NO_DSE_VERSION = "none";
 
     /**
+     * The {@code dse_version} a node in {@code internode_compatibility_mode: DSE_5_1} gossips to DSE 5.1 nodes, the
+     * only value {@link CassandraRelevantProperties#INTERNODE_COMPATIBILITY_MODE_DSE_VERSION} takes in that mode, and
+     * its default there: the version of the one DSE 5.1 release the mode supports, which the DSE 5.1 nodes run, so that
+     * their version gates stay as in a cluster of DSE 5.1.51 nodes.
+     */
+    public static final String DSE51_GOSSIPED_DSE_VERSION = "5.1.51";
+
+    /**
+     * The system property that makes a DSE 5.1 node speak messaging version 10 (Apache Cassandra 3.0) instead of 11;
+     * this software speaks only 11 with DSE 5.1 nodes, so such a node is refused ({@link #dse51Version10Advice}).
+     */
+    private static final String DSE51_FORCE_3_0_PROTOCOL_VERSION_PROPERTY = "cassandra.force_3_0_protocol_version";
+
+    /**
      * The DSE versions a node may gossip: 6.8.0 and 6.8.1. DSE 6.8.2 and later group the range reads of an index query
      * by endpoint when every node gossips such a version, with a verb DSE cannot write to this software; below 6.8 other
      * DSE features change, which nothing here has looked at. Nothing else either: DSE fails on a version it cannot parse,
@@ -148,15 +162,20 @@ public final class DseCompat
     }
 
     /**
-     * The DSE version this node gossips to DSE nodes in DSE 6 compatibility mode
+     * The DSE version this node gossips to DSE nodes
      * ({@link CassandraRelevantProperties#INTERNODE_COMPATIBILITY_MODE_DSE_VERSION}), or null when it gossips none
-     * ({@link #NO_DSE_VERSION}).
+     * ({@link #NO_DSE_VERSION}): in DSE 6 compatibility mode 6.8.0 or 6.8.1, or none; in the DSE 5.1 one
+     * {@link #DSE51_GOSSIPED_DSE_VERSION} only, also when the property is not set, and never none: a DSE 5.1 node
+     * without a saved row of a node that gossips no version counts that node as DSE 4.8.0, which keeps the version
+     * gates of its cluster closed.
      *
-     * @throws ConfigurationException if the property is neither {@link #NO_DSE_VERSION} nor such a version
+     * @throws ConfigurationException if the property is not one of the values the mode accepts
      */
     @Nullable
     public static String gossipedDseVersion()
     {
+        if (isDse51())
+            return gossipedDse51DseVersion();
         String configured = CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getString();
         if (NO_DSE_VERSION.equals(configured))
             return null;
@@ -169,11 +188,42 @@ public final class DseCompat
         return configured;
     }
 
+    /** {@link #gossipedDseVersion} in {@code internode_compatibility_mode: DSE_5_1}. */
+    private static String gossipedDse51DseVersion()
+    {
+        CassandraRelevantProperties property = CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_VERSION;
+        if (!property.isPresent())
+            return DSE51_GOSSIPED_DSE_VERSION;
+        String configured = property.getString();
+        if (!DSE51_GOSSIPED_DSE_VERSION.equals(configured))
+        {
+            String format = "%s is '%s': in internode_compatibility_mode DSE_5_1 it must be '%s', its default in that mode, " +
+                            "the DSE version of the DSE 5.1 nodes, which this node gossips to them so that their version " +
+                            "gates stay as in a cluster of DSE 5.1.51 nodes; '%s' (no DSE version) is not accepted in that " +
+                            "mode either: remove the property";
+            throw new ConfigurationException(String.format(format, property.getKey(), configured, DSE51_GOSSIPED_DSE_VERSION,
+                                                           NO_DSE_VERSION));
+        }
+        return configured;
+    }
+
+    /**
+     * The advice that ends the refusal of a DSE 5.1 node speaking messaging version 10 in
+     * {@code internode_compatibility_mode: DSE_5_1}: such a node was started with
+     * {@code -Dcassandra.force_3_0_protocol_version=true}, which the upgrade does not support.
+     */
+    public static String dse51Version10Advice()
+    {
+        return "a DSE 5.1 node speaks messaging version " + MessagingService.VERSION_30 + " only when started with -D" +
+               DSE51_FORCE_3_0_PROTOCOL_VERSION_PROPERTY + "=true, which internode_compatibility_mode DSE_5_1 does not " +
+               "support: restart that node without the property";
+    }
+
     /**
      * True while the node accepts DSE peers, in {@code internode_compatibility_mode: DSE_6} or {@code DSE_5_1}: the
      * guard of every pre-4.0 code path, of the operational guards of the upgrade and of the schema freeze. Both sources
-     * speak messaging version 11 with this software. What only DSE 6 needs (its gossip states and TLS ports, its views
-     * and access controls) is guarded by {@link #isDse6()} instead.
+     * speak messaging version 11 with this software. What only DSE 6 needs (its gossip ordinals and states, its views
+     * and access controls) is guarded by {@link #isDse6()} instead, and what only DSE 5.1 needs by {@link #isDse51()}.
      */
     public static boolean enabled()
     {

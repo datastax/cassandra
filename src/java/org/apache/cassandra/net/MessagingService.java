@@ -819,14 +819,14 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     }
 
     /**
-     * DSE 6 compatibility mode: the saved peers stored with a DSE 6 release are first connected to with the pre-4.0
-     * handshake, not the 4.0-style one DSE fails to parse (see {@link DseDialectVersions}); nothing happens otherwise,
-     * in the DSE 5.1 compatibility mode too, whose saved peers carry no DSE 6 release.
+     * DSE compatibility modes: the saved peers stored with a DSE 6 release (in {@code DSE_6}), or with a DSE 5.1
+     * release or {@code dse_version} (in {@code DSE_5_1}), are first connected to with the pre-4.0 handshake, not the
+     * 4.0-style one DSE fails on (see {@link DseDialectVersions}); nothing happens with {@code NONE}.
      */
     @VisibleForTesting
     void seedDseDialectPeers()
     {
-        if (DseCompat.isDse6())
+        if (DseCompat.enabled())
             DseDialectVersions.seedFromSavedPeers(versions);
     }
 

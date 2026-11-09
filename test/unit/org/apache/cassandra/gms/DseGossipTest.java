@@ -17,10 +17,12 @@
 package org.apache.cassandra.gms;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -41,6 +43,7 @@ import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.dsecompat.DseFixtures.GossipState;
@@ -50,11 +53,13 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.nodes.DseNodeWorkloads;
 import org.apache.cassandra.nodes.PeerInfo;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.JsonUtils;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.GOSSIP_DISABLE_THREAD_VALIDATION;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,7 +70,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@code NET_VERSION} is recorded, and how an endpoint state serialized with DSE's {@code ApplicationState}
  * ordinals is read at messaging version 11 and written for a DSE peer, with the
  * values of the captured {@code nodetool gossipinfo} of a 6.9.26 node as the expected data. With the mode off,
- * everything behaves as before.
+ * everything behaves as before. In {@code DSE_5_1} mode, the same for DSE 5.1 nodes, with the captured
+ * {@code nodetool gossipinfo} of DSE 5.1.51 nodes: this software's ordinals, none above DSE 5.1's last, and the DSE
+ * state and workloads of a DSE 5.1 node.
  */
 public class DseGossipTest
 {
@@ -720,6 +727,239 @@ public class DseGossipTest
             Gossiper.instance.endpointStateMap.remove(left);
             Gossiper.instance.endpointStateMap.remove(saved);
             Gossiper.instance.endpointStateMap.remove(rolledBack);
+        }
+    }
+
+    /*
+     * Gossip with DSE 5.1 nodes (DSE_5_1 mode)
+     */
+
+    private static void dse51()
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+    }
+
+    /** DSE 5.1 parses any number as NET_VERSION: this node publishes its own messaging version, as without a mode. */
+    @Test
+    public void publishesItsOwnMessagingVersionInDse51Mode()
+    {
+        dse51();
+        assertThat(factory().networkVersion().value).isEqualTo(String.valueOf(MessagingService.current_version));
+    }
+
+    /**
+     * The states of a DSE 5.1.51 node, as the captured {@code nodetool gossipinfo} of node 1 and of the Search and
+     * Graph node print them, under DSE 5.1's names, those of Apache Cassandra 3.11, whose ordinals 0 to 14 are this
+     * software's (asserted first, as DSE 5.1.51's enum has them), written with those ordinals and read at 11 in DSE_5_1
+     * mode: read as they are, no translation, the DSE state at ordinal 9 ({@code X_11_PADDING}) with {@code active}
+     * the string "true", and the workloads read from their concatenated names. The captured bytes of a gossip message
+     * are decoded in {@link Dse51GossipDigestAckTest}.
+     */
+    @Test
+    public void capturedDse51StatesAreReadWithThisSoftwaresOrdinals() throws IOException
+    {
+        String[] dse51Names = { "STATUS", "LOAD", "SCHEMA", "DC", "RACK", "RELEASE_VERSION", "REMOVAL_COORDINATOR", "INTERNAL_IP",
+                                "RPC_ADDRESS", "X_11_PADDING", "SEVERITY", "NET_VERSION", "HOST_ID", "TOKENS", "RPC_READY" };
+        for (int ordinal = 0; ordinal < dse51Names.length; ordinal++)
+            assertThat(ApplicationState.values()[ordinal].name()).as("ordinal " + ordinal).isEqualTo(dse51Names[ordinal]);
+
+        dse51();
+        Dse51Fixtures dse51 = DseFixtures.dse51();
+        VersionedValue tokens = factory().tokens(TOKENS);
+        Map<String, Path> nodes = new LinkedHashMap<>();
+        nodes.put("/127.0.51.11", dse51.gossipInfo(1));
+        nodes.put("/127.0.51.21", dse51.searchGraphGossipInfo());
+        for (Map.Entry<String, Path> node : nodes.entrySet())
+        {
+            String endpoint = node.getKey();
+            List<Object[]> written = new ArrayList<>();
+            Map<ApplicationState, String> expected = new EnumMap<>(ApplicationState.class);
+            for (GossipState s : dse51.gossipStates(node.getValue(), endpoint))
+            {
+                ApplicationState name = ApplicationState.valueOf(s.name);
+                VersionedValue value = name == ApplicationState.TOKENS ? tokens : VersionedValue.unsafeMakeVersionedValue(s.value, s.version);
+                written.add(new Object[]{ name.ordinal(), value });
+                expected.put(name, value.value);
+            }
+            EndpointState state;
+            try (DataInputBuffer in = new DataInputBuffer(dseEndpointState(written)))
+            {
+                state = EndpointState.serializer.deserialize(in, DSE_DIALECT);
+            }
+            assertThat(values(state)).as(endpoint).isEqualTo(expected);
+            assertThat(state.getStatus()).as(endpoint).isEqualTo("NORMAL");
+            assertThat(state.getApplicationState(ApplicationState.X_11_PADDING).value).as(endpoint).startsWith("{\"dse_version\":\"5.1.51\"");
+            Map<String, Object> dseState = JsonUtils.fromJsonMap(state.getApplicationState(ApplicationState.X_11_PADDING).value);
+            assertThat(dseState.get("active")).as(endpoint).isEqualTo("true");
+
+            DseNodeWorkloads workloads = Dse51GossipStates.gossipedWorkloads(DSE_ENDPOINT, state);
+            assertThat(workloads.peer).isEqualTo(DSE_ENDPOINT.getAddress());
+            if (endpoint.equals("/127.0.51.11"))
+            {
+                assertThat(workloads.workloads).containsExactly("Cassandra");
+                assertThat(workloads.workload).isEqualTo("Cassandra");
+                assertThat(workloads.graph).isFalse();
+            }
+            else
+            {
+                // "SearchGraphCassandra", as the workloads set of its system.local holds them
+                assertThat(workloads.workloads).containsExactly("Cassandra", "Graph", "Search");
+                assertThat(workloads.workload).isEqualTo("Search");
+                assertThat(workloads.graph).isTrue();
+            }
+        }
+    }
+
+    /**
+     * The workloads of a DSE 5.1 state: the names DSE 5.1 concatenates, sorted; a value of other names is kept whole;
+     * the old form of the state (a bare workload name) and a graph given as text are read as DSE 5.1 reads them.
+     */
+    @Test
+    public void dse51WorkloadsAreReadFromTheirConcatenatedNames()
+    {
+        assertThat(Dse51GossipStates.splitWorkloads("SearchGraphCassandraAnalytics")).containsExactly("Analytics", "Cassandra", "Graph", "Search");
+        assertThat(Dse51GossipStates.splitWorkloads("Cassandra")).containsExactly("Cassandra");
+        assertThat(Dse51GossipStates.splitWorkloads("SearchAnalytics")).containsExactly("Analytics", "Search");
+        assertThat(Dse51GossipStates.splitWorkloads("Unknown")).containsExactly("Unknown");
+        assertThat(Dse51GossipStates.splitWorkloads("CassandraX")).containsExactly("CassandraX");
+        assertThat(Dse51GossipStates.splitWorkloads("")).isEmpty();
+
+        EndpointState oldForm = new EndpointState(new HeartBeatState(1, 1));
+        oldForm.addApplicationState(ApplicationState.X_11_PADDING, VersionedValue.unsafeMakeVersionedValue("Search", 1));
+        DseNodeWorkloads old = Dse51GossipStates.gossipedWorkloads(DSE_ENDPOINT, oldForm);
+        assertThat(old.workloads).containsExactly("Search");
+        assertThat(old.workload).isEqualTo("Search");
+        assertThat(old.graph).isNull();
+
+        EndpointState graphAsText = new EndpointState(new HeartBeatState(1, 1));
+        graphAsText.addApplicationState(ApplicationState.X_11_PADDING,
+                                        VersionedValue.unsafeMakeVersionedValue("{\"dse_version\":\"5.1.51\",\"workloads\":\"GraphCassandra\",\"graph\":\"true\"}", 1));
+        DseNodeWorkloads text = Dse51GossipStates.gossipedWorkloads(DSE_ENDPOINT, graphAsText);
+        assertThat(text.workloads).containsExactly("Cassandra", "Graph");
+        assertThat(text.workload).isNull();
+        assertThat(text.graph).isTrue();
+
+        // no DSE state, or no state at all: nothing to read
+        assertThat(Dse51GossipStates.gossipedWorkloads(DSE_ENDPOINT, new EndpointState(new HeartBeatState(1, 1)))).isNull();
+        assertThat(Dse51GossipStates.gossipedWorkloads(DSE_ENDPOINT, null)).isNull();
+    }
+
+    /** An ordinal this software does not know is dropped in DSE_5_1 mode too, the rest of the state kept. */
+    @Test
+    public void unknownOrdinalIsDroppedInDse51Mode() throws IOException
+    {
+        List<Object[]> states = new ArrayList<>();
+        states.add(new Object[]{ ApplicationState.DC.ordinal(), VersionedValue.unsafeMakeVersionedValue("Cassandra", 14) });
+        states.add(new Object[]{ Gossiper.STATES.length, VersionedValue.unsafeMakeVersionedValue("future", 1) });
+        states.add(new Object[]{ -1, VersionedValue.unsafeMakeVersionedValue("negative", 1) });
+        states.add(new Object[]{ ApplicationState.RACK.ordinal(), VersionedValue.unsafeMakeVersionedValue("rack1", 17) });
+        dse51();
+        try (DataInputBuffer in = new DataInputBuffer(dseEndpointState(states)))
+        {
+            assertThat(values(EndpointState.serializer.deserialize(in, DSE_DIALECT))).containsEntry(ApplicationState.DC, "Cassandra")
+                                                                                       .containsEntry(ApplicationState.RACK, "rack1")
+                                                                                       .hasSize(2);
+        }
+    }
+
+    /**
+     * What a DSE 5.1 node reads of this node's state at 11 in DSE_5_1 mode: this software's ordinals, none above 24
+     * (DSE 5.1's last, X10), so that DSE 5.1 never fails on the message and closes the connection; STATUS, RPC_ADDRESS
+     * and RPC_READY at DSE 5.1's 0, 8 and 14, which drivers on DSE 5.1 nodes need to learn this node; the release
+     * without its suffix. A padding state above 24 is left out with a WARN (this software publishes none: its own
+     * states end at INDEX_STATUS, 20); it is still sent at 4.0 and later, and in DSE_6 mode to HCD 1.2 at the dialect,
+     * as before.
+     */
+    @Test
+    public void ownStateSentToADse51NodeHasOrdinalsDse51Knows() throws Exception
+    {
+        // this software's own states end at INDEX_STATUS, 20; everything after it is padding nothing publishes
+        assertThat(ApplicationState.INDEX_STATUS.ordinal()).isEqualTo(20);
+        for (ApplicationState padding : ApplicationState.values())
+            if (padding.ordinal() > ApplicationState.INDEX_STATUS.ordinal())
+                assertThat(padding.name()).matches("X\\d+");
+
+        dse51();
+        VersionedValue.VersionedValueFactory factory = factory();
+        UUID hostId = UUID.randomUUID();
+        Map<ApplicationState, VersionedValue> own = new EnumMap<>(ApplicationState.class);
+        own.put(ApplicationState.STATUS_WITH_PORT, factory.normal(TOKENS));
+        own.put(ApplicationState.STATUS, factory.normal(TOKENS));
+        own.put(ApplicationState.NET_VERSION, factory.networkVersion());
+        own.put(ApplicationState.HOST_ID, factory.hostId(hostId));
+        own.put(ApplicationState.NATIVE_ADDRESS_AND_PORT, factory.nativeaddressAndPort(FBUtilities.getBroadcastNativeAddressAndPort()));
+        // as StorageService publishes it: the broadcast native address
+        own.put(ApplicationState.RPC_ADDRESS, factory.rpcaddress(FBUtilities.getJustBroadcastNativeAddress()));
+        own.put(ApplicationState.RPC_READY, factory.rpcReady(true));
+        own.put(ApplicationState.INTERNAL_ADDRESS_AND_PORT, factory.internalAddressAndPort(InetAddressAndPort.getByName("10.0.0.5:7000")));
+        own.put(ApplicationState.RELEASE_VERSION, factory.releaseVersion("5.0.7.0-abc1234def"));
+        own.put(ApplicationState.SSTABLE_VERSIONS, VersionedValue.unsafeMakeVersionedValue("big-nb", 1));
+        own.put(ApplicationState.INDEX_STATUS, factory.indexStatus("{}"));
+        own.put(ApplicationState.DISK_USAGE, factory.diskUsage("spacious"));
+        own.put(ApplicationState.DC, factory.datacenter("dc1"));
+        own.put(ApplicationState.TOKENS, factory.tokens(TOKENS));
+        own.put(ApplicationState.X_11_PADDING, factory.dse51State("5.1.51"));
+        // padding at 22 (DSE 5.1's X8) and at 27 (beyond DSE 5.1's ordinals)
+        own.put(ApplicationState.X2, VersionedValue.unsafeMakeVersionedValue("x2", 1));
+        own.put(ApplicationState.X7, VersionedValue.unsafeMakeVersionedValue("x7", 1));
+        EndpointState state = new EndpointState(new HeartBeatState(7, 8), own);
+
+        Logger logger = (Logger) LoggerFactory.getLogger(EndpointStateSerializer.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        Map<Integer, String> sent;
+        try
+        {
+            sent = sentAtTheDialect(state);
+        }
+        finally
+        {
+            logger.detachAppender(appender);
+        }
+        assertThat(sent.keySet()).allMatch(ordinal -> ordinal <= Dse51GossipStates.DSE51_MAX_ORDINAL)
+                                 .contains(ApplicationState.X2.ordinal())
+                                 .doesNotContain(ApplicationState.X7.ordinal());
+        assertThat(sent).containsEntry(0, "NORMAL," + TOKENS.get(0))
+                        .containsEntry(8, FBUtilities.getJustBroadcastNativeAddress().getHostAddress())
+                        .containsEntry(14, "true")
+                        .containsEntry(9, factory.dse51State("5.1.51").value)
+                        .containsEntry(ApplicationState.RELEASE_VERSION.ordinal(), "5.0.7.0")
+                        .containsEntry(ApplicationState.NET_VERSION.ordinal(), String.valueOf(MessagingService.current_version))
+                        .hasSize(own.size() - 1);
+        assertThat(appender.list).extracting(ILoggingEvent::getFormattedMessage)
+                                 .containsExactly("DSE 5.1 compatibility mode: not sending the gossip state X7 (ordinal 27, value 'x7') to a " +
+                                                  "DSE 5.1 node, which knows no ordinal above 24");
+
+        // at 4.0 and later, to a node of this software, the states go as they are, the padding included
+        assertThat(EndpointStateSerializer.filterOutgoingStates(state.states(), MessagingService.current_version, false))
+        .extracting(Map.Entry::getKey).contains(ApplicationState.X7).hasSize(own.size());
+
+        // DSE_6 mode, a peer at the dialect not identified as a DSE node (HCD 1.2): the padding goes as before
+        dse6();
+        assertThat(sentAtTheDialect(state)).containsEntry(ApplicationState.X7.ordinal(), "x7").hasSize(own.size());
+    }
+
+    /** The (ordinal, value) pairs of {@code state} written at the dialect with this software's ordinals. */
+    private static Map<Integer, String> sentAtTheDialect(EndpointState state) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            EndpointStateSerializer.instance.serialize(state, out, DSE_DIALECT, false);
+            assertThat(out.getLength()).isEqualTo(EndpointStateSerializer.instance.serializedSize(state, DSE_DIALECT, false));
+            try (DataInputBuffer in = new DataInputBuffer(out.toByteArray()))
+            {
+                in.readInt();
+                in.readInt();
+                int count = in.readInt();
+                Map<Integer, String> states = new HashMap<>();
+                for (int i = 0; i < count; i++)
+                {
+                    int ordinal = in.readInt();
+                    assertThat(states.put(ordinal, VersionedValue.serializer.deserialize(in, DSE_DIALECT).value)).as("ordinal " + ordinal).isNull();
+                }
+                return states;
+            }
         }
     }
 }
