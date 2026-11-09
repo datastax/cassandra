@@ -151,7 +151,7 @@ public interface MessagingServiceMBean
 
     public int getVersion(String address) throws UnknownHostException;
 
-    /** The configured {@code internode_compatibility_mode} ({@code NONE} or {@code DSE_6}). */
+    /** The configured {@code internode_compatibility_mode} ({@code NONE}, {@code DSE_6} or {@code DSE_5_1}). */
     public String getInternodeCompatibilityMode();
 
     /** The configured {@code storage_compatibility_mode}. */

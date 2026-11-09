@@ -1461,7 +1461,9 @@ public class Config
      * Enterprise 6.9 (or 6.8) and removed with a rolling restart once every node runs this software. It keeps the
      * on-disk output readable by DSE (trie version {@code bb}, numeric generations, compressors DSE reads), requires
      * {@code storage_compatibility_mode: HCD_1}, and lets the node speak DSE's pre-4.0 internode dialect with DSE 6
-     * peers. See {@link InternodeCompatibilityMode}.
+     * peers. {@code DSE_5_1} is set the same way on a cluster being upgraded from DataStax Enterprise 5.1.51; so far it
+     * checks the settings only (storage_compatibility_mode {@code HCD_1}, the {@code big} format, numeric generations,
+     * {@code paxos_variant: v1}, compressors DSE 5.1 reads). See {@link InternodeCompatibilityMode}.
      */
     public InternodeCompatibilityMode internode_compatibility_mode = InternodeCompatibilityMode.NONE;
 

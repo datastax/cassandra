@@ -367,6 +367,31 @@ public class CompatStatusTest extends CQLTester
         assertThat(MessagingService.instance().versions.minClusterVersion).isEqualTo(MessagingService.current_version);
     }
 
+    /** In DSE_5_1 mode the mode line names it, and nothing of the DSE 6 upgrade is kept or checked. */
+    @Test
+    public void printsTheModeInDse51Mode()
+    {
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try
+        {
+            ToolRunner.ToolResult tool = ToolRunner.invokeNodetool("compatstatus");
+            tool.assertOnCleanExit();
+            List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
+            String inTheMode = " (internode_compatibility_mode DSE_5_1)";
+            assertThat(lines).contains("Internode compatibility mode : DSE_5_1",
+                                       "DSE peers                    : not tracked" + inTheMode,
+                                       "DSE 6 peers on record        : not maintained" + inTheMode,
+                                       "SAI version pinned           : not checked" + inTheMode,
+                                       "Non-core DSE traces          : not checked" + inTheMode,
+                                       "DSE access controls ignored  : not checked" + inTheMode);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+        }
+    }
+
     @Test
     public void dsePeersOfAServerWithoutTheAttributeAreUnknown()
     {

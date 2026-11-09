@@ -42,6 +42,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.ApplicationState;
@@ -69,9 +70,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The startup checks of the DSE 6 compatibility mode: what {@code DSE_6} refuses to find on disk, the upgrade marker
- * it writes once every check has passed, the refusal of {@code NONE} while the marker or the record of DSE 6 peers
- * exists, the DSE version {@code DSE_6} gossips to DSE nodes (with the state it starts gossiping with), and the silence
- * after which a node that is down counts as lost during the upgrade.
+ * it writes once every check has passed, the refusal of {@code NONE} (and {@code DSE_5_1}) while the marker or the
+ * record of DSE 6 peers exists, the DSE version {@code DSE_6} gossips to DSE nodes (with the state it starts gossiping
+ * with), and the silence after which a node that is down counts as lost during the upgrade.
  * <p>
  * The JVM of this class (unit tests fork per class) initialises the trie format at version {@code bb}, as
  * {@code DSE_6} does on a real node, so that {@link StartupChecks#checkSSTablesFormat} rejects newer trie files the
@@ -342,7 +343,11 @@ public class Dse6StartupChecksTest
         assertThat(StartupChecks.isSSTableUnreadableByDse6("ca-1-bti-Data.db")).isTrue();
     }
 
-    /** The names of the files DSE 6.8.65 and 6.9.26 wrote: none of them is taken for one written without the mode. */
+    /**
+     * The names of the files DSE 6.8.65 and 6.9.26 wrote: none of them is taken for one written without the mode. The
+     * fixtures of DSE 5.1.51 (the files and directories named {@code dse-5.1.51*}), which {@code DSE_6} does not
+     * read, are left out.
+     */
     @Test
     public void theFilesDseWroteAreNotFlagged() throws IOException
     {
@@ -350,7 +355,9 @@ public class Dse6StartupChecksTest
         List<String> segments;
         try (Stream<Path> files = Files.walk(DseFixtures.ROOT))
         {
-            List<String> names = files.filter(Files::isRegularFile).map(p -> p.getFileName().toString()).collect(Collectors.toList());
+            List<String> names = files.filter(Files::isRegularFile)
+                                      .filter(p -> !Dse51Fixtures.isDse51Fixture(p))
+                                      .map(p -> p.getFileName().toString()).collect(Collectors.toList());
             sstables = names.stream().filter(n -> Descriptor.isValidFile(new File(n))).collect(Collectors.toList());
             // the fixtures keep the segments compressed
             segments = names.stream().filter(n -> n.startsWith("CommitLog-")).map(n -> n.replaceFirst("\\.gz$", "")).collect(Collectors.toList());
@@ -490,6 +497,21 @@ public class Dse6StartupChecksTest
         assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
         .isInstanceOf(StartupException.class)
         .hasMessageContaining("internode_compatibility_mode is NONE but the DSE 6 upgrade marker")
+        .hasMessageContaining(DseUpgradeMarker.FILE_NAME + " is present: DSE 6 peers may still be in the cluster")
+        .hasMessageContaining("once every node runs this software, delete the marker")
+        .hasMessageContaining("ignore_dse_peers=true")
+        .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
+    }
+
+    /** DSE_5_1 does not talk to DSE 6 peers either: the same refusal, which names the mode the node runs in. */
+    @Test
+    public void dse51IsRefusedWhileTheMarkerExists() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertThat(DseUpgradeMarker.writeIfAbsent()).isTrue();
+        assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessageContaining("internode_compatibility_mode is DSE_5_1 but the DSE 6 upgrade marker")
         .hasMessageContaining(DseUpgradeMarker.FILE_NAME + " is present: DSE 6 peers may still be in the cluster")
         .hasMessageContaining("once every node runs this software, delete the marker")
         .hasMessageContaining("ignore_dse_peers=true")
