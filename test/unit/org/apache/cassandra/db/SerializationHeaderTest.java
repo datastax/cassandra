@@ -36,12 +36,14 @@ import org.junit.Test;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.TupleType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
@@ -57,18 +59,21 @@ import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 
 public class SerializationHeaderTest
@@ -321,4 +326,149 @@ public class SerializationHeaderTest
         }
     }
 
+    /**
+     * The header of an sstable of {@code system.peers} or {@code system.local} that names the five columns DSE 5.1
+     * adds to those tables (a compacted one names all five) is read in every mode, the five as dropped regular columns
+     * of their types; any other unknown column of those tables is refused. The same names are refused for another
+     * table, which has no record of them, as before this software read them.
+     */
+    @Test
+    public void theColumnsDse51AddsToTheLocalAndPeersTablesAreReadAsDropped() throws UnknownColumnException
+    {
+        Version version = BigFormat.getInstance().getLatestVersion();
+        for (TableMetadata table : Arrays.asList(SystemKeyspace.LegacyPeers, SystemKeyspace.Local))
+        {
+            TableMetadata withDse51Columns = Dse51SystemTables.withDse51Columns(table);
+            SerializationHeader.Component written = SerializationHeader.makeWithoutStats(withDse51Columns)
+                                                                       .toComponent();
+            SerializationHeader read = written.toHeader("dse51", table, version, false);
+            for (Map.Entry<String, AbstractType<?>> column : Dse51SystemTables.COLUMNS.entrySet())
+            {
+                ColumnMetadata dropped = named(read.columns().regulars, column.getKey());
+                assertThat(dropped).as("%s in %s", column.getKey(), table).isNotNull();
+                assertThat(dropped.isDropped()).isTrue();
+                assertThat(dropped.type).isEqualTo(column.getValue());
+            }
+            assertThat(read.columns().regulars.size()).isEqualTo(withDse51Columns.regularColumns().size());
+
+            TableMetadata other = userTable(withDse51Columns);
+            TableMetadata otherWithoutDseColumns = userTable(table);
+            SerializationHeader.Component otherWritten = SerializationHeader.makeWithoutStats(other).toComponent();
+            assertThatThrownBy(() -> otherWritten.toHeader("other", otherWithoutDseColumns, version, false))
+            .isInstanceOf(UnknownColumnException.class)
+            .hasMessageMatching("Unknown column (workload|workloads|graph|dse_version|server_id) " +
+                                "during deserialization");
+
+            TableMetadata withUnknown = withColumnFoo(table);
+            SerializationHeader.Component unknownWritten = SerializationHeader.makeWithoutStats(withUnknown)
+                                                                              .toComponent();
+            assertThatThrownBy(() -> unknownWritten.toHeader("unknown", table, version, false))
+            .isInstanceOf(UnknownColumnException.class)
+            .hasMessage("Unknown column foo during deserialization");
+        }
+    }
+
+    /**
+     * The columns of an update of {@code system.peers} naming a column DSE 5.1 adds are read at messaging version
+     * 10 in {@code DSE_5_1} only, the version of the commit log segments of DSE 5.1: in the other modes, and at
+     * versions 11 and 12 in the mode, the name is refused as an unknown column, as before. Any other unknown column is
+     * refused in every mode.
+     */
+    @Test
+    public void anUpdateNamingAColumnDse51AddsIsReadInDse51ModeOnly() throws IOException
+    {
+        TableMetadata peers = SystemKeyspace.LegacyPeers;
+        TableMetadata withDse51Columns = Dse51SystemTables.withDse51Columns(peers);
+        ByteBuffer dataCenter = UTF8Type.instance.decompose("data_center");
+        ByteBuffer dseVersion = UTF8Type.instance.decompose(Dse51SystemTables.DSE_VERSION);
+        Columns written = Columns.from(Arrays.asList(withDse51Columns.getColumn(dataCenter),
+                                                     withDse51Columns.getColumn(dseVersion)));
+        TableMetadata withUnknown = withColumnFoo(peers);
+        Columns unknown = Columns.of(withUnknown.getColumn(UTF8Type.instance.decompose("foo")));
+        int[] versions = { MessagingService.VERSION_30, MessagingService.VERSION_3014, MessagingService.VERSION_40 };
+        InternodeCompatibilityMode previous = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+            {
+                DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+                for (int version : versions)
+                {
+                    boolean reads = mode == InternodeCompatibilityMode.DSE_5_1
+                                    && version == MessagingService.VERSION_30;
+                    assertThat(Dse51SystemTables.readsStoredDse51Columns(peers, version))
+                    .as("%s at %s", mode, version)
+                    .isEqualTo(reads);
+                    if (reads)
+                    {
+                        Columns read = deserializeColumns(written, peers, version);
+                        assertThat(named(read, "data_center")).isEqualTo(peers.getColumn(dataCenter));
+                        assertThat(named(read, Dse51SystemTables.DSE_VERSION).isDropped()).isTrue();
+                    }
+                    else
+                    {
+                        assertThatThrownBy(() -> deserializeColumns(written, peers, version))
+                        .hasMessage("Unknown column dse_version during deserialization of system.peers");
+                    }
+                    assertThatThrownBy(() -> deserializeColumns(unknown, peers, version))
+                    .hasMessage("Unknown column foo during deserialization of system.peers");
+                }
+                assertThat(Dse51SystemTables.readsStoredDse51Columns(SystemKeyspace.Local, MessagingService.VERSION_30))
+                .isEqualTo(mode == InternodeCompatibilityMode.DSE_5_1);
+                assertThat(Dse51SystemTables.readsStoredDse51Columns(userTable(peers), MessagingService.VERSION_30))
+                .isFalse();
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(previous);
+        }
+    }
+
+    /** The column named {@code name} in {@code columns}, null if none. */
+    private static ColumnMetadata named(Columns columns, String name)
+    {
+        for (ColumnMetadata column : columns)
+        {
+            if (column.name.toString().equals(name))
+                return column;
+        }
+        return null;
+    }
+
+    /** A table of the keyspace of this test with the name and the columns of {@code source}. */
+    private static TableMetadata userTable(TableMetadata source)
+    {
+        TableMetadata.Builder builder = TableMetadata.builder(KEYSPACE, source.name);
+        for (ColumnMetadata column : source.partitionKeyColumns())
+            builder.addPartitionKeyColumn(column.name, column.type);
+        for (ColumnMetadata column : source.clusteringColumns())
+            builder.addClusteringColumn(column.name, column.type);
+        for (ColumnMetadata column : source.regularColumns())
+            builder.addRegularColumn(column.name, column.type);
+        return builder.build();
+    }
+
+    /** {@code table} with a regular column {@code foo}, unknown to {@code table}, and no dropped column. */
+    private static TableMetadata withColumnFoo(TableMetadata table)
+    {
+        return table.unbuild()
+                    .droppedColumns(Collections.emptyMap())
+                    .addRegularColumn("foo", UTF8Type.instance)
+                    .build();
+    }
+
+    /** {@code columns} written as an update writes them, read back with {@code metadata} at {@code version}. */
+    private static Columns deserializeColumns(Columns columns, TableMetadata metadata, int version) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            Columns.serializer.serialize(columns, out);
+            try (DataInputBuffer in = new DataInputBuffer(out.getData(), 0, out.getLength()))
+            {
+                boolean storedByDse51 = Dse51SystemTables.readsStoredDse51Columns(metadata, version);
+                return Columns.serializer.deserialize(in, metadata, false, false, storedByDse51);
+            }
+        }
+    }
 }

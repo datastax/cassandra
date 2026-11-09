@@ -44,6 +44,7 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SizeEstimatesRecorder;
 import org.apache.cassandra.db.SystemKeyspace;
@@ -266,6 +267,18 @@ public class CassandraDaemon
         catch (IOException e)
         {
             exitOrFail(StartupException.ERR_WRONG_DISK_STATE, e.getMessage(), e.getCause());
+        }
+
+        // DSE 5.1 compatibility: the values DSE 5.1 wrote to its columns of system.local and system.peers, read
+        // before the first write to system.local, whose flush can start a compaction that rewrites those rows
+        // without them (at the first start in the mode; loaded from its record at the later ones)
+        try
+        {
+            Dse51SystemTables.loadOrReadAtStart();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
         }
 
         // We need to persist this as soon as possible after startup checks.

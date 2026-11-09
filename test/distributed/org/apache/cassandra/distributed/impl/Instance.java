@@ -71,6 +71,7 @@ import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.SystemKeyspaceMigrator41;
@@ -657,6 +658,17 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 registerOutboundFilter(cluster);
 
                 CassandraDaemon.getInstanceForTesting().runStartupChecks();
+
+                // as CassandraDaemon.setup: the values DSE 5.1 wrote to its columns of system.local and
+                // system.peers, read before the first write to system.local
+                try
+                {
+                    Dse51SystemTables.loadOrReadAtStart();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
 
                 // We need to persist this as soon as possible after startup checks.
                 // This should be the first write to SystemKeyspace (CASSANDRA-11742)
