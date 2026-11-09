@@ -238,7 +238,7 @@ public class ScrubNoTTLTest extends CQLTester
         StorageService ss = StorageService.instance;
 
         createTableWithExpiringRow();
-        assertEquals(SUCCESS, ss.scrub(true, false, true, "NO_TTL", 1, keyspace(), currentTable()));
+        assertEquals(SUCCESS, ss.scrub(true, false, true, "NO_TTL", false, 1, keyspace(), currentTable()));
         assertTTLRemoved(TIMESTAMP);
 
         createTableWithExpiringRow();
@@ -277,7 +277,7 @@ public class ScrubNoTTLTest extends CQLTester
     public void testStorageServiceRejectsInvalidMode() throws Throwable
     {
         createTableWithExpiringRow();
-        StorageService.instance.scrub(true, false, true, "NOT_A_MODE", 1, keyspace(), currentTable());
+        StorageService.instance.scrub(true, false, true, "NOT_A_MODE", false, 1, keyspace(), currentTable());
     }
 
     // ---- ColumnFamilyStore / CompactionManager -------------------------------------------------------------------

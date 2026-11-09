@@ -426,8 +426,6 @@ public interface StorageServiceMBean extends NotificationEmitter
 
     public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, boolean reinsertOverflowedTTL, int jobs, String keyspaceName, String... columnFamilies) throws IOException, ExecutionException, InterruptedException;
 
-    public int scrub(boolean disableSnapshot, boolean skipCorrupted, boolean checkData, String overwriteTTLMode, int jobs, String keyspaceName, String... columnFamilies) throws IOException, ExecutionException, InterruptedException;
-
     /**
      * @param bumpTTLTimestamp only valid with overwriteTTLMode NO_TTL: rewrite cells whose TTL is removed with their
      *                         original timestamp incremented by one

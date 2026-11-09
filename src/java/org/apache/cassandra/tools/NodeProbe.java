@@ -380,9 +380,7 @@ public class NodeProbe implements AutoCloseable
     {
         // Route through boolean method unless NO_TTL is requested to preserve compatibility with older nodes during rolling upgrades
         if (overwriteTTLMode == IScrubber.OverwriteTTLMode.NO_TTL)
-            return bumpTTLTimestamp
-                   ? ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode.name(), true, jobs, keyspaceName, tables)
-                   : ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode.name(), jobs, keyspaceName, tables);
+            return ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode.name(), bumpTTLTimestamp, jobs, keyspaceName, tables);
         else
             return ssProxy.scrub(disableSnapshot, skipCorrupted, checkData, overwriteTTLMode == IScrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL, jobs, keyspaceName, tables);
     }
