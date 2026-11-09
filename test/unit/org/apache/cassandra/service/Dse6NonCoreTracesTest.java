@@ -21,6 +21,7 @@ import java.net.InetAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -1059,6 +1060,33 @@ public class Dse6NonCoreTracesTest extends CQLTester
                                                "REMOVED_COMPACTION materialized view ks.b (compaction " +
                                                "org.apache.cassandra.db.compaction.DateTieredCompactionStrategy)",
                                                "TABLE_COMPACTION table ks.c (compaction TieredCompactionStrategy)");
+        // the predicate the preflight tool takes them by, with the same names
+        for (String traced : List.of("DateTieredCompactionStrategy",
+                                     "org.apache.cassandra.db.compaction.DateTieredCompactionStrategy",
+                                     "TieredCompactionStrategy",
+                                     "org.apache.cassandra.db.compaction.TieredCompactionStrategy",
+                                     "MemoryOnlyStrategy", "org.apache.cassandra.db.compaction.MemoryOnlyStrategy"))
+            assertThat(Dse6NonCoreTraces.isDse51CompactionTrace(traced)).as(traced).isTrue();
+        for (String other : Arrays.asList("TimeWindowCompactionStrategy", "SizeTieredCompactionStrategy",
+                                          "org.apache.cassandra.db.compaction.LeveledCompactionStrategy", null))
+            assertThat(Dse6NonCoreTraces.isDse51CompactionTrace(other)).as(String.valueOf(other)).isFalse();
+    }
+
+    /**
+     * The DSEFS keyspace dse.yaml names, as the preflight tool passes it: a trace of DSE Analytics of its own, once,
+     * even when the name is one the start check knows.
+     */
+    @Test
+    public void dse51TheDsefsKeyspaceOfDseYaml()
+    {
+        Map<String, String> keyspaces = Map.of("myfs", SimpleStrategy.class.getName(),
+                                               "cfs", SimpleStrategy.class.getName());
+        Map<Dse6NonCoreTraces.Feature, List<String>> traces = new Dse6NonCoreTraces.Dse51Markers().keyspaces(keyspaces)
+                                                                                                 .dsefsKeyspace("myfs")
+                                                                                                 .dsefsKeyspace("cfs")
+                                                                                                 .byFeature();
+        assertThat(traces.get(Dse6NonCoreTraces.Feature.ANALYTICS))
+        .containsExactlyInAnyOrder("keyspace cfs", "keyspace myfs (DSEFS, named in dse.yaml)");
     }
 
     /**
@@ -1093,6 +1121,13 @@ public class Dse6NonCoreTracesTest extends CQLTester
                          "GRAPH keyspace x_system (a keyspace of the graph x_system)",
                          "GRAPH keyspace x_system_pvt (a keyspace of the graph x_system)",
                          "GRAPH keyspace x_system_system (a keyspace of the graph x_system)");
+        // the keyspaces the preflight tool leaves to that report, those of DSE 5.1's other features with them
+        keyspaces.put("cfs", SimpleStrategy.class.getName());
+        keyspaces.put("solr_admin", SimpleStrategy.class.getName());
+        keyspaces.put("spark_system", SimpleStrategy.class.getName());
+        assertThat(Dse6NonCoreTraces.dse51TracedKeyspaces(keyspaces))
+        .containsExactly("alone_pvt", "cfs", "g", "g_pvt", "g_system", "solr_admin", "spark_system", "x_system",
+                         "x_system_pvt", "x_system_system");
     }
 
     /**

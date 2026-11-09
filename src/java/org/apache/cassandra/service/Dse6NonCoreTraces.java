@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 
@@ -490,6 +491,19 @@ public final class Dse6NonCoreTraces
             return this;
         }
 
+        /**
+         * The keyspace of DSEFS that {@code dsefs_options.keyspace_name} of {@code dse.yaml} names when it is not
+         * {@code dsefs}, present in the schema: a keyspace the node's start check does not know by its name, which
+         * the preflight tool, reading {@code dse.yaml}, reports with the others of DSE Analytics.
+         */
+        public Dse51Markers dsefsKeyspace(String keyspace)
+        {
+            // a name the start check knows is reported by keyspaces() already
+            if (!DSE51_NON_CORE_KEYSPACES.containsKey(keyspace))
+                traces.addKeyspace(Feature.ANALYTICS, "keyspace " + keyspace + " (DSEFS, named in dse.yaml)");
+            return this;
+        }
+
         /** One row of {@code system_schema.indexes}, with the {@code class_name} of its options (null when absent). */
         public Dse51Markers index(String keyspace, String table, String index, @Nullable String className)
         {
@@ -545,15 +559,37 @@ public final class Dse6NonCoreTraces
             if (feature != null)
                 traces.addKeyspace(feature, "keyspace " + name);
             String graph = dse51GraphOf(name, keyspaces.keySet());
-            String replication = keyspace.getValue();
-            boolean local = name.endsWith(DSE51_GRAPH_PRIVATE_SUFFIX) && replication != null &&
-                            (replication.equals(LocalStrategy.class.getName()) ||
-                             replication.equals(LocalStrategy.class.getSimpleName()));
             if (graph != null)
                 traces.add(Kind.GRAPH_KEYSPACE, "keyspace " + name + " (a keyspace of the graph " + graph + ')');
-            else if (local)
+            else if (isDse51GraphPrivateKeyspace(name, keyspace.getValue()))
                 traces.add(Kind.GRAPH_KEYSPACE, "keyspace " + name + " (LocalStrategy, as DSE Graph creates it)");
         }
+    }
+
+    /**
+     * The keyspaces among {@code keyspaces} (every keyspace of the schema of a DSE 5.1 node with its replication class)
+     * that {@link #addDse51KeyspaceTraces} reports as traces, sorted: the preflight tool leaves their tables to that
+     * report, whose remedy drops the keyspace.
+     */
+    public static Set<String> dse51TracedKeyspaces(Map<String, String> keyspaces)
+    {
+        Set<String> traced = new TreeSet<>();
+        for (Map.Entry<String, String> keyspace : keyspaces.entrySet())
+        {
+            String name = keyspace.getKey();
+            if (DSE51_NON_CORE_KEYSPACES.containsKey(name) || dse51GraphOf(name, keyspaces.keySet()) != null ||
+                isDse51GraphPrivateKeyspace(name, keyspace.getValue()))
+                traced.add(name);
+        }
+        return traced;
+    }
+
+    /** Whether {@code keyspace} is the private keyspace of a graph of DSE 5.1: named so, on {@code LocalStrategy}. */
+    private static boolean isDse51GraphPrivateKeyspace(String keyspace, @Nullable String replication)
+    {
+        return keyspace.endsWith(DSE51_GRAPH_PRIVATE_SUFFIX) && replication != null &&
+               (replication.equals(LocalStrategy.class.getName()) ||
+                replication.equals(LocalStrategy.class.getSimpleName()));
     }
 
     /**
@@ -604,6 +640,17 @@ public final class Dse6NonCoreTraces
             traces.add(Kind.TABLE_COMPACTION, table + " (compaction " + compactionClass + ')');
         else if (isOneOf(compactionClass, DSE51_REMOVED_COMPACTION_CLASSES))
             traces.add(Kind.REMOVED_COMPACTION, table + " (compaction " + compactionClass + ')');
+    }
+
+    /**
+     * Whether {@code compactionClass}, the compaction class of a table or a view of DSE 5.1, is one the start check
+     * of {@code DSE_5_1} refuses as a trace ({@link #addCompactionTrace}), by its short or its long name: the preflight
+     * tool reports it among the traces, not as a class it cannot load.
+     */
+    public static boolean isDse51CompactionTrace(@Nullable String compactionClass)
+    {
+        return compactionClass != null && (isOneOf(compactionClass, DSE51_COMPACTION_CLASSES) ||
+                                           isOneOf(compactionClass, DSE51_REMOVED_COMPACTION_CLASSES));
     }
 
     /** Whether {@code compactionClass} is one of {@code classes}, by its short or its long name. */
