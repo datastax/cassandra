@@ -24,11 +24,14 @@ import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.utils.TimeUUID;
 
 /**
@@ -55,7 +58,24 @@ import org.apache.cassandra.utils.TimeUUID;
  * Once the flag is dropped, a remove record left by this mode is accepted at the next start through the legacy branch
  * of {@link LogFile#verifyRecord} (with a WARN), as long as its time is still the latest modification time of the
  * sstable's files; a record whose sstable had its stats file written again after the record, which this mode accepts
- * ({@link #isDse6RemoveRecord}), is then refused as any log whose files changed. Drop the flag on a drained node.
+ * ({@link #isDseRemoveRecord}), is then refused as any log whose files changed. Drop the flag on a drained node.
+ * <p>
+ * In {@code internode_compatibility_mode: DSE_5_1}, for the node and for the tools that read it, the logs are named and
+ * their remove records written as DSE 5.1.51 reads them, by its source. Its logs share some rules with DSE 6's: the
+ * name of the 4.0 line, whose first two characters it does not read; a type it does not know refuses its start with the
+ * same exception; the update time of a remove record taken over every file of the sstable, the stats file included, and
+ * compared exactly with the files' times as Java's {@code File.lastModified} gives them, where this software compares
+ * both times cut to the second: the mode writes the time as the files give it, in milliseconds
+ * ({@link LogRecord#make(LogRecord.Type, org.apache.cassandra.io.sstable.SSTable)}), as DSE 5.1.51 wrote it on the
+ * Java 8 of the logs it was seen writing. A Java 8 build without the fix of JDK-8177809 gives whole seconds on Linux,
+ * so a DSE 5.1.51 running on one would refuse such a record; it reads the records only at a start after a rollback,
+ * which the rollback procedure makes on a drained node with no transaction log left. Two rules differ: it knows 20
+ * types, those of {@link #DSE_OPERATION_TYPES} without {@code restore} ({@link #DSE_51_OPERATION_TYPES}); and a record
+ * names the sstable by its path without the trailing component separator, where this software records its URI
+ * ({@link #recordPath}). The start finds the files of a record naming a path by its URI ({@link #uriOfRecordPath}), so
+ * that it checks a log DSE 5.1 left, or one the mode wrote, as it checks its own. Once the flag is dropped such a
+ * record is no longer matched to its files: its log is completed without the check of the update time, as any log whose
+ * records name paths, unless its last record is corrupt, which then refuses it (its files being counted as none).
  */
 final class DseTransactionLogs
 {
@@ -88,7 +108,32 @@ final class DseTransactionLogs
                                                                    "viewbuild",
                                                                    "write");
 
-    /** The type written in place of one DSE 6 does not accept; DSE accepts it. */
+    /**
+     * The operation types of this software, as they appear in a log name, that DSE 5.1.51 accepts too: those of
+     * {@link #DSE_OPERATION_TYPES} but {@code restore}. Literal on purpose, as that table.
+     */
+    static final Set<String> DSE_51_OPERATION_TYPES = ImmutableSet.of("anticompactionafterrepair",
+                                                                      "cleanup",
+                                                                      "compaction",
+                                                                      "countercachesave",
+                                                                      "flush",
+                                                                      "indexsummaryredistribution",
+                                                                      "keycachesave",
+                                                                      "relocatesstablestocorrectdisk",
+                                                                      "removedeleteddata",
+                                                                      "rowcachesave",
+                                                                      "scrub",
+                                                                      "secondaryindexbuild",
+                                                                      "stream",
+                                                                      "tombstonecompaction",
+                                                                      "unknowncompactiontype",
+                                                                      "upgradesstables",
+                                                                      "validation",
+                                                                      "verify",
+                                                                      "viewbuild",
+                                                                      "write");
+
+    /** The type written in place of one DSE does not accept; DSE 6 and DSE 5.1 accept it. */
     private static final String DSE_FALLBACK_TYPE = "compaction";
 
     private DseTransactionLogs()
@@ -106,14 +151,15 @@ final class DseTransactionLogs
 
     /**
      * Whether a remove record whose time is not that of the sstable's files without the stats file is one written in
-     * this mode ({@link LogRecord#make(LogRecord.Type, org.apache.cassandra.io.sstable.SSTable)}): its time is the
+     * this mode, {@code DSE_6} or {@code DSE_5_1}
+     * ({@link LogRecord#make(LogRecord.Type, org.apache.cassandra.io.sstable.SSTable)}): its time is the
      * latest of the files with the stats file (temporary files left out, as when it was written); or it lies between
      * the latest time of the other files and the stats file's, the stats file having been the newest file when the
      * record was written, and written again since (a level or repairedAt change racing with a shutdown, the reason
      * CASSANDRA-18119 left the stats file out of the records). Any other time is refused, as files restored after the
      * record would give.
      */
-    static boolean isDse6RemoveRecord(LogRecord record, List<File> existingFiles)
+    static boolean isDseRemoveRecord(LogRecord record, List<File> existingFiles)
     {
         long others = 0;
         long stats = 0;
@@ -129,8 +175,9 @@ final class DseTransactionLogs
         long time = LogFile.truncateMillis(record.updateTime);
         if (time == LogFile.truncateMillis(Math.max(others, stats)))
         {
-            logger.debug("Found a log record {} with updateTime based on the stats file, as DSE 6, and this software in DSE 6 " +
-                         "compatibility mode, write it", record);
+            String source = DatabaseDescriptor.isDse51SSTableOutput() ? "DSE 5.1" : "DSE 6";
+            logger.debug("Found a log record {} with updateTime based on the stats file, as {}, and this software in " +
+                         "{} compatibility mode, write it", record, source, source);
             return true;
         }
         if (LogFile.truncateMillis(others) < time && time < LogFile.truncateMillis(stats))
@@ -141,9 +188,40 @@ final class DseTransactionLogs
         return false;
     }
 
-    /** The file name of {@code type} if DSE 6 accepts it in a log name, otherwise {@code compaction}. */
+    /**
+     * The path a record names an sstable by, from the URI this software builds for it ({@code file:} and the absolute
+     * path, ending with the component separator): in {@code DSE_5_1} the absolute path without the separator, as DSE
+     * 5.1.51 writes it, by its source (it writes the canonical path, and finds the files of a record by listing its
+     * directory, so an absolute path reads the same); otherwise, or for a URI of another file system, the URI as it is.
+     * The prefix still matches the files of that sstable only: a big sstable is named
+     * {@code <version>-<generation>-big-<component>}.
+     */
+    static String recordPath(String uri)
+    {
+        if (!DatabaseDescriptor.isDse51SSTableOutput() || !uri.startsWith("file:"))
+            return uri;
+        String path = PathUtils.getPath(uri).toString();
+        return path.endsWith(String.valueOf(Component.SEPARATOR)) ? path.substring(0, path.length() - 1) : path;
+    }
+
+    /**
+     * The URI of the sstable a record names by {@code path}, by which {@link LogRecord#getExistingFiles(java.util.Set)}
+     * finds its files: this software records the URI, DSE 5.1.51, by its source, the absolute path, which this returns
+     * as a URI. A URI gives back the same URI, normalised.
+     */
+    static String uriOfRecordPath(String path)
+    {
+        return PathUtils.getPath(path).toUri().toString();
+    }
+
+    /**
+     * The file name of {@code type} if the DSE release of the mode accepts it in a log name
+     * ({@link #DSE_OPERATION_TYPES} for DSE 6, {@link #DSE_51_OPERATION_TYPES} in {@code DSE_5_1}), otherwise
+     * {@code compaction}.
+     */
     static String dseOperationType(OperationType type)
     {
-        return DSE_OPERATION_TYPES.contains(type.fileName) ? type.fileName : DSE_FALLBACK_TYPE;
+        Set<String> accepted = DatabaseDescriptor.isDse51SSTableOutput() ? DSE_51_OPERATION_TYPES : DSE_OPERATION_TYPES;
+        return accepted.contains(type.fileName) ? type.fileName : DSE_FALLBACK_TYPE;
     }
 }

@@ -74,6 +74,9 @@ public class Dse51ModeClientTest
 
             assertThat(DatabaseDescriptor.getInternodeCompatibilityMode()).isEqualTo(InternodeCompatibilityMode.NONE);
             assertThat(DatabaseDescriptor.isDse6SSTableOutput()).isFalse();
+            // the transaction logs and the statistics of DSE_5_1
+            assertThat(DatabaseDescriptor.isDseSSTableOutput()).isTrue();
+            assertThat(DatabaseDescriptor.isDse51SSTableOutput()).isTrue();
             assertThat(TRIE_INDEX_FORMAT_VERSION.isPresent()).isFalse();
             // the defaults of a client configuration are bti and uuid generations
             assertThat(new Config().sstable.selected_format).isNotEqualTo(BigFormat.NAME);

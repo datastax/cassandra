@@ -127,6 +127,16 @@ public final class Dse51Fixtures
         return false;
     }
 
+    /**
+     * The CQL creating {@code test_ks_fixture.t}, the collection table of the commit log and hints fixtures, as on the
+     * DSE 5.1.51 cluster, with its id there ({@link #FIXTURE_TABLE_ID}; replication factor 1 for a single test node):
+     * a replay or a decoding of its mutations needs that id.
+     */
+    public List<String> fixtureSchema()
+    {
+        return DseFixtures.fixtureSchema(FIXTURE_TABLE_ID);
+    }
+
     /** The {@code nodetool gossipinfo} of node {@code node} (1 to 3) of the three-node cluster. */
     public Path gossipInfo(int node)
     {

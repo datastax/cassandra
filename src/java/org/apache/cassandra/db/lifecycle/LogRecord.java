@@ -204,17 +204,23 @@ final class LogRecord
 
     /**
      * The record written for an sstable. Its update time leaves the stats file out (see
-     * {@link #make(Type, List, int, String)}), except for a remove record in DSE 6 compatibility mode, while the node or
-     * a tool writes the sstables DSE 6 reads: DSE 6 recomputes a remove record's update time over every file of the
-     * sstable, the stats file included, and refuses to start on a record whose time differs
+     * {@link #make(Type, List, int, String)}), except for a remove record in DSE 6 or DSE 5.1 compatibility mode, while
+     * the node or a tool writes the sstables of the mode: DSE 6 and DSE 5.1 recompute a remove record's update time
+     * over every file of the sstable, the stats file included, and refuse to start on a record whose time differs
      * ({@link DseTransactionLogs}). This software reads such a record back through the stats file checks of
      * {@link LogFile#verifyRecord}. Temporary files are left out either way, which departs from DSE's computation (it
      * takes every file of the sstable, so a temporary stats file left by a crash makes it refuse the log): with them the
      * record's number of files would differ from the add record's, which {@link LogFile} compares it with.
+     * <p>
+     * In DSE 5.1 compatibility mode the record names the sstable as DSE 5.1 writes and reads it, by its absolute path
+     * without the trailing component separator ({@link DseTransactionLogs#recordPath}), and the update time of a remove
+     * record is the files' time as they give it, in milliseconds: DSE 5.1.51 wrote it so on the Java 8 of the logs it
+     * was seen writing, and compares it with the files' times exactly (see {@link DseTransactionLogs}).
      */
-    private static LogRecord makeForSSTable(Type type, List<File> files, int minFiles, String absolutePath)
+    private static LogRecord makeForSSTable(Type type, List<File> files, int minFiles, String uri)
     {
-        if (type == Type.REMOVE && DatabaseDescriptor.isDse6SSTableOutput() && !INCLUDE_STATS_FOR_TESTS)
+        String absolutePath = DseTransactionLogs.recordPath(uri);
+        if (type == Type.REMOVE && DatabaseDescriptor.isDseSSTableOutput() && !INCLUDE_STATS_FOR_TESTS)
         {
             List<File> withoutTemporaryFiles = files.stream().filter(f -> !f.name().endsWith(TMP_EXT)).collect(Collectors.toList());
             return make(type, withoutTemporaryFiles, minFiles, absolutePath, true);
@@ -234,7 +240,7 @@ final class LogRecord
      * We create a LogRecord based on the files on disk; there's some subtlety around how we handle stats files as the
      * timestamp can be mutated by the async completion of compaction if things race with node shutdown. To work around this,
      * we don't take the stats file timestamp into account when calculating nor using the timestamps for all the components
-     * as we build the LogRecord (except for the remove records written in DSE 6 compatibility mode, see
+     * as we build the LogRecord (except for the remove records written in DSE 6 or DSE 5.1 compatibility mode, see
      * {@link #makeForSSTable}).
      */
     public static LogRecord make(Type type, List<File> files, int minFiles, String absolutePath)
@@ -246,8 +252,8 @@ final class LogRecord
      * In most cases we skip including the stats file timestamp entirely as it can be mutated during anticompaction
      * and thus "invalidate" the LogRecord. There is an edge case where we have a LogRecord that was written w/the wrong
      * timestamp (i.e. included a mutated stats file) and we need the node to come up, so we need to expose the selective
-     * ability to either include the stats file timestamp or not. In DSE 6 compatibility mode the remove records are
-     * written with it (see {@link #makeForSSTable}).
+     * ability to either include the stats file timestamp or not. In DSE 6 or DSE 5.1 compatibility mode the remove
+     * records are written with it (see {@link #makeForSSTable}).
      *
      * See {@link LogFile#verifyRecord}
      */
@@ -405,7 +411,9 @@ final class LogRecord
             // if the set contains a prefix of the current file name, the file name we have here should sort directly
             // after the prefix in the tree set, which means we can use 'floor' to get the prefix (returns the largest
             // of the smaller strings in the set). Also note that the prefixes always end with '-' which means we won't
-            // have "xy-1111-Data.db".startsWith("xy-11") below (we'd get "xy-1111-Data.db".startsWith("xy-11-"))
+            // have "xy-1111-Data.db".startsWith("xy-11") below (we'd get "xy-1111-Data.db".startsWith("xy-11-")); the
+            // records of DSE 5.1 compatibility mode (DseTransactionLogs.recordPath) end with the format instead, as in
+            // "nb-11-big", with which no file of another sstable starts either ("nb-110-big-Data.db" does not)
             String baseName = dirSet.floor(name);
             if (baseName != null && name.startsWith(baseName))
             {

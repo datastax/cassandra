@@ -69,13 +69,13 @@ public class MetadataCollector implements PartitionStatisticsCollector
      * follows a longer one it fails, as DSE 6.8.65's {@code nodetool tablehistograms} and insights reporting did after
      * a rollback with {@code Index 115 out of bounds for length 115} on a table holding sstables of both lengths; in the
      * other order it does not fail, but the counts of the sstables between the first one and the first longer histogram
-     * are lost.
+     * are lost. DSE 5.1.51 asks for the same 114 buckets, by its source.
      */
     static final int DSE_6_CELL_COUNT_BUCKETS = 114;
 
     /**
-     * The cell count histogram of a new sstable: in {@code internode_compatibility_mode: DSE_6}, and for a tool that
-     * reads a {@code DSE_6} configuration ({@link DatabaseDescriptor#isDse6SSTableOutput()}), with DSE 6's
+     * The cell count histogram of a new sstable: in {@code internode_compatibility_mode: DSE_6} or {@code DSE_5_1}, and
+     * for a tool that reads such a configuration ({@link DatabaseDescriptor#isDseSSTableOutput()}), with DSE's
      * {@link #DSE_6_CELL_COUNT_BUCKETS} buckets, whose largest offset is 1996099046 cells: a partition with more
      * cells is counted in the overflow bucket, as DSE counts it. When this software reads such an sstable from disk it
      * clears that bucket with a WARN ({@link StatsMetadata}), but the reader a flush or a compaction opens keeps the
@@ -86,7 +86,7 @@ public class MetadataCollector implements PartitionStatisticsCollector
      */
     static EstimatedHistogram defaultCellPerPartitionCountHistogram()
     {
-        if (DatabaseDescriptor.isDse6SSTableOutput())
+        if (DatabaseDescriptor.isDseSSTableOutput())
             return new EstimatedHistogram(DSE_6_CELL_COUNT_BUCKETS);
         // EH of 118 can track a max value of 4139110981, i.e., > 4B cells
         return new EstimatedHistogram(118);

@@ -35,6 +35,7 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.slf4j.LoggerFactory;
+import org.slf4j.helpers.MessageFormatter;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -475,6 +476,29 @@ public class DseHintsAcknowledgementTest
         awaitAnswers(acknowledged);
         assertEquals(succeeded + HINTS, HintsServiceMetrics.hintsSucceeded.getCount());
         assertEquals(0, hintsFilesOnDisk().size());
+    }
+
+    /**
+     * The WARN names the DSE release of the mode: DSE 6 in {@code DSE_6}, with the text the tests above read; DSE 5.1
+     * in {@code DSE_5_1}, which by its source acknowledges the hints it drops and leaves unanswered a hint it fails to
+     * apply.
+     */
+    @Test
+    public void theWarningNamesTheDseReleaseOfTheMode()
+    {
+        Object[] args = { "/127.0.0.2:7000", 3L, "f-1-2.hints", "127.0.0.2" };
+        String dse6 = HintsDispatcher.unacknowledgedHintsWarning(false);
+        assertEquals(String.format(WARNING, args), MessageFormatter.arrayFormat(dse6, args).getMessage());
+        assertEquals("DSE 5.1 compatibility mode: hints not acknowledged by DSE 5.1 node /127.0.0.2:7000: 3 in file " +
+                     "f-1-2.hints; the file stays and is sent again from that page. The node may be down or " +
+                     "overloaded, it may have answered with a failure, the hints may not have been sent (see the " +
+                     "messaging log), or it failed to apply them: DSE 5.1 acknowledges a hint it drops (unknown " +
+                     "table, invalid data, range no longer owned) but not one it fails to apply, and such a hint " +
+                     "holds back this file and the later ones for that node until it expires (the smallest " +
+                     "gc_grace_seconds of its tables, capped by cassandra.maxHintTTL) or the node is upgraded. If " +
+                     "this repeats for the same file, nodetool truncatehints 127.0.0.2 deletes all the pending hints " +
+                     "for that node, and the repair after the compatibility mode is dropped brings their writes to it.",
+                     MessageFormatter.arrayFormat(HintsDispatcher.unacknowledgedHintsWarning(true), args).getMessage());
     }
 
     /** No WARN with the mode off: a peer at a pre-4.0 version is not a DSE 6 node then. */

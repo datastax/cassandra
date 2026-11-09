@@ -18,8 +18,11 @@ package org.apache.cassandra.hints;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,14 +33,23 @@ import org.junit.After;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -52,6 +64,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * layout of the DSE 6.8 messaging version, the one the commit log replay uses for DSE's segments; the others stop at
  * the unknown table id. Applied, the hints of the fixture table give back the data set the fixture workload wrote. How
  * many hints a file holds is not pinned: the 6.9.26 file holds those of two runs of the workload.
+ * <p>
+ * The hints files of DSE 5.1 are plain files of version 1, as this software's: their hints are read at messaging
+ * version 10 as the dispatcher reads them, those of a file generated here and those of the file DSE 5.1.51 wrote.
  */
 public class DseHintsContentTest extends CQLTester
 {
@@ -126,6 +141,120 @@ public class DseHintsContentTest extends CQLTester
     }
 
     /**
+     * The hints of a file DSE 5.1 writes (version 1, generated here as DSE 5.1.51 writes it by its source, its
+     * mutations laid out as at messaging version 12) are read as the dispatcher reads a file of another version than
+     * its target's: page by page through {@link HintsReader}, each hint decoded at the messaging version of the file,
+     * 10, then encoded again at the current version, at which it is sent. They give back the rows hinted; nothing of
+     * the DSE 6 layout is involved.
+     */
+    @Test
+    public void theHintsOfADse51FileAreReadAsTheDispatcherReadsThem() throws Throwable
+    {
+        String table = createTable("CREATE TABLE %s (id int PRIMARY KEY, v text)");
+        TableMetadata metadata = Schema.instance.getTableMetadata(KEYSPACE, table);
+        long now = Clock.Global.currentTimeMillis();
+        List<byte[]> written = new ArrayList<>();
+        for (int id = 0; id < 3; id++)
+        {
+            long timestamp = FBUtilities.timestampMicros();
+            Mutation mutation = new RowUpdateBuilder(metadata, timestamp, id).add("v", "v" + id).build();
+            written.add(DseFixtures.dseHint(now + id, FIXTURE_GC_GRACE_SECONDS, DseFixtures.mutation40(mutation)));
+        }
+        Path directory = Files.createTempDirectory("dse51hints");
+        List<Hint> hints = new ArrayList<>();
+        try
+        {
+            Path file = DseFixtures.writeDse51HintsFile(directory, UUID.randomUUID(), now, written);
+            try (HintsReader reader = HintsReader.open(new File(file)))
+            {
+                int version = reader.descriptor().messagingVersion();
+                assertThat(version).isEqualTo(MessagingService.VERSION_30);
+                for (HintsReader.Page page : reader)
+                {
+                    Iterator<ByteBuffer> buffers = page.buffersIterator();
+                    while (buffers.hasNext())
+                    {
+                        try (DataInputBuffer in = new DataInputBuffer(buffers.next(), true))
+                        {
+                            Hint hint = Hint.serializer.deserialize(in, version);
+                            hints.add(encodedAgain(hint, MessagingService.current_version));
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            new File(directory).deleteRecursive();
+        }
+        assertThat(hints).extracting(h -> h.creationTime).containsExactly(now, now + 1, now + 2);
+        assertThat(hints).extracting(h -> h.gcgs).containsOnly(FIXTURE_GC_GRACE_SECONDS);
+        for (Hint hint : hints)
+            hint.mutation.apply();
+        assertRowsIgnoringOrder(execute("SELECT id, v FROM %s"), row(0, "v0"), row(1, "v1"), row(2, "v2"));
+    }
+
+    /**
+     * The hints of the file DSE 5.1.51 wrote, all of the collection table, read as the dispatcher reads them (as in
+     * {@link #theHintsOfADse51FileAreReadAsTheDispatcherReadsThem}, which covers the decoding of a hint of a table
+     * created here), give back the data set the fixture workload wrote. Unlike the generated ones, their mutations
+     * hold collections, user types, tuples, a static column and the deletions of a partition, a cell and a range.
+     */
+    @Test
+    public void theHintsDse51WroteAreReadAsTheDispatcherReadsThemAndGiveBackTheFixtureRows() throws Throwable
+    {
+        Dse51Fixtures dse51 = DseFixtures.dse51();
+        for (String statement : dse51.fixtureSchema())
+            execute(statement);
+        List<Hint> hints = new ArrayList<>();
+        // read in place: the reader only reads the file
+        try (HintsReader reader = HintsReader.open(new File(dse51.hintsFile())))
+        {
+            int version = reader.descriptor().messagingVersion();
+            assertThat(version).isEqualTo(MessagingService.VERSION_30);
+            for (HintsReader.Page page : reader)
+            {
+                Iterator<ByteBuffer> buffers = page.buffersIterator();
+                while (buffers.hasNext())
+                {
+                    try (DataInputBuffer in = new DataInputBuffer(buffers.next(), true))
+                    {
+                        Hint hint = Hint.serializer.deserialize(in, version);
+                        assertThat(in.available()).as("bytes left after a hint").isZero();
+                        hints.add(encodedAgain(hint, MessagingService.current_version));
+                    }
+                }
+            }
+        }
+        assertThat(hints).hasSize(Dse51Fixtures.FIXTURE_HINTS);
+        // the first and the last creation time, in ms: hints are buffered before the file is created, so they are a
+        // few seconds older than its timestamp (1793958749068)
+        assertThat(new long[]{ hints.stream().mapToLong(h -> h.creationTime).min().getAsLong(),
+                               hints.stream().mapToLong(h -> h.creationTime).max().getAsLong() })
+        .containsExactly(1793958746529L, 1793958746734L);
+        assertThat(hints).extracting(h -> h.gcgs).containsOnly(FIXTURE_GC_GRACE_SECONDS);
+        assertThat(hints).flatExtracting(h -> h.mutation.getTableIds())
+                         .containsOnly(TableId.fromUUID(Dse51Fixtures.FIXTURE_TABLE_ID));
+        // the timestamps of the mutations decide the outcome, not the order they are applied in
+        for (Hint hint : hints)
+            hint.mutation.apply();
+        assertTheFixtureDataSet();
+    }
+
+    /** {@code hint} serialized at {@code version} and read back. */
+    private static Hint encodedAgain(Hint hint, int version) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            Hint.serializer.serialize(hint, out, version);
+            try (DataInputBuffer in = new DataInputBuffer(out.toByteArray()))
+            {
+                return Hint.serializer.deserialize(in, version);
+            }
+        }
+    }
+
+    /**
      * Decodes every hint of the file of a version, applies those of the fixture table and checks the data set of the
      * README of the fixtures; returns the other tables hinted, whether this test server knows them or not.
      */
@@ -187,7 +316,13 @@ public class DseHintsContentTest extends CQLTester
         // the timestamps of the mutations decide the outcome, not the order they are applied in
         for (Hint hint : fixtureHints)
             hint.mutation.apply();
+        assertTheFixtureDataSet();
+        return others;
+    }
 
+    /** The data set of the README of the fixtures, in the fixture table. */
+    private void assertTheFixtureDataSet() throws Throwable
+    {
         String t = FIXTURE_KEYSPACE + ".t";
         assertRows(execute("SELECT count(*) FROM " + t), row((long) DseFixtures.COLLECTION_TABLE_COUNT_STAR));
         assertRows(execute("SELECT id, ck FROM " + t + " WHERE id = 1"));
@@ -208,6 +343,5 @@ public class DseHintsContentTest extends CQLTester
         assertRows(execute("SELECT id, ck, v, n, s FROM " + t + " WHERE id = 100"),
                    row(100, "ck1", "val199", 19900L, 1000),
                    row(100, "ck2", "val200", 20000L, 1000));
-        return others;
     }
 }

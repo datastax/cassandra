@@ -143,8 +143,10 @@ public class Dse51ModeConfigTest
         assertThat(DatabaseDescriptor.isDse51CompatibilityMode()).isTrue();
         assertThat(DatabaseDescriptor.isDseCompatibilityMode()).isTrue();
         assertThat(DatabaseDescriptor.isDse6CompatibilityMode()).isFalse();
-        // nothing of the on-disk half of DSE_6: no trie version, no DSE 6 transaction logs or histograms
+        // nothing of the on-disk half of DSE_6 (no trie version); the transaction logs and histograms of DSE_5_1
         assertThat(DatabaseDescriptor.isDse6SSTableOutput()).isFalse();
+        assertThat(DatabaseDescriptor.isDseSSTableOutput()).isTrue();
+        assertThat(DatabaseDescriptor.isDse51SSTableOutput()).isTrue();
         assertThat(TRIE_INDEX_FORMAT_VERSION.isPresent()).isFalse();
         assertThatCode(DatabaseDescriptor::verifyDse6SSTableFormat).doesNotThrowAnyException();
         // and no pre-4.0 dialect: the gate of every pre-4.0 code path stays closed
