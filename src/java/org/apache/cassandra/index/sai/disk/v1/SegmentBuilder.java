@@ -20,13 +20,14 @@ package org.apache.cassandra.index.sai.disk.v1;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
@@ -38,12 +39,18 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.quantization.VectorCompressor;
+import io.github.jbellis.jvector.util.work.ProgressTracker;
+import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.compaction.CompactionRowSourceTagging;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
+import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.analyzer.ByteLimitedMaterializer;
 import org.apache.cassandra.index.sai.analyzer.NoOpAnalyzer;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.PrimaryKeyMap;
 import org.apache.cassandra.index.sai.disk.RAMStringIndexer;
 import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -55,18 +62,32 @@ import org.apache.cassandra.index.sai.disk.v1.kdtree.NumericIndexWriter;
 import org.apache.cassandra.index.sai.disk.v1.trie.InvertedIndexWriter;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.CompactionGraph;
+import org.apache.cassandra.index.sai.disk.vector.CompactionGraphMerger;
+import org.apache.cassandra.index.sai.disk.vector.CompactionProgressLimiter;
+import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
+import org.apache.cassandra.index.sai.disk.vector.OrdinalsView;
+import org.apache.cassandra.index.sai.disk.vector.VectorDeduplicator;
+import org.apache.cassandra.index.sai.disk.vector.VectorHandle;
+import org.apache.cassandra.index.sai.disk.vector.VectorIndexIntegrity;
+import org.apache.cassandra.index.sai.disk.vector.VectorMergeOperation;
+import org.apache.cassandra.index.sai.disk.vector.VectorMergePostings;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceTagRing;
+import org.apache.cassandra.index.sai.utils.InsertFanout;
 import org.apache.cassandra.index.sai.metrics.IndexMetrics;
+import org.apache.cassandra.index.sai.metrics.VectorCompactionMetrics;
 import org.apache.cassandra.index.sai.utils.NamedMemoryLimiter;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.metrics.QuickSlidingWindowReservoir;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.utils.NonThrowingCloseable;
+import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 import org.apache.lucene.util.BytesRef;
 
-import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFactory;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_TEST_LAST_VALID_SEGMENTS;
-import static org.apache.cassandra.utils.FBUtilities.busyWaitWhile;
 
 /**
  * Creates an on-heap index data structure to be flushed to an SSTable index.
@@ -79,13 +100,6 @@ import static org.apache.cassandra.utils.FBUtilities.busyWaitWhile;
 public abstract class SegmentBuilder
 {
     private static final Logger logger = LoggerFactory.getLogger(SegmentBuilder.class);
-
-    /** for parallelism within a single compaction */
-    public static final ExecutorService compactionExecutor = executorFactory().configurePooled("SegmentBuilder", Runtime.getRuntime().availableProcessors())
-                                                                                .withQueueLimit(10 * Runtime.getRuntime().availableProcessors())
-                                                                                .withKeepAlive(1, TimeUnit.MINUTES)
-                                                                                .withThreadPriority(Thread.MIN_PRIORITY)
-                                                                                .build();
 
     // Served as safe net in case memory limit is not triggered or when merger merges small segments..
     public static final long LAST_VALID_SEGMENT_ROW_ID = ((long)Integer.MAX_VALUE / 2) - 1L;
@@ -113,6 +127,10 @@ public abstract class SegmentBuilder
     private boolean flushed = false;
     private boolean active = true;
 
+    // Node-wide concurrent-build admission permit for vector builds; null for non-vector builders and when
+    // the bound is disabled. Acquired in the vector subclass constructor, released exactly once in release().
+    private JVectorVersionUtil.BuildPermit buildPermit;
+
     // segment metadata
     private long minSSTableRowId = -1;
     private long maxSSTableRowId = -1;
@@ -127,9 +145,9 @@ public abstract class SegmentBuilder
     protected ByteBuffer minTerm;
     protected ByteBuffer maxTerm;
 
-    protected final AtomicInteger updatesInFlight = new AtomicInteger(0);
     protected final QuickSlidingWindowReservoir termSizeReservoir = new QuickSlidingWindowReservoir(100);
-    protected AtomicReference<Throwable> asyncThrowable = new AtomicReference<>();
+    /** Weighted, bounded (or unbounded) async insert fan-out; set by the vector builders, null for synchronous builders. */
+    protected InsertFanout insertFanout;
 
 
     public boolean requiresFlush()
@@ -254,13 +272,12 @@ public abstract class SegmentBuilder
                                            long keyCount,
                                            VectorCompressor<?> compressor,
                                            boolean unitVectors,
-                                           boolean allRowsHaveVectors,
                                            NamedMemoryLimiter limiter)
         {
             super(components, rowIdOffset, limiter);
             try
             {
-                graphIndex = new CompactionGraph(components, compressor, unitVectors, keyCount, allRowsHaveVectors);
+                graphIndex = new CompactionGraph(components, compressor, unitVectors, keyCount);
             }
             catch (IOException e)
             {
@@ -268,6 +285,12 @@ public abstract class SegmentBuilder
             }
             totalBytesAllocated = graphIndex.ramBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
+            insertFanout = JVectorVersionUtil.newInsertFanout();
+            // The graph's PQ training takes a write lock that every in-flight addGraphNode task (on the
+            // shared build pool) must not be holding out; drain the fan-out first or the pool deadlocks.
+            // See CompactionGraph.quiesceInserts.
+            graphIndex.onBeforeTraining(insertFanout::awaitCompletion);
+            acquireBuildPermit();
         }
 
         @Override
@@ -283,13 +306,14 @@ public abstract class SegmentBuilder
         }
 
         @Override
-        protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
+        protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId, PrimaryKey key)
         {
             assert terms.size() == 1;
 
             // CompactionGraph splits adding a node into two parts:
             // (1) maybeAddVector, which must be done serially because it writes to disk incrementally
             // (2) addGraphNode, which may be done asynchronously
+            int weight = terms.get(0).remaining();
             CompactionGraph.InsertionResult result;
             try
             {
@@ -302,32 +326,16 @@ public abstract class SegmentBuilder
             if (result.vector == null)
                 return result.bytesUsed;
 
-            updatesInFlight.incrementAndGet();
-            compactionExecutor.submit(() -> {
-                try
-                {
-                    long bytesAdded = result.bytesUsed + graphIndex.addGraphNode(result);
-                    totalBytesAllocatedConcurrent.add(bytesAdded);
-                    termSizeReservoir.update(bytesAdded);
-                }
-                catch (Throwable th)
-                {
-                    asyncThrowable.compareAndExchange(null, th);
-                }
-                finally
-                {
-                    updatesInFlight.decrementAndGet();
-                }
+            // Dispatch the graph insertion via the fan-out harness (bounded or unbounded admission).
+            insertFanout.submit(weight, () -> {
+                long bytesAdded = result.bytesUsed + graphIndex.addGraphNode(result);
+                totalBytesAllocatedConcurrent.add(bytesAdded);
+                termSizeReservoir.update(bytesAdded);
             });
-            // bytes allocated will be approximated immediately as the average of recently added terms,
-            // rather than waiting until the async update completes to get the exact value.  The latter could
-            // result in a dangerously large discrepancy between the amount of memory actually consumed
-            // and the amount the limiter knows about if the queue depth grows.
-            busyWaitWhile(() -> termSizeReservoir.size() == 0 && asyncThrowable.get() == null);
-            if (asyncThrowable.get() != null) {
-                throw new RuntimeException("Error adding term asynchronously", asyncThrowable.get());
-            }
-            return (long) termSizeReservoir.getMean();
+            Throwable async = insertFanout.error();
+            if (async != null)
+                throw new RuntimeException("Error adding term asynchronously", async);
+            return termSizeReservoir.size() == 0 ? weight : (long) termSizeReservoir.getMean();
         }
 
         @Override
@@ -336,6 +344,8 @@ public abstract class SegmentBuilder
             if (graphIndex.isEmpty())
                 return;
             var componentsMetadata = graphIndex.flush();
+            logger.info("VectorOffHeapSegmentBuilder: legacy off-heap graph build+flush {} rows for {}",
+                        getRowCount(), components.descriptor());
             metadataBuilder.setComponentsMetadata(componentsMetadata);
         }
 
@@ -366,6 +376,393 @@ public abstract class SegmentBuilder
         }
     }
 
+    /**
+     * Segment builder for the jvector on-disk graph merge path. Instead of rebuilding the graph
+     * from individual vectors, it records each incoming vector and its output row ID into a
+     * ChronicleMap during the row-by-row pass, then delegates the actual graph construction to
+     * {@link CompactionGraphMerger} at flush time.
+     *
+     * <p>This path is active when all input SSTables already have graph indexes and at least
+     * two source segments are available. The merger writes one output segment per compaction.
+     */
+    public static class VectorMergeSegmentBuilder extends SegmentBuilder
+    {
+        private final List<CompactionGraphMerger.SourceSegment> sourceSegments;
+        /**
+         * Output postings keyed by the {@link VectorHandle} of the
+         * source graph node that owns the row's winning vector cell, together with the set of surviving
+         * source nodes.
+         */
+        private final VectorMergePostings postings;
+        private final VectorDeduplicator deduplicator;
+        // Non-null only when ingest_parallel is on.
+        private final InsertFanout mergeInsertFanout;
+
+        /** Source sstable id → indexes into {@code sourceSegments}, ascending by rowid offset. */
+        private final Map<SSTableId<?>, int[]> sourceGroups;
+        /** Row-source tag ring registered by SSTableIndexWriter; null on the direct-construction test path. */
+        private final VectorSourceTagRing tagRing;
+        private final ColumnMetadata column;
+
+        /** Long task spanning the row-attribution and ChronicleMap population window. */
+        private ProgressTracker.PhaseScope ingestPhase = ProgressTracker.PhaseScope.NOOP;
+
+        // Thread-confined resolution resources (all resolution runs on the compaction thread), closed at release().
+        private final Map<SSTableId<?>, PrimaryKeyMap> pkMaps = new HashMap<>();
+        private final Map<Integer, OrdinalsView> ordinalViews = new HashMap<>();
+
+        /** Rows whose winning source ordinal could not be resolved. Any > 0 fails the flush loudly. */
+        private long anomalies;
+        private String firstAnomaly;
+        /** Rows that carried an indexable vector, i.e. reached resolution. */
+        private final AtomicLong rowsWithVector = new AtomicLong();
+        /** Rows skipped before resolution because the vector cell was null or empty. */
+        private final AtomicLong rowsWithoutVector = new AtomicLong();
+
+        @SuppressWarnings("unchecked")
+        public VectorMergeSegmentBuilder(
+                IndexComponents.ForWrite components,
+                long rowIdOffset,
+                long estimatedRows,
+                List<CompactionGraphMerger.SourceSegment> sourceSegments,
+                NamedMemoryLimiter limiter) throws IOException
+        {
+            super(components, rowIdOffset, limiter);
+            this.sourceSegments = sourceSegments;
+            this.column = components.context().getDefinition();
+
+            // Id bounds for the postings' live sets, and the sstable → segments routing table.
+            int[] idUpperBound = new int[sourceSegments.size()];
+            var groups = new HashMap<SSTableId<?>, List<Integer>>();
+            for (int i = 0; i < sourceSegments.size(); i++)
+            {
+                var src = sourceSegments.get(i);
+                idUpperBound[i] = src.graph().getIdUpperBound();
+                if (src.sstableIndex() != null)
+                    groups.computeIfAbsent(src.sstableIndex().getSSTable().descriptor.id, k -> new ArrayList<>()).add(i);
+            }
+            this.sourceGroups = new HashMap<>();
+            for (var e : groups.entrySet())
+            {
+                int[] idxs = e.getValue().stream()
+                        .sorted(Comparator.comparingLong(i -> sourceSegments.get((int) i).segmentRowIdOffset()))
+                        .mapToInt(Integer::intValue).toArray();
+                sourceGroups.put(e.getKey(), idxs);
+            }
+
+            // Re-acquire the tag ring (idempotent, same thread).
+            this.tagRing = CompactionRowSourceTagging.current()
+                           instanceof VectorSourceTagRing ring ? ring : null;
+
+            try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
+                    VectorCompactionMetrics.Phase.POSTINGS_MAP_SETUP, components.context()))
+            {
+                postings = new VectorMergePostings(idUpperBound, estimatedRows);
+                deduplicator = new VectorDeduplicator(estimatedRows);
+            }
+
+            totalBytesAllocated = 0;
+            totalBytesAllocatedConcurrent.add(0);
+            this.mergeInsertFanout = JVectorVersionUtil.isIngestParallel() ? JVectorVersionUtil.newInsertFanout() : null;
+            acquireBuildPermit();
+            ingestPhase = VectorCompactionMetrics.INSTANCE.start(VectorCompactionMetrics.Phase.ROW_INGEST,
+                                                                 components.context());
+        }
+
+        @Override
+        public boolean isEmpty()
+        {
+            // NOT postings.isEmpty(): under parallel ingest the postings land asynchronously;
+            // the per-add counter is incremented synchronously and cannot race.
+            return rowsWithVector.get() == 0;
+        }
+
+        @Override
+        protected long addInternal(List<ByteBuffer> terms, int segmentRowId)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId, PrimaryKey key)
+        {
+            assert terms.size() == 1;
+            var vectorBuf = terms.get(0);
+            if (vectorBuf == null || vectorBuf.remaining() == 0)
+            {
+                rowsWithoutVector.incrementAndGet();
+                return 0;
+            }
+            rowsWithVector.incrementAndGet();
+
+            // Resolution runs SYNCHRONOUSLY on the compaction thread, but only for vectors not seen before.
+            VectorHandle handle = deduplicator.deduplicate(vectorBuf, () -> resolveHandle(key));
+            if (handle == null)
+                return 0; // anomaly recorded inside resolveHandle; flush will fail loudly
+
+            if (mergeInsertFanout != null)
+            {
+                mergeInsertFanout.submit(VectorHandle.BYTES + Integer.BYTES,
+                                         () -> postings.put(handle, segmentRowId));
+                Throwable async = mergeInsertFanout.error();
+                if (async != null)
+                    throw new RuntimeException("Error populating merge postings asynchronously", async);
+            }
+            else
+            {
+                postings.put(handle, segmentRowId);
+            }
+            return 0;
+        }
+
+        /**
+         * Join this output row to the source graph node whose cell won its merge; returns that node's
+         * handle, or null after recording an anomaly.
+         */
+        private VectorHandle resolveHandle(PrimaryKey key)
+        {
+            if (tagRing == null)
+                return recordAnomaly("no row-source tag ring registered (non-compaction path?)", key);
+            SSTableId<?> winner = tagRing.consume(key.partitionKey(), key.clustering(), column);
+            if (logger.isTraceEnabled())
+                logger.trace("resolvePostingsKey: key={} winner={} available_sourceGroups={}", key, winner, sourceGroups.keySet());
+            if (winner == null)
+                return recordAnomaly("no source tag for row (ring wrap or untagged merge)", key);
+            int[] group = sourceGroups.get(winner);
+            if (group == null)
+                return recordAnomaly("winning sstable " + winner + " has no merge source segments", key);
+
+            long rowId;
+            try
+            {
+                var pkMap = pkMaps.get(winner);
+                if (pkMap == null)
+                {
+                    int segIdx = group[0];
+                    pkMap = sourceSegments.get(segIdx).sstableIndex().getSSTableContext()
+                            .primaryKeyMapFactory.newPerSSTablePrimaryKeyMap();
+                    pkMaps.put(winner, pkMap);
+                }
+                rowId = pkMap.exactRowIdOrInvertedCeiling(key);
+                if (logger.isTraceEnabled())
+                    logger.trace("resolvePostingsKey: looked up key={} in pkMap for winner={}, got rowId={}, pkMap class={}",
+                                key, winner, rowId, pkMap.getClass().getName());
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException("Failed to resolve source rowid for merge", e);
+            }
+            if (rowId < 0)
+                return recordAnomaly("primary key not found in winning sstable " + winner, key);
+
+            // Route to the segment whose rowid range contains the row.
+            int segIdx = -1;
+            for (int i = group.length - 1; i >= 0; i--)
+            {
+                if (sourceSegments.get(group[i]).segmentRowIdOffset() <= rowId)
+                {
+                    segIdx = group[i];
+                    break;
+                }
+            }
+            if (segIdx < 0)
+                return recordAnomaly("source rowid " + rowId + " below all segment offsets of " + winner, key);
+
+            int ordinal;
+            try
+            {
+                var view = ordinalViews.get(segIdx);
+                if (view == null)
+                {
+                    view = sourceSegments.get(segIdx).diskAnn().getOrdinalsView();
+                    ordinalViews.put(segIdx, view);
+                }
+                ordinal = view.getOrdinalForRowId(
+                        Math.toIntExact(rowId - sourceSegments.get(segIdx).segmentRowIdOffset()));
+            }
+            catch (Exception e)
+            {
+                throw new RuntimeException("Failed to resolve source ordinal for merge", e);
+            }
+            if (ordinal < 0 || ordinal >= postings.idUpperBound(segIdx))
+                return recordAnomaly("no ordinal for source rowid " + rowId + " in segment " + segIdx + " of " + winner, key);
+
+            return new VectorHandle(segIdx, ordinal);
+        }
+
+        private VectorHandle recordAnomaly(String what, PrimaryKey key)
+        {
+            anomalies++;
+            if (firstAnomaly == null)
+                firstAnomaly = what + " [key=" + key + ']';
+            return null;
+        }
+
+        /** Test hook: ingest a pre-resolved (source node, output rowid) pair, bypassing tag/PK resolution. */
+        @VisibleForTesting
+        public void addResolved(int sourceSegmentIdx, int sourceOrdinal, int segmentRowId)
+        {
+            postings.put(new VectorHandle(sourceSegmentIdx, sourceOrdinal), segmentRowId);
+        }
+
+        @Override
+        protected void flushInternal(SegmentMetadataBuilder metadataBuilder) throws IOException
+        {
+            finishIngestPhase();
+
+            // Drain any parallel per-row ingest so the postings map is complete before it is read/merged.
+            if (mergeInsertFanout != null)
+            {
+                try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
+                        VectorCompactionMetrics.Phase.INGEST_DRAIN, components.context()))
+                {
+                    mergeInsertFanout.awaitCompletion();
+                    Throwable async = mergeInsertFanout.error();
+                    if (async != null)
+                        throw new RuntimeException("Error populating merge postings asynchronously", async);
+                }
+            }
+
+            if (anomalies > 0)
+                throw new IllegalStateException(String.format(
+                        "Vector graph merge: %d row(s) could not be joined to a source graph ordinal (first: %s). " +
+                        "Set -D%s=false to fall back to the graph-rebuild path.",
+                        anomalies, firstAnomaly,
+                        CassandraRelevantProperties.SAI_VECTOR_GRAPH_COMPACTION_MERGE_ENABLED.getKey()));
+
+            if (postings.isEmpty())
+            {
+                long withVector = rowsWithVector.get();
+                if (withVector > 0)
+                    throw VectorIndexIntegrity.abort(String.format(
+                            "vector graph merge for %s would produce an EMPTY index: %d row(s) resolved to a "
+                            + "source graph ordinal but no postings were recorded (%d row(s) had no vector)",
+                            components.descriptor(), withVector, rowsWithoutVector.get()));
+
+                logger.info("{} vector graph merge indexed no rows ({} row(s) carried no vector); " +
+                            "writing an empty index for this segment",
+                            components.logMessage(""), rowsWithoutVector.get());
+                return;
+            }
+
+            long total = Math.max(1L, postings.size());
+            VectorMergeOperation op =
+                    new VectorMergeOperation(
+                            components.context().columnFamilyStore().metadata(),
+                            TimeUUID.Generator.nextTimeUUID(),
+                            Collections.emptyList(),
+                            total);
+
+            long memoryEstimate = total * JVectorVersionUtil.getMergeBytesPerOrdinal();
+            NamedMemoryLimiter memLimiter = V1OnDiskFormat.SEGMENT_BUILD_MEMORY_LIMITER;
+            memLimiter.increment(memoryEstimate);
+            logger.debug("Vector graph merge measurement: charged {} bytes to SAI segment-build limiter ({} of {} bytes used)",
+                         memoryEstimate, memLimiter.currentBytesUsed(), memLimiter.limitBytes());
+            if (memLimiter.usageExceedsLimit())
+                logger.warn("Vector graph merge estimated {} bytes pushes SAI segment-build memory to {} over the {} byte limit; proceeding",
+                            memoryEstimate, memLimiter.currentBytesUsed(), memLimiter.limitBytes());
+
+            // Pin every source SAI index for the merge's full lifetime.
+            List<SSTableIndex> pinnedSources = new ArrayList<>();
+            try
+            {
+                for (var src : sourceSegments)
+                {
+                    SSTableIndex idx = src.sstableIndex();
+                    if (idx == null)
+                        continue; // test path manages source lifetime directly
+                    if (!idx.reference())
+                        throw new IllegalStateException("Source SAI index is being released (DROP/teardown in progress); abandoning graph merge");
+                    pinnedSources.add(idx);
+                }
+
+                try (NonThrowingCloseable c =
+                             CompactionManager.instance.active.onOperationStart(op);
+                     ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
+                             VectorCompactionMetrics.Phase.TOTAL_MERGE, components.context()))
+                {
+                    CompactionGraphMerger merger =
+                            new CompactionGraphMerger(
+                                    sourceSegments,
+                                    postings,
+                                    components.context().getIndexWriterConfig().getSimilarityFunction(),
+                                    components,
+                                    new CompactionProgressLimiter(op, components.context()));
+                    var componentsMetadata = merger.merge();
+                    op.setCompleted(total);
+                    metadataBuilder.setComponentsMetadata(componentsMetadata);
+                }
+            }
+            finally
+            {
+                for (SSTableIndex idx : pinnedSources)
+                {
+                    try { idx.release(); }
+                    catch (Throwable t) { logger.warn("Error releasing pinned source SAI index after graph merge", t); }
+                }
+                memLimiter.decrement(memoryEstimate);
+                logger.debug("Vector graph merge measurement: released {} bytes from SAI segment-build limiter ({} bytes used)",
+                             memoryEstimate, memLimiter.currentBytesUsed());
+            }
+        }
+
+        @Override
+        public boolean supportsAsyncAdd()
+        {
+            return true;
+        }
+
+        @Override
+        public boolean requiresFlush()
+        {
+            return false;
+        }
+
+        @Override
+        long release(IndexContext indexContext)
+        {
+            finishIngestPhase();
+            try (ProgressTracker.PhaseScope ignored = VectorCompactionMetrics.INSTANCE.start(
+                    VectorCompactionMetrics.Phase.CLEANUP, components.context()))
+            {
+                for (var pkMap : pkMaps.values())
+                {
+                    try { pkMap.close(); }
+                    catch (Exception e) { logger.warn("Error closing source primary-key map after graph merge", e); }
+                }
+                for (var view : ordinalViews.values())
+                {
+                    try { view.close(); }
+                    catch (Exception e) { logger.warn("Error closing source ordinals view after graph merge", e); }
+                }
+                try
+                {
+                    deduplicator.close();
+                }
+                catch (Exception e)
+                {
+                    logger.warn("Error closing vector deduplicator after graph merge", e);
+                }
+                try
+                {
+                    postings.close();
+                }
+                catch (Exception e)
+                {
+                    throw new UncheckedIOException(new IOException("Error closing merge postings map", e));
+                }
+            }
+            return super.release(indexContext);
+        }
+
+        private void finishIngestPhase()
+        {
+            ProgressTracker.PhaseScope phase = ingestPhase;
+            ingestPhase = ProgressTracker.PhaseScope.NOOP;
+            phase.close();
+        }
+    }
+
     public static class VectorOnHeapSegmentBuilder extends SegmentBuilder
     {
         private final CassandraOnHeapGraph<Integer> graphIndex;
@@ -376,6 +773,8 @@ public abstract class SegmentBuilder
             graphIndex = new CassandraOnHeapGraph<>(components.context(), false, null);
             totalBytesAllocated = graphIndex.ramBytesUsed();
             totalBytesAllocatedConcurrent.add(totalBytesAllocated);
+            insertFanout = JVectorVersionUtil.newInsertFanout();
+            acquireBuildPermit();
         }
 
         @Override
@@ -392,34 +791,18 @@ public abstract class SegmentBuilder
         }
 
         @Override
-        protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
+        protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId, PrimaryKey key)
         {
-            updatesInFlight.incrementAndGet();
-            compactionExecutor.submit(() -> {
-                try
-                {
-                    long bytesAdded = addInternal(terms, segmentRowId);
-                    totalBytesAllocatedConcurrent.add(bytesAdded);
-                    termSizeReservoir.update(bytesAdded);
-                }
-                catch (Throwable th)
-                {
-                    asyncThrowable.compareAndExchange(null, th);
-                }
-                finally
-                {
-                    updatesInFlight.decrementAndGet();
-                }
+            int weight = terms.get(0).remaining();
+            insertFanout.submit(weight, () -> {
+                long bytesAdded = addInternal(terms, segmentRowId);
+                totalBytesAllocatedConcurrent.add(bytesAdded);
+                termSizeReservoir.update(bytesAdded);
             });
-            // bytes allocated will be approximated immediately as the average of recently added terms,
-            // rather than waiting until the async update completes to get the exact value.  The latter could
-            // result in a dangerously large discrepancy between the amount of memory actually consumed
-            // and the amount the limiter knows about if the queue depth grows.
-            busyWaitWhile(() -> termSizeReservoir.size() == 0 && asyncThrowable.get() == null);
-            if (asyncThrowable.get() != null) {
-                throw new RuntimeException("Error adding term asynchronously", asyncThrowable.get());
-            }
-            return (long) termSizeReservoir.getMean();
+            Throwable async = insertFanout.error();
+            if (async != null)
+                throw new RuntimeException("Error adding term asynchronously", async);
+            return termSizeReservoir.size() == 0 ? weight : (long) termSizeReservoir.getMean();
         }
 
         @Override
@@ -430,6 +813,8 @@ public abstract class SegmentBuilder
             // and SegmentBuilder::flush checks for the empty index case before calling flushInternal
             assert shouldFlush;
             var componentsMetadata = graphIndex.flush(components);
+            logger.info("VectorOnHeapSegmentBuilder: legacy on-heap graph build+flush {} rows for {}",
+                        getRowCount(), components.descriptor());
             metadataBuilder.setComponentsMetadata(componentsMetadata);
         }
 
@@ -451,6 +836,16 @@ public abstract class SegmentBuilder
         this.lastValidSegmentRowID = testLastValidSegmentRowId >= 0 ? testLastValidSegmentRowId : LAST_VALID_SEGMENT_ROW_ID;
 
         minimumFlushBytes = limiter.limitBytes() / ACTIVE_BUILDER_COUNT.getAndIncrement();
+    }
+
+    /**
+     * Acquire the node-wide concurrent-build admission permit for this (vector) build, parking until one is
+     * free. Called at the end of a vector subclass constructor; the permit is released exactly once in
+     * {@link #release(IndexContext)}. A no-op when the bound is disabled ({@code concurrent_builds <= 0}).
+     */
+    protected void acquireBuildPermit()
+    {
+        this.buildPermit = JVectorVersionUtil.acquireBuildPermit();
     }
 
     public SegmentMetadata flush() throws IOException
@@ -541,7 +936,7 @@ public abstract class SegmentBuilder
         {
             // only vector indexing is done async and there can only be one term
             assert terms.size() == 1;
-            bytesAllocated = addInternalAsync(terms, segmentRowId);
+            bytesAllocated = addInternalAsync(terms, segmentRowId, key);
         }
         else
         {
@@ -552,7 +947,11 @@ public abstract class SegmentBuilder
         return bytesAllocated;
     }
 
-    protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId)
+    /**
+     * Async add. {@code key} is the row's primary key — the vector merge builder joins it,
+     * via the compaction row-source tags, to the source graph ordinal; other builders ignore it.
+     */
+    protected long addInternalAsync(List<ByteBuffer> terms, int segmentRowId, PrimaryKey key)
     {
         throw new UnsupportedOperationException();
     }
@@ -563,14 +962,15 @@ public abstract class SegmentBuilder
 
     public Throwable getAsyncThrowable()
     {
-        return asyncThrowable.get();
+        return insertFanout == null ? null : insertFanout.error();
     }
 
     public void awaitAsyncAdditions()
     {
-        // addTerm is only called by the compaction thread, serially, so we don't need to worry about new
-        // terms being added while we're waiting -- updatesInFlight can only decrease
-        busyWaitWhile(() -> updatesInFlight.get() > 0);
+        // addTerm is only called by the compaction thread, serially, so no new inserts are dispatched
+        // while we drain. Parks (no spin) until every dispatched insert has completed.
+        if (insertFanout != null)
+            insertFanout.awaitCompletion();
     }
 
     long totalBytesAllocated()
@@ -606,6 +1006,11 @@ public abstract class SegmentBuilder
             minimumFlushBytes = limiter.limitBytes() / ACTIVE_BUILDER_COUNT.decrementAndGet();
             long used = limiter.decrement(totalBytesAllocated);
             active = false;
+            if (buildPermit != null)
+            {
+                buildPermit.close();
+                buildPermit = null;
+            }
             return used;
         }
 

@@ -55,6 +55,8 @@ import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.index.sai.disk.vector.JVectorCompactionControl;
+import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
@@ -632,7 +634,10 @@ public class CassandraDaemon
 	        logger.debug("Classpath: {}", JAVA_CLASS_PATH.getString());
 
             logger.debug("JVM Arguments: {}", ManagementFactory.getRuntimeMXBean().getInputArguments());
-    	}
+
+            JVectorVersionUtil.logStartupConfig();
+            JVectorCompactionControl.registerMBean();
+     }
     }
 
     /**

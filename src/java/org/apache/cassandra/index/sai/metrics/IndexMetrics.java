@@ -52,6 +52,11 @@ public class IndexMetrics extends AbstractMetrics
     public final Histogram compactionSegmentCellsPerSecond;
     public final Histogram compactionSegmentBytesPerSecond;
 
+    public final Counter vectorMergeCount;
+    public final Histogram vectorMergeMillis;
+    public final Histogram vectorMergeBytesWritten;
+    public final Histogram vectorMergeSurvivingOrdinals;
+
     public IndexMetrics(IndexContext context)
     {
         super(context.getKeyspace(), context.getTable(), context.getIndexName(), "IndexMetrics");
@@ -70,6 +75,10 @@ public class IndexMetrics extends AbstractMetrics
         memtableIndexFlushErrors = Metrics.counter(createMetricName("MemtableIndexFlushErrors"));
         segmentFlushErrors = Metrics.counter(createMetricName("CompactionSegmentFlushErrors"));
         queriesCount = Metrics.counter(createMetricName("QueriesCount"));
+        vectorMergeCount = Metrics.counter(createMetricName("VectorMergeCount"));
+        vectorMergeMillis = Metrics.histogram(createMetricName("VectorMergeMillis"), false);
+        vectorMergeBytesWritten = Metrics.histogram(createMetricName("VectorMergeBytesWritten"), false);
+        vectorMergeSurvivingOrdinals = Metrics.histogram(createMetricName("VectorMergeSurvivingOrdinals"), false);
         liveMemtableIndexWriteCount = Metrics.register(createMetricName("LiveMemtableIndexWriteCount"), context::liveMemtableWriteCount);
         memtableOnHeapIndexBytes = Metrics.register(createMetricName("MemtableOnHeapIndexBytes"), context::estimatedOnHeapMemIndexMemoryUsed);
         memtableOffHeapIndexBytes = Metrics.register(createMetricName("MemtableOffHeapIndexBytes"), context::estimatedOffHeapMemIndexMemoryUsed);
