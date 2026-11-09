@@ -52,6 +52,7 @@ import org.apache.cassandra.db.guardrails.Threshold;
 import org.apache.cassandra.exceptions.QueryCancelledException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.db.guardrails.Guardrails;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
@@ -1287,11 +1288,20 @@ public abstract class ReadCommand extends AbstractReadQuery
         public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
         {
             out.writeByte(command.kind.ordinal());
+            // The pre-4.0 layout a DSE 6 peer reads (DSE_6 mode only) has no NEEDS_RECONCILIATION bit (its flags are digest,
+            // thrift and index only). Such a replica filters strictly, as every replica did before CASSANDRA-19018. Replica
+            // filtering protection still runs at the coordinator and fixes a stale match on one replica that another replica
+            // has overwritten, but it cannot recover a row whose matching values were written to different replicas by
+            // separate partial updates: no replica returns that row, so a filtered read above CL ONE that involves a DSE 6
+            // replica can miss it, as the same read does on DSE 6 itself.
+            // Nor has it the ACCEPTS_TRANSIENT bit: a DSE 6 node is never a transient replica (DSE has no transient
+            // replication, so no keyspace of a cluster with DSE 6 nodes has transient replicas).
+            boolean pre40 = DseCompat.isPre40Layout(version);
             out.writeByte(
                     digestFlag(command.isDigestQuery())
                     | indexFlag(null != command.indexQueryPlan())
-                    | acceptsTransientFlag(command.acceptsTransient())
-                    | needsReconciliationFlag(command.rowFilter().needsReconciliation())
+                    | acceptsTransientFlag(!pre40 && command.acceptsTransient())
+                    | needsReconciliationFlag(!pre40 && command.rowFilter().needsReconciliation())
             );
             if (command.isDigestQuery())
                 out.writeUnsignedVInt32(command.digestVersion());

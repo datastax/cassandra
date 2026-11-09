@@ -31,10 +31,23 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class ForwardingInfoTest
 {
+
+    /** Whether every target is listed with the given id: a DSE 6 coordinator lists one id per target. */
+    @Test
+    public void testUseSameMessageID() throws Exception
+    {
+        InetAddressAndPort first = InetAddressAndPort.getByName("127.0.0.1");
+        InetAddressAndPort second = InetAddressAndPort.getByName("127.0.0.2");
+        assertTrue(new ForwardingInfo(ImmutableList.of(first, second), new long[]{ 7, 7 }).useSameMessageID(7));
+        assertFalse(new ForwardingInfo(ImmutableList.of(first, second), new long[]{ 7, 8 }).useSameMessageID(7));
+        assertFalse(new ForwardingInfo(ImmutableList.of(first, second), new long[]{ 8, 9 }).useSameMessageID(7));
+        assertTrue(new ForwardingInfo(ImmutableList.of(), new long[0]).useSameMessageID(7));
+    }
 
     @Test
     public void testSupportedVersions() throws Exception

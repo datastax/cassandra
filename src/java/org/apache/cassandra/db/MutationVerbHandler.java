@@ -23,6 +23,7 @@ import java.util.stream.Collectors;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.ForwardingInfo;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -135,13 +136,17 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
                .withParam(ParamType.RESPOND_TO, originalMessage.from())
                .withoutParam(ParamType.FORWARD_TO);
 
+        // DSE 6 compatibility mode: a DSE 6 coordinator (at the pre-4.0 dialect) lists an id of its own for each target in
+        // FWD_TO and expects the target to answer under it, so each target gets the mutation with the id listed for it, as
+        // the forwarders before 5.0 (HCD 1.2 included) do (mode NONE always reuses the forwarder's message, as before)
+        boolean useSameMessageID = !DseCompat.enabled() || forwardTo.useSameMessageID(originalMessage.id());
         // reuse the same Message if all ids are identical (as they will be for 4.0+ node originated messages)
-        Message<Mutation> message = builder.build();
+        Message<Mutation> message = useSameMessageID ? builder.build() : null;
 
         forwardTo.forEach((id, target) ->
                           {
                               Tracing.trace("Enqueuing forwarded write to {}", target);
-                              MessagingService.instance().send(message, target);
+                              MessagingService.instance().send(useSameMessageID ? message : builder.withId(id).build(), target);
                           });
     }
 }

@@ -489,12 +489,53 @@ public class OutboundConnection
      */
     private void onFailedSerialize(Message<?> message, int messagingVersion, int bytesWrittenToNetwork, Throwable t)
     {
+        boolean pre40 = DseCompat.isPre40Layout(messagingVersion);
+        if (pre40 && !message.verb().existsInPre40Dialect())
+        {
+            onRefusedForPre40Peer(message);
+            return;
+        }
         logger.warn("{} dropping message of type {} due to error", id(), message.verb(), t);
         JVMStabilityInspector.inspectThrowable(t);
         releaseCapacity(1, canonicalSize(message));
         errorCount += 1;
-        errorBytes += message.serializedSize(messagingVersion);
+        errorBytes += pre40 ? pre40SizeOrCanonical(message, messagingVersion) : message.serializedSize(messagingVersion);
         callbacks.onFailedSerialize(message, template.to, messagingVersion, bytesWrittenToNetwork, t);
+    }
+
+    /**
+     * DSE 6 compatibility mode: a request whose verb does not exist in the pre-4.0 dialect, queued before the peer's
+     * version was known (MessagingService refuses it before queuing otherwise), fails to serialize on a connection
+     * that turned out to speak that dialect. It is dropped once, counted as a refusal, and its callback fails at once;
+     * the message cannot be sized at the connection's version, so its canonical size is accounted. Like any message
+     * that fails to serialize, it also counts in the connection's error count and bytes.
+     */
+    private void onRefusedForPre40Peer(Message<?> message)
+    {
+        noSpamLogger.warn("{} not sending {}: the verb does not exist in the pre-4.0 dialect this peer speaks (DSE 6 compatibility mode)",
+                          id(), message.verb());
+        releaseCapacity(1, canonicalSize(message));
+        errorCount += 1;
+        errorBytes += canonicalSize(message);
+        DseCompatRefusals.refused(DseCompat.refusedVerb(message.verb()));
+        callbacks.onRefused(message, template.to);
+    }
+
+    /**
+     * The size at a pre-4.0 version of a message that failed to serialize, or its canonical size when it cannot even be
+     * sized at that version: this must not throw, or the message would never leave the queue.
+     */
+    private int pre40SizeOrCanonical(Message<?> message, int messagingVersion)
+    {
+        try
+        {
+            return message.serializedSize(messagingVersion);
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            return canonicalSize(message);
+        }
     }
 
     /**

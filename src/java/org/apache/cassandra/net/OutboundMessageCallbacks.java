@@ -32,4 +32,13 @@ interface OutboundMessageCallbacks
 
     /** A message was not sent because the connection was forcibly closed */
     void onDiscardOnClose(Message<?> message, InetAddressAndPort peer);
+
+    /**
+     * A message was not sent because its verb does not exist in the pre-4.0 dialect the peer speaks (DSE 6
+     * compatibility mode); by default handled as a discarded message.
+     */
+    default void onRefused(Message<?> message, InetAddressAndPort peer)
+    {
+        onDiscardOnClose(message, peer);
+    }
 }

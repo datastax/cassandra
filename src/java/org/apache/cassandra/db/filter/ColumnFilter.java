@@ -32,6 +32,8 @@ import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -864,19 +866,37 @@ public abstract class ColumnFilter
         // to return static data for empty partitions
         private static final int FETCH_ALL_STATICS_MASK = 0x08;
 
-        private static int makeHeaderByte(ColumnFilter selection)
+        /**
+         * The bits the pre-4.0 layout defines (DSE 6 compatibility mode, messaging version 11): the 3.0.14 header
+         * has no FETCH_ALL_STATICS bit, and in that dialect FETCH_ALL already means all regular and all static
+         * columns.
+         */
+        private static final int PRE40_HEADER_MASK = FETCH_ALL_REGULARS_MASK | HAS_QUERIED_MASK | HAS_SUB_SELECTIONS_MASK;
+
+        private static int makeHeaderByte(ColumnFilter selection, boolean pre40)
         {
-            return (selection.fetchesAllColumns(false) ? FETCH_ALL_REGULARS_MASK : 0)
-                   | (!selection.isWildcard() ? HAS_QUERIED_MASK : 0)
-                   | (selection.subSelections() != null ? HAS_SUB_SELECTIONS_MASK : 0)
-                   | (selection.fetchesAllColumns(true) ? FETCH_ALL_STATICS_MASK : 0);
+            int header = (selection.fetchesAllColumns(false) ? FETCH_ALL_REGULARS_MASK : 0)
+                         | (!selection.isWildcard() ? HAS_QUERIED_MASK : 0)
+                         | (selection.subSelections() != null ? HAS_SUB_SELECTIONS_MASK : 0)
+                         | (selection.fetchesAllColumns(true) ? FETCH_ALL_STATICS_MASK : 0);
+            return pre40 ? header & PRE40_HEADER_MASK : header;
+        }
+
+        /**
+         * Whether the fetched columns are sent: always, except in the pre-4.0 layout of Cassandra 3.0.0-3.0.13 (messaging
+         * version 10), where the receiver fetches all the columns of the table, as HCD 1.2 does. Only in DSE 6
+         * compatibility mode: with the mode off version 10 keeps the layout it had before the mode existed.
+         */
+        private static boolean hasFetchedColumns(int version)
+        {
+            return version >= MessagingService.VERSION_3014 || !DseCompat.isPre40Layout(version);
         }
 
         public void serialize(ColumnFilter selection, DataOutputPlus out, int version) throws IOException
         {
-            out.writeByte(makeHeaderByte(selection));
+            out.writeByte(makeHeaderByte(selection, DseCompat.isPre40Layout(version)));
 
-            if (selection.fetchesAllColumns(false))
+            if (hasFetchedColumns(version) && selection.fetchesAllColumns(false))
             {
                 serializeRegularAndStaticColumns(selection.fetchedColumns(), out);
             }
@@ -920,7 +940,7 @@ public abstract class ColumnFilter
             RegularAndStaticColumns queried = null;
 
             if (isFetchAllRegulars)
-                fetched = deserializeRegularAndStaticColumns(in, metadata);
+                fetched = hasFetchedColumns(version) ? deserializeRegularAndStaticColumns(in, metadata) : metadata.regularAndStaticColumns();
 
             if (hasQueried)
                 queried = deserializeRegularAndStaticColumns(in, metadata);
@@ -933,6 +953,11 @@ public abstract class ColumnFilter
             {
                 if (!hasQueried)
                     return new WildCardColumnFilter(fetched);
+
+                // pre-4.0 (CASSANDRA-12768), and so in the DSE 6 dialect, fetching all regular columns fetched all
+                // static columns too; the sender does not have a FETCH_ALL_STATICS bit to say so
+                if (DseCompat.isPre40Layout(version))
+                    return new SelectionColumnFilter(FetchingStrategy.ALL_COLUMNS, queried, fetched, subSelections);
 
                 if (!isFetchAllStatics)
                     return new SelectionColumnFilter(FetchingStrategy.ALL_REGULARS_AND_QUERIED_STATICS_COLUMNS, queried, fetched, subSelections);
@@ -969,7 +994,7 @@ public abstract class ColumnFilter
         {
             long size = 1; // header byte
 
-            if (selection.fetchesAllColumns(false))
+            if (hasFetchedColumns(version) && selection.fetchesAllColumns(false))
             {
                 size += regularAndStaticColumnsSerializedSize(selection.fetchedColumns());
             }

@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
@@ -73,6 +74,34 @@ public class RequestCallbacks implements OutboundMessageCallbacks
 
         long expirationInterval = defaultExpirationInterval();
         executor.scheduleWithFixedDelay(this::expire, expirationInterval, expirationInterval, NANOSECONDS);
+    }
+
+    /**
+     * The serializer of the response a pre-4.0 peer (DSE 6 compatibility mode) sends for the request with this id:
+     * such a peer answers with the generic {@link Verb#REQUEST_RSP} or {@link Verb#INTERNAL_RSP} verbs, which have
+     * no serializer of their own, so the payload is read with the serializer of the response verb of the request.
+     * Null when no callback is registered (the payload is skipped) or the request verb has no response verb.
+     */
+    @Nullable
+    <In, Out> IVersionedAsymmetricSerializer<In, Out> responseSerializer(long id, InetAddressAndPort peer)
+    {
+        CallbackInfo info = get(id, peer);
+        return info == null || info.requestVerb.responseVerb == null
+             ? null
+             : (IVersionedAsymmetricSerializer<In, Out>) info.requestVerb.responseVerb.serializer();
+    }
+
+    /**
+     * When the response to the request with this id, read from a pre-4.0 peer (DSE 6 compatibility mode), expires on
+     * receipt: at the deadline of the request's callback. Such a peer stamps a response with the start of the
+     * operation and names only the generic response verbs, whose own timeout would drop, for instance, a TRUNCATE
+     * response that took longer than the RPC timeout. Without a callback, the response verb's own expiry applies:
+     * nothing waits for that response anyway.
+     */
+    long pre40ResponseExpiresAtNanos(long id, InetAddressAndPort peer, Verb responseVerb, long createdAtNanos)
+    {
+        CallbackInfo info = get(id, peer);
+        return info == null ? responseVerb.expiresAtNanos(createdAtNanos) : info.expiresAtNanos;
     }
 
     /**
@@ -336,6 +365,20 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     public void onDiscardOnClose(Message<?> message, InetAddressAndPort peer)
     {
         removeAndExpire(message, peer);
+    }
+
+    /**
+     * A request refused because its verb does not exist in the pre-4.0 dialect the peer speaks (DSE 6 compatibility
+     * mode), before it was queued or when it was serialized: its callback fails at once, with
+     * {@link RequestFailureReason#UNKNOWN}, instead of timing out. Such requests never carry forwarding targets (only
+     * mutations do, and they exist in the dialect).
+     */
+    @Override
+    public void onRefused(Message<?> message, InetAddressAndPort peer)
+    {
+        CallbackInfo info = remove(message.id(), peer);
+        if (info != null && info.invokeOnFailure())
+            INTERNAL_RESPONSE.submit(() -> info.callback.onFailure(peer, RequestFailureReason.UNKNOWN));
     }
 
     private void removeAndExpire(Message message, InetAddressAndPort peer)

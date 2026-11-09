@@ -46,6 +46,7 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.TeeDataInputPlus;
 import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
@@ -56,6 +57,8 @@ import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.concurrent.Future;
 
+import static org.apache.cassandra.net.MessagingService.VERSION_30;
+import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_50;
 import static org.apache.cassandra.net.MessagingService.VERSION_DSE_68;
@@ -372,6 +375,11 @@ public class Mutation implements IMutation, Supplier<Mutation>
         return buff.append("])").toString();
     }
 
+    /**
+     * The sizes at the pre-4.0 versions 10 and 11, used in DSE 6 compatibility mode only: allocated on first use, so
+     * that the mode costs a single reference when it is off.
+     */
+    private int[] serializedSizesPre40;
     private int serializedSize40;
     private int serializedSize50;
     private int serializedSizeDS10;
@@ -384,6 +392,19 @@ public class Mutation implements IMutation, Supplier<Mutation>
     {
         switch (version)
         {
+            case VERSION_30:
+            case VERSION_3014:
+            {
+                if (!DseCompat.enabled())
+                    throw new IllegalStateException("Unknown serialization version: " + version);
+                int[] sizes = serializedSizesPre40;
+                if (sizes == null)
+                    serializedSizesPre40 = sizes = new int[2];
+                int index = version - VERSION_30;
+                if (sizes[index] == 0)
+                    sizes[index] = (int) serializer.serializedSize(this, version);
+                return sizes[index];
+            }
             case VERSION_40:
                 if (serializedSize40 == 0)
                     serializedSize40 = (int) serializer.serializedSize(this, VERSION_40);

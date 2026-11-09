@@ -44,6 +44,7 @@ import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.locator.InOurDc;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -183,9 +184,20 @@ public class BlockingPartitionRepair
         }
     }
 
-    private static int msgVersionIdx(int version)
+    /**
+     * The lowest messaging version a replica may be at, where the per-version repair mutations start:
+     * {@link MessagingService#minimum_version}, except in DSE 6 compatibility mode, where a DSE 6 replica is at the
+     * pre-4.0 version {@link MessagingService#VERSION_3014} and the lowest version is the oldest one a pre-4.0 peer may
+     * request, {@link DseCompat#OLDEST_PRE40_VERSION}.
+     */
+    private static int lowestVersion()
     {
-        return version - MessagingService.minimum_version;
+        return DseCompat.enabled() ? DseCompat.OLDEST_PRE40_VERSION : MessagingService.minimum_version;
+    }
+
+    private static int msgVersionIdx(int version, int lowestVersion)
+    {
+        return version - lowestVersion;
     }
 
     /**
@@ -212,11 +224,12 @@ public class BlockingPartitionRepair
 
         ReadRepairMetrics.speculatedWrite.mark();
 
-        Mutation[] versionedMutations = new Mutation[msgVersionIdx(MessagingService.current_version) + 1];
+        int lowestVersion = lowestVersion();
+        Mutation[] versionedMutations = new Mutation[msgVersionIdx(MessagingService.current_version, lowestVersion) + 1];
 
         for (Replica replica : newCandidates)
         {
-            int versionIdx = msgVersionIdx(MessagingService.instance().versions.get(replica.endpoint()));
+            int versionIdx = msgVersionIdx(MessagingService.instance().versions.get(replica.endpoint()), lowestVersion);
 
             Mutation mutation = versionedMutations[versionIdx];
 

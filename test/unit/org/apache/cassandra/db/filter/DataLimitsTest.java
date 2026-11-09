@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.PageSize;
 import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.marshal.IntegerType;
@@ -39,6 +40,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.db.filter.DataLimits.NO_LIMIT;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.fail;
 
 public class DataLimitsTest
@@ -80,6 +82,136 @@ public class DataLimitsTest
             checkSerialization(version, groupByLimitsForPagingInBytes, "group by limits for paging in bytes", metadata);
             checkSerialization(version, groupByLimitsForPagingInRowsWithLastRow, "group by limits for paging in rows with last row", metadata);
             checkSerialization(version, groupByLimitsForPagingInBytesWithLastRow, "group by limits for paging in bytes with last row", metadata);
+        }
+    }
+
+    /**
+     * At 10 (the older DSE migration dialect) and, in DSE 6 compatibility mode, at 11 (its dialect) the kind is written
+     * with DSE's ordinal, which lacks THRIFT_LIMIT and SUPER_COLUMN_COUNTING_LIMIT: the GROUP BY kinds are 2
+     * and 3 there, 4 and 5 from 4.0. Neither dialect has the bytes limit of the DS versions.
+     */
+    @Test
+    public void kindOrdinalsBelow40AreDseOnes() throws IOException
+    {
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            checkKindOrdinals(true);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+        // with the mode off only 10 uses the DSE ordinals, as before the mode existed
+        checkKindOrdinals(false);
+    }
+
+    private void checkKindOrdinals(boolean dse6Mode) throws IOException
+    {
+        TableMetadata metadata = SchemaLoader.standardCFMD("ks", "cf", 1, IntegerType.instance, IntegerType.instance, IntegerType.instance).build();
+        int[] versions = { MessagingService.VERSION_30, MessagingService.VERSION_3014, MessagingService.VERSION_40 };
+        for (int version : versions)
+        {
+            boolean pre40 = version == MessagingService.VERSION_30 || (dse6Mode && version == MessagingService.VERSION_3014);
+            // CQL_LIMIT: kind, row limit, per-partition limit, distinct
+            assertThat(ByteBufferUtil.bytesToHex(ByteBuffer.wrap(serialize(cqlLimits, version, metadata)))).isEqualTo("00131100");
+            // CQL_PAGING_LIMIT: then the last returned key (vint length) and the rows remaining in it
+            assertThat(serialize(cqlLimitsForPagingInRowsWithLastRow, version, metadata)).isEqualTo(expected(1, out -> {
+                out.writeUnsignedVInt32(13);
+                out.writeUnsignedVInt32(17);
+                out.writeBoolean(false);
+                ByteBufferUtil.writeWithVIntLength(lastReturnedKey, out);
+                out.writeUnsignedVInt32(5);
+            }));
+            // CQL_GROUP_BY_LIMIT: group limit, group per-partition limit, row limit, the aggregation (AGGREGATE_EVERYTHING,
+            // ordinal 0) and an empty grouping state
+            assertThat(serialize(groupByLimits, version, metadata)).isEqualTo(expected(pre40 ? 2 : 4, out -> {
+                out.writeUnsignedVInt32(19);
+                out.writeUnsignedVInt32(17);
+                out.writeUnsignedVInt32(NO_LIMIT);
+                out.writeByte(0);
+                out.writeBoolean(false);
+            }));
+            // CQL_GROUP_BY_PAGING_LIMIT: then the last returned key and the rows remaining in it
+            assertThat(serialize(groupByLimitsForPagingInRowsWithLastRow, version, metadata)).isEqualTo(expected(pre40 ? 3 : 5, out -> {
+                out.writeUnsignedVInt32(19);
+                out.writeUnsignedVInt32(17);
+                out.writeUnsignedVInt32(13);
+                out.writeByte(0);
+                out.writeBoolean(false);
+                ByteBufferUtil.writeWithVIntLength(lastReturnedKey, out);
+                out.writeUnsignedVInt32(5);
+            }));
+        }
+    }
+
+    /**
+     * In DSE 6 compatibility mode an ordinal no kind has, sent by a DSE 6 peer at 11, is refused with an explicit error;
+     * with the mode off an unknown ordinal fails as it did before the mode existed.
+     */
+    @Test
+    public void unknownKindOrdinalIsRefused()
+    {
+        TableMetadata metadata = SchemaLoader.standardCFMD("ks", "cf", 1, IntegerType.instance, IntegerType.instance, IntegerType.instance).build();
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            // 4 is CQL_GROUP_BY_LIMIT from 4.0, but DSE has no fifth kind
+            assertThatThrownBy(() -> deserialize(new byte[]{ 4 }, MessagingService.VERSION_3014, metadata))
+            .isInstanceOf(IOException.class)
+            .hasMessage("Unknown DataLimits.Kind ordinal 4 at messaging version " + MessagingService.VERSION_3014);
+            assertThatThrownBy(() -> deserialize(new byte[]{ 9 }, MessagingService.VERSION_3014, metadata))
+            .isInstanceOf(IOException.class)
+            .hasMessage("Unknown DataLimits.Kind ordinal 9 at messaging version " + MessagingService.VERSION_3014);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+        assertThatThrownBy(() -> deserialize(new byte[]{ 4 }, MessagingService.VERSION_30, metadata))
+        .isInstanceOf(AssertionError.class)
+        .hasMessage("Unknown DataLimits.Kind with ordinal 4 and version " + MessagingService.VERSION_30);
+        assertThatThrownBy(() -> deserialize(new byte[]{ 9 }, MessagingService.VERSION_40, metadata))
+        .isInstanceOf(ArrayIndexOutOfBoundsException.class);
+    }
+
+    private interface Writer
+    {
+        void write(DataOutputBuffer out) throws IOException;
+    }
+
+    private static byte[] expected(int ordinal, Writer body) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            out.writeByte(ordinal);
+            body.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    private static byte[] serialize(DataLimits limits, int version, TableMetadata metadata) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            DataLimits.serializer.serialize(limits, out, version, metadata.comparator);
+            byte[] bytes = out.toByteArray();
+            assertThat(DataLimits.serializer.serializedSize(limits, version, metadata.comparator)).isEqualTo(bytes.length);
+            try (DataInputBuffer in = new DataInputBuffer(bytes))
+            {
+                assertThat(DataLimits.serializer.deserialize(in, version, metadata).kind()).isEqualTo(limits.kind());
+            }
+            return bytes;
+        }
+    }
+
+    private static DataLimits deserialize(byte[] bytes, int version, TableMetadata metadata) throws IOException
+    {
+        try (DataInputBuffer in = new DataInputBuffer(bytes))
+        {
+            return DataLimits.serializer.deserialize(in, version, metadata);
         }
     }
 

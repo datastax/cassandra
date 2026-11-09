@@ -37,6 +37,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.FileDataInput;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.SearchIterator;
 import org.apache.cassandra.utils.WrappedException;
@@ -159,6 +160,9 @@ public class UnfilteredSerializer
     private void serialize(Row row, SerializationHelper helper, DataOutputPlus out, long previousUnfilteredSize, int version)
     throws IOException
     {
+        if (DseCompat.isPre40Layout(version) && !helper.header.isForSSTable())
+            checkPre40DeletionTimes(row, version);
+
         int flags = 0;
         int extendedFlags = 0;
 
@@ -202,7 +206,7 @@ public class UnfilteredSerializer
         {
             try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
             {
-                serializeRowBody(row, flags, helper, dob);
+                serializeRowBody(row, flags, helper, dob, version);
 
                 out.writeUnsignedVInt(dob.position() + TypeSizes.sizeofUnsignedVInt(previousUnfilteredSize));
                 // We write the size of the previous unfiltered to make reverse queries more efficient (and simpler).
@@ -213,12 +217,12 @@ public class UnfilteredSerializer
         }
         else
         {
-            serializeRowBody(row, flags, helper, out);
+            serializeRowBody(row, flags, helper, out, version);
         }
     }
 
     @Inline
-    private void serializeRowBody(Row row, int flags, SerializationHelper helper, DataOutputPlus out)
+    private void serializeRowBody(Row row, int flags, SerializationHelper helper, DataOutputPlus out, int version)
     throws IOException
     {
         boolean isStatic = row.isStatic();
@@ -236,7 +240,7 @@ public class UnfilteredSerializer
             header.writeLocalDeletionTime(pkLiveness.localExpirationTime(), out);
         }
         if ((flags & HAS_DELETION) != 0)
-            header.writeDeletionTime(deletion.time(), out);
+            header.writeDeletionTime(deletion.time(), out, version);
 
         if ((flags & HAS_ALL_COLUMNS) == 0)
             Columns.serializer.serializeSubset(row.columns(), headerColumns, out);
@@ -259,7 +263,8 @@ public class UnfilteredSerializer
                     if (cd.column.isSimple())
                         Cell.serializer.serialize((Cell<?>) cd, column, out, pkLiveness, header);
                     else
-                        writeComplexColumn((ComplexColumnData) cd, column, (flags & HAS_COMPLEX_DELETION) != 0, pkLiveness, header, out);
+                        writeComplexColumn((ComplexColumnData) cd, column, (flags & HAS_COMPLEX_DELETION) != 0,
+                                           pkLiveness, header, out, version);
                 }
                 catch (IOException e)
                 {
@@ -276,11 +281,17 @@ public class UnfilteredSerializer
         }
     }
 
-    private void writeComplexColumn(ComplexColumnData data, ColumnMetadata column, boolean hasComplexDeletion, LivenessInfo rowLiveness, SerializationHeader header, DataOutputPlus out)
+    private void writeComplexColumn(ComplexColumnData data,
+                                    ColumnMetadata column,
+                                    boolean hasComplexDeletion,
+                                    LivenessInfo rowLiveness,
+                                    SerializationHeader header,
+                                    DataOutputPlus out,
+                                    int version)
     throws IOException
     {
         if (hasComplexDeletion)
-            header.writeDeletionTime(data.complexDeletion(), out);
+            header.writeDeletionTime(data.complexDeletion(), out, version);
 
         out.writeUnsignedVInt32(data.cellsCount());
         for (Cell<?> cell : data)
@@ -291,6 +302,18 @@ public class UnfilteredSerializer
     throws IOException
     {
         SerializationHeader header = helper.header;
+        if (DseCompat.isPre40Layout(version) && !header.isForSSTable())
+        {
+            if (marker.isBoundary())
+            {
+                checkPre40DeletionTime(((RangeTombstoneBoundaryMarker) marker).endDeletionTime().localDeletionTime(), version);
+                checkPre40DeletionTime(((RangeTombstoneBoundaryMarker) marker).startDeletionTime().localDeletionTime(), version);
+            }
+            else
+            {
+                checkPre40DeletionTime(((RangeTombstoneBoundMarker) marker).deletionTime().localDeletionTime(), version);
+            }
+        }
         out.writeByte((byte)IS_MARKER);
         ClusteringBoundOrBoundary.serializer.serialize(marker.clustering(), out, version, header.clusteringTypes());
 
@@ -303,13 +326,58 @@ public class UnfilteredSerializer
         if (marker.isBoundary())
         {
             RangeTombstoneBoundaryMarker bm = (RangeTombstoneBoundaryMarker)marker;
-            header.writeDeletionTime(bm.endDeletionTime(), out);
-            header.writeDeletionTime(bm.startDeletionTime(), out);
+            header.writeDeletionTime(bm.endDeletionTime(), out, version);
+            header.writeDeletionTime(bm.startDeletionTime(), out, version);
         }
         else
         {
-            header.writeDeletionTime(((RangeTombstoneBoundMarker)marker).deletionTime(), out);
+            header.writeDeletionTime(((RangeTombstoneBoundMarker)marker).deletionTime(), out, version);
         }
+    }
+
+    /**
+     * DSE 6 compatibility mode: the pre-4.0 dialect has 32-bit local deletion times, the last one early in 2038, and a
+     * DSE 6 peer would read a later one as a negative, invalid, time. The mode requires the {@code HCD_1} storage
+     * compatibility mode, under which no deletion time goes past that cap, so this never fires; it fails fast, before
+     * anything is written, if one ever does. {@link Cell#NO_DELETION_TIME} (live) is never written as a deletion time.
+     * It covers what is serialized at the peer's version: mutations, hints, batches, Paxos commits, and the data of a
+     * read response, which the replica builds at the current version and serializes again at the peer's.
+     */
+    public static void checkPre40DeletionTime(long localDeletionTime, int version)
+    {
+        if (localDeletionTime > CellData.MAX_DELETION_TIME_2038_LEGACY_CAP && localDeletionTime != Cell.NO_DELETION_TIME)
+            throw new IllegalStateException("DSE 6 compatibility mode: local deletion time " + localDeletionTime + " is past 2038 and cannot be sent at messaging version " +
+                                            version + ", whose deletion times are 32-bit");
+    }
+
+    private static void checkPre40DeletionTimes(Row row, int version)
+    {
+        LivenessInfo pkLiveness = row.primaryKeyLivenessInfo();
+        if (pkLiveness.isExpiring())
+            checkPre40DeletionTime(pkLiveness.localExpirationTime(), version);
+        if (!row.deletion().isLive())
+            checkPre40DeletionTime(row.deletion().time().localDeletionTime(), version);
+        for (ColumnData data : row)
+        {
+            if (data.column().isSimple())
+            {
+                checkPre40DeletionTime((Cell<?>) data, version);
+            }
+            else
+            {
+                ComplexColumnData complex = (ComplexColumnData) data;
+                if (!complex.complexDeletion().isLive())
+                    checkPre40DeletionTime(complex.complexDeletion().localDeletionTime(), version);
+                for (Cell<?> cell : complex)
+                    checkPre40DeletionTime(cell, version);
+            }
+        }
+    }
+
+    private static void checkPre40DeletionTime(Cell<?> cell, int version)
+    {
+        if (cell.isExpiring() || cell.isTombstone())
+            checkPre40DeletionTime(cell.localDeletionTime(), version);
     }
 
     public long serializedSize(Unfiltered unfiltered, SerializationHelper helper, int version)
@@ -360,7 +428,7 @@ public class UnfilteredSerializer
             size += header.localDeletionTimeSerializedSize(pkLiveness.localExpirationTime());
         }
         if (!deletion.isLive())
-            size += header.deletionTimeSerializedSize(deletion.time());
+            size += header.deletionTimeSerializedSize(deletion.time(), version);
 
         if (!hasAllColumns)
             size += Columns.serializer.serializedSubsetSize(row.columns(), header.columns(isStatic));
@@ -373,16 +441,22 @@ public class UnfilteredSerializer
             if (data.column.isSimple())
                 return v + Cell.serializer.serializedSize((Cell<?>) data, column, pkLiveness, header);
             else
-                return v + sizeOfComplexColumn((ComplexColumnData) data, column, hasComplexDeletion, pkLiveness, header);
+                return v + sizeOfComplexColumn((ComplexColumnData) data, column, hasComplexDeletion, pkLiveness, header,
+                                               version);
         }, size);
     }
 
-    private long sizeOfComplexColumn(ComplexColumnData data, ColumnMetadata column, boolean hasComplexDeletion, LivenessInfo rowLiveness, SerializationHeader header)
+    private long sizeOfComplexColumn(ComplexColumnData data,
+                                     ColumnMetadata column,
+                                     boolean hasComplexDeletion,
+                                     LivenessInfo rowLiveness,
+                                     SerializationHeader header,
+                                     int version)
     {
         long size = 0;
 
         if (hasComplexDeletion)
-            size += header.deletionTimeSerializedSize(data.complexDeletion());
+            size += header.deletionTimeSerializedSize(data.complexDeletion(), version);
 
         size += TypeSizes.sizeofUnsignedVInt(data.cellsCount());
         for (Cell<?> cell : data)
@@ -408,12 +482,12 @@ public class UnfilteredSerializer
         if (marker.isBoundary())
         {
             RangeTombstoneBoundaryMarker bm = (RangeTombstoneBoundaryMarker)marker;
-            size += header.deletionTimeSerializedSize(bm.endDeletionTime());
-            size += header.deletionTimeSerializedSize(bm.startDeletionTime());
+            size += header.deletionTimeSerializedSize(bm.endDeletionTime(), version);
+            size += header.deletionTimeSerializedSize(bm.startDeletionTime(), version);
         }
         else
         {
-           size += header.deletionTimeSerializedSize(((RangeTombstoneBoundMarker)marker).deletionTime());
+           size += header.deletionTimeSerializedSize(((RangeTombstoneBoundMarker)marker).deletionTime(), version);
         }
         return size;
     }
