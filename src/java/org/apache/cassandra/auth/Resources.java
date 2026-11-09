@@ -66,6 +66,20 @@ public final class Resources
      */
     public static IResource fromName(String name)
     {
+        IResource resource = tryFromName(name);
+        if (resource == null)
+            throw new IllegalArgumentException(String.format("Name %s is not valid for any resource type", name));
+        return resource;
+    }
+
+    /**
+     * Like {@link #fromName(String)} but returns null for a name of a resource type this software does not have,
+     * such as the DataStax Enterprise resources ({@code rows/…}, {@code rpc/…}, {@code search/…}, …) that survive
+     * in {@code system_auth.role_permissions} after an in-place upgrade from DSE. A malformed name of a known type
+     * still throws, as with {@link #fromName(String)} (an {@link IllegalArgumentException}, for instance).
+     */
+    public static IResource tryFromName(String name)
+    {
         if (name.startsWith(RoleResource.root().getName()))
             return RoleResource.fromName(name);
         else if (name.startsWith(DataResource.root().getName()))
@@ -75,6 +89,6 @@ public final class Resources
         else if (name.startsWith(JMXResource.root().getName()))
             return JMXResource.fromName(name);
         else
-            throw new IllegalArgumentException(String.format("Name %s is not valid for any resource type", name));
+            return null;
     }
 }

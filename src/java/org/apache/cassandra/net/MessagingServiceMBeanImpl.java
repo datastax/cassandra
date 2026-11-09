@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.cassandra.auth.CassandraAuthorizer;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
@@ -406,5 +407,21 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
         // the lines of the persisted record that are not addresses with port refuse a start with NONE too
         result.addAll(DsePeersRecord.unparsedEntries());
         return result;
+    }
+
+    @Override
+    public List<String> getDseLoneWriteGrants()
+    {
+        if (!(DatabaseDescriptor.getAuthorizer() instanceof CassandraAuthorizer))
+            return Collections.emptyList();
+        return CassandraAuthorizer.loneDseWriteGrants();
+    }
+
+    @Override
+    public String getDseLoneWriteGrantsSource()
+    {
+        if (!(DatabaseDescriptor.getAuthorizer() instanceof CassandraAuthorizer))
+            return null;
+        return CassandraAuthorizer.loneDseWriteGrantsSource();
     }
 }
