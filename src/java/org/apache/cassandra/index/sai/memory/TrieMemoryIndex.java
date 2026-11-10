@@ -894,6 +894,9 @@ public class TrieMemoryIndex extends MemoryIndex
     private long estimateNumRowsInTermRange(@Nullable ByteComparable queryLower, boolean lowerExclusive,
                                             @Nullable ByteComparable queryUpper, boolean upperExclusive)
     {
+        if (isEmptyRange(queryLower, !lowerExclusive, queryUpper, !upperExclusive))
+            return 0;
+
         Trie<PrimaryKeys> subtrie = queryLower == null && queryUpper == null
                                     ? data
                                     : data.slice(queryLower == null ? ByteComparable.EMPTY : queryLower,
@@ -1044,17 +1047,27 @@ public class TrieMemoryIndex extends MemoryIndex
             upperInclusive = false;
         }
 
-        // The slice rejects bounds that are out of order, which an inverted range (e.g. v > 5 AND v < 3) and equal
-        // bounds with both sides exclusive produce. Equal bounds with one exclusive side make a valid empty slice and
-        // are returned early only because they are empty.
-        if (lowerBound != null && upperBound != null)
-        {
-            int cmp = ByteComparable.compare(lowerBound, upperBound, data.byteComparableVersion());
-            if (cmp > 0 || (cmp == 0 && !(lowerInclusive && upperInclusive)))
-                return Trie.empty(data.byteComparableVersion());
-        }
+        if (isEmptyRange(lowerBound, lowerInclusive, upperBound, upperInclusive))
+            return Trie.empty(data.byteComparableVersion());
 
         return data.slice(lowerBound, lowerInclusive, upperBound, upperInclusive);
+    }
+
+    /**
+     * Returns whether the given term range can't contain any term because its bounds are inverted
+     * (e.g. {@code v > 5 AND v < 3}) or equal with at least one exclusive side. A null bound is unbounded.
+     * <p>
+     * Trie slices reject out-of-order bounds, so this must be checked before slicing. Equal bounds with one exclusive
+     * side would make a valid empty slice, they are also reported here only because they are empty.
+     */
+    private boolean isEmptyRange(@Nullable ByteComparable lowerBound, boolean lowerInclusive,
+                                 @Nullable ByteComparable upperBound, boolean upperInclusive)
+    {
+        if (lowerBound == null || upperBound == null)
+            return false;
+
+        int cmp = ByteComparable.compare(lowerBound, upperBound, data.byteComparableVersion());
+        return cmp > 0 || (cmp == 0 && !(lowerInclusive && upperInclusive));
     }
 
     @Override
