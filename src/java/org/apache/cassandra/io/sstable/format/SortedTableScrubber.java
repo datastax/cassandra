@@ -829,11 +829,6 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
         private final OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics;
         private final long timestampBump;
 
-        public NoTTLTransformer(OutputHandler outputHandler, TableMetadata metadata, OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics)
-        {
-            this(outputHandler, metadata, overwrittenTTLInfoMetrics, false);
-        }
-
         public NoTTLTransformer(OutputHandler outputHandler, TableMetadata metadata, OverwrittenTTLInfoMetrics overwrittenTTLInfoMetrics, boolean bumpTimestamp)
         {
             this.metadata = metadata;

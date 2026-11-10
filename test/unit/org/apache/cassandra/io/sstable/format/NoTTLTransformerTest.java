@@ -74,7 +74,7 @@ public class NoTTLTransformerTest
 
     private static SortedTableScrubber.NoTTLTransformer transformer(SortedTableScrubber.OverwrittenTTLInfoMetrics metrics)
     {
-        return new SortedTableScrubber.NoTTLTransformer(new OutputHandler.LogOutput(), metadata, metrics);
+        return new SortedTableScrubber.NoTTLTransformer(new OutputHandler.LogOutput(), metadata, metrics, false);
     }
 
     private static SortedTableScrubber.NoTTLTransformer bumpingTransformer(SortedTableScrubber.OverwrittenTTLInfoMetrics metrics)
