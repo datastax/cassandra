@@ -1293,7 +1293,10 @@ public class RowFilter
                 ByteBuffer mapKey = expression instanceof MapComparisonExpression ? ((MapComparisonExpression) expression).key : null;
                 CellBounds bounds = perCellBounds.computeIfAbsent(Pair.create(expression.column, mapKey), c -> new CellBounds(valueType));
                 bounds.add(expression.operator, expression.value);
+            }
 
+            for (CellBounds bounds : perCellBounds.values())
+            {
                 if (bounds.isAlwaysFalse())
                     return true;
             }
