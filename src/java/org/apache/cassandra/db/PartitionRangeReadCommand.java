@@ -315,7 +315,9 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
             if (inputCollector.isEmpty())
                 return EmptyIterators.unfilteredPartition(metadata());
 
-            return checkCacheFilter(UnfilteredPartitionIterators.mergeLazily(inputCollector.finalizeIterators(cfs, nowInSec(), controller.oldestUnrepairedTombstone())), cfs);
+            return checkCacheFilter(UnfilteredPartitionIterators.mergeLazily(inputCollector.finalizeIterators(cfs, nowInSec(), controller.oldestUnrepairedTombstone()),
+                                                                             controller::checkForCancellation),
+                                    cfs);
         }
         catch (RuntimeException | Error e)
         {

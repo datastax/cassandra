@@ -668,6 +668,12 @@ public abstract class ReadCommand extends AbstractReadQuery
         return Transformation.apply(iter, new MetricRecording());
     }
 
+    /**
+     * Throws {@link QueryCancelledException} once the read has been aborted, normally because it ran past its timeout.
+     * <p>
+     * This only sees what the merge returns. The merge checks data that merges to nothing itself, see
+     * {@link ReadExecutionController#checkForCancellation}.
+     */
     private class QueryCancellationChecker extends StoppingTransformation<UnfilteredRowIterator>
     {
         long lastCheckedAt = 0;
@@ -808,7 +814,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     {
         final BiFunction<List<UnfilteredRowIterator>, RepairedDataInfo, UnfilteredRowIterator> merge =
             (unfilteredRowIterators, repairedDataInfo) -> {
-                UnfilteredRowIterator repaired = UnfilteredRowIterators.merge(unfilteredRowIterators);
+                UnfilteredRowIterator repaired = UnfilteredRowIterators.merge(unfilteredRowIterators, controller::checkForCancellation);
                 return repairedDataInfo.withRepairedDataInfo(repaired);
             };
 
@@ -826,7 +832,8 @@ public abstract class ReadCommand extends AbstractReadQuery
         final BiFunction<List<UnfilteredPartitionIterator>, RepairedDataInfo, UnfilteredPartitionIterator> merge =
             (unfilteredPartitionIterators, repairedDataInfo) -> {
                 UnfilteredPartitionIterator repaired = UnfilteredPartitionIterators.merge(unfilteredPartitionIterators,
-                                                                                          NOOP);
+                                                                                          NOOP,
+                                                                                          controller::checkForCancellation);
                 return repairedDataInfo.withRepairedDataInfo(repaired);
             };
 
