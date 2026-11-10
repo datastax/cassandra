@@ -84,7 +84,6 @@ import org.apache.cassandra.exceptions.InvalidPatternException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
-import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -1344,8 +1343,7 @@ public class RowFilter
             return !table.isVirtual() &&
                    Keyspace.openAndGetStore(table)
                            .getIndexManager()
-                           .getBestIndexFor(expression, hints, StorageAttachedIndex.class)
-                           .isPresent();
+                           .isSaiIndexed(expression, hints);
         }
     }
 
