@@ -196,6 +196,26 @@ public class SlowSAIQueryLoggerTest extends TestBaseImpl
                           "NumericIndexScan",
                           quote("predicate: Expression{name: n, op: RANGE, lower: (?, false), upper: (null, false), exclusions: []}"));
 
+        // test that optimizer options are included in the logged query
+        mark = node.logs().mark();
+        coordinator.execute(numericQuery + " WITH optimizer_options = {'intersection_clause_limit': '1'}", ConsistencyLevel.ONE);
+        assertLogsContain(mark, node, quote("WITH optimizer_options = {'intersection_clause_limit': 1}"));
+
+        mark = node.logs().mark();
+        coordinator.execute(numericQuery +
+                            " WITH optimizer_options = {" +
+                            "'query_optimization_level': '0', " +
+                            "'intersection_clause_limit': '2', " +
+                            "'use_term_statistics': 'true', " +
+                            "'hybrid_sort_order': 'filter_then_sort'}",
+                            ConsistencyLevel.ONE);
+        assertLogsContain(mark, node,
+                          quote("WITH optimizer_options = {" +
+                                "'query_optimization_level': 0, " +
+                                "'intersection_clause_limit': 2, " +
+                                "'use_term_statistics': true, " +
+                                "'hybrid_sort_order': 'FILTER_THEN_SORT'}"));
+
         // test single text query
         mark = node.logs().mark();
         String textQuery = format("SELECT * FROM %s.%s WHERE s = 's_2' OR s = 's_3'");
