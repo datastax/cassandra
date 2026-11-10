@@ -670,9 +670,7 @@ columns from it, leaving out the data of a column dropped after it was written t
 
 A schema change that changes the static or regular columns switches the memtable (see `shouldSwitch`), and the
 new memtable numbers the columns as the new metadata does. (Every schema change switches it in fact, as new
-metadata has a new comparator, unless a concurrent switch, for the trie size limit for instance, created the next
-memtable with the old metadata first; see `ColumnFamilyStore.switchMemtableIfCurrent`. Such a memtable asks to be
-switched when an update whose columns differ from its own reaches it.)
+metadata has a new comparator.)
 
 An update's trie numbers the columns as the metadata the update was made or deserialized with. When the update
 was made before a schema change and is applied after it, its column lists differ from the memtable's, and the
@@ -691,19 +689,21 @@ write with `ColumnNewerThanMemtableException` before it takes any of it, and ask
 change if the table's metadata is newer than its own. A write that fails asks for the switch also when another one
 has asked first, and waits for it: `ColumnFamilyStore` switches the memtable under the table's lock, and issues the
 write barrier that sends the write groups started after it to the next memtable before it lets go of the lock.
+If a concurrent switch, for the trie size limit for instance, has replaced the memtable with one created with the
+old metadata, `ColumnFamilyStore` switches that one instead.
 If the memtable asked to be switched, `Keyspace.applyInternal` then applies the mutation once more, in a write group
 that starts after the switch and goes past the memtable that failed it. A write that fails again fails, with
 `INCOMPATIBLE_SCHEMA`. So does, without being applied again, one made with metadata newer than the table's, which no
 memtable of the table can take, and for which the memtable does not ask to be switched. A column a write only lists,
 as a read repair lists the columns its read fetched, is left out by the rebuild.
+A write in that window that holds no newer column is rebuilt with the memtable's numbering rather than switching
+the memtable early, and if `ColumnFamilyStore.reload` fails before it switches the memtable, such writes are rebuilt
+until the memtable is next flushed; a write holding a newer column still asks for the switch and is applied again.
 
-The retry still fails in these cases:
-- A concurrent switch, for the trie size limit for instance, created the next memtable with the old metadata (see
-  above). The retry fails on that memtable, which asks to be switched in its turn, and is not applied again.
-- A mutation of several tables is applied once more only once. When it holds newer columns of two tables whose
-  memtables are both older than their tables' metadata, as a schema change that publishes the metadata of several
-  tables of a keyspace at once and then switches their memtables in turn can leave them, the retry goes past the
-  first one's memtable and fails on the second's.
+The retry still fails for a mutation of several tables, which is applied once more only once. When it holds newer
+columns of two tables whose memtables are both older than their tables' metadata, as a schema change that publishes
+the metadata of several tables of a keyspace at once and then switches their memtables in turn can leave them, the
+retry goes past the first one's memtable and fails on the second's.
 
 The failed attempt's commit log record lies in the range of the memtable that failed it, and the retry has a
 record of its own in the new memtable's range. The first is replayed only if the node stops before the failed

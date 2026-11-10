@@ -1216,17 +1216,43 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
 
     /**
      * Checks with the memtable if it should be switched for the given reason, and if not, calls the specified
-     * notification method.
+     * notification method. The check is made on the memtable that is current with the table's lock taken (see
+     * {@link #switchCurrentMemtableIfNeeded}), and the memtable to notify is read before the lock is let go, so it is
+     * the one the check was made on. The notification runs after the lock is let go.
      */
     private void switchMemtableOrNotify(FlushReason reason, Consumer<Memtable> elseNotify)
     {
-        if (!data.getView().liveMemtables.isEmpty())
+        Memtable currentMemtable;
+        synchronized (data)
         {
-            Memtable currentMemtable = data.getView().getCurrentMemtable();
-            if (currentMemtable.shouldSwitch(reason))
-                switchMemtableIfCurrent(currentMemtable, reason);
-            else
-                elseNotify.accept(currentMemtable);
+            if (data.getView().liveMemtables.isEmpty())
+                return;
+            if (switchCurrentMemtableIfNeeded(reason) != null)
+                return;
+            currentMemtable = data.getView().getCurrentMemtable();
+        }
+        elseNotify.accept(currentMemtable);
+    }
+
+    /**
+     * Switches the current memtable if it should be switched for the given reason, and returns the future of the
+     * switch, or null if it should not be switched.
+     * <p>
+     * The decision is made with the table's lock taken, on the memtable that is current then. A switch creates the
+     * table's next memtable, with the metadata the table has at that moment, and installs it with the lock taken, so a
+     * switch for another reason can install a memtable created with the old metadata after a schema change has
+     * published the new one, and that memtable, rather than the one it replaced, is the one the change must switch.
+     * This holds for the table's own memtables only. The memtables of its index tables are created and installed by its
+     * switches, under its lock, while an index table makes this decision under its own lock; legacy index tables have
+     * no static or regular columns, so no column numbering depends on it.
+     */
+    private Future<CommitLogPosition> switchCurrentMemtableIfNeeded(FlushReason reason)
+    {
+        synchronized (data)
+        {
+            if (data.getView().getCurrentMemtable().shouldSwitch(reason))
+                return switchMemtable(reason);
+            return null;
         }
     }
 
@@ -1724,10 +1750,25 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         }
     }
 
+    /**
+     * A memtable asks to be switched for a schema change as the table's metadata is newer than its own. By the time
+     * this takes the table's lock, a switch for another reason, another write's request or the schema change itself
+     * can have replaced it, and the memtable that replaced it can have been created before the change published the
+     * metadata, so the decision is made on the memtable that is current, as for {@link #reload}. When this returns, the
+     * current memtable does not need switching for the schema change, so a write the memtable failed for holding a
+     * column of that metadata, applied once more, reaches a memtable that has the column.
+     */
     @Override
     public Future<CommitLogPosition> signalFlushRequired(Memtable memtable, FlushReason reason)
     {
-        return switchMemtableIfCurrent(memtable, reason);
+        if (reason != FlushReason.SCHEMA_CHANGE)
+            return switchMemtableIfCurrent(memtable, reason);
+
+        Future<CommitLogPosition> switched = switchCurrentMemtableIfNeeded(reason);
+        if (switched != null)
+            return switched;
+        logger.debug("Memtable is no longer current, returning future that completes when current flushing operation completes");
+        return waitForFlushes();
     }
 
     @Override

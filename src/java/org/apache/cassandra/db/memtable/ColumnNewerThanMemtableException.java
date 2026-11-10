@@ -25,8 +25,7 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 /// before it throws this if the table's metadata is newer than its own ([#switched]), so
 /// [org.apache.cassandra.db.Keyspace] applies the mutation once more, in a write group started after the switch. It
 /// does not otherwise: a write made with metadata newer than the table's, for instance, which no memtable of the table
-/// can take, fails with this at once. A write that fails again fails with this as well, as one that reaches a next
-/// memtable created with the old metadata by a concurrent switch does.
+/// can take, fails with this at once. A write that fails again fails with this as well.
 public class ColumnNewerThanMemtableException extends RuntimeException implements InternalRequestExecutionException
 {
     /// Whether the memtable asked to be switched for the schema change and waited for the switch before throwing this.
