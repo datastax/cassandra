@@ -131,8 +131,9 @@ public class TrieMemtable extends AbstractShardedMemtable
         MBeanWrapper.instance.registerMBean(new TrieMemtableConfig(), TRIE_MEMTABLE_CONFIG_OBJECT_NAME, MBeanWrapper.OnException.LOG);
     }
 
-    // Set to true when the memtable requests a switch (e.g. for trie size limit being reached) to ensure only one
-    // thread calls cfs.switchMemtableIfCurrent.
+    // Set to true when the memtable requests a switch (e.g. for trie size limit being reached), so that only one
+    // thread asks the owner for a switch that can be skipped once requested. A write that fails for holding a column
+    // newer than the memtable asks for the schema change's switch whether or not this is set (see keyedAsThisMemtable).
     private final AtomicBoolean switchRequested = new AtomicBoolean(false);
 
     /// Sharded memtable sections. Each is responsible for a contiguous range of the token space (between `boundaries[i]`
@@ -317,39 +318,40 @@ public class TrieMemtable extends AbstractShardedMemtable
             return trieUpdate;
         }
 
-        // A schema change publishes the table's new metadata before it switches this memtable, and the switch can be
-        // lost to a concurrent one that created the next memtable with the old metadata (ColumnFamilyStore's
-        // switchMemtableIfCurrent). If the table's metadata is newer than this memtable's, ask for the switch, which an
-        // update made with the newer metadata may need. Only then: an update can be newer than the table's metadata as
-        // well (TraceKeyspace's definitions of the system_traces tables can run ahead of the live schema), and the next
-        // memtable could not take it either, so switching for it would switch and flush on every such write.
-        boolean switching = shouldSwitch(ColumnFamilyStore.FlushReason.SCHEMA_CHANGE);
-
-        // An update made after a schema change adding a column has published the table's new metadata, and before the
-        // change has switched this memtable, holds a column this memtable cannot key. Rather than leave its data out of
-        // a write that is acknowledged, fail the write before this memtable takes any of it. If this memtable asks for
-        // the switch, Keyspace.applyInternal applies the mutation again, in a write group of its own, which has a
-        // commit log record of its own, and must start after the switch to go past this memtable. A write that fails
-        // therefore asks for the switch also when another has asked first and can still be making it: the owner
-        // switches the memtable and issues the write barrier that sends the write groups started after it to the next
-        // memtable under the table's lock, so this memtable is no longer current when the call returns. The next
-        // memtable can have been created with the old metadata by a concurrent switch, and the write then fails there
-        // as well. The failed write's record is in this memtable's range: it is replayed only if the node stops before
-        // this memtable is flushed, into a memtable that has the column, and replaying it as well as the retry's is
-        // harmless.
+        // An update made after a schema change has published the table's new metadata, and before the change has
+        // switched this memtable, can reach this memtable. One that holds no column newer than this memtable is rebuilt
+        // with its numbering below, and does not ask for the switch, which the schema change makes when it reaches the
+        // table (ColumnFamilyStore.reload). One made after a change adding a column holds a column this memtable cannot
+        // key. Rather than leave its data out of a write that is acknowledged, fail the write before this memtable takes
+        // any of it. If the table's metadata is newer than this memtable's, ask for the switch, and
+        // Keyspace.applyInternal applies the mutation again, in a write group of its own, which has a commit log record
+        // of its own, and must start after the switch to go past this memtable. A write that fails therefore asks for
+        // the switch also when another has asked first and can still be making it: the owner switches the memtable and
+        // issues the write barrier that sends the write groups started after it to the next memtable under the table's
+        // lock, so when the call returns this memtable is no longer current, and the current one does not need
+        // switching for the schema change (ColumnFamilyStore.signalFlushRequired). Ask only if the table's
+        // metadata is newer: an update can be newer than the table's metadata as well (TraceKeyspace's definitions of
+        // the system_traces tables can run ahead of the live schema), and the next memtable could not take it either,
+        // so switching for it would switch and flush on every such write. The failed write's record is in this
+        // memtable's range: it is replayed only if the node stops before this memtable is flushed, into a memtable that
+        // has the column, and replaying it as well as the retry's is harmless.
         ColumnMetadata newerColumn = columnNewerThan(actualMetadata, trieUpdate);
-        if (switching)
-            signalFlushRequired(ColumnFamilyStore.FlushReason.SCHEMA_CHANGE, newerColumn == null);
         if (newerColumn != null)
         {
+            boolean switching = shouldSwitch(ColumnFamilyStore.FlushReason.SCHEMA_CHANGE);
             if (switching)
+            {
+                signalFlushRequired(ColumnFamilyStore.FlushReason.SCHEMA_CHANGE, false);
                 NoSpamLogger.log(logger, NoSpamLogger.Level.INFO, 1, TimeUnit.MINUTES,
-                                 "Failed a write holding column {} of {}, which is newer than the memtable; switching the memtable to apply it again",
+                                 "Failed a write holding column {} of {}, which is newer than the memtable; switched the memtable to apply it again",
                                  newerColumn.name, actualMetadata);
+            }
             else
+            {
                 NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, TimeUnit.MINUTES,
                                  "Failed a write holding column {} of {}, which neither the memtable nor the table's schema has",
                                  newerColumn.name, actualMetadata);
+            }
             throw new ColumnNewerThanMemtableException(String.format("Column %s of the update is newer than this memtable of %s",
                                                                      newerColumn.name, actualMetadata),
                                                        switching);

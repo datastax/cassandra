@@ -17,11 +17,14 @@
 package org.apache.cassandra.db.memtable;
 
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
+import java.lang.management.ThreadInfo;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import com.google.common.collect.ImmutableMap;
@@ -31,6 +34,7 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.apache.cassandra.Util;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QueryProcessor;
@@ -64,6 +68,7 @@ import org.jboss.byteman.contrib.bmunit.BMRules;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
@@ -159,7 +164,8 @@ public class TrieMemtableSchemaChangeTest extends CQLTester
     /**
      * The next switch of a table's memtable, which {@link #switchingMemtable} holds after the switch has taken the
      * table's lock, and before it has created the new memtable and issued the write barrier that sends the write groups
-     * started after it there.
+     * started after it there, and {@link #installingMemtable} after it has created the new memtable, and before it has
+     * installed it.
      */
     private static class HeldSwitch
     {
@@ -180,7 +186,10 @@ public class TrieMemtableSchemaChangeTest extends CQLTester
         }
     }
 
-    /** Called at the start of {@link ColumnFamilyStore#switchMemtableIfCurrent}, before it takes the table's lock. */
+    /**
+     * Called at the start of {@link ColumnFamilyStore#signalFlushRequired}, which a memtable calls to ask to be
+     * switched, before it takes the table's lock.
+     */
     public static void requestingSwitch(ColumnFamilyStore cfs)
     {
         HeldSwitch hold = heldSwitch;
@@ -196,6 +205,16 @@ public class TrieMemtableSchemaChangeTest extends CQLTester
             return;
         hold.started.countDown();
         Uninterruptibles.awaitUninterruptibly(hold.released, 1, TimeUnit.MINUTES);
+    }
+
+    /**
+     * Called at the start of {@link org.apache.cassandra.db.lifecycle.Tracker#switchMemtable}, which a switch of a
+     * table's memtable calls with the table's lock taken, after it has created the new memtable with the table's
+     * metadata, and before it installs it. Holds the switch as {@link #switchingMemtable} does.
+     */
+    public static void installingMemtable(ColumnFamilyStore cfs)
+    {
+        switchingMemtable(cfs);
     }
 
     /** A column that sorts first moves every regular column up by one, the complex ones as well. */
@@ -653,9 +672,8 @@ public class TrieMemtableSchemaChangeTest extends CQLTester
 
     /**
      * A write made in the same window after a schema change dropping a column has no column the memtable cannot key,
-     * and the memtable takes it, rebuilt with its numbering. It still asks for the switch, as the memtable is older
-     * than the table's metadata, which a concurrent switch that created it with the old metadata can leave it
-     * (ColumnFamilyStore.switchMemtableIfCurrent).
+     * and the memtable takes it, rebuilt with its numbering. It does not ask for the switch, which the schema change
+     * makes once the write is done.
      */
     @Test
     public void testWriteBetweenDroppingColumnAndSwitchingMemtable() throws Throwable
@@ -668,10 +686,10 @@ public class TrieMemtableSchemaChangeTest extends CQLTester
         assertNull(write.failure);
         assertEquals(0, write.failedWrites);
         assertEquals(1, write.rebuilds);
-        assertNotSame(write.memtableBefore, write.memtableAfter);
+        assertSame(write.memtableBefore, write.memtableAfter);
         assertEquals(1, write.operationsBefore);
-        assertEquals(0, write.operationsAfter);
-        assertSame(write.memtableAfter, getCurrentColumnFamilyStore().getCurrentMemtable());
+        assertNotSame(write.memtableBefore, getCurrentColumnFamilyStore().getCurrentMemtable());
+        assertMemtableHasCurrentColumns();
         beforeAndAfterFlush(() -> assertRows(execute("SELECT c, b FROM %s WHERE k = 0"), row(1, 2)));
     }
 
@@ -684,7 +702,7 @@ public class TrieMemtableSchemaChangeTest extends CQLTester
     @Test
     @BMRules(rules = { @BMRule(name = "Count the requests to switch a table's memtable",
                                targetClass = "ColumnFamilyStore",
-                               targetMethod = "switchMemtableIfCurrent",
+                               targetMethod = "signalFlushRequired",
                                action = "org.apache.cassandra.db.memtable.TrieMemtableSchemaChangeTest.requestingSwitch($0)"),
                        @BMRule(name = "Hold a switch of a table's memtable after it has taken the table's lock",
                                targetClass = "ColumnFamilyStore",
@@ -776,6 +794,169 @@ public class TrieMemtableSchemaChangeTest extends CQLTester
         });
         new Thread(write).start();
         return write;
+    }
+
+    /**
+     * A switch for the memtable size limit has created the next memtable with the table's metadata when a schema change
+     * adding a column publishes the new metadata, and installs it while the schema change waits for the table's lock
+     * to switch the memtable. The schema change decides on the memtable that is current once it holds the lock, and
+     * switches the one installed with the old metadata, so that the writes made with the new metadata do not fail.
+     */
+    @Test
+    @BMRule(name = "Hold a switch of a table's memtable after it has created the new memtable, and before it installs it",
+            targetClass = "org.apache.cassandra.db.lifecycle.Tracker",
+            targetMethod = "switchMemtable",
+            action = "org.apache.cassandra.db.memtable.TrieMemtableSchemaChangeTest.installingMemtable($0.cfstore)")
+    public void testSchemaChangeSwitchesMemtableCreatedByConcurrentSwitch() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, b int, PRIMARY KEY(k, c)) WITH memtable = 'trie'");
+
+        schemaChangeDuringConcurrentSwitch("ALTER TABLE %s ADD a int", "switchMemtableOrNotify", cfs -> {});
+
+        Memtable memtable = getCurrentColumnFamilyStore().getCurrentMemtable();
+        assertFalse("The memtable is older than the table's metadata", memtable.shouldSwitch(ColumnFamilyStore.FlushReason.SCHEMA_CHANGE));
+        assertMemtableHasCurrentColumns();
+        failedWrites.set(0);
+        execute("INSERT INTO %s (k, c, a, b) VALUES (0, 1, 2, 3)");
+        assertEquals(0, failedWrites.get());
+        beforeAndAfterFlush(() -> assertRows(execute("SELECT c, a, b FROM %s WHERE k = 0"), row(1, 2, 3)));
+    }
+
+    /**
+     * As {@link #testSchemaChangeSwitchesMemtableCreatedByConcurrentSwitch}, for a memtable that is not a trie
+     * memtable: ColumnFamilyStore decides on the memtable that is current for every memtable, and a skip list memtable
+     * created with the old metadata asks to be switched as its comparator is not the table's.
+     */
+    @Test
+    @BMRule(name = "Hold a switch of a table's memtable after it has created the new memtable, and before it installs it",
+            targetClass = "org.apache.cassandra.db.lifecycle.Tracker",
+            targetMethod = "switchMemtable",
+            action = "org.apache.cassandra.db.memtable.TrieMemtableSchemaChangeTest.installingMemtable($0.cfstore)")
+    public void testSchemaChangeSwitchesSkipListMemtableCreatedByConcurrentSwitch() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, b int, PRIMARY KEY(k, c)) WITH memtable = 'skiplist'");
+
+        schemaChangeDuringConcurrentSwitch("ALTER TABLE %s ADD a int", "switchMemtableOrNotify", cfs -> {});
+
+        Memtable memtable = getCurrentColumnFamilyStore().getCurrentMemtable();
+        assertTrue(String.valueOf(memtable), memtable instanceof SkipListMemtable);
+        assertFalse("The memtable is older than the table's metadata", memtable.shouldSwitch(ColumnFamilyStore.FlushReason.SCHEMA_CHANGE));
+        execute("INSERT INTO %s (k, c, a, b) VALUES (0, 1, 2, 3)");
+        beforeAndAfterFlush(() -> assertRows(execute("SELECT c, a, b FROM %s WHERE k = 0"), row(1, 2, 3)));
+    }
+
+    /**
+     * A write as in {@link #testWriteBetweenAddingColumnAndSwitchingMemtable}, made while a switch for the memtable
+     * size limit holds the table's lock after it has created the next memtable with the old metadata. The write fails
+     * on the old memtable and asks for the switch, which waits for the lock, and that switch then installs its memtable.
+     * The write's request switches that memtable as well, as it is older than the table's metadata, so that the write,
+     * applied once more, lands in a memtable created with the new metadata rather than failing on that one.
+     */
+    @Test
+    @BMRule(name = "Hold a switch of a table's memtable after it has created the new memtable, and before it installs it",
+            targetClass = "org.apache.cassandra.db.lifecycle.Tracker",
+            targetMethod = "switchMemtable",
+            action = "org.apache.cassandra.db.memtable.TrieMemtableSchemaChangeTest.installingMemtable($0.cfstore)")
+    public void testWriteBetweenAddingColumnAndSwitchingMemtableDuringConcurrentSwitch() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, b int, PRIMARY KEY(k, c)) WITH memtable = 'trie'");
+
+        WriteInWindow made = new WriteInWindow();
+        schemaChangeDuringConcurrentSwitch("ALTER TABLE %s ADD a int", "signalFlushRequired", cfs -> {
+            made.memtableBefore = cfs.getCurrentMemtable();
+            failedWrites.set(0);
+            PartitionUpdate update = build(cfs.metadata(), 0, builder -> builder.row(1).add("a", 2).add("b", 3));
+            made.failure = failureOf(() -> new Mutation(update).apply());
+            made.failedWrites = failedWrites.get();
+            made.memtableAfter = cfs.getCurrentMemtable();
+            made.operationsBefore = made.memtableBefore.operationCount();
+            made.operationsAfter = made.memtableAfter.operationCount();
+        });
+
+        made.assertAppliedAgainToSwitchedMemtable();
+        beforeAndAfterFlush(() -> assertRows(execute("SELECT c, a, b FROM %s WHERE k = 0"), row(1, 2, 3)));
+    }
+
+    /**
+     * Makes the schema change while a switch for the memtable size limit, which the memtable pool's cleaner asks the
+     * table for, holds the table's lock after it has created the next memtable with the old metadata (see
+     * {@link #installingMemtable}). {@code inWindow} runs when the change reaches the table, before the table switches
+     * its memtable, in the thread that makes the change, and the held switch goes on once that thread waits for the
+     * table's lock in the ColumnFamilyStore method {@code waitingIn}: to switch the memtable for the change, or to make
+     * the switch a write made by {@code inWindow} asks for.
+     */
+    private void schemaChangeDuringConcurrentSwitch(String schemaChange, String waitingIn, Consumer<ColumnFamilyStore> inWindow) throws Throwable
+    {
+        String table = currentTable();
+        ColumnFamilyStore store = getCurrentColumnFamilyStore();
+        Memtable memtable = store.getCurrentMemtable();
+        HeldSwitch hold = new HeldSwitch(table);
+        AtomicReference<FutureTask<Throwable>> release = new AtomicReference<>();
+        heldSwitch = hold;
+        beforeMemtableSwitch = cfs -> {
+            if (!cfs.name.equals(table))
+                return;
+            beforeMemtableSwitch = null;
+            release.set(releaseOnceBlocked(hold, Thread.currentThread(), cfs, waitingIn));
+            inWindow.accept(cfs);
+        };
+        try
+        {
+            FutureTask<Throwable> limitSwitch = new FutureTask<>(() -> failureOf(() -> store.signalFlushRequired(memtable, ColumnFamilyStore.FlushReason.MEMTABLE_LIMIT)));
+            new Thread(limitSwitch).start();
+            assertTrue("The switch for the memtable size limit did not start", hold.started.await(1, TimeUnit.MINUTES));
+            alterTable(schemaChange);
+            assertNull(release.get().get(1, TimeUnit.MINUTES));
+            assertNull(limitSwitch.get(1, TimeUnit.MINUTES));
+        }
+        finally
+        {
+            beforeMemtableSwitch = null;
+            heldSwitch = null;
+            hold.released.countDown();
+        }
+    }
+
+    /**
+     * Lets the held switch go once the thread waits for the table's lock, which the switch holds, in the
+     * ColumnFamilyStore method {@code waitingIn}, or after a minute if it does not, in which case the task fails.
+     */
+    private static FutureTask<Throwable> releaseOnceBlocked(HeldSwitch hold, Thread thread, ColumnFamilyStore cfs, String waitingIn)
+    {
+        FutureTask<Throwable> release = new FutureTask<>(() -> {
+            try
+            {
+                return failureOf(() -> Util.spinAssertEquals("The thread did not wait for the table's lock in " + waitingIn,
+                                                             true,
+                                                             () -> isBlockedOn(thread, cfs.getTracker(), waitingIn),
+                                                             1, TimeUnit.MINUTES));
+            }
+            finally
+            {
+                hold.released.countDown();
+            }
+        });
+        new Thread(release).start();
+        return release;
+    }
+
+    /**
+     * Whether the thread is waiting to take the lock of the object with the ColumnFamilyStore method {@code method} on
+     * its stack, which a wait for the same lock elsewhere does not pass for.
+     */
+    private static boolean isBlockedOn(Thread thread, Object lock, String method)
+    {
+        ThreadInfo info = ManagementFactory.getThreadMXBean().getThreadInfo(thread.getId(), Integer.MAX_VALUE);
+        if (info == null
+            || info.getThreadState() != Thread.State.BLOCKED
+            || info.getLockInfo().getIdentityHashCode() != System.identityHashCode(lock))
+            return false;
+        for (StackTraceElement frame : info.getStackTrace())
+        {
+            if (frame.getClassName().equals(ColumnFamilyStore.class.getName()) && frame.getMethodName().equals(method))
+                return true;
+        }
+        return false;
     }
 
     /** What a write made between a schema change publishing the table's metadata and switching its memtable did. */

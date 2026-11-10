@@ -173,7 +173,11 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource, CellSo
      */
     interface Owner
     {
-        /** Signal to the owner that a flush is required (e.g. in response to hitting space limits) */
+        /**
+         * Signal to the owner that a flush is required (e.g. in response to hitting space limits).
+         * For SCHEMA_CHANGE, when the call returns, a memtable that needed switching for the change has been switched
+         * and its write barrier issued.
+         */
         Future<CommitLogPosition> signalFlushRequired(Memtable memtable, ColumnFamilyStore.FlushReason reason);
 
         /** Get the current memtable for this owner. Used to avoid capturing memtable in scheduled flush tasks. */
@@ -551,6 +555,8 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource, CellSo
      *   used to create sstables, which will be streamed and then deleted.
      * This will not be called to perform truncation or drop (in that case the memtable is unconditionally dropped),
      * but a flush may nevertheless be requested in that case to prepare a snapshot.
+     * It can be called with the owner's (table's) lock held, for SCHEMA_CHANGE and OWNED_RANGES_CHANGE as well as for
+     * the flush reasons, and must not block or wait for writes.
      */
     boolean shouldSwitch(ColumnFamilyStore.FlushReason reason);
 
