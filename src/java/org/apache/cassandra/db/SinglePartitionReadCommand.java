@@ -841,7 +841,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                                                        long startTimeNanos)
     {
         @SuppressWarnings("resource") //  Closed through the closing of the result of the caller method.
-        UnfilteredRowIterator merged = UnfilteredRowIterators.merge(iterators);
+        UnfilteredRowIterator merged = UnfilteredRowIterators.merge(iterators, controller::checkForCancellation);
 
         return withSSTablesIterated(merged, controller, totalIntersectingSSTables, metrics, metricsCollector, startTimeNanos);
     }
