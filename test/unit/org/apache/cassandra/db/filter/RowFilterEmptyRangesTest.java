@@ -192,6 +192,7 @@ public class RowFilterEmptyRangesTest extends CQLTester
          * TODO: further row filter simplifications could be added at some point:
          *  assertIsNotEmptyQuery("SELECT * FROM %s WHERE a = 0 AND (a != 0 OR b = 1)", "a = 0 AND b = 1");
          *  assertIsNotEmptyQuery("SELECT * FROM %s WHERE a = 0 OR (a != 0 AND b = 1)", "a = 0 OR b = 1");
+         *  This should be done by <https://github.com/riptano/cndb/issues/20167.
          */
     }
 
