@@ -92,6 +92,30 @@ public class EmptyRangeQueryTest extends SAITester.Versioned
     }
 
     @Test
+    public void testInequality() throws Throwable
+    {
+        // A range with equal inclusive bounds that excludes its only value with an inequality can't match anything.
+        createTable("CREATE TABLE %s (pk int, ck int, v bigint, PRIMARY KEY (pk, ck))");
+        createIndex("CREATE INDEX ON %s(v) USING 'sai'");
+        disableCompaction();
+
+        execute("INSERT INTO %s (pk, ck, v) VALUES (1, 1, 3)");
+        execute("INSERT INTO %s (pk, ck, v) VALUES (1, 2, 5)");
+
+        beforeAndAfterFlush(() -> {
+            assertEmpty(execute("SELECT * FROM %s WHERE v >= 5 AND v <= 5 AND v != 5"));
+            assertEmpty(execute("SELECT * FROM %s WHERE v != 5 AND v >= 5 AND v <= 5"));
+            assertEmpty(execute("SELECT * FROM %s WHERE v >= 5 AND v <= 5 AND v != 5 AND v != 3"));
+            assertRows(execute("SELECT pk, ck FROM %s WHERE v >= 5 AND v <= 5 AND v != 3"), row(1, 2));
+            assertRows(execute("SELECT pk, ck FROM %s WHERE v >= 3 AND v <= 5 AND v != 5"), row(1, 1));
+        });
+
+        execute("INSERT INTO %s (pk, ck, v) VALUES (2, 1, 5)");
+        assertEmpty(execute("SELECT * FROM %s WHERE v >= 5 AND v <= 5 AND v != 5"));
+        assertRowsIgnoringOrder(execute("SELECT pk, ck FROM %s WHERE v >= 5 AND v <= 5 AND v != 3"), row(1, 2), row(2, 1));
+    }
+
+    @Test
     public void testStaticColumn() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int, ck int, s bigint static, w int, PRIMARY KEY (pk, ck))");
