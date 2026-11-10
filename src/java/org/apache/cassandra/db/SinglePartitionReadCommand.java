@@ -952,7 +952,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                                                        SSTableReadMetricsCollector metricsCollector,
                                                        long startTimeNanos)
     {
-        UnfilteredRowIterator merged = UnfilteredRowIterators.merge(iterators);
+        UnfilteredRowIterator merged = UnfilteredRowIterators.merge(iterators, controller::checkForCancellation);
 
         return withSSTablesIterated(merged, controller, totalIntersectingSSTables, metrics, metricsCollector, startTimeNanos);
     }

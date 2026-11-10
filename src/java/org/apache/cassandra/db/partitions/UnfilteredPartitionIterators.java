@@ -134,6 +134,16 @@ public abstract class UnfilteredPartitionIterators
 
     public static UnfilteredPartitionIterator merge(final List<? extends UnfilteredPartitionIterator> iterators, final MergeListener listener)
     {
+        return merge(iterators, listener, null);
+    }
+
+    /**
+     * As {@link #merge(List, MergeListener)}, also calling {@code onEmptyMerge} (if not null) for every row or marker
+     * that merges to nothing, see {@link UnfilteredRowIterators#merge(List, Runnable)}.
+     */
+    @SuppressWarnings("resource")
+    public static UnfilteredPartitionIterator merge(final List<? extends UnfilteredPartitionIterator> iterators, final MergeListener listener, final Runnable onEmptyMerge)
+    {
         assert !iterators.isEmpty();
 
         final TableMetadata metadata = iterators.get(0).metadata();
@@ -187,7 +197,7 @@ public abstract class UnfilteredPartitionIterators
                     }
                 }
 
-                return UnfilteredRowIterators.merge(toMerge, rowListener);
+                return UnfilteredRowIterators.merge(toMerge, rowListener, onEmptyMerge);
             }
 
             public void onKeyChange()
@@ -231,6 +241,16 @@ public abstract class UnfilteredPartitionIterators
 
     public static UnfilteredPartitionIterator mergeLazily(final List<? extends UnfilteredPartitionIterator> iterators)
     {
+        return mergeLazily(iterators, null);
+    }
+
+    /**
+     * As {@link #mergeLazily(List)}, also calling {@code onEmptyMerge} (if not null) for every row or marker that merges
+     * to nothing, see {@link UnfilteredRowIterators#merge(List, Runnable)}.
+     */
+    @SuppressWarnings("resource")
+    public static UnfilteredPartitionIterator mergeLazily(final List<? extends UnfilteredPartitionIterator> iterators, final Runnable onEmptyMerge)
+    {
         assert !iterators.isEmpty();
 
         if (iterators.size() == 1)
@@ -253,7 +273,7 @@ public abstract class UnfilteredPartitionIterators
                 {
                     protected UnfilteredRowIterator initializeIterator()
                     {
-                        return UnfilteredRowIterators.merge(toMerge);
+                        return UnfilteredRowIterators.merge(toMerge, onEmptyMerge);
                     }
                 };
             }
