@@ -43,18 +43,52 @@ public interface IScrubber extends Closeable
         return new Options.Builder();
     }
 
+    /**
+     * Controls how the scrubber handles TTL during scrubbing.
+     *
+     * <ul>
+     *   <li>{@link #NONE} — default behaviour; TTL values are left as-is.</li>
+     *   <li>{@link #REINSERT_OVERFLOWED_TTL} — fixes cells whose local deletion time overflowed a 32-bit
+     *       integer (see CASSANDRA-14092).</li>
+     *   <li>{@link #NO_TTL} — strips all TTL information from every cell (including expired cells, which are
+     *       resurrected), turning them into permanent non-expiring data. By default the rewritten cells keep their
+     *       original timestamp. At an equal timestamp a tombstone or an expiring cell wins over a non-expiring cell
+     *       (CASSANDRA-14592), so a permanent cell can lose to an un-scrubbed expiring copy of the same cell (other
+     *       sstables, the memtable, other replicas) or to the tombstone produced when such a copy expires. This is
+     *       only safe if every copy of the data is scrubbed before anything reads or compacts it (e.g. restoring a
+     *       backup). When that can't be guaranteed, enable {@link Options.Builder#bumpTTLTimestamp(boolean)}, which
+     *       rewrites the cells with the original timestamp incremented by one so that they supersede those copies.</li>
+     * </ul>
+     */
+    enum OverwriteTTLMode
+    {
+        // Do nothing
+        NONE,
+        // Reinserts overflowed TTLs. See CASSANDRA-14092
+        REINSERT_OVERFLOWED_TTL,
+        // Remove any TTL from data
+        NO_TTL
+    }
+
     final class ScrubResult
     {
         public final int goodPartitions;
         public final int badPartitions;
         public final int emptyPartitions;
+        public final int noTTLOverwrittenRows;
         public final List<SSTableReader> scrubbed;
 
         public ScrubResult(int goodPartitions, int badPartitions, int emptyPartitions, List<SSTableReader> scrubbed)
         {
+            this(goodPartitions, badPartitions, emptyPartitions, 0, scrubbed);
+        }
+
+        public ScrubResult(int goodPartitions, int badPartitions, int emptyPartitions, int noTTLOverwrittenRows, List<SSTableReader> scrubbed)
+        {
             this.goodPartitions = goodPartitions;
             this.badPartitions = badPartitions;
             this.emptyPartitions = emptyPartitions;
+            this.noTTLOverwrittenRows = noTTLOverwrittenRows;
             this.scrubbed = scrubbed;
         }
     }
@@ -65,13 +99,17 @@ public interface IScrubber extends Closeable
         public final boolean reinsertOverflowedTTLRows;
         public final boolean skipCorrupted;
         public final boolean overrideTxnIsOffline;
+        public final OverwriteTTLMode overwriteTTLMode;
+        public final boolean bumpTTLTimestamp;
 
-        private Options(boolean checkData, boolean reinsertOverflowedTTLRows, boolean skipCorrupted, boolean overrideTxnIsOffline)
+        private Options(boolean checkData, boolean reinsertOverflowedTTLRows, boolean skipCorrupted, boolean overrideTxnIsOffline, OverwriteTTLMode overwriteTTLMode, boolean bumpTTLTimestamp)
         {
             this.checkData = checkData;
             this.reinsertOverflowedTTLRows = reinsertOverflowedTTLRows;
             this.skipCorrupted = skipCorrupted;
             this.overrideTxnIsOffline = overrideTxnIsOffline;
+            this.overwriteTTLMode = overwriteTTLMode;
+            this.bumpTTLTimestamp = bumpTTLTimestamp;
         }
 
         @Override
@@ -81,15 +119,18 @@ public interface IScrubber extends Closeable
                    .add("checkData=" + checkData)
                    .add("reinsertOverflowedTTLRows=" + reinsertOverflowedTTLRows)
                    .add("skipCorrupted=" + skipCorrupted)
+                   .add("overwriteTTLMode=" + overwriteTTLMode)
+                   .add("bumpTTLTimestamp=" + bumpTTLTimestamp)
                    .toString();
         }
 
         public static class Builder
         {
             private boolean checkData = false;
-            private boolean reinsertOverflowedTTLRows = false;
             private boolean skipCorrupted = false;
             private boolean overrideTxnIsOffline = false;
+            private OverwriteTTLMode overwriteTTLMode = OverwriteTTLMode.NONE;
+            private boolean bumpTTLTimestamp = false;
 
             public Builder checkData()
             {
@@ -105,13 +146,21 @@ public interface IScrubber extends Closeable
 
             public Builder reinsertOverflowedTTLRows()
             {
-                this.reinsertOverflowedTTLRows = true;
-                return this;
+                return reinsertOverflowedTTLRows(true);
             }
 
             public Builder reinsertOverflowedTTLRows(boolean reinsertOverflowedTTLRows)
             {
-                this.reinsertOverflowedTTLRows = reinsertOverflowedTTLRows;
+                if (reinsertOverflowedTTLRows)
+                {
+                    if (overwriteTTLMode != OverwriteTTLMode.NONE && overwriteTTLMode != OverwriteTTLMode.REINSERT_OVERFLOWED_TTL)
+                        throw new IllegalArgumentException(String.format("Cannot specify both reinsertOverflowedTTLRows and overwriteTTLMode %s", overwriteTTLMode));
+                    this.overwriteTTLMode = OverwriteTTLMode.REINSERT_OVERFLOWED_TTL;
+                }
+                else if (this.overwriteTTLMode == OverwriteTTLMode.REINSERT_OVERFLOWED_TTL)
+                {
+                    this.overwriteTTLMode = OverwriteTTLMode.NONE;
+                }
                 return this;
             }
 
@@ -139,9 +188,30 @@ public interface IScrubber extends Closeable
                 return this;
             }
 
+            public Builder overwriteTTLMode(OverwriteTTLMode overwriteTTLMode)
+            {
+                if (overwriteTTLMode != null && this.overwriteTTLMode != OverwriteTTLMode.NONE && this.overwriteTTLMode != overwriteTTLMode)
+                    throw new IllegalArgumentException(String.format("Cannot specify both reinsertOverflowedTTLRows and overwriteTTLMode %s", overwriteTTLMode));
+                this.overwriteTTLMode = overwriteTTLMode != null ? overwriteTTLMode : OverwriteTTLMode.NONE;
+                return this;
+            }
+
+            /**
+             * Only meaningful with {@link OverwriteTTLMode#NO_TTL}: rewrite the cells whose TTL is removed with their
+             * original timestamp incremented by one.
+             */
+            public Builder bumpTTLTimestamp(boolean bumpTTLTimestamp)
+            {
+                this.bumpTTLTimestamp = bumpTTLTimestamp;
+                return this;
+            }
+
             public Options build()
             {
-                return new Options(checkData, reinsertOverflowedTTLRows, skipCorrupted, overrideTxnIsOffline);
+                if (bumpTTLTimestamp && overwriteTTLMode != OverwriteTTLMode.NO_TTL)
+                    throw new IllegalArgumentException("bumpTTLTimestamp can only be used with overwriteTTLMode " + OverwriteTTLMode.NO_TTL);
+                boolean reinsert = overwriteTTLMode == OverwriteTTLMode.REINSERT_OVERFLOWED_TTL;
+                return new Options(checkData, reinsert, skipCorrupted, overrideTxnIsOffline, overwriteTTLMode, bumpTTLTimestamp);
             }
         }
     }
