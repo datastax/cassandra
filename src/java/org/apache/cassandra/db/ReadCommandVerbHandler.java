@@ -24,9 +24,11 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.QueryCancelledException;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
@@ -78,6 +80,17 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         {
             response = command.createResponse(iterator, controller.getRepairedDataInfo());
         }
+        catch (AssertionError t)
+        {
+            throw new AssertionError(String.format("Caught an error while trying to process the command: %s", command.toCQLString(Redaction.REDACT)), t);
+        }
+        catch (QueryCancelledException e)
+        {
+            logger.debug("Query cancelled (timeout): {}", e);
+            response = null;
+            assert !command.isCompleted() : "Read marked as completed despite being aborted by timeout to table " + command.metadata();
+        }
+
         if (!command.complete())
         {
             Tracing.trace("Discarding partial response to {} (timed out)", message.from());
