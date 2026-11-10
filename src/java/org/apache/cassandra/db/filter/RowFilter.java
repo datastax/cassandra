@@ -967,7 +967,7 @@ public class RowFilter
          */
         public boolean isNeverSatisfied()
         {
-            return isDisjunction && isEmpty();
+            return this == ALL;
         }
 
         public boolean contains(Expression expression)
@@ -1004,8 +1004,12 @@ public class RowFilter
 
         public boolean isSatisfiedBy(TableMetadata table, DecoratedKey key, Row row, long nowInSec)
         {
+            if (this == ALL)
+                return false;
+
             if (isEmpty())
                 return true;
+
             if (isDisjunction)
             {
                 for (Expression e : expressions)
