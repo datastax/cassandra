@@ -314,6 +314,32 @@ public class AffectedColumnCountTest
     }
 
     @Test
+    public void testAffectedColumnCountWithRangeTombstoneAndDeletedColumn()
+    {
+        PartitionUpdate.Builder updateBuilder = partitionUpdateFactory.builder(metadata, partitionKey, metadata.regularAndStaticColumns(), 16);
+
+        // Add a range tombstone
+        updateBuilder.add(new RangeTombstone(org.apache.cassandra.db.Slice.make(Clustering.make(ByteBufferUtil.bytes(1)),
+                                                                                Clustering.make(ByteBufferUtil.bytes(10))),
+                                             DeletionTime.build(1000, FBUtilities.nowInSeconds())));
+
+        // Add a row with a cell and column deletion
+        Row.Builder builder = partitionUpdateFactory.rowBuilder(metadata.regularColumns(), false);
+        builder.newRow(Clustering.make(ByteBufferUtil.bytes(5)));
+        builder.addCell(BufferCell.live(r1, 11000, ByteBufferUtil.bytes(100)));
+        builder.addComplexDeletion(c1, DeletionTime.build(2000, FBUtilities.nowInSeconds()));
+        updateBuilder.add(builder.build());
+
+        PartitionUpdate update = updateBuilder.build();
+
+        // Should count: one range tombstone * 5, one regular column, one complex column
+        // Row marker in trie must not count.
+        int expected = 1 * metadata.regularColumns().size() + 2;
+        assertEquals(expected, update.affectedColumnCount());
+        assertEquals(2, update.affectedRowCount());
+    }
+
+    @Test
     public void testAffectedColumnCountWithMultipleRows()
     {
         PartitionUpdate.Builder updateBuilder = partitionUpdateFactory.builder(metadata, partitionKey, metadata.regularAndStaticColumns(), 16);

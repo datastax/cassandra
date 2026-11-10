@@ -24,6 +24,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import com.google.common.base.Predicates;
@@ -158,9 +159,10 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         else
             columns = new RegularAndStaticColumns(Columns.NONE, Columns.from(row.columns()));
 
-        putInTrie(makeNoConflictMutator(trie), metadata, metadata.comparator, row);
+        // Only count the row if it has live data, as the other ways of building trie-backed partitions do.
+        boolean hasLiveData = putInTrie(makeNoConflictMutator(trie), metadata, metadata.comparator, row);
 
-        return new TriePartitionUpdate(metadata, key, columns, stats, 1, row.deletion().isLive() ? 0 : 1, row.dataSize(), trie);
+        return new TriePartitionUpdate(metadata, key, columns, stats, hasLiveData ? 1 : 0, row.deletion().isLive() ? 0 : 1, row.dataSize(), trie);
     }
 
     /** @see PartitionUpdate.Factory#fromIterator(UnfilteredRowIterator)  */
@@ -252,6 +254,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             throw new AssertionError(e);
         }
+        // Note: the tombstoneCount here may be an overestimation (some boundaries become covering deletions).
         return new TriePartitionUpdate(metadata, partitionKey, columns, stats, rowCountIncludingStatic, tombstoneCount, dataSize, t);
     }
 
@@ -447,14 +450,21 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
                                        (InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker>) trie);
     }
 
-    /// Returns true iff the given marker has a row-level deletion on its right side.
+    /// Returns true iff the given marker has a new row-level deletion on its right side.
     static boolean startsRowDeletion(TrieTombstoneMarker update)
     {
-        TrieTombstoneMarker.Covering side = update.rightDeletion();
-        if (side == null)
+        TrieTombstoneMarker.Covering right = update.rightDeletion();
+        // Don't count if it's not a boundary, or if it does not introduce a new deletion
+        // (row level marker under covering deletion).
+        TrieTombstoneMarker.Covering left = update.leftDeletion();
+        if (right == null || Objects.equals(right, left))
             return false;
 
-        return ROW_DELETION_KINDS.contains(side.deletionKind());
+        // Note that we will overcount boundaries under a covering deletion (we count once
+        // on entry, and once on exit). There's no easy way to avoid this and not risk
+        // undercounting (e.g. when two ranges partially overlap).
+
+        return ROW_DELETION_KINDS.contains(right.deletionKind()) && (left == null || ROW_DELETION_KINDS.contains(left.deletionKind()));
     }
 
     /**
@@ -684,8 +694,8 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
             else
             {
                 TrieTombstoneMarker merged = update.mergeWith(existing);
-                int hadTombstone = existing.isBoundary() && startsRowDeletion(existing) ? 1 : 0;
-                int hasTombstone = merged != null && merged.isBoundary() && startsRowDeletion(merged) ? 1 : 0;
+                int hadTombstone = startsRowDeletion(existing) ? 1 : 0;
+                int hasTombstone = merged != null && startsRowDeletion(merged) ? 1 : 0;
                 tombstoneCount += hasTombstone - hadTombstone;
                 return merged;
             }
@@ -706,8 +716,7 @@ public class TriePartitionUpdate extends TrieBackedPartition implements Partitio
         {
             if (o == LivenessInfo.EMPTY)
                 --rowCountIncludingStatic;
-            if (o instanceof TrieTombstoneMarker && ((TrieTombstoneMarker) o).rightDeletion() != null)
-                --tombstoneCount;
+            // Dropping ineffective row markers does not change tombstoneCount
         }
 
         @Override

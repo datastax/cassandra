@@ -556,6 +556,12 @@ extends BaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>>
         };
     }
 
+    /// Return true iff the trie has a deletion branch at its root.
+    default boolean hasDeletionBranchAtRoot()
+    {
+        return cursor(Direction.FORWARD).deletionBranchCursor(Direction.FORWARD) != null;
+    }
+
     /// Return any deletion started at the root of the deletion trie. This is an
     /// efficient alternative of `applicableDeletion(EMPTY)`, taking advantage of
     /// the fact that the root cannot carry an applicable deletion from a previous
