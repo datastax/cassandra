@@ -37,7 +37,7 @@ import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
-import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
+import static org.apache.cassandra.utils.MonotonicClock.Global.preciseTime;
 
 public class ResponseVerbHandler implements IVerbHandler
 {
@@ -57,7 +57,9 @@ public class ResponseVerbHandler implements IVerbHandler
             return;
         }
 
-        long latencyNanos = approxTime.now() - callbackInfo.createdAtNanos;
+        // Use the precise clock: createdAtNanos may come from a precise-clock RequestTime (see Message.outWithFlags),
+        // and approxTime can lag behind it, which would yield a negative latency.
+        long latencyNanos = preciseTime.now() - callbackInfo.createdAtNanos;
         Tracing.trace("Processing response from {}", message.from());
 
         RequestCallback<?> cb = callbackInfo.callback;

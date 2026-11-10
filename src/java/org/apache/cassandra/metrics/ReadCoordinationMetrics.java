@@ -53,7 +53,8 @@ public final class ReadCoordinationMetrics
         if (null == histogram)
             histogram = replicaLatencies.computeIfAbsent(address, ReadCoordinationMetrics::createHistogram);
 
-        histogram.update(latency);
+        // clamp negative values (e.g. due to clock imprecision), as histograms using DSE-compatible boundaries reject them
+        histogram.update(Math.max(0, latency));
     }
 
     private static Histogram createHistogram(InetAddressAndPort h)
