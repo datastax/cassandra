@@ -1325,4 +1325,54 @@ public class SelectSingleColumnRelationTest extends CQLTester
         );
     }
 
+    /**
+     * The restrictions on the fields of UDT and tuple columns, filtered without any index (ALLOW FILTERING): on a
+     * frozen and a non-frozen UDT, a tuple component, a nested field and a field inside a list. An unset field
+     * satisfies no restriction, {@code !=} included; inside a list, a restriction is satisfied by some element, and
+     * {@code !=} and {@code NOT IN} by no element (so also without elements). The queries served by the SAI indexes
+     * on fields are in {@code UdtFieldQueryTest} and {@code UdtCollectionFieldQueryTest}.
+     */
+    @Test
+    public void testFieldRestrictionsWithFiltering() throws Throwable
+    {
+        String geo = createType("CREATE TYPE %s (lat double, lon double)");
+        String address = createType("CREATE TYPE %s (city text, zip int, loc frozen<" + geo + ">)");
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, v int, f frozen<" + address + ">, n " + address + ", " +
+                    "t frozen<tuple<text, int>>, l list<frozen<" + address + ">>)");
+        execute("INSERT INTO %s (id, f, n, t, l) VALUES (1, {city: 'Rome', zip: 100, loc: {lat: 1.0}}, {city: 'Rome', zip: 100}, " +
+                "('a', 1), [{city: 'Rome', zip: 100}, {city: 'Milan', zip: 200}])");
+        execute("INSERT INTO %s (id, f, n, t, l) VALUES (2, {city: 'Paris', zip: 200, loc: {lat: 2.0}}, {city: 'Paris', zip: 200}, " +
+                "('b', 2), [{city: 'Paris', zip: 300}])");
+        execute("INSERT INTO %s (id, f, n) VALUES (3, {zip: 300}, {zip: 300})");
+        execute("INSERT INTO %s (id) VALUES (4)");
+
+        beforeAndAfterFlush(() -> {
+            for (String udt : new String[]{ "f", "n" })
+            {
+                assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE " + udt + ".city = 'Rome' ALLOW FILTERING"), row(1));
+                assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE " + udt + ".city != 'Rome' ALLOW FILTERING"), row(2));
+                assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE " + udt + ".zip > 100 AND " + udt + ".zip <= 300 ALLOW FILTERING"), row(2), row(3));
+                assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE " + udt + ".city IN ('Rome', 'Milan') ALLOW FILTERING"), row(1));
+                assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE " + udt + ".city NOT IN ('Rome', 'Milan') ALLOW FILTERING"), row(2));
+                assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE " + udt + ".zip = ? ALLOW FILTERING", 300), row(3));
+            }
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE t.field1 = 'b' ALLOW FILTERING"), row(2));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE t.field2 >= 1 ALLOW FILTERING"), row(1), row(2));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE f.loc.lat > 1.5 ALLOW FILTERING"), row(2));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE f.loc.lat < 1.5 AND n.city = 'Rome' ALLOW FILTERING"), row(1));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE l.city = 'Milan' ALLOW FILTERING"), row(1));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE l.zip >= 300 ALLOW FILTERING"), row(2));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE l.city IN ('Paris', 'Turin') ALLOW FILTERING"), row(2));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE l.city != 'Rome' ALLOW FILTERING"), row(2), row(3), row(4));
+            assertRowsIgnoringOrder(execute("SELECT id FROM %s WHERE l.zip NOT IN (100, 300) ALLOW FILTERING"), row(3), row(4));
+        });
+
+        assertInvalidMessage(String.format(StatementRestrictions.FIELD_REQUIRES_ALLOW_FILTERING_MESSAGE, "f.city"),
+                             "SELECT id FROM %s WHERE f.city = 'Rome'");
+        // only in SELECT
+        assertInvalidMessage(String.format(StatementRestrictions.FIELD_RESTRICTIONS_ONLY_IN_SELECT_MESSAGE, "f.city = 'Rome'"),
+                             "UPDATE %s SET v = 1 WHERE id = 1 AND f.city = 'Rome'");
+        assertInvalidMessage(String.format(StatementRestrictions.FIELD_RESTRICTIONS_ONLY_IN_SELECT_MESSAGE, "n.zip > 1"),
+                             "DELETE FROM %s WHERE id = 1 AND n.zip > 1");
+    }
 }

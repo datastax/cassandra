@@ -25,6 +25,7 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
@@ -78,6 +79,10 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     private final IndexContext indexContext;
     private final AbstractType<?> validator;
     private final LongAdder writeCount = new LongAdder();
+    // the earliest local expiration time of the indexed expiring cells, see markExpiringTerm()
+    private final AtomicLong minExpirationTime = new AtomicLong(Long.MAX_VALUE);
+    // whether a partition deletion or a range tombstone was applied to the memtable, see markShadowingDeletion()
+    private volatile boolean hasShadowingDeletions;
     private final LongAdder estimatedOnHeapMemoryUsed = new LongAdder();
     private final LongAdder estimatedOffHeapMemoryUsed = new LongAdder();
 
@@ -109,6 +114,34 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     public Memtable getMemtable()
     {
         return memtable;
+    }
+
+    @Override
+    public void markExpiringTerm(long localExpirationTime)
+    {
+        // most expiring cells don't lower the minimum: no CAS for them
+        if (localExpirationTime < minExpirationTime.get())
+            minExpirationTime.accumulateAndGet(localExpirationTime, Math::min);
+    }
+
+    @Override
+    public boolean mayHaveExpiredTerms(long nowInSec)
+    {
+        // an expiring cell is live while the time is before its local expiration time
+        return nowInSec >= minExpirationTime.get();
+    }
+
+    @Override
+    public void markShadowingDeletion()
+    {
+        if (!hasShadowingDeletions)
+            hasShadowingDeletions = true;
+    }
+
+    @Override
+    public boolean hasShadowingDeletions()
+    {
+        return hasShadowingDeletions;
     }
 
     @Override
@@ -231,12 +264,15 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
     @Override
     public void update(DecoratedKey key, Clustering clustering, ByteBuffer oldValue, ByteBuffer newValue, Memtable memtable, OpOrder.Group opGroup)
     {
-        int oldRemaining = oldValue == null ? 0 : oldValue.remaining();
-        int newRemaining = newValue == null ? 0 : newValue.remaining();
-        if (oldRemaining == 0 && newRemaining == 0)
+        // an empty value is indexed for the literal types allowing it (an empty string is a value, see index()):
+        // an update from null to an empty string must index it
+        boolean skipsEmpty = TypeUtil.skipsEmptyValue(validator);
+        boolean hasOld = oldValue != null && (oldValue.hasRemaining() || !skipsEmpty);
+        boolean hasNew = newValue != null && (newValue.hasRemaining() || !skipsEmpty);
+        if (!hasOld && !hasNew)
             return;
 
-        if (oldRemaining == newRemaining && validator.compare(oldValue, newValue) == 0)
+        if (hasOld && hasNew && oldValue.remaining() == newValue.remaining() && validator.compare(oldValue, newValue) == 0)
             return;
 
         RequestSensors sensors = requestTracker.get();

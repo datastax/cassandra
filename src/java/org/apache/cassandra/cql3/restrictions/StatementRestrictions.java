@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.Optional;
@@ -36,11 +37,14 @@ import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.ElementMatchRelation;
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.Ordering;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.Relation;
+import org.apache.cassandra.cql3.SingleColumnRelation;
 import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.WhereClause;
 import org.apache.cassandra.cql3.functions.Function;
@@ -110,6 +114,30 @@ public class StatementRestrictions
     public static final String INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE = "Index on column %s does not support LIKE restrictions.";
 
     public static final String INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE = "Index on column %s does not support ':' restrictions.";
+
+    public static final String FIELD_REQUIRES_ALLOW_FILTERING_MESSAGE = ALLOW_FILTERING_MESSAGE +
+            "No index serves the restrictions on %s. " +
+            "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING";
+
+    public static final String NOT_CONTAINS_ELEMENT_REQUIRES_ALLOW_FILTERING_MESSAGE = ALLOW_FILTERING_MESSAGE +
+            "%s is not served by the indexes: a NOT CONTAINS ELEMENT group is filtered, except a single equality on " +
+            "a field whose index has no analyzer. " +
+            "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING";
+
+    /**
+     * The message for filtered-only {@code NOT CONTAINS ELEMENT} groups next to other restrictions on fields that
+     * no index serves: the groups, then the other fields.
+     */
+    public static final String NOT_CONTAINS_ELEMENT_AND_FIELDS_REQUIRE_ALLOW_FILTERING_MESSAGE = ALLOW_FILTERING_MESSAGE +
+            "%s is not served by the indexes: a NOT CONTAINS ELEMENT group is filtered, except a single equality on " +
+            "a field whose index has no analyzer. No index serves the restrictions on %s. " +
+            "If you want to execute this query despite the performance unpredictability, use ALLOW FILTERING";
+
+    public static final String FIELD_RESTRICTIONS_ONLY_IN_SELECT_MESSAGE =
+    "Restrictions on fields of UDT and tuple columns are only supported in SELECT statements: %s";
+
+    public static final String FIELD_RESTRICTIONS_NOT_IN_VIEWS_MESSAGE =
+    "Restrictions on fields of UDT and tuple columns are not supported in materialized views: %s";
 
     public static final String INDEX_DOES_NOT_SUPPORT_DISJUNCTION =
     "An index involved in this query does not support disjunctive queries using the OR operator";
@@ -445,13 +473,30 @@ public class StatementRestrictions
              */
             for (Relation relation : element.relations())
             {
-                if ((relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey())
-                        && (type.isUpdate() || type.isDelete()))
+                // the CONTAINS ELEMENT groups restrict fields: they are field relations, whose operator isn't that of
+                // a relation on a column
+                boolean isElementMatch = relation instanceof ElementMatchRelation;
+                if (!isElementMatch
+                    && (relation.isContains() || relation.isContainsKey() || relation.isNotContains() || relation.isNotContainsKey())
+                    && (type.isUpdate() || type.isDelete()))
                 {
                     throw invalidRequest("Cannot use %s with %s", type, relation.operator());
                 }
 
-                if (relation.operator() == Operator.IS_NOT)
+                // the restrictions on the fields of UDT and tuple columns are served by indexes or filtering only
+                boolean isFieldRelation = isElementMatch
+                                          || relation instanceof SingleColumnRelation && ((SingleColumnRelation) relation).hasFieldPath();
+                if (isFieldRelation)
+                {
+                    if (forView)
+                        throw invalidRequest(FIELD_RESTRICTIONS_NOT_IN_VIEWS_MESSAGE, relation);
+                    if (!type.allowUseOfSecondaryIndices())
+                        throw invalidRequest(FIELD_RESTRICTIONS_ONLY_IN_SELECT_MESSAGE, relation);
+                }
+
+                // the IS NOT NULL on a field selects rows, as the other field restrictions; that on a column is only
+                // a materialized view restriction
+                if (relation.operator() == Operator.IS_NOT && !isFieldRelation)
                 {
                     if (!forView)
                         throw invalidRequest("Unsupported restriction: %s", relation);
@@ -470,7 +515,7 @@ public class StatementRestrictions
                         }
                         else
                         {
-                            throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, restriction.getFirstColumn());
+                            throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, targetName(restriction));
                         }
                     }
                     if (relation.operator() == Operator.ANALYZER_MATCHES)
@@ -487,13 +532,25 @@ public class StatementRestrictions
                             }
                             else
                             {
-                                throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, restriction.getFirstColumn());
+                                throw invalidRequest(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_ANALYZER_MATCHES_MESSAGE, targetName(restriction));
                             }
                         }
                     }
     
                     ColumnMetadata def = restriction.getFirstColumn();
-                    if (def.isPartitionKey())
+                    if (isFieldRelation)
+                    {
+                        // As for the partition key columns, the restrictions on their fields must be part of the
+                        // top-level AND: the filter evaluates the partition-level expressions (partition key and
+                        // static columns) separately from the row-level ones, so it can't apply an OR between them.
+                        if (def.isPartitionKey() && nestingLevel > 0)
+                            throw invalidRequest(StatementRestrictions.PARTITION_KEY_RESTRICTION_MUST_BE_TOP_LEVEL, targetName(restriction));
+
+                        // the restrictions on the fields of primary key columns don't select partitions or rows by
+                        // their keys: like those on regular columns, they're served by indexes or filtering
+                        nonPrimaryKeyRestrictionSet.addRestriction((SingleRestriction) restriction, element.isDisjunction());
+                    }
+                    else if (def.isPartitionKey())
                     {
                         // All partition key restrictions must be a part of the top-level AND operation.
                         // The read path filtering logic is currently unable to filter rows based on
@@ -528,7 +585,10 @@ public class StatementRestrictions
             ClusteringColumnRestrictions clusteringColumnsRestrictions = clusteringColumnsRestrictionSet.build();
             RestrictionSet nonPrimaryKeyRestrictions = nonPrimaryKeyRestrictionSet.build();
             ImmutableSet<ColumnMetadata> notNullColumns = notNullColumnsBuilder.build();
-            boolean hasRegularColumnsRestrictions = nonPrimaryKeyRestrictions.hasRestrictionFor(ColumnMetadata.Kind.REGULAR);
+            // the restrictions on the fields of clustering columns select rows, as those on regular columns
+            boolean hasRegularColumnsRestrictions = nonPrimaryKeyRestrictions.hasRestrictionFor(ColumnMetadata.Kind.REGULAR)
+                                                    || nonPrimaryKeyRestrictions.restrictions().stream()
+                                                                                .anyMatch(r -> r.fieldPath() != null && r.getFirstColumn().isClusteringColumn());
             boolean usesSecondaryIndexing = false;
             boolean isKeyRange = false;
 
@@ -885,11 +945,28 @@ public class StatementRestrictions
 
     private static void throwRequiresAllowFilteringError(TableMetadata table, IndexHints indexHints, Iterable<Restriction> columnRestrictions, ClientState state)
     {
-        Set<ColumnMetadata> unsupported = getColumnsWithUnsupportedIndexRestrictions(table, indexHints, columnRestrictions);
+        Set<String> unsupported = getColumnsWithUnsupportedIndexRestrictions(table, indexHints, columnRestrictions);
         if (unsupported.isEmpty())
         {
             if (requiresAllowFilteringIfNotSpecified(table))
+            {
+                // name the restricted fields that no index serves, the field indexes being created one by one
+                Set<String> unindexedFields = getUnindexedFields(table, indexHints, columnRestrictions);
+                if (!unindexedFields.isEmpty() && Guardrails.allowFilteringEnabled.isEnabled(state))
+                {
+                    // the NOT CONTAINS ELEMENT groups need ALLOW FILTERING whatever the indexes on their fields: say
+                    // so, and name the other restricted fields that no index serves, if any
+                    Set<String> filteredGroups = getFilteredOnlyGroups(columnRestrictions);
+                    if (filteredGroups.isEmpty())
+                        throw invalidRequest(FIELD_REQUIRES_ALLOW_FILTERING_MESSAGE, String.join(", ", unindexedFields));
+                    unindexedFields.removeAll(filteredGroups);
+                    if (unindexedFields.isEmpty())
+                        throw invalidRequest(NOT_CONTAINS_ELEMENT_REQUIRES_ALLOW_FILTERING_MESSAGE, String.join(", ", filteredGroups));
+                    throw invalidRequest(NOT_CONTAINS_ELEMENT_AND_FIELDS_REQUIRE_ALLOW_FILTERING_MESSAGE,
+                                         String.join(", ", filteredGroups), String.join(", ", unindexedFields));
+                }
                 throw invalidRequest(allowFilteringMessage(state));
+            }
         }
         else
         {
@@ -1055,7 +1132,7 @@ public class StatementRestrictions
         else if (hasNonPrimaryKeyRestrictions())
         {
             for (SingleRestriction restriction : nonPrimaryKeyRestrictions.restrictions())
-                if (restriction.getFirstColumn().name.equals(column.name) && restriction.isEqualityBased())
+                if (restriction.getFirstColumn().name.equals(column.name) && restriction.isEqualityBased() && restriction.fieldPath() == null)
                     return true;
         }
 
@@ -1098,6 +1175,23 @@ public class StatementRestrictions
     public boolean hasPartitionKeyRestrictions()
     {
         return !partitionKeyRestrictions.isEmpty();
+    }
+
+    /**
+     * @return whether these restrictions, or those of the nested expressions, restrict a field of a clustering column
+     * (those restrictions are not clustering restrictions, see {@link #hasClusteringColumnsRestrictions()})
+     */
+    public boolean hasFieldRestrictionsOnClusteringColumns()
+    {
+        for (SingleRestriction restriction : nonPrimaryKeyRestrictions.restrictions())
+            if (restriction.fieldPath() != null && restriction.getFirstColumn().isClusteringColumn())
+                return true;
+
+        for (StatementRestrictions child : children)
+            if (child.hasFieldRestrictionsOnClusteringColumns())
+                return true;
+
+        return false;
     }
 
     /**
@@ -1420,28 +1514,87 @@ public class StatementRestrictions
         return Iterables.concat(clusteringColumnsRestrictions.restrictions(), nonPrimaryKeyRestrictions.restrictions());
     }
 
-    private static Set<ColumnMetadata> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, IndexHints indexHints, Iterable<Restriction> restrictions)
+    /**
+     * @return the CQL form of the target of a restriction, for messages: the column, followed by the path for a
+     * restriction on a field
+     */
+    private static String targetName(Restriction restriction)
+    {
+        return restriction instanceof SingleColumnRestriction
+               ? ((SingleColumnRestriction) restriction).targetName()
+               : restriction.getFirstColumn().toString();
+    }
+
+    /**
+     * @return the names of the restricted fields that no index serves
+     */
+    private static Set<String> getUnindexedFields(TableMetadata table, IndexHints indexHints, Iterable<Restriction> restrictions)
+    {
+        IndexRegistry indexRegistry = IndexRegistry.obtain(table);
+        Set<String> fields = new LinkedHashSet<>();
+        for (Restriction restriction : restrictions)
+        {
+            if (restriction instanceof SingleRestriction
+                && ((SingleRestriction) restriction).fieldPath() != null
+                && !restriction.hasSupportingIndex(indexRegistry, indexHints))
+                fields.add(targetName(restriction));
+        }
+        return fields;
+    }
+
+    /**
+     * @return the CQL forms of the {@code NOT CONTAINS ELEMENT} groups that no index can serve (see
+     * {@link ElementMatchRestriction#isFilteredOnly()})
+     */
+    private static Set<String> getFilteredOnlyGroups(Iterable<Restriction> restrictions)
+    {
+        Set<String> groups = new LinkedHashSet<>();
+        for (Restriction restriction : restrictions)
+        {
+            if (restriction instanceof ElementMatchRestriction && ((ElementMatchRestriction) restriction).isFilteredOnly())
+                groups.add(targetName(restriction));
+        }
+        return groups;
+    }
+
+    /**
+     * @return the names of the restricted columns (or fields, see {@link #targetName(Restriction)}) that have
+     * indexes, none of which supports the restriction
+     */
+    private static Set<String> getColumnsWithUnsupportedIndexRestrictions(TableMetadata table, IndexHints indexHints, Iterable<Restriction> restrictions)
     {
         IndexRegistry indexRegistry = IndexRegistry.obtain(table);
         if (indexRegistry.listIndexes().isEmpty())
             return Collections.emptySet();
 
-        ImmutableSet.Builder<ColumnMetadata> builder = ImmutableSet.builder();
+        ImmutableSet.Builder<String> builder = ImmutableSet.builder();
 
         for (Restriction restriction : restrictions)
         {
             if (!restriction.hasSupportingIndex(indexRegistry, indexHints))
             {
+                // for a restriction on a field, only the indexes on that field count
+                FieldPath fieldPath = restriction instanceof SingleRestriction ? ((SingleRestriction) restriction).fieldPath() : null;
+                if (fieldPath != null)
+                {
+                    ColumnMetadata column = restriction.getFirstColumn();
+                    for (Index index : indexRegistry.listNotExcludedIndexes(indexHints))
+                        if (index.isOnField(column, fieldPath))
+                            builder.add(targetName(restriction));
+                    continue;
+                }
+
                 for (Index index : indexRegistry.listNotExcludedIndexes(indexHints))
                 {
-                    // If a column restriction has an index which was not picked up by hasSupportingIndex, it means it's an unsupported restriction
+                    // If a column restriction has an index which was not picked up by hasSupportingIndex, it means it's an unsupported restriction.
+                    // The indexes on the fields of a column never serve the restrictions on the whole column.
                     for (ColumnMetadata column : restriction.getColumnDefs())
                     {
-                        if (index.dependsOn(column))
+                        if (index.dependsOn(column) && !index.isOnFieldOf(column))
                         {
                             if (index instanceof NoopIndex)
                                 throw invalidRequest(((NoopIndex) index).getUnsupportedMessage());
-                            builder.add(column);
+                            builder.add(column.toString());
                         }
                     }
                 }

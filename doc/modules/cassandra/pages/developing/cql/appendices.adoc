@@ -50,6 +50,7 @@ or not.
 |`DISTINCT` |no
 |`DOUBLE` |no
 |`DROP` |yes
+|`ELEMENT` |no
 |`ENTRIES` |yes
 |`ESCAPE` |no
 |`EXECUTE` |yes

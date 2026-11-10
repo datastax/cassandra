@@ -1863,7 +1863,9 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                                                       StatementRestrictions restrictions)
                                                       throws InvalidRequestException
         {
+            // the restrictions on the fields of clustering columns select rows, as those on the clustering columns
             checkFalse(restrictions.hasClusteringColumnsRestrictions() ||
+                       restrictions.hasFieldRestrictionsOnClusteringColumns() ||
                        (restrictions.hasNonPrimaryKeyRestrictions() && !restrictions.nonPKRestrictedColumns(true).stream().allMatch(ColumnMetadata::isStatic)),
                        "SELECT DISTINCT with WHERE clause only supports restriction by partition key and/or static columns.");
 
@@ -1930,6 +1932,12 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                 }
                 else
                 {
+                    // the fields of UDT and tuple columns (GROUP BY addr.city), also of primary key columns, and the
+                    // other selectors (m['k'], CAST, ...) aren't columns
+                    checkFalse(selectable instanceof Selectable.WithFieldSelection,
+                               "Group by is not supported on the fields of columns, got %s", selectable);
+                    checkTrue(selectable instanceof ColumnMetadata,
+                              "Group by is currently only supported on the columns of the PRIMARY KEY, got %s", selectable);
                     def = (ColumnMetadata) selectable;
                     checkTrue(def.isPartitionKey() || def.isClusteringColumn(),
                               "Group by is currently only supported on the columns of the PRIMARY KEY, got %s", def.name);

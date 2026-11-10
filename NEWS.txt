@@ -100,9 +100,67 @@ New features
       Strings are ordered by their bytes (code points, no collation). Indexes with an analyzer ('case_sensitive': false,
       'normalize', 'ascii', 'index_analyzer', 'query_analyzer') don't serve these restrictions. No index rebuild, new
       index version or messaging change is needed.
+    - SAI indexes on the fields of UDT and tuple columns: CREATE INDEX ON t (addr.city) USING 'sai' indexes one field
+      (leaf) of a frozen or non-frozen UDT column, at any nesting depth (p.home.loc.lat); the components of a tuple are
+      named field1, field2, ... (t.field2), as in DSE Search. The fields of the elements of lists and sets of UDTs or
+      tuples (addrs.city, or values(addrs).city) and of the values of maps of UDTs or tuples (values(m).city) can be
+      indexed too, as well as collection fields (addr.tags, CONTAINS; full(addr.tags) for the whole frozen value). The
+      default index name is t_addr_city_idx. Each index has its own options ('case_sensitive', 'normalize', 'ascii',
+      analyzers on single fields).
+      WHERE clauses restrict fields with =, !=, <, <=, >, >=, IN, NOT IN, LIKE, : (analyzed match), CONTAINS / NOT
+      CONTAINS (collection fields) and IS NOT NULL, served by the field indexes or with ALLOW FILTERING. As on columns,
+      the results of ranges, != and NOT IN don't depend on the analyzers of the indexes (those of =, :, LIKE,
+      CONTAINS and NOT CONTAINS do): indexes with an analyzer ('case_sensitive': false, 'normalize', 'ascii',
+      'index_analyzer', 'query_analyzer') don't serve the ranges on text fields, nor != and NOT IN on the fields
+      inside collections, and ranges, != and NOT IN compare the raw values. On a field
+      inside a collection a restriction is satisfied by some element (and !=, NOT IN, NOT CONTAINS by no element),
+      and AND-ed restrictions may be satisfied by different elements; conditions on the same element are written as
+      a group: addrs CONTAINS ELEMENT (city = 'Rome' AND zip >= 100), with AND, OR, negations and nested fields
+      inside, and addrs NOT CONTAINS ELEMENT (...) for "no element". ELEMENT is a new unreserved keyword.
+      The DSE Search tuple queries ({!tuple}addr.city:Rome, ...) map to these restrictions, see the SAI documentation
+      page "Indexes on UDT and tuple fields".
+      Limitations: no IS NULL restriction (on fields inside collections, NOT CONTAINS ELEMENT (f IS NOT NULL) selects
+      the rows where no element has the field); no paths through map keys, no map-entry restrictions (m['k'] = v) on
+      fields, no KEYS or ENTRIES indexes on fields; no ORDER BY, BM25 or ANN on fields, and no vector or duration
+      fields; index_analyzer and query_analyzer are refused on the fields inside collections, because a tokenized
+      query could match each token in a different element of the collection in the index and only in one element in
+      the filtering (only 'case_sensitive', 'normalize' and 'ascii' are allowed there); ALTER TYPE ... RENAME of a
+      field used by an index is refused (drop the index first; ALTER TYPE ... ADD is fine); there is no shorthand to
+      index all the fields of a column, create one index per field; as on columns, a value whose term is larger than
+      the maximum term size of its index (8 KiB by default, after the analyzer for an analyzed index) isn't indexed,
+      so the queries served by the index, IS NOT NULL included, don't return its row. Field restrictions are only
+      accepted in SELECT WHERE clauses (not in the WHERE clauses of UPDATE, DELETE or materialized views).
+    - The system views system_views.indexes and system_views.sai_column_indexes have two new columns: field_path, the
+      path to the indexed field with the raw field names, as column_name (city for an index on addr.city, loc.lat for
+      addr.loc.lat), null for an index on a whole column; and target, the index target in canonical CQL form
+      (addr.city, values(addr.tags), full(addr.tags), values(m), "Addr"."City").
+    - Drivers show the target of an index on a field (addr.city) as the column name in their index metadata.
+    - cqlsh completes the field paths in CREATE INDEX targets and in SELECT relations (the fields of UDT and tuple
+      columns, and of the elements of collections), IS NOT NULL and NOT IN on fields, and CONTAINS ELEMENT /
+      NOT CONTAINS ELEMENT groups (the fields of the elements, AND, OR and parentheses inside). It doesn't complete
+      the values(col).field and full(col.field) index targets, the field names after the first one of a path, the
+      fields inside a group on a field path (p.home.names CONTAINS ELEMENT (...)), nor LIKE, OR and != on columns
+      outside groups (as before).
 
 Upgrading
 ---------
+    - SAI indexes on UDT and tuple fields don't change the on-disk formats or the messaging protocol, and existing
+      indexes don't need to be rebuilt. Create field indexes only once all the nodes are upgraded. Schema changes
+      during a rolling upgrade are discouraged but not enforced between 5.0.x versions: a field index created while
+      some nodes are not upgraded makes those nodes fail to load it with "Unable to parse targets for index ...", until
+      they are upgraded or the index is dropped.
+    - During a rolling upgrade, use field restrictions only once all the nodes are upgraded: a query with a field
+      restriction (with ALLOW FILTERING, as no field index can exist yet) that reaches a replica that isn't upgraded
+      fails. The replica logs "Unknown index expression kind" at ERROR and answers with a failure, and the client
+      receives a read failure ("... failures: UNKNOWN from ..."), never wrong results.
+    - Before downgrading to a version without this feature, drop the indexes on UDT and tuple fields: the older
+      version can't load them.
+    - SAI NOT CONTAINS and NOT CONTAINS KEY on non-frozen collection columns (and !=, NOT IN and NOT CONTAINS on the
+      fields inside collections) no longer subtract the rows of the index terms that may be stale, which returned too
+      few rows: when a source (memtable or SSTable) may hold expired cells (TTL), it doesn't subtract its keys, and
+      when the table has partition deletions or range tombstones (or, for the SSTables of tables with clustering
+      columns, any tombstone), the restriction is evaluated by scanning the keys and filtering the rows. Such queries
+      may be slower on tables with deletions or TTLs.
     - Breaking change in CQL LIKE patterns: every '%' is now a wildcard wherever it appears (previously only the
       leading and trailing ones), '_' is now a single-character wildcard (previously a literal character), and a
       pattern without wildcards matches only equal values. Queries whose pattern contains '_' or an inner '%' may

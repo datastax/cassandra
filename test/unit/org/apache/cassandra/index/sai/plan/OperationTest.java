@@ -37,7 +37,10 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.cql3.FieldIdentifier;
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
@@ -51,6 +54,7 @@ import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DoubleType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
@@ -62,8 +66,11 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.index.sai.IndexingSchemaLoader;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v1.V1OnDiskFormat;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.Indexes;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
@@ -77,15 +84,18 @@ public class OperationTest extends IndexingSchemaLoader
     private static final String CF_NAME = "test_cf";
     private static final String CLUSTERING_CF_NAME = "clustering_test_cf";
     private static final String STATIC_CF_NAME = "static_ndi_test_cf";
+    private static final String FIELD_CF_NAME = "field_test_cf";
 
     private static ColumnFamilyStore BACKEND;
     private static ColumnFamilyStore CLUSTERING_BACKEND;
     private static ColumnFamilyStore STATIC_BACKEND;
+    private static ColumnFamilyStore FIELD_BACKEND;
 
 
     private QueryController controller;
     private QueryController controllerClustering;
     private QueryController controllerStatic;
+    private QueryController controllerField;
 
 
     @BeforeClass
@@ -99,11 +109,28 @@ public class OperationTest extends IndexingSchemaLoader
                                             KeyspaceParams.simpleTransient(1),
                                             IndexingSchemaLoader.ndiCFMD(KS_NAME, CF_NAME),
                                             IndexingSchemaLoader.clusteringNDICFMD(KS_NAME, CLUSTERING_CF_NAME),
-                                            IndexingSchemaLoader.staticNDICFMD(KS_NAME, STATIC_CF_NAME));
+                                            IndexingSchemaLoader.staticNDICFMD(KS_NAME, STATIC_CF_NAME),
+                                            fieldCFMD());
 
         BACKEND = Keyspace.open(KS_NAME).getColumnFamilyStore(CF_NAME);
         CLUSTERING_BACKEND = Keyspace.open(KS_NAME).getColumnFamilyStore(CLUSTERING_CF_NAME);
         STATIC_BACKEND = Keyspace.open(KS_NAME).getColumnFamilyStore(STATIC_CF_NAME);
+        FIELD_BACKEND = Keyspace.open(KS_NAME).getColumnFamilyStore(FIELD_CF_NAME);
+    }
+
+    /**
+     * A table with a tuple column and a case-insensitive index on its first component.
+     */
+    private static TableMetadata.Builder fieldCFMD()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(IndexTarget.CUSTOM_INDEX_OPTION_NAME, StorageAttachedIndex.class.getName());
+        options.put(IndexTarget.TARGET_OPTION_NAME, "t.field1");
+        options.put("case_sensitive", "false");
+        return TableMetadata.builder(KS_NAME, FIELD_CF_NAME)
+                            .addPartitionKeyColumn("id", Int32Type.instance)
+                            .addRegularColumn("t", new TupleType(Arrays.asList(UTF8Type.instance, Int32Type.instance)))
+                            .indexes(Indexes.of(IndexMetadata.fromSchemaMetadata(FIELD_CF_NAME + "_t_field1", IndexMetadata.Kind.CUSTOM, options)));
     }
 
 
@@ -118,6 +145,42 @@ public class OperationTest extends IndexingSchemaLoader
 
         command = PartitionRangeReadCommand.allDataRead(STATIC_BACKEND.metadata(), FBUtilities.nowInSeconds());
         controllerStatic = new QueryController(STATIC_BACKEND, command, V1OnDiskFormat.instance.indexFeatureSet(), new QueryContext(), null);
+
+        command = PartitionRangeReadCommand.allDataRead(FIELD_BACKEND.metadata(), FBUtilities.nowInSeconds());
+        controllerField = new QueryController(FIELD_BACKEND, command, V1OnDiskFormat.instance.indexFeatureSet(), new QueryContext(), null);
+    }
+
+    /**
+     * IS NOT NULL on a field is combined with the previous expression on the field, whatever the operator of that
+     * expression and the order of the restrictions: it sorts strictly after every other operator, also after those
+     * without a priority of their own, such as ':' (with the priority of the default case, the IS NOT NULL written
+     * first would be an expression of its own).
+     */
+    @Test
+    public void testFieldIsNotNullCombinedWithAnyOperator()
+    {
+        ColumnMetadata t = FIELD_BACKEND.metadata().getColumn(UTF8Type.instance.decompose("t"));
+        FieldPath field1 = FieldPath.resolve(t.type, Arrays.asList(FieldIdentifier.forUnquoted("field1")));
+        ByteBuffer rome = UTF8Type.instance.decompose("rome");
+
+        for (Operator operator : new Operator[]{ Operator.ANALYZER_MATCHES, Operator.EQ })
+        {
+            for (boolean isNotNullFirst : new boolean[]{ true, false })
+            {
+                RowFilter.Expression other = new RowFilter.FieldExpression(t, field1, operator, rome, null);
+                RowFilter.Expression isNotNull = new RowFilter.FieldExpression(t, field1, Operator.IS_NOT, ByteBufferUtil.EMPTY_BYTE_BUFFER, null);
+                List<RowFilter.Expression> expressions = isNotNullFirst ? Arrays.asList(isNotNull, other) : Arrays.asList(other, isNotNull);
+                List<Expression> analyzed = new ArrayList<>(Operation.analyzeGroup(controllerField, Operation.OperationType.AND, expressions).values());
+
+                String description = operator + (isNotNullFirst ? " after IS NOT NULL" : " before IS NOT NULL");
+                Assert.assertEquals(description, 1, analyzed.size());
+                // the merged expression keeps the operation of the other one: MATCH for ':' (also for an analyzed '=',
+                // which the CQL layer turns into ':' with the default equals behaviour), EQ for an '='
+                Expression.Op expected = operator == Operator.EQ ? Expression.Op.EQ : Expression.Op.MATCH;
+                Assert.assertEquals(description, expected, analyzed.get(0).getOp());
+                Assert.assertTrue(description, analyzed.get(0).isNotNull());
+            }
+        }
     }
 
     @After

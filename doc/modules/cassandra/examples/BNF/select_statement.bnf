@@ -17,7 +17,10 @@ where_clause::= `relation` ( AND `relation` )*
 relation::= column_name operator term
 	'(' column_name ( ',' column_name )* ')' operator tuple_literal 
 	TOKEN '(' column_name# ( ',' column_name )* ')' operator term 
+	column_name field_path ( operator term | IS NOT NULL )
+	column_name [ field_path ] [ NOT ] CONTAINS ELEMENT '(' where_clause ')'
 operator::= '=' | '<' | '>' | '<=' | '>=' | '!=' | IN | CONTAINS | CONTAINS KEY 
+field_path::= '.' field_name ( '.' field_name )*
 group_by_clause::= column_name ( ',' column_name )*
 ordering_clause::= column_name [ ASC | DESC ] ( ',' column_name [ ASC | DESC ] )*
 select_options::= `select_option` ( AND `select_option` )*

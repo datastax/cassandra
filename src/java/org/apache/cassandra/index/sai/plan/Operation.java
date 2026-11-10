@@ -20,16 +20,20 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.TypeSizes;
@@ -70,21 +74,28 @@ public class Operation
                                                                            OperationType op,
                                                                            List<RowFilter.Expression> expressions)
     {
-        ListMultimap<ColumnMetadata, Expression> analyzed = ArrayListMultimap.create();
-        Map<ColumnMetadata, Boolean> columnIsMultiExpression = new HashMap<>();
+        // The expressions are grouped by target: a column, or a field of a column (the expressions on different
+        // fields of a column, or on a column and on its fields, are independent: e.g. the bounds of 'addr.city >= x'
+        // and 'addr.zip <= y' must not be combined into one range). The result is keyed by column, with the
+        // expressions of each target next to each other.
+        ListMultimap<List<Object>, Expression> analyzedByTarget = ArrayListMultimap.create();
+        Map<List<Object>, Boolean> targetIsMultiExpression = new HashMap<>();
 
-        // sort all of the expressions in the operation by name and priority of the logical operator
+        // sort all of the expressions in the operation by name, field and priority of the logical operator
         // this gives us an efficient way to handle inequality and combining into ranges without extra processing
         // and converting expressions from one type to another.
         expressions.sort((a, b) -> {
             int cmp = a.column().compareTo(b.column());
+            if (cmp == 0)
+                cmp = compareFieldPaths(a.fieldPath(), b.fieldPath());
             return cmp == 0 ? -Integer.compare(getPriority(a.operator()), getPriority(b.operator())) : cmp;
         });
 
         for (final RowFilter.Expression e : expressions)
         {
             IndexContext indexContext = controller.getContext(e);
-            List<Expression> perColumn = analyzed.get(e.column());
+            List<Object> target = Arrays.asList(e.column(), e.fieldPath());
+            List<Expression> perColumn = analyzedByTarget.get(target);
 
             AbstractAnalyzer.AnalyzerFactory analyzerFactory = indexContext.getQueryAnalyzerFactory();
             AbstractAnalyzer analyzer = analyzerFactory.create();
@@ -99,7 +110,7 @@ public class Operation
                 // if there is no EQ operations and NOT_EQ is met or a single NOT_EQ expression present,
                 // in such case we know exactly that there would be no more EQ/RANGE expressions for given column
                 // since NOT_EQ has the lowest priority.
-                boolean isMultiExpression = columnIsMultiExpression.getOrDefault(e.column(), Boolean.FALSE);
+                boolean isMultiExpression = targetIsMultiExpression.getOrDefault(target, Boolean.FALSE);
                 switch (e.operator())
                 {
                     // case BM25: leave it at the default of `false`
@@ -127,11 +138,24 @@ public class Operation
                         // NEQ operator will always be a multiple expression if it is the only operator
                         // (e.g. multiple NEQ expressions)
                         isMultiExpression = isMultiExpression || perColumn.isEmpty();
+                        // but the NEQs on a field inside collection elements are combined into one NOT_EQ with
+                        // exclusions (see below)
+                        if (isOnMultiValuedPath(e))
+                            isMultiExpression = false;
                         break;
                 }
-                columnIsMultiExpression.put(e.column(), isMultiExpression);
+                targetIsMultiExpression.put(target, isMultiExpression);
 
-                if (isMultiExpression && e.operator() == Operator.LIKE_MATCHES)
+                if (e.operator() == Operator.IS_NOT)
+                {
+                    // IS NOT NULL on a field has no operand to analyze: all the terms of the index; combined with the
+                    // previous expression on the same single-valued target, which implies it
+                    if (perColumn.isEmpty() || op != OperationType.AND || isOnMultiValuedPath(e) || !Iterables.getLast(perColumn).context.equals(indexContext))
+                        perColumn.add(new Expression(indexContext).add(Operator.IS_NOT, ByteBuffer.allocate(0)));
+                    else
+                        Iterables.getLast(perColumn).add(Operator.IS_NOT, ByteBuffer.allocate(0));
+                }
+                else if (isMultiExpression && e.operator() == Operator.LIKE_MATCHES)
                 {
                     // the analyzer normalizes the literals of the pattern, not its wildcards and escapes
                     ByteBuffer pattern = LikePatterns.normalizeLiterals(e.getIndexValue(), literal -> analyzeLiteral(analyzerFactory, literal));
@@ -170,9 +194,19 @@ public class Operation
                     Expression range;
                     // An expression is combined with the previous one only if they have the same context, so a NEQ
                     // that no index serves doesn't turn a range served by an index into a non-indexed one, or vice versa.
+                    // The expressions on a field inside collection elements are never combined: each of them is
+                    // satisfied by some element (by no element for a NEQ), possibly a different one for each
+                    // expression, as RowFilter.FieldExpression evaluates them, while a combined range (or a range with
+                    // exclusions) would be evaluated on each element, requiring a single element to satisfy all of
+                    // them (e.g. 'addrs.zip >= 150 AND addrs.zip < 300' selects the rows with an element whose zip
+                    // is >= 150, and an element whose zip is < 300). The only exception is the AND of NEQs (a NOT IN):
+                    // "no element is equal to a" and "no element is equal to b" is "no element is equal to a or b",
+                    // one NOT_EQ with exclusions, served by a single anti-join (all the keys minus the keys matching
+                    // any of the values, see Expression#negations) and evaluated as "no value excluded" on each element.
                     if (perColumn.size() == 0
                         || op != OperationType.AND
                         || e instanceof RowFilter.MapComparisonExpression
+                        || isOnMultiValuedPath(e) && !(e.operator() == Operator.NEQ && Iterables.getLast(perColumn).getOp() == Expression.Op.NOT_EQ)
                         || !Iterables.getLast(perColumn).context.equals(indexContext))
                     {
                         range = new Expression(indexContext);
@@ -226,7 +260,44 @@ public class Operation
             }
         }
 
+        ListMultimap<ColumnMetadata, Expression> analyzed = ArrayListMultimap.create();
+        for (List<Object> target : analyzedByTarget.keySet())
+            analyzed.putAll((ColumnMetadata) target.get(0), analyzedByTarget.get(target));
         return analyzed;
+    }
+
+    /**
+     * @return whether the expression is on a field inside the elements of a collection
+     */
+    private static boolean isOnMultiValuedPath(RowFilter.Expression expression)
+    {
+        return expression.fieldPath() != null && expression.fieldPath().hasElements();
+    }
+
+    /**
+     * Orders the field paths of the expressions on a column: the expressions on the whole column first.
+     */
+    private static int compareFieldPaths(@Nullable FieldPath a, @Nullable FieldPath b)
+    {
+        if (Objects.equals(a, b))
+            return 0;
+        if (a == null)
+            return -1;
+        if (b == null)
+            return 1;
+        List<FieldPath.Step> stepsA = a.steps();
+        List<FieldPath.Step> stepsB = b.steps();
+        for (int i = 0; i < Math.min(stepsA.size(), stepsB.size()); i++)
+        {
+            FieldPath.Step stepA = stepsA.get(i);
+            FieldPath.Step stepB = stepsB.get(i);
+            int cmp = stepA.kind.compareTo(stepB.kind);
+            if (cmp == 0)
+                cmp = Integer.compare(stepA.position, stepB.position);
+            if (cmp != 0)
+                return cmp;
+        }
+        return Integer.compare(stepsA.size(), stepsB.size());
     }
 
     /**
@@ -278,6 +349,12 @@ public class Operation
             case NEQ:
                 return 1;
 
+            // IS NOT NULL on a field is strictly last (below the other operators, also those of the default case):
+            // it's combined with the previous expression on the same single-valued field, whatever its operator
+            // (see analyzeGroup and Expression#add), which keeps its operation and bounds
+            case IS_NOT:
+                return -1;
+
             default:
                 return 0;
         }
@@ -318,11 +395,30 @@ public class Operation
 
         static Node buildTree(QueryController controller, List<RowFilter.Expression> expressions, List<RowFilter.FilterElement> children, boolean isDisjunction)
         {
+            return buildTree(controller, expressions, children, isDisjunction, false);
+        }
+
+        /**
+         * @param underDisjunction whether an ancestor of the node is an OR: the keys of the node are then not
+         * necessarily those the query reads (they're united with other keys)
+         */
+        private static Node buildTree(QueryController controller,
+                                      List<RowFilter.Expression> expressions,
+                                      List<RowFilter.FilterElement> children,
+                                      boolean isDisjunction,
+                                      boolean underDisjunction)
+        {
+            boolean inDisjunction = underDisjunction || isDisjunction;
             OperatorNode node = isDisjunction ? new OrNode() : new AndNode();
             for (RowFilter.Expression expression : expressions)
-                node.add(buildExpression(controller, expression, isDisjunction));
+            {
+                if (expression instanceof RowFilter.ElementMatchExpression)
+                    node.add(new ElementNode(controller, (RowFilter.ElementMatchExpression) expression, !inDisjunction));
+                else
+                    node.add(buildExpression(controller, expression, isDisjunction));
+            }
             for (RowFilter.FilterElement child : children)
-                node.add(buildTree(controller, child));
+                node.add(buildTree(controller, child.expressions(), child.children(), child.isDisjunction(), inDisjunction));
             return node;
         }
 
@@ -333,6 +429,9 @@ public class Operation
 
         static Node buildExpression(QueryController controller, RowFilter.Expression expression, boolean isDisjunction)
         {
+            // the groups are built by buildTree, which knows whether an OR is above them
+            assert !(expression instanceof RowFilter.ElementMatchExpression) : "CONTAINS ELEMENT groups are built by buildTree: " + expression;
+
             if (expression.operator() == Operator.IN)
             {
                 OperatorNode node = new OrNode();
@@ -340,13 +439,12 @@ public class Operation
                 int offset = ListSerializer.sizeOfCollectionSize();
                 for (int index = 0; index < size; index++)
                 {
-                    node.add(new ExpressionNode(new RowFilter.SimpleExpression(expression.column(),
-                                                                               Operator.EQ,
-                                                                               ListSerializer.readValue(expression.getIndexValue(),
-                                                                                                        ByteBufferAccessor.instance,
-                                                                                                        offset),
-                                                                               expression.analyzer(),
-                                                                               expression.annOptions())));
+                    ByteBuffer value = ListSerializer.readValue(expression.getIndexValue(), ByteBufferAccessor.instance, offset);
+                    // an IN on a field is an OR of EQs on the same field
+                    RowFilter.Expression eq = expression.fieldPath() == null
+                                              ? new RowFilter.SimpleExpression(expression.column(), Operator.EQ, value, expression.analyzer(), expression.annOptions())
+                                              : new RowFilter.FieldExpression(expression.column(), expression.fieldPath(), Operator.EQ, value, expression.analyzer());
+                    node.add(new ExpressionNode(eq));
                     offset += TypeSizes.INT_SIZE + ByteBufferAccessor.instance.getInt(expression.getIndexValue(), offset);
                 }
                 if (node.children().size() == 1)
@@ -534,6 +632,81 @@ public class Operation
         public String toString()
         {
             return "ExpressionNode{expression=" + expression + '}';
+        }
+    }
+
+    /**
+     * A {@code CONTAINS ELEMENT} group (see {@link RowFilter.ElementMatchExpression}): its keys are those of its
+     * candidates, the AND / OR of the expressions on the absolute paths of its positive conditions, a superset of
+     * the rows satisfying it (the whole table if there are no candidates, e.g. for {@code NOT CONTAINS ELEMENT}, which
+     * is never subtracted); its filter evaluates the group on each element (see {@link FilterTree.ElementFilter}).
+     */
+    public static class ElementNode extends Node
+    {
+        private final RowFilter.ElementMatchExpression expression;
+        // the plan of the candidates, null if they don't restrict the rows
+        @Nullable
+        private final Node candidates;
+        private final QueryController controller;
+        // whether the keys of the candidates are those the query reads: no OR above the group
+        private final boolean candidatesAreKeySource;
+
+        ElementNode(QueryController controller, RowFilter.ElementMatchExpression expression, boolean candidatesAreKeySource)
+        {
+            this.expression = expression;
+            this.controller = controller;
+            this.candidatesAreKeySource = candidatesAreKeySource;
+            RowFilter.FilterElement candidateElement = expression.candidates();
+            this.candidates = candidateElement == null ? null : buildTree(controller, candidateElement);
+        }
+
+        @Override
+        boolean canFilter()
+        {
+            return true;
+        }
+
+        @Override
+        List<Node> children()
+        {
+            return candidates == null ? Collections.emptyList() : Collections.singletonList(candidates);
+        }
+
+        @Override
+        RowFilter.Expression expression()
+        {
+            return expression;
+        }
+
+        @Override
+        void analyze(QueryController controller)
+        {
+            if (candidates != null)
+                candidates.analyze(controller);
+        }
+
+        @Override
+        FilterTree filterTree()
+        {
+            // the candidates' filter tree is kept for the indexes it references (the guardrail on the SSTable
+            // indexes per query), not evaluated: the element filter implies it
+            return new FilterTree.ElementFilter(expression,
+                                                controller.metadata(),
+                                                controller.queryContext(),
+                                                candidates != null && candidatesAreKeySource,
+                                                candidates == null ? null : candidates.filterTree());
+        }
+
+        @Override
+        Plan.KeysIteration plan(QueryController controller)
+        {
+            return candidates == null ? controller.planFactory.everything : candidates.plan(controller);
+        }
+
+        @Override
+        public String toString()
+        {
+            return "ElementNode{expression=" + expression + '}';
         }
     }
 

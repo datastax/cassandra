@@ -175,6 +175,14 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
         if (expression.isUserDefined())
             return false;
 
+        // a CONTAINS ELEMENT group is served through its candidates (the positive conditions on the absolute paths),
+        // with the same rules as the other expressions: one in an AND, all in an OR
+        if (expression instanceof RowFilter.ElementMatchExpression)
+        {
+            RowFilter.FilterElement candidates = ((RowFilter.ElementMatchExpression) expression).candidates();
+            return candidates != null && selectedIndexes(candidates, allIndexes, selectedIndexes, hints);
+        }
+
         // collect the indexes that support the specified expression
         Set<StorageAttachedIndex> candidates = new HashSet<>();
         for (StorageAttachedIndex index : allIndexes)

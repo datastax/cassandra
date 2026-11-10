@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.cql3.restrictions;
 
+import javax.annotation.Nullable;
+
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.Bound;
 import org.apache.cassandra.db.MultiClusteringBuilder;
@@ -72,6 +75,16 @@ public interface SingleRestriction extends Restriction
     public default boolean isMultiColumn()
     {
         return false;
+    }
+
+    /**
+     * @return the path to the restricted field of the column for a restriction on a field of a UDT or tuple column
+     * (see {@link FieldPath}), {@code null} for the restrictions on whole columns
+     */
+    @Nullable
+    default FieldPath fieldPath()
+    {
+        return null;
     }
 
     public default boolean isIndexBasedOrdering()

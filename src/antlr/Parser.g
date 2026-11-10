@@ -898,11 +898,21 @@ createIndexStatement returns [CreateIndexStatement.Raw stmt]
     ;
 
 indexIdent [List<IndexTarget.Raw> targets]
-    : c=cident                   { $targets.add(IndexTarget.Raw.simpleIndexOn(c)); }
-    | K_VALUES '(' c=cident ')'  { $targets.add(IndexTarget.Raw.valuesOf(c)); }
-    | K_KEYS '(' c=cident ')'    { $targets.add(IndexTarget.Raw.keysOf(c)); }
-    | K_ENTRIES '(' c=cident ')' { $targets.add(IndexTarget.Raw.keysAndValuesOf(c)); }
-    | K_FULL '(' c=cident ')'    { $targets.add(IndexTarget.Raw.fullCollection(c)); }
+    : c=cident p=indexFieldPath?                                    { $targets.add(IndexTarget.Raw.simpleIndexOn(c, p)); }
+    | K_VALUES '(' c=cident p=indexFieldPath? ')' e=indexFieldPath? { $targets.add(IndexTarget.Raw.valuesOf(c, p, e)); }
+    | K_KEYS '(' c=cident ')'                                       { $targets.add(IndexTarget.Raw.keysOf(c)); }
+    | K_ENTRIES '(' c=cident ')'                                    { $targets.add(IndexTarget.Raw.keysAndValuesOf(c)); }
+    | K_FULL '(' c=cident p=indexFieldPath? ')'                     { $targets.add(IndexTarget.Raw.fullCollection(c, p)); }
+    ;
+
+/**
+ * The path to a field of a UDT or tuple column (tuple components are named field1, field2, ...), for example
+ * the '.home.city' of 'CREATE INDEX ON t (p.home.city)' or of 'SELECT ... WHERE p.home.city = ?'.
+ */
+indexFieldPath returns [List<FieldIdentifier> path]
+    @init { List<FieldIdentifier> names = new ArrayList<>(); }
+    @after { $path = names; }
+    : ('.' f=fident { names.add(f); })+
     ;
 
 /**
@@ -1822,22 +1832,30 @@ relationType returns [Operator op]
     ;
 
 relation[WhereClause.Builder clauses]
-    : name=cident type=relationType t=term { $clauses.add(new SingleColumnRelation(name, type, t)); }
-    | name=cident K_LIKE t=term (K_ESCAPE e=likeEscape)? { $clauses.add(SingleColumnRelation.createLikeRelation(name, t, e)); }
-    | name=cident K_IS K_NOT K_NULL { $clauses.add(new SingleColumnRelation(name, Operator.IS_NOT, Constants.NULL_LITERAL)); }
+    : name=cident p=indexFieldPath? type=relationType t=term { $clauses.add(SingleColumnRelation.create(name, p, type, t)); }
+    | name=cident p=indexFieldPath? K_LIKE t=term (K_ESCAPE e=likeEscape)? { $clauses.add(SingleColumnRelation.createLikeRelation(name, p, t, e)); }
+    | name=cident p=indexFieldPath? K_IS K_NOT K_NULL { $clauses.add(SingleColumnRelation.create(name, p, Operator.IS_NOT, Constants.NULL_LITERAL)); }
+    | name=cident p=indexFieldPath? K_IS K_NULL
+        { addRecognitionError("IS NULL restrictions are not supported: only IS NOT NULL, on the fields of UDT and tuple columns (and in materialized views)"); }
     | K_TOKEN l=tupleOfIdentifiers type=relationType t=term
         { $clauses.add(new TokenRelation(l, type, t)); }
     | K_GEO_DISTANCE '(' name=cident ',' point=term ')' type=relationType distance=term
         { $clauses.add(new GeoDistanceRelation(name, point, type, distance)); }
-    | name=cident K_IN marker=inMarker
-        { $clauses.add(new SingleColumnRelation(name, Operator.IN, marker)); }
-    | name=cident K_NOT K_IN marker=inMarker
-        { $clauses.add(new SingleColumnRelation(name, Operator.NOT_IN, marker)); }
-    | name=cident K_IN inValues=singleColumnInValues
-        { $clauses.add(SingleColumnRelation.createInRelation($name.id, inValues)); }
-    | name=cident K_NOT K_IN inValues=singleColumnInValues
-            { $clauses.add(SingleColumnRelation.createNotInRelation($name.id, inValues)); }
-    | name=cident rt=containsOperator t=term { $clauses.add(new SingleColumnRelation(name, rt, t)); }
+    | name=cident p=indexFieldPath? K_IN marker=inMarker
+        { $clauses.add(SingleColumnRelation.create(name, p, Operator.IN, marker)); }
+    | name=cident p=indexFieldPath? K_NOT K_IN marker=inMarker
+        { $clauses.add(SingleColumnRelation.create(name, p, Operator.NOT_IN, marker)); }
+    | name=cident p=indexFieldPath? K_IN inValues=singleColumnInValues
+        { $clauses.add(SingleColumnRelation.createInRelation($name.id, p, inValues)); }
+    | name=cident p=indexFieldPath? K_NOT K_IN inValues=singleColumnInValues
+            { $clauses.add(SingleColumnRelation.createNotInRelation($name.id, p, inValues)); }
+    | name=cident p=indexFieldPath?
+      ( (K_CONTAINS K_ELEMENT elementMatchGroup)=> K_CONTAINS K_ELEMENT g=elementMatchGroup
+            { $clauses.add(ElementMatchRelation.create(name, p, false, g)); }
+      | (K_NOT K_CONTAINS K_ELEMENT elementMatchGroup)=> K_NOT K_CONTAINS K_ELEMENT g=elementMatchGroup
+            { $clauses.add(ElementMatchRelation.create(name, p, true, g)); }
+      | rt=containsOperator t=term { $clauses.add(SingleColumnRelation.create(name, p, rt, t)); }
+      )
     | name=cident '[' key=term ']' type=relationType t=term { $clauses.add(new SingleColumnRelation(name, key, type, t)); }
     | ids=tupleOfIdentifiers
       ( K_IN
@@ -1869,6 +1887,17 @@ relation[WhereClause.Builder clauses]
       | type=relationType tupleMarker=markerForTuple /* (a, b, c) >= ? */
           { $clauses.add(MultiColumnRelation.createNonInRelation(ids, type, tupleMarker)); }
       )
+    ;
+
+/**
+ * The conditions on one element of a collection of UDTs or tuples, for example the '(city = 'Rome' AND zip = 100)' of
+ * 'WHERE addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100)': a WHERE expression whose names are paths relative
+ * to the element. The syntactic predicates of the relation keep 'CONTAINS element(x)' a call to a function named
+ * 'element', as no term is a WHERE expression.
+ */
+elementMatchGroup returns [WhereClause clause]
+    @init { WhereClause.Builder builder = new WhereClause.Builder(); }
+    : '(' expression[builder] ')' { $clause = builder.build(); }
     ;
 
 containsOperator returns [Operator o]
@@ -2111,6 +2140,7 @@ basic_unreserved_keyword returns [String str]
         | K_RECORD
         | K_ANN
         | K_BM25
+        | K_ELEMENT
         | K_OFFSET
         | K_DETERMINISTIC
         | K_MONOTONIC

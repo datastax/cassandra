@@ -27,6 +27,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -38,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -228,7 +230,7 @@ public class RowFilter
     public boolean isMutableIntersection()
     {
         List<Expression> exprs = expressions();
-        Set<ColumnMetadata> columns = null;
+        Set<Object> targets = null;
         for (Expression e : exprs)
         {
             if (e.column.isStatic() && exprs.size() > 1)
@@ -236,11 +238,20 @@ public class RowFilter
 
             if (!e.column.isPrimaryKeyColumn())
             {
-                if (columns == null)
-                    columns = new HashSet<>(exprs.size());
+                if (targets == null)
+                    targets = new HashSet<>(exprs.size());
 
-                columns.add(e.column);
-                if (columns.size() > 1)
+                // the fields of a non-frozen (multi-cell) UDT are different cells, so each is a mutable target of its
+                // own; those of a frozen column are parts of a single cell, so they're the same target as the column.
+                // Each expression on a field inside the elements of a non-frozen collection may be satisfied by a
+                // different element, that is, by a different cell, even if they are on the same field: each of them
+                // is a mutable target of its own (the same expression twice is the same condition).
+                boolean isCellTarget = e.fieldPath() != null && e.column.type.isMultiCell();
+                if (isCellTarget && e.fieldPath().hasElements() && e.column.type.isCollection())
+                    targets.add(e);
+                else
+                    targets.add(isCellTarget ? List.of(e.column, e.fieldPath()) : e.column);
+                if (targets.size() > 1)
                     return true;
             }
         }
@@ -376,7 +387,7 @@ public class RowFilter
                              ? ((CompositeType) keyValidator).split(key.getKey())[e.column.position()]
                              : key.getKey();
 
-            if (!e.isSatisfiedBy(e.column.type, value))
+            if (!e.isSatisfiedByColumnValue(value))
                 return false;
         }
         return true;
@@ -395,7 +406,7 @@ public class RowFilter
 
             ByteBuffer value = clustering.bufferAt(e.column.position());
 
-            if (!e.isSatisfiedBy(e.column.type, value))
+            if (!e.isSatisfiedByColumnValue(value))
                 return false;
         }
         return true;
@@ -423,7 +434,8 @@ public class RowFilter
         if (isEmpty())
             return this;
 
-        return new RowFilter(root.filter(e -> !e.column().equals(column) || e.operator() != op || !e.value.equals(value)), needsReconciliation, indexHints, optimizerOptions);
+        // the expressions on the fields of the column are not expressions on the column
+        return new RowFilter(root.filter(e -> !e.column().equals(column) || e.fieldPath() != null || e.operator() != op || !e.value.equals(value)), needsReconciliation, indexHints, optimizerOptions);
     }
 
     public boolean hasNonKeyExpression()
@@ -450,7 +462,8 @@ public class RowFilter
      */
     public RowFilter withoutFirstLevelExpression(ColumnMetadata column)
     {
-        return restrictFirstLevel(e -> !e.column.equals(column));
+        // the expressions on the fields of the column are not expressions on the column
+        return restrictFirstLevel(e -> !e.column.equals(column) || e.fieldPath() != null);
     }
 
     /**
@@ -678,6 +691,31 @@ public class RowFilter
         }
 
         /**
+         * Adds the specified filter expression on a field of a UDT or tuple column to this builder.
+         *
+         * @param def the column of the filtered field
+         * @param fieldPath the path to the filtered field of the column, or {@code null} to filter the whole column,
+         * as {@link #add(ColumnMetadata, Operator, ByteBuffer)} does
+         * @param op the filtering operator, shouldn't be {@link Operator#ANN}.
+         * @param value the filtered value, of the type of the field
+         * @return the added expression
+         */
+        public SimpleExpression add(ColumnMetadata def, @Nullable FieldPath fieldPath, Operator op, ByteBuffer value)
+        {
+            if (fieldPath == null)
+                return add(def, op, value);
+
+            assert op != Operator.ANN : "ANN expressions are not supported on fields";
+            // IS NOT has no operand to analyze, and it checks the presence of the value, not its terms
+            Index.Analyzer analyzer = indexRegistry == null || op == Operator.IS_NOT
+                                      ? null
+                                      : indexRegistry.getAnalyzerFor(def, fieldPath, op, value, indexHints).orElse(null);
+            FieldExpression expression = new FieldExpression(def, fieldPath, op, value, analyzer);
+            add(expression);
+            return expression;
+        }
+
+        /**
          * Adds the specified ANN expression to this builder.
          *
          * @param def the column for ANN ordering
@@ -750,6 +788,52 @@ public class RowFilter
         public void addUserExpression(UserExpression e)
         {
             current.expressions.add(e);
+        }
+
+        /**
+         * Returns a builder of the conditions of a {@code CONTAINS ELEMENT} group (see
+         * {@link #addElementMatch}), or of a part of them, an AND or an OR: it adds the expressions to a filter
+         * element of its own (see {@link #buildElement()}), using the index registry and hints of this builder, so
+         * that the expressions on the fields of the elements get the analyzers of the indexes as outside groups.
+         *
+         * @param isDisjunction whether the conditions of the new builder are OR-ed
+         */
+        public Builder nestedBuilder(boolean isDisjunction)
+        {
+            Builder builder = new Builder(needsReconciliation, indexRegistry, indexHints, optimizerOptions);
+            builder.current = new FilterElement.Builder(isDisjunction);
+            return builder;
+        }
+
+        /**
+         * Adds a child element, e.g. one made by a {@link #nestedBuilder nested builder}.
+         */
+        public void addChild(FilterElement child)
+        {
+            current.children.add(child);
+        }
+
+        /**
+         * @return the element made of the expressions and children added to this builder (see
+         * {@link #nestedBuilder})
+         */
+        public FilterElement buildElement()
+        {
+            return current.build();
+        }
+
+        /**
+         * Adds a {@code CONTAINS ELEMENT} group, see {@link ElementMatchExpression}.
+         *
+         * @param column the column of the collection
+         * @param prefix the path to the elements of the collection (see {@link FieldPath#elementsOf})
+         * @param negated {@code true} for {@code NOT CONTAINS ELEMENT}
+         * @param conditions the conditions on each element, expressions on the absolute paths (from the column) of
+         * fields of the elements, as {@link #add(ColumnMetadata, FieldPath, Operator, ByteBuffer)} makes them
+         */
+        public void addElementMatch(ColumnMetadata column, FieldPath prefix, boolean negated, FilterElement conditions)
+        {
+            add(ElementMatchExpression.fromAbsolute(column, prefix, negated, conditions));
         }
     }
 
@@ -894,16 +978,22 @@ public class RowFilter
                 || !(upper instanceof SimpleExpression)
                 || !(lower.operator == Operator.GT || lower.operator == Operator.GTE)
                 || !(upper.operator == Operator.LT || upper.operator == Operator.LTE)
-                || !lower.column.equals(upper.column))
+                || !lower.column.equals(upper.column)
+                // the bounds of the same target: the column, or the same field of it
+                || !Objects.equal(lower.fieldPath(), upper.fieldPath())
+                // the bounds on a field inside collection elements may be satisfied by different elements
+                || lower.fieldPath() != null && lower.fieldPath().hasElements())
                 return false;
+
+            // as the operators compare the values, see SimpleExpression#isSatisfiedBy (FieldExpression: of the field)
+            AbstractType<?> type = lower instanceof FieldExpression
+                                   ? ((FieldExpression) lower).leafType()
+                                   : lower.column.type.isCounter() ? LongType.instance : lower.column.type;
 
             // an index can order the values differently than their type, e.g. SAI compares IPv4 addresses as
             // IPv4-mapped IPv6 ones, so the type order can't tell that the range is empty
-            if (lower.column.type.unwrap() instanceof InetAddressType)
+            if (type.unwrap() instanceof InetAddressType)
                 return false;
-
-            // as the operators compare the values, see SimpleExpression#isSatisfiedBy
-            AbstractType<?> type = lower.column.type.isCounter() ? LongType.instance : lower.column.type;
             int cmp = type.compareForCQL(lower.value, upper.value);
             return cmp > 0 || cmp == 0 && !(lower.operator == Operator.GTE && upper.operator == Operator.LTE);
         }
@@ -1056,10 +1146,18 @@ public class RowFilter
 
             public FilterElement deserialize(DataInputPlus in, int version, TableMetadata metadata, IndexHints indexHints) throws IOException
             {
+                return deserialize(in, version, metadata, indexHints, null);
+            }
+
+            /**
+             * @param group the group whose conditions are deserialized, {@code null} outside groups
+             */
+            private FilterElement deserialize(DataInputPlus in, int version, TableMetadata metadata, IndexHints indexHints, @Nullable ElementGroup group) throws IOException
+            {
                 int size = in.readUnsignedVInt32();
                 List<Expression> expressions = new ArrayList<>(size);
                 for (int i = 0; i < size; i++)
-                    expressions.add(Expression.serializer.deserialize(in, version, metadata, indexHints));
+                    expressions.add(Expression.serializer.deserialize(in, version, metadata, indexHints, group));
 
                 if (version < MessagingService.VERSION_DS_10)
                     return new FilterElement(false, expressions, Collections.emptyList());
@@ -1068,7 +1166,7 @@ public class RowFilter
                 size = in.readUnsignedVInt32();
                 List<FilterElement> children = new ArrayList<>(size);
                 for (int i  = 0; i < size; i++)
-                    children.add(deserialize(in, version, metadata, indexHints));
+                    children.add(deserialize(in, version, metadata, indexHints, group));
                 return new FilterElement(isDisjunction, expressions, children);
             }
 
@@ -1090,6 +1188,23 @@ public class RowFilter
         }
     }
 
+    /**
+     * The group of the {@code CONTAINS ELEMENT} conditions being deserialized (see {@link ElementMatchExpression}).
+     */
+    private static final class ElementGroup
+    {
+        private final ColumnMetadata column;
+        private final FieldPath prefix;
+        private final AbstractType<?> elementType;
+
+        private ElementGroup(ColumnMetadata column, FieldPath prefix, AbstractType<?> elementType)
+        {
+            this.column = column;
+            this.prefix = prefix;
+            this.elementType = elementType;
+        }
+    }
+
     public static abstract class Expression
     {
         public static final Serializer serializer = new Serializer();
@@ -1101,7 +1216,7 @@ public class RowFilter
         // VECTOR
         protected enum Kind
         {
-            SIMPLE(0), MAP_COMPARISON(1), UNUSED1(2), CUSTOM(3), USER(4), VECTOR_RADIUS(100);
+            SIMPLE(0), MAP_COMPARISON(1), UNUSED1(2), CUSTOM(3), USER(4), FIELD(5), ELEMENT_MATCH(6), VECTOR_RADIUS(100);
             private final int val;
             Kind(int v) { val = v; }
             public int getVal() { return val; }
@@ -1114,6 +1229,8 @@ public class RowFilter
                     case 2: return UNUSED1;
                     case 3: return CUSTOM;
                     case 4: return USER;
+                    case 5: return FIELD;
+                    case 6: return ELEMENT_MATCH;
                     case 100: return VECTOR_RADIUS;
                     default: throw new IllegalArgumentException("Unknown index expression kind: " + val);
                 }
@@ -1150,6 +1267,16 @@ public class RowFilter
         public ColumnMetadata column()
         {
             return column;
+        }
+
+        /**
+         * @return the path to the restricted field of the {@link #column() column} for an expression on a field of a
+         * UDT or tuple column (see {@link FieldExpression}), {@code null} for the expressions on whole columns
+         */
+        @Nullable
+        public FieldPath fieldPath()
+        {
+            return null;
         }
 
         public Operator operator()
@@ -1302,6 +1429,18 @@ public class RowFilter
         public abstract boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec);
 
         /**
+         * Returns whether the provided value of the {@link #column() column} of this expression (a partition key or
+         * clustering value) satisfies this expression.
+         *
+         * @param columnValue the value of the column
+         * @return whether the value satisfies this expression
+         */
+        public boolean isSatisfiedByColumnValue(ByteBuffer columnValue)
+        {
+            return isSatisfiedBy(column.type, columnValue);
+        }
+
+        /**
          * Returns the number of values that this expression will check after applying any index analyzers.
          */
         protected int numFilteredValues()
@@ -1405,6 +1544,16 @@ public class RowFilter
                         ByteBufferUtil.writeWithShortLength(mexpr.key, out);
                         ByteBufferUtil.writeWithShortLength(mexpr.value, out);
                         break;
+                    case FIELD:
+                        // the path is relative to the elements in the conditions of an ELEMENT_MATCH
+                        ((FieldExpression) expression).fieldPath.serialize(out);
+                        ByteBufferUtil.writeWithShortLength(expression.value, out);
+                        break;
+                    case ELEMENT_MATCH:
+                        ElementMatchExpression match = (ElementMatchExpression) expression;
+                        match.prefix.serialize(out);
+                        FilterElement.serializer.serialize(match.conditions, out, version);
+                        break;
                     case VECTOR_RADIUS:
                         GeoDistanceExpression gexpr = (GeoDistanceExpression) expression;
                         gexpr.distanceOperator.writeTo(out);
@@ -1416,7 +1565,18 @@ public class RowFilter
 
             public Expression deserialize(DataInputPlus in, int version, TableMetadata metadata, IndexHints indexHints) throws IOException
             {
+                return deserialize(in, version, metadata, indexHints, null);
+            }
+
+            /**
+             * @param group the group whose conditions are deserialized, {@code null} outside groups
+             */
+            private Expression deserialize(DataInputPlus in, int version, TableMetadata metadata, IndexHints indexHints, @Nullable ElementGroup group) throws IOException
+            {
                 Kind kind = Kind.fromVal(in.readByte());
+                // the conditions of a group are expressions on the fields of its elements
+                if (group != null && kind != Kind.FIELD)
+                    throw new IOException("Invalid CONTAINS ELEMENT condition of kind " + kind + " on " + group.column.name);
 
                 // custom expressions (3.0+ only) do not contain a column or operator, only a value
                 if (kind == Kind.CUSTOM)
@@ -1450,6 +1610,32 @@ public class RowFilter
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
                         ByteBuffer val = ByteBufferUtil.readWithShortLength(in);
                         return new MapComparisonExpression(column, key, operator, val);
+                    case FIELD:
+                        FieldPath fieldPath = FieldPath.deserialize(in);
+                        ByteBuffer fieldValue = ByteBufferUtil.readWithShortLength(in);
+                        if (group != null)
+                        {
+                            if (!column.equals(group.column))
+                                throw new IOException("Invalid CONTAINS ELEMENT condition on column " + column.name + " in a group on " + group.column.name);
+                            // the path is relative to the elements, the analyzer that of the index on the absolute path
+                            Index.Analyzer conditionAnalyzer = operator == Operator.IS_NOT
+                                                               ? null
+                                                               : indexRegistry.getAnalyzerFor(column, group.prefix.concat(fieldPath), operator, fieldValue, indexHints).orElse(null);
+                            return FieldExpression.relative(column, group.elementType, fieldPath, operator, fieldValue, conditionAnalyzer);
+                        }
+                        Index.Analyzer fieldAnalyzer = operator == Operator.IS_NOT
+                                                       ? null
+                                                       : indexRegistry.getAnalyzerFor(column, fieldPath, operator, fieldValue, indexHints).orElse(null);
+                        return new FieldExpression(column, fieldPath, operator, fieldValue, fieldAnalyzer);
+                    case ELEMENT_MATCH:
+                        FieldPath prefix = FieldPath.deserialize(in);
+                        if (operator != Operator.CONTAINS && operator != Operator.NOT_CONTAINS)
+                            throw new IOException("Invalid CONTAINS ELEMENT operator " + operator);
+                        AbstractType<?> elementType = ElementMatchExpression.elementType(column, prefix);
+                        FilterElement conditions = FilterElement.serializer.deserialize(in, version, metadata, indexHints, new ElementGroup(column, prefix, elementType));
+                        if (conditions.isEmpty())
+                            throw new IOException("Empty CONTAINS ELEMENT group on " + column.name);
+                        return new ElementMatchExpression(column, prefix, elementType, operator == Operator.NOT_CONTAINS, conditions);
                     case VECTOR_RADIUS:
                         Operator boundaryOperator = Operator.readFrom(in);
                         ByteBuffer distance = ByteBufferUtil.readWithShortLength(in);
@@ -1480,6 +1666,15 @@ public class RowFilter
                         MapComparisonExpression mexpr = (MapComparisonExpression)expression;
                         size += ByteBufferUtil.serializedSizeWithShortLength(mexpr.key)
                               + ByteBufferUtil.serializedSizeWithShortLength(mexpr.value);
+                        break;
+                    case FIELD:
+                        size += ((FieldExpression) expression).fieldPath.serializedSize()
+                                + ByteBufferUtil.serializedSizeWithShortLength(expression.value);
+                        break;
+                    case ELEMENT_MATCH:
+                        ElementMatchExpression match = (ElementMatchExpression) expression;
+                        size += match.prefix.serializedSize()
+                                + FilterElement.serializer.serializedSize(match.conditions, version);
                         break;
                     case CUSTOM:
                         size += IndexMetadata.serializer.serializedSize(((CustomExpression)expression).targetIndex, version)
@@ -1676,7 +1871,7 @@ public class RowFilter
         @Override
         public String toCQLString(Redaction redaction)
         {
-            AbstractType<?> type = column.type;
+            AbstractType<?> type = targetType();
             switch (operator)
             {
                 case CONTAINS:
@@ -1697,9 +1892,12 @@ public class RowFilter
                 case ORDER_BY_ASC:
                 case ORDER_BY_DESC:
                     // These don't have a value, so we return here to prevent an error calling type.getString(value)
-                    return String.format("ORDER BY %s %s", column.name.toCQLString(), operator);
+                    return String.format("ORDER BY %s %s", targetCQLString(), operator);
+                case IS_NOT:
+                    // no operand either (IS NOT NULL on a field)
+                    return String.format("%s IS NOT NULL", targetCQLString());
                 case ANN:
-                    return String.format("ORDER BY %s ANN OF %s", column.name.toCQLString(), truncateValue(type.toCQLString(value, redaction)));
+                    return String.format("ORDER BY %s ANN OF %s", targetCQLString(), truncateValue(type.toCQLString(value, redaction)));
                 case LIKE_PREFIX:
                     return likeToCQLString("'%s%%'", type, redaction, true);
                 case LIKE_SUFFIX:
@@ -1712,20 +1910,36 @@ public class RowFilter
                 default:
                     break;
             }
-            return String.format("%s %s %s", column.name.toCQLString(), operator, truncateValue(type.toCQLString(value, redaction)));
+            return String.format("%s %s %s", targetCQLString(), operator, truncateValue(type.toCQLString(value, redaction)));
         }
 
         private String likeToCQLString(String pattern, AbstractType<?> type, Redaction redaction, boolean literal)
         {
             if (redaction == Redaction.REDACT)
-                return String.format("%s LIKE ?", column.name.toCQLString());
+                return String.format("%s LIKE ?", targetCQLString());
 
             String term = type.getString(value);
             if (literal)
                 term = LikePatterns.escape(term);
             String stringValue = String.format(pattern, term);
             String escape = term.indexOf(LikePatterns.ESCAPE) >= 0 ? " ESCAPE '" + LikePatterns.ESCAPE + '\'' : "";
-            return String.format("%s LIKE %s%s", column.name.toCQLString(), truncateValue(stringValue), escape);
+            return String.format("%s LIKE %s%s", targetCQLString(), truncateValue(stringValue), escape);
+        }
+
+        /**
+         * @return the CQL form of the restricted target: the name of the column
+         */
+        protected String targetCQLString()
+        {
+            return column.name.toCQLString();
+        }
+
+        /**
+         * @return the type of the restricted target: that of the column
+         */
+        protected AbstractType<?> targetType()
+        {
+            return column.type;
         }
 
         private static String truncateValue(String value)
@@ -1737,6 +1951,584 @@ public class RowFilter
         protected Kind kind()
         {
             return Kind.SIMPLE;
+        }
+    }
+
+    /**
+     * An expression on a field of a UDT or tuple column, of the form 'column.field.field' OPERATOR 'value' (see
+     * {@link FieldPath}): the value is of the type of the field, and it is compared with the value of the field.
+     * <p>
+     * A row where the field is unset (or the column is null) doesn't satisfy the expression, except for
+     * {@link Operator#NOT_CONTAINS}, as for {@link SimpleExpression}.
+     * <p>
+     * A path through collections ({@link FieldPath#hasElements() elements}: list or set elements, map values) reaches
+     * any number of values per row, the field of each element (the unset fields are skipped). The expression is then
+     * satisfied by the rows where <em>some</em> value satisfies it, but for the negative operators ({@code !=},
+     * {@code NOT IN}, {@code NOT CONTAINS}), satisfied by the rows where <em>no</em> value equals (contains) the value
+     * of the expression, which includes the rows without any value, as for {@code NOT CONTAINS} on a collection
+     * column. The SAI post-filter evaluates the multi-valued indexes the same way.
+     */
+    public static class FieldExpression extends SimpleExpression
+    {
+        private final FieldPath fieldPath;
+        // the type the path starts from: that of the column, or that of the elements for a relative expression
+        private final AbstractType<?> rootType;
+        // whether the path is relative to the elements of a collection of the column (see ElementMatchExpression)
+        private final boolean isRelative;
+        private final AbstractType<?> leafType;
+        // whether the path reaches any number of values per row
+        private final boolean isMultiValued;
+
+        public FieldExpression(ColumnMetadata column,
+                               FieldPath fieldPath,
+                               Operator operator,
+                               ByteBuffer value,
+                               @Nullable Index.Analyzer analyzer)
+        {
+            this(column, column.type, false, fieldPath, operator, value, analyzer);
+        }
+
+        private FieldExpression(ColumnMetadata column,
+                                AbstractType<?> rootType,
+                                boolean isRelative,
+                                FieldPath fieldPath,
+                                Operator operator,
+                                ByteBuffer value,
+                                @Nullable Index.Analyzer analyzer)
+        {
+            super(column, operator, value, analyzer, null);
+            this.fieldPath = fieldPath;
+            this.rootType = rootType;
+            this.isRelative = isRelative;
+            String root = isRelative ? "the elements of column" : "column";
+            try
+            {
+                this.leafType = fieldPath.leafType(rootType);
+            }
+            catch (IllegalStateException e)
+            {
+                // the path doesn't match the type of the column, possibly a sender with a different schema
+                throw new InvalidRequestException(String.format("Invalid field path %s for %s %s of type %s: %s",
+                                                                fieldPath, root, column.name, rootType.asCQL3Type(), e.getMessage()));
+            }
+            // the elements are only crossed to reach a field of them: a path never ends with them
+            List<FieldPath.Step> steps = fieldPath.steps();
+            if (steps.get(steps.size() - 1).kind != FieldPath.Step.Kind.FIELD)
+                throw new InvalidRequestException(String.format("Invalid field path %s for %s %s of type %s: it doesn't end with a field",
+                                                                fieldPath, root, column.name, rootType.asCQL3Type()));
+            this.isMultiValued = fieldPath.hasElements();
+        }
+
+        /**
+         * Creates an expression of a {@code CONTAINS ELEMENT} group (see {@link ElementMatchExpression}), whose path
+         * is relative to the elements of a collection of the column: it's evaluated on each element (see
+         * {@link #isSatisfiedByColumnValue}), as a single-cell value of the type of the elements.
+         *
+         * @param column the column of the collection
+         * @param elementType the type of the elements of the collection, a UDT or a tuple
+         * @param fieldPath the path from the elements to the restricted field
+         */
+        static FieldExpression relative(ColumnMetadata column,
+                                        AbstractType<?> elementType,
+                                        FieldPath fieldPath,
+                                        Operator operator,
+                                        ByteBuffer value,
+                                        @Nullable Index.Analyzer analyzer)
+        {
+            return new FieldExpression(column, elementType, true, fieldPath, operator, value, analyzer);
+        }
+
+        /**
+         * @return whether the path of this expression is relative to the elements of a collection of the column (see
+         * {@link ElementMatchExpression})
+         */
+        public boolean isRelative()
+        {
+            return isRelative;
+        }
+
+        @Override
+        public FieldPath fieldPath()
+        {
+            return fieldPath;
+        }
+
+        /**
+         * @return the type of the restricted field
+         */
+        public AbstractType<?> leafType()
+        {
+            return leafType;
+        }
+
+        @Override
+        public void validate()
+        {
+            checkNotNull(value, "Unsupported null value for field %s", targetCQLString());
+            checkBindValueSet(value, "Unsupported unset value for field %s", targetCQLString());
+        }
+
+        @Override
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            assert !isRelative : "A relative expression is evaluated on the elements: " + this;
+            if (!isMultiValued)
+                return isSatisfiedByField(fieldValue(metadata, partitionKey, row, nowInSec));
+            return isSatisfiedByFields(metadata, partitionKey, row, nowInSec, isNegativeOperator() ? VIOLATED_BY : SATISFIED_BY);
+        }
+
+        /**
+         * The predicate of the values of a multi-valued path satisfying a positive expression: one is enough.
+         */
+        private static final BiPredicate<FieldExpression, ByteBuffer> SATISFIED_BY = FieldExpression::isSatisfiedByField;
+        /**
+         * The predicate of the values of a multi-valued path not satisfying a negative expression: one excludes the
+         * row.
+         */
+        private static final BiPredicate<FieldExpression, ByteBuffer> VIOLATED_BY = (e, v) -> !e.isSatisfiedByField(v);
+
+        /**
+         * @return the value of the field in the row, {@code null} if it's unset or the column is null, for a path
+         * without elements
+         */
+        @Nullable
+        private ByteBuffer fieldValue(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            return column.isComplex()
+                   ? fieldPath.singleValue(row.getComplexColumnData(column), nowInSec)
+                   : fieldPath.singleValue(getValue(metadata, partitionKey, row, nowInSec));
+        }
+
+        /**
+         * @return whether the values of the field reached by a path through collections (the field of each element,
+         * the unset fields skipped) satisfy this expression: some value satisfies it, but for the negative operators,
+         * which every value must satisfy (no value is equal to, or contains, the value of the expression). The given
+         * predicate is the one deciding, the satisfaction for a positive operator and the violation for a negative
+         * one: the visit of the values stops at the first value it accepts.
+         */
+        private boolean isSatisfiedByFields(TableMetadata metadata,
+                                            DecoratedKey partitionKey,
+                                            Row row,
+                                            long nowInSec,
+                                            BiPredicate<FieldExpression, ByteBuffer> deciding)
+        {
+            boolean decided = column.isComplex()
+                              ? fieldPath.anyValue(column.type, row.getComplexColumnData(column), nowInSec, this, deciding)
+                              : fieldPath.anyValue(column.type, getValue(metadata, partitionKey, row, nowInSec), this, deciding);
+            return isNegativeOperator() != decided;
+        }
+
+        /**
+         * @return whether the operator of this expression excludes values: a value of a multi-valued path that
+         * doesn't satisfy it excludes the row
+         */
+        private boolean isNegativeOperator()
+        {
+            return operator == Operator.NEQ || operator == Operator.NOT_IN || operator == Operator.NOT_CONTAINS;
+        }
+
+        /**
+         * {@inheritDoc}
+         * <p>
+         * For a {@link #isRelative() relative} expression, the value is that of an element.
+         */
+        @Override
+        public boolean isSatisfiedByColumnValue(ByteBuffer columnValue)
+        {
+            if (!isMultiValued)
+                return isSatisfiedByField(fieldPath.singleValue(columnValue));
+
+            boolean negative = isNegativeOperator();
+            return negative != fieldPath.anyValue(rootType, columnValue, this, negative ? VIOLATED_BY : SATISFIED_BY);
+        }
+
+        private boolean isSatisfiedByField(@Nullable ByteBuffer fieldValue)
+        {
+            switch (operator)
+            {
+                case IS_NOT:
+                    return isSet(leafType, fieldValue);
+                case CONTAINS:
+                    return contains(fieldValue);
+                case NOT_CONTAINS:
+                    return !contains(fieldValue);
+                case CONTAINS_KEY:
+                case NOT_CONTAINS_KEY:
+                case ANN:
+                case BM25:
+                case ORDER_BY_ASC:
+                case ORDER_BY_DESC:
+                    throw new AssertionError("Unsupported operator on a field: " + operator);
+                default:
+                    // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
+                    return isSatisfiedBy(leafType, fieldValue);
+            }
+        }
+
+        /**
+         * Whether a field is set, for {@code IS NOT NULL}: it has a value, which the indexes on the field index (the
+         * empty values only for the literal types, as the indexes do, see {@code TypeUtil.skipsEmptyValue}).
+         */
+        public static boolean isSet(AbstractType<?> type, @Nullable ByteBuffer fieldValue)
+        {
+            return fieldValue != null && (fieldValue.hasRemaining() || !TypeUtil.skipsEmptyValue(type));
+        }
+
+        /**
+         * @return whether the value of the field, a frozen collection, contains the value of this expression
+         */
+        private boolean contains(@Nullable ByteBuffer fieldValue)
+        {
+            if (fieldValue == null)
+                return false;
+
+            assert leafType.isCollection() : "CONTAINS on non-collection field " + targetCQLString();
+            if (analyzer == null)
+                return Operator.CONTAINS.isSatisfiedBy(leafType, fieldValue, value);
+
+            // as for the elements of non-frozen collection columns (see SimpleExpression#contains)
+            AbstractType<?> elementType = FieldPath.Step.ELEMENTS.apply(leafType);
+            List<ByteBuffer> queriedTokens = analyzer.queriedTokens();
+            boolean[] found = { false };
+            FieldPath.forEachElement((CollectionType<?>) leafType, fieldValue, element -> {
+                if (!found[0] && Operator.ANALYZER_MATCHES.isSatisfiedByAnalyzed(elementType, analyzer.indexedTokens(element), queriedTokens))
+                    found[0] = true;
+            });
+            return found[0];
+        }
+
+        @Override
+        protected String targetCQLString()
+        {
+            // a relative path is written as in a CONTAINS ELEMENT group, without the column
+            if (isRelative)
+                return fieldPath.toCQLString(rootType);
+            return column.name.toCQLString() + '.' + fieldPath.toCQLString(column.type);
+        }
+
+        @Override
+        protected AbstractType<?> targetType()
+        {
+            return leafType;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            return super.equals(o) && fieldPath.equals(((FieldExpression) o).fieldPath) && isRelative == ((FieldExpression) o).isRelative;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return 31 * super.hashCode() + fieldPath.hashCode();
+        }
+
+        @Override
+        protected Kind kind()
+        {
+            return Kind.FIELD;
+        }
+    }
+
+    /**
+     * A {@code CONTAINS ELEMENT} group: {@code addrs CONTAINS ELEMENT (city = 'Rome' AND zip = 100)} is satisfied by
+     * the rows where some element of the collection satisfies all the conditions of the group, its filter element of
+     * expressions on the fields of the elements, and {@code addrs NOT CONTAINS ELEMENT (...)} by those where no
+     * element does (including the rows without elements). The {@code null} elements and the unset fields never
+     * satisfy a condition (but the negative ones, see {@link FieldExpression}).
+     * <p>
+     * The collection is reached by the {@link #fieldPath() prefix}, a path ending with the {@link FieldPath.Step#ELEMENTS
+     * elements} of a collection of UDTs or tuples (see {@link FieldPath#elementsOf}): the collection is the column
+     * ({@code addrs}), or a field of it ({@code p.home.names}). The conditions are {@link FieldExpression#isRelative()
+     * relative} field expressions, whose paths start from the elements ({@code city}, {@code loc.lat}), evaluated on
+     * each element as on a single-cell value; their analyzers are those of the indexes on the absolute paths (the
+     * prefix followed by the relative path), as outside groups.
+     * <p>
+     * Serialization (kind {@link Kind#ELEMENT_MATCH}): after the column name and the operator ({@link Operator#CONTAINS},
+     * or {@link Operator#NOT_CONTAINS} for {@code NOT CONTAINS ELEMENT}), the prefix (see
+     * {@link FieldPath#serialize}), then the conditions as a {@link FilterElement} whose expressions are all
+     * {@link Kind#FIELD} expressions on the same column, written as usual (column name, operator, path, value) but
+     * with the path relative to the elements. The deserialization refuses a prefix that doesn't reach the elements of
+     * a collection of UDTs or tuples, conditions of other kinds or on another column, relative paths that don't
+     * match the type of the elements, and an empty group.
+     * <p>
+     * The SAI indexes serve a {@code CONTAINS ELEMENT} group through its {@link #candidates() candidates}, a superset
+     * of the rows satisfying it, then they post-filter the candidate rows with this expression.
+     */
+    public static class ElementMatchExpression extends Expression
+    {
+        private static final BiPredicate<ElementMatchExpression, ByteBuffer> MATCHED_BY = (e, element) -> isSatisfiedByElement(e.conditions, element);
+
+        private final FieldPath prefix;
+        private final AbstractType<?> elementType;
+        private final boolean negated;
+        // the conditions on each element: relative field expressions
+        private final FilterElement conditions;
+        // the candidates and their expressions (see #candidates()), computed once: the expression is immutable
+        @Nullable
+        private final FilterElement candidates;
+        private final List<Expression> candidateExpressions;
+
+        private ElementMatchExpression(ColumnMetadata column, FieldPath prefix, AbstractType<?> elementType, boolean negated, FilterElement conditions)
+        {
+            super(column, negated ? Operator.NOT_CONTAINS : Operator.CONTAINS, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+            this.prefix = prefix;
+            this.elementType = elementType;
+            this.negated = negated;
+            this.conditions = conditions;
+            this.candidates = negated ? null : candidates(conditions);
+            this.candidateExpressions = candidates == null ? Collections.emptyList() : List.copyOf(candidates.traversedExpressions());
+        }
+
+        /**
+         * @param column the column of the collection
+         * @param prefix the path to the elements of the collection
+         * @param negated {@code true} for {@code NOT CONTAINS ELEMENT}
+         * @param conditions the conditions on each element, expressions on absolute paths under the prefix
+         * @return the expression of the group, with the conditions made relative to the elements
+         */
+        public static ElementMatchExpression fromAbsolute(ColumnMetadata column, FieldPath prefix, boolean negated, FilterElement conditions)
+        {
+            AbstractType<?> elementType = elementType(column, prefix);
+            return new ElementMatchExpression(column, prefix, elementType, negated, relativize(column, prefix, elementType, conditions));
+        }
+
+        private static FilterElement relativize(ColumnMetadata column, FieldPath prefix, AbstractType<?> elementType, FilterElement conditions)
+        {
+            List<Expression> expressions = new ArrayList<>(conditions.expressions.size());
+            for (Expression expression : conditions.expressions)
+            {
+                FieldPath path = expression.fieldPath();
+                if (!(expression instanceof FieldExpression)
+                    || ((FieldExpression) expression).isRelative()
+                    || !expression.column.equals(column)
+                    || !path.isStrictlyUnder(prefix))
+                    throw new IllegalArgumentException(String.format("Not a condition on the elements of %s: %s", column.name, expression));
+                expressions.add(FieldExpression.relative(column, elementType, path.relativeTo(prefix), expression.operator, expression.value, expression.analyzer()));
+            }
+            List<FilterElement> children = new ArrayList<>(conditions.children.size());
+            for (FilterElement child : conditions.children)
+                children.add(relativize(column, prefix, elementType, child));
+            return new FilterElement(conditions.isDisjunction, expressions, children);
+        }
+
+        /**
+         * @return the type of the elements reached by the prefix
+         * @throws InvalidRequestException if the prefix doesn't reach the elements of a collection of UDTs or tuples
+         * of the column
+         */
+        static AbstractType<?> elementType(ColumnMetadata column, FieldPath prefix)
+        {
+            List<FieldPath.Step> steps = prefix.steps();
+            AbstractType<?> elementType;
+            try
+            {
+                elementType = prefix.leafType(column.type).unwrap();
+            }
+            catch (IllegalStateException e)
+            {
+                throw new InvalidRequestException(String.format("Invalid CONTAINS ELEMENT path %s for column %s of type %s: %s",
+                                                                prefix, column.name, column.type.asCQL3Type(), e.getMessage()));
+            }
+            if (steps.get(steps.size() - 1).kind != FieldPath.Step.Kind.ELEMENTS || !(elementType.isUDT() || elementType.isTuple()))
+                throw new InvalidRequestException(String.format("Invalid CONTAINS ELEMENT path %s for column %s of type %s: it doesn't reach the elements of a collection of UDTs or tuples",
+                                                                prefix, column.name, column.type.asCQL3Type()));
+            return elementType;
+        }
+
+        /**
+         * @return the path to the elements of the collection
+         */
+        @Override
+        public FieldPath fieldPath()
+        {
+            return prefix;
+        }
+
+        public boolean isNegated()
+        {
+            return negated;
+        }
+
+        /**
+         * @return the conditions on each element, relative field expressions (see {@link FieldExpression#isRelative()})
+         */
+        public FilterElement conditions()
+        {
+            return conditions;
+        }
+
+        /**
+         * Returns the candidates of this group: the expressions on the absolute paths of its positive conditions
+         * ({@code addrs.city = 'Rome' AND addrs.zip = 100} for {@code addrs CONTAINS ELEMENT (city = 'Rome' AND
+         * zip = 100 AND zip != 5)}), with the structure of the group. Each of them is satisfied by the rows where
+         * some element satisfies the condition, so they select a superset of the rows satisfying the group. The
+         * negative conditions ({@code !=}, {@code NOT IN}, {@code NOT CONTAINS}) are on the same element: they select
+         * nothing on their own, they're left out (an OR with one of them selects anything).
+         *
+         * @return the candidates, {@code null} if they don't restrict the rows (or for {@code NOT CONTAINS ELEMENT},
+         * whose rows are not a subset of anything but the whole table)
+         */
+        @Nullable
+        public FilterElement candidates()
+        {
+            return candidates;
+        }
+
+        @Nullable
+        private FilterElement candidates(FilterElement element)
+        {
+            List<Expression> expressions = new ArrayList<>(element.expressions.size());
+            List<FilterElement> children = new ArrayList<>(element.children.size());
+            for (Expression expression : element.expressions)
+            {
+                if (isPositive(expression.operator))
+                    expressions.add(new FieldExpression(column, prefix.concat(expression.fieldPath()), expression.operator, expression.value, expression.analyzer()));
+                else if (element.isDisjunction)
+                    return null;
+            }
+            for (FilterElement child : element.children)
+            {
+                FilterElement candidates = candidates(child);
+                if (candidates != null)
+                    children.add(candidates);
+                else if (element.isDisjunction)
+                    return null;
+            }
+            if (expressions.isEmpty() && children.isEmpty())
+                return null;
+            return new FilterElement(element.isDisjunction, expressions, children);
+        }
+
+        /**
+         * @return the expressions of the {@link #candidates()}, empty if there are none
+         */
+        public List<Expression> candidateExpressions()
+        {
+            return candidateExpressions;
+        }
+
+        /**
+         * @return whether a condition with the operator selects the elements satisfying it, rather than excluding
+         * those that don't
+         */
+        private static boolean isPositive(Operator operator)
+        {
+            switch (operator)
+            {
+                case EQ:
+                case IN:
+                case LT:
+                case LTE:
+                case GT:
+                case GTE:
+                case CONTAINS:
+                case ANALYZER_MATCHES:
+                case LIKE_PREFIX:
+                case LIKE_SUFFIX:
+                case LIKE_CONTAINS:
+                case LIKE_MATCHES:
+                case IS_NOT:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        @Override
+        public void validate()
+        {
+            // the conditions are validated when they're added to their builder
+        }
+
+        @Override
+        protected int numFilteredValues()
+        {
+            return conditions.numFilteredValues();
+        }
+
+        @Override
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            boolean found = column.isComplex()
+                            ? prefix.anyValue(column.type, row.getComplexColumnData(column), nowInSec, this, MATCHED_BY)
+                            : prefix.anyValue(column.type, getValue(metadata, partitionKey, row, nowInSec), this, MATCHED_BY);
+            return negated != found;
+        }
+
+        @Override
+        public boolean isSatisfiedByColumnValue(ByteBuffer columnValue)
+        {
+            return negated != prefix.anyValue(column.type, columnValue, this, MATCHED_BY);
+        }
+
+        /**
+         * @return whether the element satisfies the conditions
+         */
+        private static boolean isSatisfiedByElement(FilterElement conditions, ByteBuffer element)
+        {
+            if (conditions.isDisjunction)
+            {
+                for (Expression expression : conditions.expressions)
+                    if (expression.isSatisfiedByColumnValue(element))
+                        return true;
+                for (FilterElement child : conditions.children)
+                    if (isSatisfiedByElement(child, element))
+                        return true;
+                return conditions.isEmpty();
+            }
+
+            for (Expression expression : conditions.expressions)
+                if (!expression.isSatisfiedByColumnValue(element))
+                    return false;
+            for (FilterElement child : conditions.children)
+                if (!isSatisfiedByElement(child, element))
+                    return false;
+            return true;
+        }
+
+        @Override
+        public String toCQLString(Redaction redaction)
+        {
+            String collection = prefix.toCQLString(column.type);
+            return String.format("%s%s %s (%s)",
+                                 column.name.toCQLString(),
+                                 collection.isEmpty() ? "" : '.' + collection,
+                                 negated ? "NOT CONTAINS ELEMENT" : "CONTAINS ELEMENT",
+                                 conditions.toCQLString(redaction));
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            return super.equals(o)
+                   && prefix.equals(((ElementMatchExpression) o).prefix)
+                   && sameConditions(conditions, ((ElementMatchExpression) o).conditions);
+        }
+
+        private static boolean sameConditions(FilterElement a, FilterElement b)
+        {
+            if (a.isDisjunction != b.isDisjunction
+                || !a.expressions.equals(b.expressions)
+                || a.children.size() != b.children.size())
+                return false;
+            for (int i = 0; i < a.children.size(); i++)
+                if (!sameConditions(a.children.get(i), b.children.get(i)))
+                    return false;
+            return true;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return 31 * super.hashCode() + prefix.hashCode();
+        }
+
+        @Override
+        protected Kind kind()
+        {
+            return Kind.ELEMENT_MATCH;
         }
     }
 

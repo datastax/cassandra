@@ -7,4 +7,5 @@ ifeval::["{evalproduct}" != "dse"]
 * Numerics: `=`, `<`, `>`, `<=`, `>=`, `AND`
 * Strings: `=`, `CONTAINS`, `CONTAINS KEY`, `AND`
 * Strings without a tokenizing analyzer, booleans and UUIDs: `<`, `>`, `<=`, `>=`
+* Fields of UDT and tuple columns (`addr.city`): the operators of their type, `IS NOT NULL`, and `CONTAINS ELEMENT` / `NOT CONTAINS ELEMENT` groups on the elements of collections, see xref:cassandra:developing/cql/indexing/sai/udt-tuple-fields.adoc[Indexes on UDT and tuple fields]
 endif::[]

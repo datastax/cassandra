@@ -1,5 +1,9 @@
 5.0.9
  * Add support for JDK 21 as a non-default JDK: build, startup scripts, ASM 9.7.1, CI and packaging (HCD-645)
+ * SAI indexes on the fields of UDT and tuple columns, field restrictions and CONTAINS ELEMENT groups (HCD-653)
+ * Refuse GROUP BY on selectors that are not columns (fields, elements, casts) instead of failing with a ClassCastException (HCD-653)
+ * SAI indexes the empty strings written by updates to rows in the memtable (HCD-653)
+ * SAI NOT CONTAINS and NOT CONTAINS KEY no longer subtract the keys whose index terms may be stale (TTL, partition and range deletions) (HCD-653)
  * Bump netty-tcnative-boringssl-static to 2.0.84.Final (CVE-2026-116539) and netty to 4.1.139.Final (CNDB-19960)
  * Separate memtable memory usage tracking from limit checking, and fixes a a flush writeBarrier deadlock (CASSANDRA-21019)
 5.0.7
