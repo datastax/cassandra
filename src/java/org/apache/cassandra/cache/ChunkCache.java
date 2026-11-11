@@ -52,6 +52,7 @@ import org.apache.cassandra.concurrent.ParkedExecutor;
 import org.apache.cassandra.concurrent.ShutdownableExecutor;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.ChunkReader;
@@ -100,6 +101,8 @@ public class ChunkCache
     private static final Class PERFORM_CLEANUP_TASK_CLASS;
     private static final int CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS = CassandraRelevantProperties.CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS.getInt();
     private static final int CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS = CassandraRelevantProperties.CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS.getInt();
+    // TODO: hardcoded for testing - to be turned to C* property
+    private static final int CHUNK_CACHE_COMPACTION_POOL_WAIT_TIMEOUT_MS = 1000;
 
     /** When true on the current thread, Caffeine PerformCleanupTask runs inline instead of on cleanupExecutor. */
     private static final FastThreadLocal<Boolean> FORCE_INLINE_CLEANUP = new FastThreadLocal<>()
@@ -318,7 +321,10 @@ public class ChunkCache
                 metrics.recordPoolWaitSuccess();
                 return chunk;
             }
-            signal.awaitUntilUninterruptibly(deadline);
+            long subDeadline = Math.min(deadline, Clock.Global.nanoTime() +
+                                                  Math.min(TimeUnit.MILLISECONDS.toNanos(10), TimeUnit.MILLISECONDS.toNanos(waitMs) / 4));
+            signal.awaitUntilUninterruptibly(subDeadline);
+            bufferPool.recycleFreeLocalChunks();
             chunk = allocateChunk(chunkSize, position);
             if (chunk != null)
             {
@@ -335,6 +341,10 @@ public class ChunkCache
 
     private int poolWaitTimeoutMs()
     {
+        if (CompactionManager.isCompactor(Thread.currentThread()))
+        {
+            return CHUNK_CACHE_COMPACTION_POOL_WAIT_TIMEOUT_MS;
+        }
         int override = poolWaitTimeoutMsOverride;
         return override >= 0 ? override : CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS;
     }
