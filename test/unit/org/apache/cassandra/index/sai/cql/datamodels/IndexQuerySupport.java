@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.cql.datamodels;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
@@ -730,6 +731,24 @@ public class IndexQuerySupport
             rangeQuery(tester, model, DataModel.TEXT_COLUMN, "Alabama", "Texas");
             rangeQuery(tester, model, DataModel.TEXT_COLUMN, "M", "N");
 
+            // prefix, suffix, contains and generic patterns, a pattern without wildcards and patterns matching
+            // every non-empty value and none
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "M%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "Mi%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "State of%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "%a");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "%ss%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "A%a");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "%i_a%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "_____");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "Te_as");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "Texas");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "_%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "Z%");
+            likeQuery(tester, model, DataModel.ASCII_COLUMN, "M%");
+            likeQuery(tester, model, DataModel.ASCII_COLUMN, "%A");
+            likeQuery(tester, model, DataModel.ASCII_COLUMN, "_A");
+
             query(tester, model, DataModel.TIME_COLUMN, Operator.EQ, TimeType.instance.fromString("00:43:07"));
             query(tester, model, DataModel.TIME_COLUMN, Operator.NEQ, TimeType.instance.fromString("00:43:07"));
             query(tester, model, DataModel.TIME_COLUMN, Operator.LT, TimeType.instance.fromString("00:43:07"));
@@ -972,6 +991,55 @@ public class IndexQuerySupport
             String query = String.format(template, DataModel.ASCII_COLUMN, column, column);
             String queryValidator = String.format(templateWithFiltering, DataModel.ASCII_COLUMN, column, column);
             validate(tester, model, query, queryValidator, value1, value2, limit);
+        }
+
+        /**
+         * Validates a LIKE query. LIKE needs an index even with ALLOW FILTERING, so the expected rows are not those
+         * of the same query on the table without indexes: they are the rows of that table, which come in the same
+         * order, filtered here with the equivalent regular expression.
+         */
+        void likeQuery(DataModel.Executor tester, DataModel model, String column, String pattern) throws Throwable
+        {
+            String query = String.format("SELECT %s FROM %%s WHERE %s LIKE ? LIMIT ?", column, column);
+            try
+            {
+                tester.counterReset();
+                List<Object> actual = model.executeIndexed(tester, query, fetchSize, pattern, limit);
+                assertThat("Expected calls to " + StorageAttachedIndexSearcher.class, tester.getCounter(), Matchers.greaterThanOrEqualTo(1L));
+
+                Pattern regex = likeRegex(pattern);
+                List<Object> expected = model.executeNonIndexed(tester, String.format("SELECT %s FROM %%s", column), fetchSize)
+                                             .stream()
+                                             .filter(value -> value != null && regex.matcher((String) value).matches())
+                                             .limit(limit)
+                                             .collect(Collectors.toList());
+                assertEquals("Invalid query results for query " + query + " with pattern " + pattern, expected, actual);
+            }
+            catch (Throwable ex)
+            {
+                ex.printStackTrace();
+                throw ex;
+            }
+        }
+
+        /**
+         * The regular expression equivalent to a LIKE pattern without escapes: {@code %} matches any sequence of
+         * characters and {@code _} any single character.
+         */
+        private static Pattern likeRegex(String pattern)
+        {
+            StringBuilder regex = new StringBuilder();
+            for (int i = 0; i < pattern.length(); i++)
+            {
+                char c = pattern.charAt(i);
+                if (c == '%')
+                    regex.append(".*");
+                else if (c == '_')
+                    regex.append('.');
+                else
+                    regex.append(Pattern.quote(String.valueOf(c)));
+            }
+            return Pattern.compile(regex.toString(), Pattern.DOTALL);
         }
 
         private List<Object> validate(DataModel.Executor tester, DataModel model, String query, String validator, Object... values) throws Throwable
