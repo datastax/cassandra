@@ -16,12 +16,10 @@
 
 package org.apache.cassandra.cql3;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.function.UnaryOperator;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -132,62 +130,6 @@ public final class LikePatterns
             pattern.append(c);
         }
         return pattern.toString();
-    }
-
-    /**
-     * Applies a normalization (e.g. the lowercasing or folding of a non-tokenizing index analyzer) to the literal
-     * runs of a {@link Operator#LIKE_MATCHES} pattern in internal form, and returns the normalized pattern. The
-     * wildcards and escapes are kept out of the normalization, which could otherwise turn literal characters into
-     * them (ASCII folding turns {@code ＿} into {@code _}, for example).
-     *
-     * @param pattern the pattern, in internal form
-     * @param normalize the normalization of a literal; it may return {@code null} for an empty result
-     * @return the normalized pattern, in internal form
-     */
-    public static ByteBuffer normalizeLiterals(ByteBuffer pattern, UnaryOperator<ByteBuffer> normalize)
-    {
-        ByteBuffer literal = ByteBuffer.allocate(pattern.remaining());
-        ByteArrayOutputStream normalized = new ByteArrayOutputStream(pattern.remaining());
-        for (int i = pattern.position(); i < pattern.limit(); i++)
-        {
-            byte b = pattern.get(i);
-            if (b == ESCAPE && i + 1 < pattern.limit())
-            {
-                literal.put(pattern.get(++i));
-            }
-            else if (b == '%' || b == '_')
-            {
-                appendNormalized(literal, normalize, normalized);
-                normalized.write(b);
-            }
-            else
-            {
-                literal.put(b);
-            }
-        }
-        appendNormalized(literal, normalize, normalized);
-        return ByteBuffer.wrap(normalized.toByteArray());
-    }
-
-    /**
-     * Appends the escaped normalization of the literal accumulated in the given buffer, and clears it.
-     */
-    private static void appendNormalized(ByteBuffer literal, UnaryOperator<ByteBuffer> normalize, ByteArrayOutputStream out)
-    {
-        if (literal.position() == 0)
-            return;
-        literal.flip();
-        ByteBuffer normalized = normalize.apply(literal.duplicate());
-        literal.clear();
-        if (normalized == null)
-            return;
-        for (int i = normalized.position(); i < normalized.limit(); i++)
-        {
-            byte b = normalized.get(i);
-            if (b == '%' || b == '_' || b == ESCAPE)
-                out.write(ESCAPE);
-            out.write(b);
-        }
     }
 
     /**

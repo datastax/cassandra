@@ -390,7 +390,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
     /**
      * Filters trie entries by an automaton. Only valid for non-composite literal types, whose trie keys are the
-     * raw (already analyzed) term bytes.
+     * raw term bytes.
      */
     private static Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> acceptedEntries(Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> entries,
                                                                                                CompiledAutomaton automaton)

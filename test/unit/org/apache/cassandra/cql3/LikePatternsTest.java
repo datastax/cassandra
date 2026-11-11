@@ -17,9 +17,6 @@ package org.apache.cassandra.cql3;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.function.UnaryOperator;
 
 import org.junit.Test;
 
@@ -179,71 +176,6 @@ public class LikePatternsTest
             assertEquals(literal, UTF8Type.instance.compose(LikePatterns.unescape(escaped)));
             assertAccepts(LikePatterns.patternAutomaton(LikePatterns.escape(literal)), literal);
         }
-    }
-
-    @Test
-    public void normalizeLiteralsKeepsWildcardsAndEscapes()
-    {
-        // a normalization turning literals into wildcards or escapes (like ASCII folding of full-width characters)
-        // must not change the structure of the pattern
-        UnaryOperator<ByteBuffer> fold = literal -> UTF8Type.instance.decompose(UTF8Type.instance.compose(literal)
-                                                                                            .replace('＿', '_')
-                                                                                            .replace('％', '%')
-                                                                                            .replace('＼', '\\')
-                                                                                            .toLowerCase());
-        assertEquals("a\\_\\%\\\\_b%\\_", normalize("A＿％＼_B%\\_", fold));
-        assertEquals("abc", normalize("ABC", fold));
-        assertEquals("%_", normalize("%_", fold));
-        // a literal normalized to nothing
-        assertEquals("%a", normalize("x%a", literal -> UTF8Type.instance.compose(literal).equals("x") ? null : literal));
-        assertEquals("%a", normalize("x%a", literal -> UTF8Type.instance.compose(literal).equals("x") ? ByteBuffer.allocate(0) : literal));
-    }
-
-    @Test
-    public void normalizeLiteralsNormalizesWholeUnescapedRuns()
-    {
-        // the normalization sees each run of literals between wildcards once, unescaped
-        List<String> runs = new ArrayList<>();
-        UnaryOperator<ByteBuffer> record = literal -> {
-            runs.add(UTF8Type.instance.compose(literal));
-            return literal;
-        };
-        assertEquals("ab%c_\\%d\\\\é", normalize("ab%c_\\%d\\\\é", record));
-        assertEquals(List.of("ab", "c", "%d\\é"), runs);
-
-        runs.clear();
-        assertEquals("%%_%", normalize("%%_%", record));
-        assertEquals(List.of(), runs);
-        assertEquals("", normalize("", record));
-        assertEquals(List.of(), runs);
-    }
-
-    @Test
-    public void normalizeLiteralsEscapesNormalizedWildcards()
-    {
-        // a normalization producing wildcards or escapes in a literal: they are escaped
-        UnaryOperator<ByteBuffer> toWildcards = literal -> utf8Buffer(UTF8Type.instance.compose(literal).replace('x', '_')
-                                                                                                   .replace('y', '%')
-                                                                                                   .replace('z', '\\'));
-        String normalized = normalize("axyz%x", toWildcards);
-        assertEquals("a\\_\\%\\\\%\\_", normalized);
-        assertAccepts(LikePatterns.patternAutomaton(normalized), "a_%\\b_", "a_%\\_");
-        assertRejects(LikePatterns.patternAutomaton(normalized), "abcd_", "a_%\\b");
-    }
-
-    @Test
-    public void normalizeLiteralsReadsBufferSlices()
-    {
-        ByteBuffer slice = utf8Buffer("%%AB%C");
-        slice.position(2);
-        ByteBuffer normalized = LikePatterns.normalizeLiterals(slice, literal -> utf8Buffer(UTF8Type.instance.compose(literal).toLowerCase()));
-        assertEquals("ab%c", UTF8Type.instance.compose(normalized));
-        assertEquals(2, slice.position());
-    }
-
-    private static String normalize(String pattern, UnaryOperator<ByteBuffer> normalize)
-    {
-        return UTF8Type.instance.compose(LikePatterns.normalizeLiterals(UTF8Type.instance.decompose(pattern), normalize));
     }
 
     @Test

@@ -1054,10 +1054,6 @@ public class RowFilter
         protected final Operator operator;
         protected final ByteBuffer value;
 
-        /** The LIKE_MATCHES pattern normalized by the analyzer of the index, computed on first use. */
-        @Nullable
-        private volatile ByteBuffer normalizedPattern;
-
         protected Expression(ColumnMetadata column, Operator operator, ByteBuffer value)
         {
             this.column = column;
@@ -1112,24 +1108,6 @@ public class RowFilter
             }
         }
 
-        /**
-         * Returns the {@link Operator#LIKE_MATCHES} pattern of this expression, its literals normalized like the
-         * values by the given analyzer (see {@link LikePatterns#normalizeLiterals}).
-         */
-        private ByteBuffer normalizedPattern(Index.Analyzer analyzer)
-        {
-            ByteBuffer pattern = normalizedPattern;
-            if (pattern == null)
-            {
-                pattern = LikePatterns.normalizeLiterals(value, literal -> {
-                    List<ByteBuffer> tokens = analyzer.indexedTokens(literal);
-                    return tokens.isEmpty() ? null : tokens.get(0);
-                });
-                normalizedPattern = pattern;
-            }
-            return pattern;
-        }
-
         private boolean isSatisfiedByNonNull(AbstractType<?> type, ByteBuffer foundValue)
         {
             Index.Analyzer analyzer = analyzer();
@@ -1137,22 +1115,6 @@ public class RowFilter
             // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
             if (analyzer == null)
                 return operator.isSatisfiedBy(type, foundValue, value);
-
-            // Tokenizing indexes don't serve LIKE, so the value and the pattern each analyze to a single
-            // (normalized) token: match the normalized pattern against the normalized value, as the index does
-            // against its normalized terms.
-            if (operator.isLike())
-            {
-                List<ByteBuffer> indexedTokens = analyzer.indexedTokens(foundValue);
-                List<ByteBuffer> queriedTokens = operator == Operator.LIKE_MATCHES
-                                                 ? List.of(normalizedPattern(analyzer))
-                                                 : analyzer.queriedTokens();
-                assert indexedTokens.size() <= 1 && queriedTokens.size() <= 1
-                    : "LIKE on " + column.name + " is served by a tokenizing index: " + indexedTokens.size() + " value tokens, " + queriedTokens.size() + " pattern tokens";
-                return indexedTokens.size() == 1
-                       && queriedTokens.size() == 1
-                       && operator.isSatisfiedBy(type, indexedTokens.get(0), queriedTokens.get(0));
-            }
 
             return operator.isSatisfiedByAnalyzed(type, analyzer.indexedTokens(foundValue), analyzer.queriedTokens());
         }
