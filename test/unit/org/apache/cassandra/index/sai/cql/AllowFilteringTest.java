@@ -361,7 +361,7 @@ public class AllowFilteringTest extends SAITester
     @Test
     public void testUnsupportedIndexRestrictions()
     {
-        // tokenizing indexes don't support range restrictions (see LiteralRangeQueryTest for the non-tokenizing ones)
+        // indexes with an analyzer don't support range restrictions (see LiteralRangeQueryTest for those without)
         createTable("CREATE TABLE %s (a text, b text, c text, d text, PRIMARY KEY (a, b))");
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(b) USING '%s' WITH OPTIONS = { 'index_analyzer' : 'whitespace' }", StorageAttachedIndex.class.getName()));
         createIndex(String.format("CREATE CUSTOM INDEX ON %%s(c) USING '%s' WITH OPTIONS = { 'index_analyzer' : 'whitespace' }", StorageAttachedIndex.class.getName()));

@@ -31,6 +31,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterators;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
@@ -206,8 +208,12 @@ public class Expression
     }
 
     /**
-     * Whether the terms are in the reverse order of the values: those of reversed (DESC clustering) columns, but
-     * literal terms, which are the raw value bytes.
+     * Whether the index orders its terms in the reverse order of the column values, so that the lower bound of a
+     * range of values is the upper bound of the range of terms, and vice versa.
+     * <p>
+     * That is the case for the non-literal types of the reversed (DESC clustering) columns, whose terms are encoded
+     * by {@code ReversedType}. It is not for the literal types: their terms are the raw bytes of the values at any
+     * clustering order, so the bounds of a range of values are the bounds of the range of terms.
      */
     private boolean isReversedTerms()
     {
@@ -221,6 +227,32 @@ public class Expression
     public boolean isLiteralTermRange()
     {
         return operation == Op.RANGE && TypeUtil.isLiteral(validator) && !TypeUtil.isComposite(validator);
+    }
+
+    /**
+     * Returns the lower bound of a {@link #isLiteralTermRange() literal term range} as the inclusive start of a scan
+     * of the on-disk terms, or {@code null} if the range has no lower bound.
+     * <p>
+     * The bounds of the composite terms select whether the term equal to the bound is part of the range with the
+     * terminator of their byte-comparable encoding (see {@link #getEncodedLowerBoundByteComparable}). The literal
+     * terms are raw bytes without a terminator, so an exclusive lower bound is encoded as the term that immediately
+     * follows it in the unsigned byte order: the bound with a zero byte appended.
+     */
+    @Nullable
+    public ByteComparable getLiteralRangeScanStart(Version version)
+    {
+        assert isLiteralTermRange() : "Not a literal term range: " + this;
+        if (lower == null)
+            return null;
+
+        ByteBuffer bound = lower.value.encoded;
+        if (!lower.inclusive)
+        {
+            ByteBuffer next = ByteBuffer.allocate(bound.remaining() + 1);
+            next.put(bound.duplicate()).put((byte) 0).flip();
+            bound = next;
+        }
+        return version.onDiskFormat().encodeForTrie(bound, validator);
     }
 
     public Expression add(Operator op, ByteBuffer value)
@@ -382,10 +414,15 @@ public class Expression
                     return cmp == 0;
 
                 if (operation == Op.NOT_EQ || operation == Op.NOT_CONTAINS_KEY || operation == Op.NOT_CONTAINS_VALUE)
-                    return cmp != 0;
-
-                if (cmp > 0 || (cmp == 0 && !lowerInclusive))
+                {
+                    // the NEQ that follow the first one are exclusions, checked below
+                    if (cmp == 0)
+                        return false;
+                }
+                else if (cmp > 0 || (cmp == 0 && !lowerInclusive))
+                {
                     return false;
+                }
             }
         }
 
@@ -394,7 +431,8 @@ public class Expression
             // string (prefix or suffix) check
             if (TypeUtil.isLiteral(validator))
             {
-                if (!validateStringValue(value.raw, upper.value.raw))
+                // for a range, the check of the lower bound above already tested both bounds
+                if (!(operation == Op.RANGE && lower != null) && !validateStringValue(value.raw, upper.value.raw))
                     return false;
             }
             else
@@ -410,7 +448,8 @@ public class Expression
         // this covers EQ/RANGE with exclusions.
         for (ByteBuffer term : exclusions)
         {
-            if (TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
+            if (TypeUtil.isLiteral(validator) && hasTerm(value.raw, term) ||
+                TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
                 return false;
         }
 
@@ -578,6 +617,33 @@ public class Expression
         return success;
     }
 
+    /**
+     * Whether the excluded term is one of the terms the analyzer produces for the column value, as
+     * {@link #validateStringValue} tests for {@link Op#EQ}. Unlike that method it doesn't depend on the operation of
+     * this expression, which is not an equality when a {@code !=} follows a range or another {@code !=}.
+     * <p>
+     * The analyzer only splits or normalizes the value when a {@code !=} follows a {@code =} on an analyzed index:
+     * the ranges are not served by the analyzed indexes, so their values have a single term, the value itself.
+     */
+    private boolean hasTerm(ByteBuffer columnValue, ByteBuffer excludedTerm)
+    {
+        AbstractAnalyzer analyzer = analyzerFactory.create();
+        analyzer.reset(columnValue);
+        try
+        {
+            while (analyzer.hasNext())
+            {
+                if (validator.compare(analyzer.next(), excludedTerm) == 0)
+                    return true;
+            }
+            return false;
+        }
+        finally
+        {
+            analyzer.end();
+        }
+    }
+
     private boolean validateStringValue(ByteBuffer columnValue, ByteBuffer requestedValue)
     {
         AbstractAnalyzer analyzer = analyzerFactory.create();
@@ -664,11 +730,13 @@ public class Expression
     }
 
     /**
-     * Compares two literal terms in the order of the index: that of the raw bytes, but for composite terms.
+     * Compares two literal terms in the order of the index. The validator of a reversed (DESC clustering) column is
+     * a {@code ReversedType}, which compares in the reverse order, while the terms of the index are in the order of
+     * the base type at any clustering order.
      */
     private int compareLiteral(ByteBuffer left, ByteBuffer right)
     {
-        return TypeUtil.isComposite(validator) ? validator.compare(left, right) : ByteBufferUtil.compareUnsigned(left, right);
+        return validator.unwrap().compare(left, right);
     }
 
     public float getEuclideanSearchThreshold()

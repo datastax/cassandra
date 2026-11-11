@@ -168,8 +168,12 @@ public class Operation
                 // not-equals is combined with the range iff operator is AND.
                 {
                     Expression range;
-                    // An expression is combined with the previous one only if they have the same context, so a NEQ
-                    // that no index serves doesn't turn a range served by an index into a non-indexed one, or vice versa.
+                    // An expression is combined with the previous one only if both have the same context. On the
+                    // text, ascii, boolean and uuid columns, unless they are reversed (DESC clustering) ones, the
+                    // index serves the ranges but not NEQ (see IndexContext#supports), so for x > 'a' AND x != 'b'
+                    // the range has the context of the index and the NEQ the context of the column without index:
+                    // they stay two expressions, the first one searched in the index and the second one applied
+                    // as a filter.
                     if (perColumn.size() == 0
                         || op != OperationType.AND
                         || e instanceof RowFilter.MapComparisonExpression

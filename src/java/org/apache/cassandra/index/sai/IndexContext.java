@@ -128,8 +128,8 @@ public class IndexContext
     public static final String MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE =
     "Index hints including a SAI index used for ORDER BY cannot include any other index";
 
-    // Besides EQ and IN, only RANGE is served on these types (see supports(Expression.Op))
-    private static final Set<AbstractType<?>> EQ_ONLY_TYPES =
+    // The types on which only EQ, IN and RANGE are served (see supports(Expression.Op))
+    private static final Set<AbstractType<?>> EQ_AND_RANGE_ONLY_TYPES =
             ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, UUIDType.instance);
 
     public static final String ENABLE_SEGMENT_COMPACTION_OPTION_NAME = "enable_segment_compaction";
@@ -824,19 +824,23 @@ public class IndexContext
             return true;
         if (operator == Expression.Op.RANGE)
             return !TypeUtil.isLiteral(validator) || supportsLiteralRangeQueries();
-        // unwrapped, so that the reversed (DESC clustering) columns support the same operators as the others
-        if (operator != Expression.Op.EQ && EQ_ONLY_TYPES.contains(validator.unwrap())) return false;
+        if (operator != Expression.Op.EQ && EQ_AND_RANGE_ONLY_TYPES.contains(validator)) return false;
         return operator != null;
     }
 
     /**
      * Whether this index serves range restrictions on a literal column, in the unsigned byte order of its terms.
-     * That needs the raw values as terms: no analyzer, as the result of a query must not depend on the indexes on the
-     * column, and no frozen collection, whose serialized bytes are not in the order of the collections.
      */
     public boolean supportsLiteralRangeQueries()
     {
-        return !isAnalyzed && (TypeUtil.isBoolean(validator) || supportsLikeQueries());
+        // a string or a boolean, whose raw bytes are in the order of the values: the serialized bytes of the frozen
+        // collections, tuples and UDTs, and the composite terms of the map entries, are not
+        return (TypeUtil.isUTF8OrAscii(validator) || TypeUtil.isBoolean(validator))
+               // not the keys or values of a non-frozen collection, whose validator is the element type
+               && !isNonFrozenCollection()
+               // no analyzer, so that the terms are the values: the results of a query must not depend on the
+               // indexes on the column, and without an index the range compares the values
+               && !isAnalyzed;
     }
 
     public ByteBuffer getValueOf(DecoratedKey key, Row row, long nowInSecs)
