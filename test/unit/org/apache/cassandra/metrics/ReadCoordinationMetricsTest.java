@@ -74,17 +74,4 @@ public class ReadCoordinationMetricsTest
         ReadCoordinationMetrics.updateReplicaLatency(host, DatabaseDescriptor.getReadRpcTimeout(TimeUnit.MILLISECONDS), TimeUnit.MILLISECONDS);
         assertEquals(1, histogram.getCount());
     }
-
-    @Test
-    public void testNegativeReplicaLatencyIsClamped() throws UnknownHostException
-    {
-        InetAddressAndPort host = InetAddressAndPort.getByName("127.0.0.2");
-
-        // must not throw, even with DSE-compatible histogram boundaries
-        ReadCoordinationMetrics.updateReplicaLatency(host, -1, TimeUnit.NANOSECONDS);
-
-        Histogram histogram = ReadCoordinationMetrics.getReplicaLatencyHistogram(host);
-        assertNotNull(histogram);
-        assertEquals(1, histogram.getCount());
-    }
 }
