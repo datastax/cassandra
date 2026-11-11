@@ -941,11 +941,6 @@ public class QueryProcessor implements QueryHandler
                 throw new InvalidRequestException(String.format("there were %d markers(?) in CQL but %d bound variables",
                                                                 statement.getBindVariables().size(),
                                                                 variables.size()));
-
-            // at this point there is a match in count between markers and variables that is non-zero
-            if (logger.isTraceEnabled())
-                for (int i = 0; i < variables.size(); i++)
-                    logger.trace("[{}] '{}'", i+1, variables.get(i));
         }
 
         metrics.preparedStatementsExecuted.inc();

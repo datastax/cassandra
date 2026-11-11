@@ -181,6 +181,25 @@ public class RedactionTest extends TestBaseImpl
         assertLogsContain(mark, expected);
     }
 
+    /// Verify that the binding of variables of prepared statements don't leak their values.
+    @Test
+    public void testPreparedStatementBoundVariables()
+    {
+        table = "bound_variables";
+        cluster.schemaChange(format("CREATE TABLE %s.%s (k text PRIMARY KEY, v text)"));
+
+        PreparedStatement insert = driverSession.prepare(format("INSERT INTO %s.%s (k, v) VALUES (?, ?)"));
+        PreparedStatement select = driverSession.prepare(format("SELECT * FROM %s.%s WHERE k = ?"));
+
+        long mark = node.logs().mark();
+        driverSession.execute(insert.bind("secret_k", "secret_v"));
+        assertNoSecretsInLogs(mark);
+
+        mark = node.logs().mark();
+        driverSession.execute(select.bind("secret_k"));
+        assertNoSecretsInLogs(mark);
+    }
+
     /// Verify that the trace-level log message about processed queries uses redaction.
     @Test
     public void testProcessedStatement()
