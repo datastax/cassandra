@@ -20,13 +20,11 @@ package org.apache.cassandra.index.sai.plan;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableSet;
 
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadCommand;
@@ -218,8 +216,7 @@ public class StorageAttachedIndexQueryPlan implements Index.QueryPlan
                                                 queryMetrics,
                                                 command,
                                                 orderer,
-                                                indexFeatureSet,
-                                                DatabaseDescriptor.getRangeRpcTimeout(TimeUnit.MILLISECONDS));
+                                                indexFeatureSet);
     }
 
     /**

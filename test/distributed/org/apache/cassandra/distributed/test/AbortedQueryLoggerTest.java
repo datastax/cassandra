@@ -47,6 +47,7 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ICoordinator;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.test.sai.SlowSAIQueryLoggerTest;
+import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
 import org.assertj.core.api.Assertions;
@@ -262,9 +263,11 @@ public class AbortedQueryLoggerTest extends TestBaseImpl
                           "    partitionsFetched: 1",
                           "    partitionsReturned: 1",
                           "    partitionTombstonesFetched: 1",
-                          "    rowsFetched: 3",
-                          "    rowsReturned: 3",
+                          "    rowsFetched: 2",
+                          "    rowsReturned: 2",
                           "    rowTombstonesFetched: 4",
+                          "    cellsFetched: 6",
+                          "    cellsReturned: 6",
                           "    trieSegmentsHit: 0",
                           "    bkdPostingListsHit: 3",
                           "    bkdSegmentsHit: 3",
@@ -309,6 +312,7 @@ public class AbortedQueryLoggerTest extends TestBaseImpl
     {
         String formattedQuery = format(query);
         Assertions.assertThatThrownBy(() -> coordinator.execute(formattedQuery, ALL, boundValues))
+                  .matches(e -> e.getClass().getName().equals(ReadTimeoutException.class.getName()))
                   .hasMessageContaining("Operation");
     }
 
