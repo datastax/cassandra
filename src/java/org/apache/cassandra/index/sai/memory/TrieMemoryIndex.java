@@ -894,9 +894,8 @@ public class TrieMemoryIndex extends MemoryIndex
     private long estimateNumRowsInTermRange(@Nullable ByteComparable queryLower, boolean lowerExclusive,
                                             @Nullable ByteComparable queryUpper, boolean upperExclusive)
     {
-        Trie<PrimaryKeys> subtrie = queryLower == null && queryUpper == null
-                                    ? data
-                                    : slice(queryLower, !lowerExclusive, queryUpper, !upperExclusive);
+        // a null bound is unbounded
+        Trie<PrimaryKeys> subtrie = data.slice(queryLower, !lowerExclusive, queryUpper, !upperExclusive);
         long countedRows = 0;
         int countedTerms = 0;
         boolean complete = true;
@@ -1013,27 +1012,11 @@ public class TrieMemoryIndex extends MemoryIndex
         if (expression.getOp() == Expression.Op.AUTOMATON)
             return prefixSubtrie(expression.getAutomatonCommonPrefix());
 
-        return slice(expression.lower == null ? null : expression.getEncodedLowerBoundByteComparable(version),
-                     expression.lower != null && expression.lower.inclusive,
-                     expression.upper == null ? null : expression.getEncodedUpperBoundByteComparable(version),
-                     expression.upper != null && expression.upper.inclusive);
-    }
-
-    /**
-     * The terms of the given range, a {@code null} bound being unbounded. The bounds must be ordered, and not both
-     * exclusive if equal: the coordinator doesn't query the empty ranges (see {@code RowFilter#withoutUnsatisfiable}).
-     */
-    private Trie<PrimaryKeys> slice(@Nullable ByteComparable lower, boolean lowerInclusive,
-                                    @Nullable ByteComparable upper, boolean upperInclusive)
-    {
-        if (lower == null)
-        {
-            // inclusive, so that the empty term of an indexed empty string value, if any, is part of the range
-            lower = ByteComparable.EMPTY;
-            lowerInclusive = true;
-        }
-
-        return data.slice(lower, lowerInclusive, upper, upperInclusive);
+        // A null bound is unbounded: a range without lower bound includes the empty term of an empty string value.
+        return data.slice(expression.lower == null ? null : expression.getEncodedLowerBoundByteComparable(version),
+                          expression.lower != null && expression.lower.inclusive,
+                          expression.upper == null ? null : expression.getEncodedUpperBoundByteComparable(version),
+                          expression.upper != null && expression.upper.inclusive);
     }
 
     @Override

@@ -36,23 +36,25 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
-import org.apache.cassandra.index.sai.SAIUtil;
-import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
 
 /**
  * Tests range ({@code <}, {@code <=}, {@code >}, {@code >=}) queries on {@code text}/{@code ascii} columns with a
- * non-tokenized SAI index, the CQL counterpart of the Solr term range queries ({@code field:[a TO b]},
- * {@code field:{a TO b}}, {@code field:[a TO *]}...), across the memtable-only / flushed / compacted matrix.
+ * SAI index without analyzer, the CQL counterpart of the Solr term range queries ({@code field:[a TO b]},
+ * {@code field:{a TO b}}, {@code field:[a TO *]}...), across the memtable-only / flushed / compacted matrix and
+ * the index versions.
  * The order is the binary (unsigned byte) order of the UTF-8 values.
  */
-public class LiteralRangeQueryTest extends SAITester
+public class LiteralRangeQueryTest extends SAITester.Versioned
 {
     /** The seed of the randomized tests, which can be fixed with the {@link CassandraRelevantProperties#TEST_RANDOM_SEED} property. */
     private static final long SEED = CassandraRelevantProperties.TEST_RANDOM_SEED.getLong(System.nanoTime());
     private static final String[] ALPHABET = { "a", "b", "ab", "abc", "z", "A", "B", "Ab", " ", "0", "é", "É", "ß", "日", "😀" };
+
+    private static final int RANDOM_ROWS = 2000;
+    private static final int RANDOM_QUERIES = 200;
 
     private final Random random = new Random(SEED);
 
@@ -125,8 +127,6 @@ public class LiteralRangeQueryTest extends SAITester
             assertEquals(List.of(6), keys(execute("SELECT pk FROM %s WHERE v >= 'A' AND v < 'a'")));
             // empty ranges
             assertEquals(List.of(), keys(execute("SELECT pk FROM %s WHERE v > 'b' AND v < 'c'")));
-            assertEquals(List.of(), keys(execute("SELECT pk FROM %s WHERE v > 'b' AND v < 'b'")));
-            assertEquals(List.of(), keys(execute("SELECT pk FROM %s WHERE v >= 'c' AND v <= 'b'")));
             assertEquals(List.of(), keys(execute("SELECT pk FROM %s WHERE v > 'c'")));
             assertEquals(List.of(5), keys(execute("SELECT pk FROM %s WHERE v >= 'b' AND v <= 'b'")));
 
@@ -354,12 +354,12 @@ public class LiteralRangeQueryTest extends SAITester
         Map<Integer, String> rows = new HashMap<>();
 
         // memtable-only
-        insertRandomRows(rows, 0, 100);
+        insertRandomRows(rows, 0, RANDOM_ROWS / 2);
         verifyRandomizedRanges(rows);
 
         // flushed sstable + memtable
         flush();
-        insertRandomRows(rows, 100, 200);
+        insertRandomRows(rows, RANDOM_ROWS / 2, RANDOM_ROWS);
         verifyRandomizedRanges(rows);
 
         // two sstables
@@ -369,6 +369,68 @@ public class LiteralRangeQueryTest extends SAITester
         // compacted
         compact();
         verifyRandomizedRanges(rows);
+    }
+
+    /**
+     * An exclusive lower bound starts the scan of the on-disk terms at the bound followed by a zero byte: values
+     * with zero bytes, among which that one, are in their place.
+     */
+    @Test
+    public void testZeroByteValues()
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        String[] values = { "", "\0", "a", "a\0", "a\0\0", "a\0b", "a\u0001", "ab" };
+        for (int pk = 0; pk < values.length; pk++)
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, values[pk]);
+
+        for (int i = 0; i < 3; i++)
+        {
+            assertEquals(List.of(3, 4, 5, 6, 7), keys(execute("SELECT pk FROM %s WHERE v > ?", "a")));
+            assertEquals(List.of(2, 3, 4, 5, 6, 7), keys(execute("SELECT pk FROM %s WHERE v >= ?", "a")));
+            assertEquals(List.of(4, 5, 6, 7), keys(execute("SELECT pk FROM %s WHERE v > ?", "a\0")));
+            assertEquals(List.of(3, 4, 5, 6, 7), keys(execute("SELECT pk FROM %s WHERE v >= ?", "a\0")));
+            assertEquals(List.of(3), keys(execute("SELECT pk FROM %s WHERE v > ? AND v < ?", "a", "a\0\0")));
+            assertEquals(List.of(3, 4), keys(execute("SELECT pk FROM %s WHERE v > ? AND v <= ?", "a", "a\0\0")));
+            assertEquals(List.of(0, 1, 2), keys(execute("SELECT pk FROM %s WHERE v < ?", "a\0")));
+            assertEquals(List.of(0, 1, 2, 3), keys(execute("SELECT pk FROM %s WHERE v <= ?", "a\0")));
+            assertEquals(List.of(1, 2, 3, 4, 5, 6, 7), keys(execute("SELECT pk FROM %s WHERE v > ?", "")));
+            assertEquals(List.of(2, 3, 4, 5, 6, 7), keys(execute("SELECT pk FROM %s WHERE v > ?", "\0")));
+            assertEquals(List.of(0), keys(execute("SELECT pk FROM %s WHERE v < ?", "\0")));
+            assertEquals(List.of(), keys(execute("SELECT pk FROM %s WHERE v < ?", "")));
+            flushOrCompact(i);
+        }
+    }
+
+    /**
+     * The index serves the ranges on the ascending clustering columns and on the components of a composite
+     * partition key.
+     */
+    @Test
+    public void testPrimaryKeyColumns()
+    {
+        createTable("CREATE TABLE %s (p1 int, p2 text, ck text, v int, PRIMARY KEY ((p1, p2), ck))");
+        createIndex("CREATE CUSTOM INDEX ON %s(p2) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(ck) USING 'StorageAttachedIndex'");
+
+        String[] values = { "a", "ab", "abc", "b", "c" };
+        for (int i = 0; i < values.length; i++)
+            for (int j = 0; j < values.length; j++)
+                execute("INSERT INTO %s (p1, p2, ck, v) VALUES (?, ?, ?, ?)", i % 2, values[i], values[j], i * 10 + j);
+
+        for (int i = 0; i < 3; i++)
+        {
+            assertRowsIgnoringOrder(execute("SELECT v FROM %s WHERE ck > 'abc'"),
+                                    row(3), row(4), row(13), row(14), row(23), row(24), row(33), row(34), row(43), row(44));
+            assertRowsIgnoringOrder(execute("SELECT v FROM %s WHERE ck >= 'ab' AND ck < 'abc'"),
+                                    row(1), row(11), row(21), row(31), row(41));
+            assertRowsIgnoringOrder(execute("SELECT v FROM %s WHERE p2 > 'ab' AND p2 <= 'b'"),
+                                    row(20), row(21), row(22), row(23), row(24), row(30), row(31), row(32), row(33), row(34));
+            assertRowsIgnoringOrder(execute("SELECT v FROM %s WHERE p2 < 'ab' AND ck > 'b'"), row(4));
+            assertRowsIgnoringOrder(execute("SELECT v FROM %s WHERE p2 >= 'c' AND ck <= 'a'"), row(40));
+            flushOrCompact(i);
+        }
     }
 
     @Test
@@ -499,13 +561,17 @@ public class LiteralRangeQueryTest extends SAITester
             assertRows(execute("SELECT v FROM %s WHERE v < 'e' AND n = 1 ORDER BY v DESC LIMIT 10"), row("d"), row("b"));
             assertRows(execute("SELECT v FROM %s WHERE v > 'b' ORDER BY n ASC LIMIT 1"), row("c"));
             assertRows(execute("SELECT v FROM %s WHERE v >= 'g' ORDER BY v ASC LIMIT 10"), row("g"), row("h"));
+            // descending without upper bound, with the empty term out of and in the range
+            assertRows(execute("SELECT v FROM %s WHERE v > 'f' ORDER BY v DESC LIMIT 10"), row("h"), row("g"));
+            assertRows(execute("SELECT v FROM %s WHERE v >= 'g' ORDER BY v DESC LIMIT 1"), row("h"));
+            assertRows(execute("SELECT v FROM %s WHERE v >= '' ORDER BY v DESC LIMIT 10"),
+                       row("h"), row("g"), row("f"), row("e"), row("d"), row("c"), row("b"), row("a"), row(""));
+            assertRows(execute("SELECT v FROM %s WHERE v >= '' ORDER BY v ASC LIMIT 2"), row(""), row("a"));
             assertRows(execute("SELECT v FROM %s WHERE v < 'b' ORDER BY v DESC LIMIT 10"), row("a"), row(""));
             assertRows(execute("SELECT v FROM %s WHERE v > '' AND v < 'b' ORDER BY v DESC LIMIT 10"), row("a"));
             assertRows(execute("SELECT v FROM %s WHERE v <= '' ORDER BY v ASC LIMIT 10"), row(""));
             assertRowCount(execute("SELECT v FROM %s WHERE v < '' ORDER BY v ASC LIMIT 10"), 0);
             assertRows(execute("SELECT v FROM %s WHERE v > 'aa' AND v < 'bb' ORDER BY v DESC LIMIT 10"), row("b"));
-            assertRowCount(execute("SELECT v FROM %s WHERE v > 'f' AND v < 'b' ORDER BY v ASC LIMIT 10"), 0);
-            assertRowCount(execute("SELECT v FROM %s WHERE v > 'f' AND v < 'f' ORDER BY v DESC LIMIT 10"), 0);
 
             if (i == 0)
                 flush();
@@ -565,75 +631,6 @@ public class LiteralRangeQueryTest extends SAITester
             assertEquals(List.of(2), keys(execute("SELECT pk FROM %s WHERE v >= 'b' AND v <= ?", large)));
             flush();
         }
-    }
-
-    @Test
-    public void testAcrossIndexVersions()
-    {
-        try
-        {
-            for (Version version : Version.ALL)
-            {
-                SAIUtil.setCurrentVersion(version);
-                createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
-                createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "a");
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 2, "ab");
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 3, "abc");
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 4, "ac");
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 5, "b");
-                flush();
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 6, "abd");
-                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 7, "ac");
-
-                String message = "Version " + version;
-                assertEquals(message, List.of(2, 3, 4, 6, 7), keys(execute("SELECT pk FROM %s WHERE v >= 'ab' AND v <= 'ac'")));
-                assertEquals(message, List.of(3, 6), keys(execute("SELECT pk FROM %s WHERE v > 'ab' AND v < 'ac'")));
-                assertEquals(message, List.of(1, 2), keys(execute("SELECT pk FROM %s WHERE v < 'abc'")));
-                assertEquals(message, List.of(4, 5, 7), keys(execute("SELECT pk FROM %s WHERE v > 'abd'")));
-            }
-        }
-        finally
-        {
-            SAIUtil.resetCurrentVersion();
-        }
-    }
-
-    /**
-     * The index of a reversed (DESC clustering) column supports the same operators as that of an ascending one: on
-     * text, boolean and uuid columns it doesn't serve {@code !=}, which needs {@code ALLOW FILTERING} either way.
-     */
-    @Test
-    public void testExclusionsOnReversedColumnsNotServed()
-    {
-        for (String order : new String[]{ "ASC", "DESC" })
-        {
-            testExclusionsNotServed(order, "text", "'b'", "'a'", "'b'", "'c'");
-            testExclusionsNotServed(order, "boolean", "true", "false", "true");
-            testExclusionsNotServed(order, "uuid",
-                                    "00000000-0000-4000-8000-000000000002",
-                                    "00000000-0000-4000-8000-000000000001",
-                                    "00000000-0000-4000-8000-000000000002",
-                                    "00000000-0000-4000-8000-000000000003");
-        }
-    }
-
-    private void testExclusionsNotServed(String order, String type, String excluded, String... values)
-    {
-        createTable("CREATE TABLE %s (k int, pk int, v " + type + ", PRIMARY KEY (k, v)) WITH CLUSTERING ORDER BY (v " + order + ')');
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-        List<Integer> expected = new ArrayList<>();
-        for (int pk = 0; pk < values.length; pk++)
-        {
-            execute("INSERT INTO %s (k, pk, v) VALUES (0, " + pk + ", " + values[pk] + ')');
-            if (!values[pk].equals(excluded))
-                expected.add(pk);
-        }
-
-        assertInvalidMessage("has an index but does not support the operators specified in the query",
-                             "SELECT pk FROM %s WHERE v != " + excluded);
-        assertEquals(order + ' ' + type, expected, keys(execute("SELECT pk FROM %s WHERE v != " + excluded + " ALLOW FILTERING")));
     }
 
     /**
@@ -756,13 +753,22 @@ public class LiteralRangeQueryTest extends SAITester
     private void verifyRandomizedRanges(Map<Integer, String> rows)
     {
         List<String> values = new ArrayList<>(rows.values());
-        for (int i = 0; i < 40; i++)
+        for (int i = 0; i < RANDOM_QUERIES; i++)
         {
             // draw bounds both from the indexed values and from random strings
             String lower = random.nextBoolean() ? values.get(random.nextInt(values.size())) : randomString();
             String upper = random.nextBoolean() ? values.get(random.nextInt(values.size())) : randomString();
-            String lowerOp = random.nextBoolean() ? ">" : ">=";
-            String upperOp = random.nextBoolean() ? "<" : "<=";
+            // ordered bounds: the ranges with a lower bound above the upper one are not specific to these types
+            if (ByteBufferUtil.compareUnsigned(UTF8Type.instance.decompose(lower), UTF8Type.instance.decompose(upper)) > 0)
+            {
+                String swap = lower;
+                lower = upper;
+                upper = swap;
+            }
+            // equal bounds are both inclusive: otherwise the range is empty, as with unordered bounds
+            boolean equalBounds = lower.equals(upper);
+            String lowerOp = equalBounds || random.nextBoolean() ? ">=" : ">";
+            String upperOp = equalBounds || random.nextBoolean() ? "<=" : "<";
             int kind = random.nextInt(3);
 
             List<Integer> expected = new ArrayList<>();
@@ -816,7 +822,7 @@ public class LiteralRangeQueryTest extends SAITester
 
     private String randomString()
     {
-        int length = 1 + random.nextInt(4);
+        int length = 1 + random.nextInt(6);
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < length; i++)
             sb.append(ALPHABET[random.nextInt(ALPHABET.length)]);

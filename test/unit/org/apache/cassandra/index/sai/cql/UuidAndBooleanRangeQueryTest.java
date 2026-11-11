@@ -42,7 +42,7 @@ import static org.junit.Assert.assertEquals;
  * types: {@link UUIDType} sorts by version first, then by timestamp for time-based UUIDs, and {@code false} sorts
  * before {@code true}.
  */
-public class UuidAndBooleanRangeQueryTest extends SAITester
+public class UuidAndBooleanRangeQueryTest extends SAITester.Versioned
 {
     /** The seed of the randomized tests, which can be fixed with the {@link CassandraRelevantProperties#TEST_RANDOM_SEED} property. */
     private static final long SEED = CassandraRelevantProperties.TEST_RANDOM_SEED.getLong(System.nanoTime());
@@ -135,12 +135,12 @@ public class UuidAndBooleanRangeQueryTest extends SAITester
         Map<Integer, UUID> rows = new HashMap<>();
 
         // memtable-only
-        insertRandomRows(rows, 0, 100);
+        insertRandomRows(rows, 0, 1000);
         verifyRandomizedRanges(rows);
 
         // flushed sstable + memtable
         flush();
-        insertRandomRows(rows, 100, 200);
+        insertRandomRows(rows, 1000, 2000);
         verifyRandomizedRanges(rows);
 
         // two sstables
@@ -165,12 +165,21 @@ public class UuidAndBooleanRangeQueryTest extends SAITester
     private void verifyRandomizedRanges(Map<Integer, UUID> rows)
     {
         List<UUID> values = new ArrayList<>(rows.values());
-        for (int i = 0; i < 40; i++)
+        for (int i = 0; i < 200; i++)
         {
             UUID lower = random.nextBoolean() ? values.get(random.nextInt(values.size())) : randomUuid();
             UUID upper = random.nextBoolean() ? values.get(random.nextInt(values.size())) : randomUuid();
-            String lowerOp = random.nextBoolean() ? ">" : ">=";
-            String upperOp = random.nextBoolean() ? "<" : "<=";
+            // ordered bounds: the ranges with a lower bound above the upper one are not specific to these types
+            if (UUIDType.instance.compare(UUIDType.instance.decompose(lower), UUIDType.instance.decompose(upper)) > 0)
+            {
+                UUID swap = lower;
+                lower = upper;
+                upper = swap;
+            }
+            // equal bounds are both inclusive: otherwise the range is empty, as with unordered bounds
+            boolean equalBounds = lower.equals(upper);
+            String lowerOp = equalBounds || random.nextBoolean() ? ">=" : ">";
+            String upperOp = equalBounds || random.nextBoolean() ? "<=" : "<";
             int kind = random.nextInt(3);
 
             List<Integer> expected = new ArrayList<>();

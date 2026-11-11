@@ -573,6 +573,18 @@ public class IndexQuerySupport
             query(tester, model, DataModel.ASCII_COLUMN, Operator.EQ, "MA");
             query(tester, model, DataModel.ASCII_COLUMN, Operator.EQ, "LA");
             query(tester, model, DataModel.ASCII_COLUMN, Operator.EQ, "XX");
+            // bounds that are and that aren't values of the column
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.LT, "MA");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.LTE, "MA");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.GT, "MA");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.GTE, "MA");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.LT, "M");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.GTE, "M");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.LT, "A");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.GT, "X");
+
+            rangeQuery(tester, model, DataModel.ASCII_COLUMN, "AL", "TX");
+            rangeQuery(tester, model, DataModel.ASCII_COLUMN, "B", "N");
 
             query(tester, model, DataModel.BIGINT_COLUMN, Operator.EQ, 4800000000L);
             query(tester, model, DataModel.BIGINT_COLUMN, Operator.EQ, 5000000000L);
@@ -703,6 +715,20 @@ public class IndexQuerySupport
             query(tester, model, DataModel.TEXT_COLUMN, Operator.EQ, "Michigan");
             query(tester, model, DataModel.TEXT_COLUMN, Operator.EQ, "Louisiana");
             query(tester, model, DataModel.TEXT_COLUMN, Operator.EQ, "Massachusetts");
+            // bounds that are and that aren't values of the column, and that are a prefix of some of them
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.LT, "Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.LTE, "Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.GT, "Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.GTE, "Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.LT, "M");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.GT, "M");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.GTE, "State");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.LTE, "Al");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.LT, "");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.GTE, "");
+
+            rangeQuery(tester, model, DataModel.TEXT_COLUMN, "Alabama", "Texas");
+            rangeQuery(tester, model, DataModel.TEXT_COLUMN, "M", "N");
 
             query(tester, model, DataModel.TIME_COLUMN, Operator.EQ, TimeType.instance.fromString("00:43:07"));
             query(tester, model, DataModel.TIME_COLUMN, Operator.NEQ, TimeType.instance.fromString("00:43:07"));
@@ -746,6 +772,16 @@ public class IndexQuerySupport
             query(tester, model, DataModel.UUID_COLUMN, Operator.EQ, UUIDType.instance.fromString("ac0aa734-d17f-11e8-a8d5-f2801f1b9fd1"));
             query(tester, model, DataModel.UUID_COLUMN, Operator.EQ, UUIDType.instance.fromString("c6eec0b0-0eef-40e8-ac38-3a82110443e4"));
             query(tester, model, DataModel.UUID_COLUMN, Operator.EQ, UUIDType.instance.fromString("e37394dc-d17b-11e8-a8d5-f2801f1b9fd1"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.LT, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.LTE, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.GT, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.GTE, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+
+            // the uuid type orders by version first: the time-based (version 1) lower bound is before the random
+            // (version 4) upper bound
+            rangeQuery(tester, model, DataModel.UUID_COLUMN,
+                       UUIDType.instance.fromString("e37394dc-d17b-11e8-a8d5-f2801f1b9fd1"),
+                       UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
 
             query(tester, model, DataModel.TIMEUUID_COLUMN, Operator.EQ, UUIDType.instance.fromString("ee6136d2-d17c-11e8-a8d5-f2801f1b9fd1"));
             query(tester, model, DataModel.TIMEUUID_COLUMN, Operator.NEQ, UUIDType.instance.fromString("ee6136d2-d17c-11e8-a8d5-f2801f1b9fd1"));
@@ -777,6 +813,26 @@ public class IndexQuerySupport
                      DataModel.TIMESTAMP_COLUMN, Operator.NEQ, TimestampType.instance.fromString("2018-06-20T00:00:00"),
                      DataModel.TEXT_COLUMN, Operator.EQ, "Texas",
                      false);
+
+            andQuery(tester, model,
+                     DataModel.TEXT_COLUMN, Operator.GTE, "M",
+                     DataModel.BIGINT_COLUMN, Operator.LT, 7000000000L,
+                     false);
+
+            andQuery(tester, model,
+                     DataModel.TEXT_COLUMN, Operator.LT, "N",
+                     DataModel.ASCII_COLUMN, Operator.GT, "KY",
+                     false);
+
+            andQuery(tester, model,
+                     DataModel.TEXT_COLUMN, Operator.GT, "Alaska",
+                     DataModel.TEXT_COLUMN, Operator.LTE, "Wyoming",
+                     false);
+
+            andQuery(tester, model,
+                     DataModel.ASCII_COLUMN, Operator.LTE, "MS",
+                     DataModel.NON_INDEXED_COLUMN, Operator.GT, 0,
+                     true);
 
             andQuery(tester, model,
                      DataModel.SMALLINT_COLUMN, Operator.LTE, (short) 126,

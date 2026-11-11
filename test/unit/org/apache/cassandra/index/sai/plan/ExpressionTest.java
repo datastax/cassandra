@@ -121,6 +121,31 @@ public class ExpressionTest
     }
 
     @Test
+    public void testExclusions()
+    {
+        // the NEQ after the first one, and those after a range, are exclusions: on literal and non-literal types
+        Expression text = new Expression(SAITester.createIndexContext("col", UTF8Type.instance));
+        text.add(Operator.NEQ, UTF8Type.instance.decompose("a")).add(Operator.NEQ, UTF8Type.instance.decompose("b"));
+        assertFalse(text.isSatisfiedBy(UTF8Type.instance.decompose("a")));
+        assertFalse(text.isSatisfiedBy(UTF8Type.instance.decompose("b")));
+        assertTrue(text.isSatisfiedBy(UTF8Type.instance.decompose("c")));
+
+        Expression number = new Expression(SAITester.createIndexContext("col", Int32Type.instance));
+        number.add(Operator.NEQ, Int32Type.instance.decompose(1)).add(Operator.NEQ, Int32Type.instance.decompose(2));
+        assertFalse(number.isSatisfiedBy(Int32Type.instance.decompose(1)));
+        assertFalse(number.isSatisfiedBy(Int32Type.instance.decompose(2)));
+        assertTrue(number.isSatisfiedBy(Int32Type.instance.decompose(3)));
+
+        Expression range = range("a", true, "d", false);
+        range.add(Operator.NEQ, UTF8Type.instance.decompose("b")).add(Operator.NEQ, UTF8Type.instance.decompose("c"));
+        assertTrue(range.isSatisfiedBy(UTF8Type.instance.decompose("a")));
+        assertFalse(range.isSatisfiedBy(UTF8Type.instance.decompose("b")));
+        assertFalse(range.isSatisfiedBy(UTF8Type.instance.decompose("c")));
+        assertTrue(range.isSatisfiedBy(UTF8Type.instance.decompose("cc")));
+        assertFalse(range.isSatisfiedBy(UTF8Type.instance.decompose("d")));
+    }
+
+    @Test
     public void testLiteralTermRanges()
     {
         Expression range = range("ab", true, "b", false);

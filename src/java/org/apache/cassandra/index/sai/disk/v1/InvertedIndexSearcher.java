@@ -156,16 +156,20 @@ public class InvertedIndexSearcher extends IndexSearcher
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             return reader.exactMatch(term, listener, context);
         }
-        else if (exp.isLiteralTermRange())
-        {
-            QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
-            var lower = exp.getEncodedLowerBoundByteComparable(version);
-            var upper = exp.getEncodedUpperBoundByteComparable(version);
-            return reader.rangeMatch(lower, lower == null || exp.lower.inclusive, upper, upper == null || exp.upper.inclusive, listener, context);
-        }
         else if (exp.getOp() == Expression.Op.RANGE)
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
+            if (exp.isLiteralTermRange())
+            {
+                // The terms are the raw value bytes, which have no terminator to adjust for an exclusive bound. The
+                // start of the scan encodes an exclusive lower bound as the term that follows it. No term precedes
+                // an exclusive upper bound, so the term equal to it is excluded as for the prefix scans below.
+                var start = exp.getLiteralRangeScanStart(version);
+                var end = exp.getEncodedUpperBoundByteComparable(version);
+                return end == null || exp.upper.inclusive
+                       ? reader.rangeMatch(null, start, end, listener, context)
+                       : reader.rangeMatchExcludingUpperBoundTerm(start, end, listener, context);
+            }
             var lower = exp.getEncodedLowerBoundByteComparable(version);
             var upper = exp.getEncodedUpperBoundByteComparable(version);
             return reader.rangeMatch(filterRangeResults ? exp : null, lower, upper, listener, context);
@@ -182,7 +186,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             // possible over-match, and is excluded at the reader level instead of post-filtering every matched term.
             var lower = version.onDiskFormat().encodeForTrie(exp.lower.value.encoded, indexContext.getValidator());
             var upper = exp.getPrefixUpperBoundByteComparable(version);
-            return reader.rangeMatch(lower, true, upper, false, listener, context);
+            return reader.rangeMatchExcludingUpperBoundTerm(lower, upper, listener, context);
         }
         else if (exp.getOp() == Expression.Op.AUTOMATON)
         {

@@ -58,7 +58,6 @@ import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.CollectionType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.FloatType;
-import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.ListType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.MapType;
@@ -476,22 +475,6 @@ public class RowFilter
         return root.isEmpty();
     }
 
-    /**
-     * Returns this filter without its parts that no row can satisfy, as they require a value of a column to be in an
-     * empty range (e.g. {@code x > 5 AND x < 3}), or {@code null} if no row can satisfy the filter at all. The
-     * coordinator doesn't send these parts to the replicas, whose index scans require ordered bounds.
-     *
-     * @return this filter without its unsatisfiable parts, or {@code null} if it's unsatisfiable
-     */
-    @Nullable
-    public RowFilter withoutUnsatisfiable()
-    {
-        FilterElement satisfiable = root.withoutUnsatisfiable();
-        if (satisfiable == root)
-            return this;
-        return satisfiable == null ? null : new RowFilter(satisfiable, needsReconciliation, indexHints, optimizerOptions);
-    }
-
     @Override
     public String toString()
     {
@@ -851,61 +834,6 @@ public class RowFilter
         public boolean isAlwaysTrue()
         {
             return !isDisjunction && isEmpty();
-        }
-
-        /**
-         * Returns this element without its parts that no row can satisfy, or {@code null} if no row can satisfy it:
-         * a conjunction requiring a value of a column to be in an empty range (e.g. {@code x > 5 AND x < 3} or
-         * {@code x > 5 AND x < 5}) or with an unsatisfiable child, or a disjunction of unsatisfiable children only.
-         */
-        @Nullable
-        FilterElement withoutUnsatisfiable()
-        {
-            if (!isDisjunction)
-            {
-                for (Expression lower : expressions)
-                {
-                    for (Expression upper : expressions)
-                    {
-                        if (isEmptyRange(lower, upper))
-                            return null;
-                    }
-                }
-            }
-
-            List<FilterElement> satisfiableChildren = new ArrayList<>(children.size());
-            for (FilterElement child : children)
-            {
-                FilterElement satisfiable = child.withoutUnsatisfiable();
-                if (satisfiable == null && !isDisjunction)
-                    return null;
-                if (satisfiable != null)
-                    satisfiableChildren.add(satisfiable);
-            }
-
-            if (isDisjunction && expressions.isEmpty() && satisfiableChildren.isEmpty() && !children.isEmpty())
-                return null;
-            return satisfiableChildren.equals(children) ? this : new FilterElement(isDisjunction, expressions, satisfiableChildren);
-        }
-
-        private static boolean isEmptyRange(Expression lower, Expression upper)
-        {
-            if (!(lower instanceof SimpleExpression)
-                || !(upper instanceof SimpleExpression)
-                || !(lower.operator == Operator.GT || lower.operator == Operator.GTE)
-                || !(upper.operator == Operator.LT || upper.operator == Operator.LTE)
-                || !lower.column.equals(upper.column))
-                return false;
-
-            // an index can order the values differently than their type, e.g. SAI compares IPv4 addresses as
-            // IPv4-mapped IPv6 ones, so the type order can't tell that the range is empty
-            if (lower.column.type.unwrap() instanceof InetAddressType)
-                return false;
-
-            // as the operators compare the values, see SimpleExpression#isSatisfiedBy
-            AbstractType<?> type = lower.column.type.isCounter() ? LongType.instance : lower.column.type;
-            int cmp = type.compareForCQL(lower.value, upper.value);
-            return cmp > 0 || cmp == 0 && !(lower.operator == Operator.GTE && upper.operator == Operator.LTE);
         }
 
         public boolean contains(Expression expression)

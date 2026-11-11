@@ -278,6 +278,8 @@ public class TermsReaderTest extends SaiRandomizedTest
         {
             for (int i = 0; i < 200; i++)
             {
+                // The scans require ordered bounds. Equal bounds are covered: unless both are inclusive the range is
+                // empty, with the start of the scan after its end when the lower bound is exclusive.
                 byte[] lower = randomBound(terms);
                 byte[] upper = randomBound(terms);
                 if (lower != null && upper != null && compare(lower, upper) > 0)
@@ -285,6 +287,10 @@ public class TermsReaderTest extends SaiRandomizedTest
                     byte[] swap = lower;
                     lower = upper;
                     upper = swap;
+                }
+                else if (lower != null && randomIntBetween(0, 9) == 0)
+                {
+                    upper = lower;
                 }
                 boolean lowerInclusive = randomBoolean();
                 boolean upperInclusive = randomBoolean();
@@ -303,28 +309,29 @@ public class TermsReaderTest extends SaiRandomizedTest
                     }
                 }
 
+                if (lower == null && upper == null)
+                    continue;
+                Expression expression = new Expression(indexContext);
+                if (lower != null)
+                    expression.add(lowerInclusive ? Operator.GTE : Operator.GT, ByteBuffer.wrap(lower));
+                if (upper != null)
+                    expression.add(upperInclusive ? Operator.LTE : Operator.LT, ByteBuffer.wrap(upper));
+                assertTrue(expression.isLiteralTermRange());
+
+                // as InvertedIndexSearcher searches the range
+                ByteComparable start = expression.getLiteralRangeScanStart(version);
+                ByteComparable end = expression.getEncodedUpperBoundByteComparable(version);
+                QueryEventListener.TrieIndexEventListener listener = (QueryEventListener.TrieIndexEventListener) NO_OP_TRIE_LISTENER;
                 Set<Integer> actualRows = new TreeSet<>();
-                try (PostingList postings = reader.rangeMatch(lower == null ? null : ByteComparable.preencoded(VERSION, lower),
-                                                              lowerInclusive,
-                                                              upper == null ? null : ByteComparable.preencoded(VERSION, upper),
-                                                              upperInclusive,
-                                                              (QueryEventListener.TrieIndexEventListener) NO_OP_TRIE_LISTENER,
-                                                              new QueryContext()))
+                try (PostingList postings = end == null || upperInclusive
+                                            ? reader.rangeMatch(null, start, end, listener, new QueryContext())
+                                            : reader.rangeMatchExcludingUpperBoundTerm(start, end, listener, new QueryContext()))
                 {
                     for (long rowId = postings.nextPosting(); rowId != PostingList.END_OF_STREAM; rowId = postings.nextPosting())
                         actualRows.add((int) rowId);
                 }
                 assertEquals(range, expectedRows, actualRows);
 
-                Expression expression = new Expression(indexContext);
-                if (lower != null)
-                    expression.add(lowerInclusive ? Operator.GTE : Operator.GT, ByteBuffer.wrap(lower));
-                if (upper != null)
-                    expression.add(upperInclusive ? Operator.LTE : Operator.LT, ByteBuffer.wrap(upper));
-                // the coordinator doesn't query the empty ranges
-                boolean empty = lower != null && upper != null && (compare(lower, upper) > 0 || compare(lower, upper) == 0 && !(lowerInclusive && upperInclusive));
-                if (!expression.isLiteralTermRange() || empty)
-                    continue;
                 assertEquals(range, toStrings(expectedTerms), scannedTerms(reader.rangeTerms(expression, true)));
                 Collections.reverse(expectedTerms);
                 assertEquals(range, toStrings(expectedTerms), scannedTerms(reader.rangeTerms(expression, false)));
