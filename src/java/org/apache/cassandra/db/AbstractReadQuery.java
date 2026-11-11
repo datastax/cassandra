@@ -147,7 +147,8 @@ abstract class AbstractReadQuery extends MonitorableImpl implements ReadQuery
             Set<String> excluded = IndexMetadata.toNames(indexHints.excluded);
             b.append(SelectOptions.INCLUDED_INDEXES, included)
              .append(SelectOptions.EXCLUDED_INDEXES, excluded)
-             .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toCQLString());
+             .append(SelectOptions.ANN_OPTIONS, rowFilter().annOptions().toCQLString())
+             .append(SelectOptions.OPTIMIZER_OPTIONS, rowFilter().optimizerOptions.toCQLString());
         });
 
         // The limits used by the subsequent queries of paging don't have a clear direct translation into CQL.
