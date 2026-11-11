@@ -92,14 +92,14 @@ otherwise the node does not start ("Invalid yaml. Please remove properties [...]
 
 New features
 ------------
-    - Storage-attached indexes (SAI) on non-tokenized string columns support LIKE restrictions with the '%' and
-      '_' wildcards and optional escaping with ESCAPE, e.g. LIKE 'a!_%' ESCAPE '!'. No index rebuild, new index
-      version or messaging change is needed.
-    - SAI indexes serve range restrictions (<, <=, >, >=) on text, ascii, boolean and uuid columns, the CQL
-      counterpart of Solr term ranges (field:[a TO b] is f >= 'a' AND f <= 'b', field:{a TO *] is f > 'a').
-      Strings are ordered by their bytes (code points, no collation). Indexes with an analyzer ('case_sensitive': false,
-      'normalize', 'ascii', 'index_analyzer', 'query_analyzer') don't serve these restrictions. No index rebuild, new
-      index version or messaging change is needed.
+    - Storage-attached indexes (SAI) on string columns support LIKE restrictions with the '%' and '_' wildcards
+      and optional escaping with ESCAPE, e.g. LIKE 'a!_%' ESCAPE '!'. Indexes with an analyzer ('case_sensitive':
+      false, 'normalize', 'ascii', 'index_analyzer', 'query_analyzer') don't serve these restrictions. No index
+      rebuild, new index version or messaging change is needed.
+    - SAI indexes serve range restrictions (<, <=, >, >=) on text, ascii, boolean and uuid columns. Strings are
+      ordered by their bytes (code points, no collation). Indexes with an analyzer ('case_sensitive': false,
+      'normalize', 'ascii', 'index_analyzer', 'query_analyzer') don't serve these restrictions. No index rebuild,
+      new index version or messaging change is needed.
 
 Upgrading
 ---------

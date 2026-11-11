@@ -185,27 +185,16 @@ public class LikePrefixTest extends SAITester
     }
 
     @Test
-    public void testCaseInsensitivePrefix()
+    public void testCaseInsensitiveIndexRejectsPrefix()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : 'false' }");
 
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "Apple");
-        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 2, "apricot");
-        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 3, "APPLE PIE");
-        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 4, "banana");
 
-        for (int i = 0; i < 2; i++)
-        {
-            // both the indexed terms and the prefix are lowercased
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'AP%%'"), row(1), row(2), row(3));
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'apple%%'"), row(1), row(3));
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'Apple P%%'"), row(3));
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'B%%'"), row(4));
-
-            if (i == 0)
-                flush();
-        }
+        // the terms of the index are not the values: see AutomatonQueryTest#testNormalizedIndexesRejectLike
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'v'),
+                             "SELECT pk FROM %s WHERE v LIKE 'AP%%'");
     }
 
     @Test

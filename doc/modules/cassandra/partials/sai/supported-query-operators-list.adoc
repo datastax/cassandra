@@ -6,5 +6,6 @@ endif::[]
 ifeval::["{evalproduct}" != "dse"]
 * Numerics: `=`, `<`, `>`, `<=`, `>=`, `AND`
 * Strings: `=`, `CONTAINS`, `CONTAINS KEY`, `AND`
-* Strings without a tokenizing analyzer, booleans and UUIDs: `<`, `>`, `<=`, `>=`
+* Strings without an analyzer, booleans and UUIDs: `<`, `>`, `<=`, `>=`
+* Strings without an analyzer: `LIKE`
 endif::[]

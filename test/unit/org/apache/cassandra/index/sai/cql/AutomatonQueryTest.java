@@ -336,27 +336,28 @@ public class AutomatonQueryTest extends SAITester
     }
 
     /**
-     * The same patterns on an index with a non-tokenizing analyzer, which post-filters LIKE per analyzed token
-     * (RowFilter), and with an additional restriction that makes the query post-filter the LIKE results.
+     * The same patterns with an additional restriction that makes the query post-filter the LIKE results.
      */
     @Test
-    public void testInnerWildcardsWithAnalyzerAndPostFiltering()
+    public void testInnerWildcardsWithPostFiltering()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text, n int)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : 'false' }");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
-        execute("INSERT INTO %s (pk, v, n) VALUES (?, ?, ?)", 1, "AxBy", 1);
-        execute("INSERT INTO %s (pk, v, n) VALUES (?, ?, ?)", 2, "a%B%", 1);
-        execute("INSERT INTO %s (pk, v, n) VALUES (?, ?, ?)", 3, "xAyB", 1);
+        execute("INSERT INTO %s (pk, v, n) VALUES (?, ?, ?)", 1, "axby", 1);
+        execute("INSERT INTO %s (pk, v, n) VALUES (?, ?, ?)", 2, "a%b%", 1);
+        execute("INSERT INTO %s (pk, v, n) VALUES (?, ?, ?)", 3, "xayb", 1);
         execute("INSERT INTO %s (pk, v, n) VALUES (?, ?, ?)", 4, "ab", 2);
+        execute("INSERT INTO %s (pk, v, n) VALUES (?, ?, ?)", 5, "AB", 2);
 
         for (int i = 0; i < 2; i++)
         {
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'A%%b%%'"), row(1), row(2), row(4));
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE '%%a%%B'"), row(3), row(4));
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'a%%b%%'"), row(1), row(2), row(4));
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE '%%a%%b'"), row(3), row(4));
             assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE '%%a%%b%%'"), row(1), row(2), row(3), row(4));
             assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE '%%a%%b%%' AND n = 1"), row(1), row(2), row(3));
             assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'a%%b%%' AND n = 2"), row(4));
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE '%%A%%B%%' AND n = 2"), row(5));
 
             if (i == 0)
                 flush();
@@ -565,24 +566,47 @@ public class AutomatonQueryTest extends SAITester
     }
 
     @Test
-    public void testNormalizedIndexServesLikeOnNormalizedTerms()
+    public void testNormalizedIndexesRejectLike()
     {
-        // a non-tokenizing normalizer (case_sensitive: false) still is an analyzer: the stored terms differ
-        // from the raw values, but LIKE (whose patterns survive the normalization) is served with both sides
-        // normalized
+        // A non-tokenizing normalizer still is an analyzer: the terms of the index differ from the values. The
+        // results of a query must not depend on the indexes on the column, so LIKE, which matches the values, is
+        // rejected. Only = matches the terms of the analyzer.
+        for (String options : new String[]{ "'case_sensitive' : 'false'", "'normalize' : 'true'", "'ascii' : 'true'" })
+        {
+            createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+            createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { " + options + " }");
+
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "Apple");
+            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 2, "apricot");
+
+            for (String pattern : new String[]{ "Ap%%", "%%pple", "%%ppl%%", "A%%e", "A_ple", "Apple" })
+            {
+                assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'v'),
+                                     "SELECT pk FROM %s WHERE v LIKE '" + pattern + '\'');
+                assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'v'),
+                                     "SELECT pk FROM %s WHERE v LIKE '" + pattern + "' ALLOW FILTERING");
+            }
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v = 'Apple'"), row(1));
+        }
+    }
+
+    @Test
+    public void testPlainAndNormalizedIndexes()
+    {
+        // with a plain and a normalizing index on the column, the plain one serves LIKE, on the values
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : 'false' }");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : 'false', 'equals_behaviour_when_analyzed': 'unsupported' }");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : 'true' }");
 
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "Apple");
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 2, "apricot");
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 3, "APPLE PIE");
-        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 4, "banana");
 
         for (int i = 0; i < 2; i++)
         {
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE '%%PPLE'"), row(1));
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE '%%pple%%'"), row(1), row(3));
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'A%%E'"), row(1), row(3));
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'Ap%%'"), row(1));
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE '%%PPLE%%'"), row(3));
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'a_r%%'"), row(2));
 
             if (i == 0)
                 flush();

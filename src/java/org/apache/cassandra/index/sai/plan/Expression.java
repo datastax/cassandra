@@ -522,9 +522,7 @@ public class Expression
 
     /**
      * For {@link Op#AUTOMATON} expressions, returns the compiled byte-level automaton of the pattern carried by
-     * this expression, compiling it on first use. The pattern value in {@link #lower} is the (possibly
-     * normalized, e.g. lowercased) pattern produced by the analysis in {@code Operation#analyzeGroup}, matching
-     * how the stored terms are normalized.
+     * this expression, compiling it on first use.
      *
      * @throws org.apache.cassandra.exceptions.InvalidPatternException if the pattern is invalid or too complex
      */
@@ -679,7 +677,7 @@ public class Expression
                         break;
 
                     case AUTOMATON:
-                        // pattern matching over the (possibly normalized) term, with the exact same automaton
+                        // pattern matching over the term, with the exact same automaton
                         // used by the index searchers
                         isMatch = LikePatterns.accepts(getAutomaton(), term);
                         break;
