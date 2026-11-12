@@ -594,7 +594,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             Guardrails.nonPartitionRestrictedIndexQueryEnabled.ensureEnabled(state);
 
         // Handle additional validation for topK queries
-        if (restrictions.hasIndxBasedOrdering())
+        if (restrictions.hasIndexBasedOrdering())
         {
             // We aren't going to allow SERIAL at all, so we can error out on those.
             checkFalse(options.getConsistency() == ConsistencyLevel.LOCAL_SERIAL ||
@@ -2066,7 +2066,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         /** If ALLOW FILTERING was not specified, this verifies that it is not needed */
         private void checkNeedsFiltering(TableMetadata table, StatementRestrictions restrictions, ClientState state) throws InvalidRequestException
         {
-            if (parameters.allowFiltering && restrictions.hasIndxBasedOrdering())
+            if (parameters.allowFiltering && restrictions.hasIndexBasedOrdering())
             {
                 // ANN queries do not currently work correctly when filtering is required, so
                 // we fail even though ALLOW FILTERING was passed
@@ -2083,7 +2083,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
                     restrictions.throwRequiresAllowFilteringError(table, state);
                 }
                 if (restrictions.hasClusteringColumnsRestrictions()
-                    && restrictions.hasIndxBasedOrdering()
+                    && restrictions.hasIndexBasedOrdering()
                     && restrictions.hasClusterColumnRestrictionWithoutSupportingIndex(table))
                         restrictions.throwRequiresAllowFilteringError(table, state);
             }

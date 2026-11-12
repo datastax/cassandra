@@ -875,14 +875,14 @@ public class StatementRestrictions
         return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(r -> r instanceof SingleColumnRestriction.AnnRestriction);
     }
 
-    public boolean hasIndxBasedOrdering()
+    public boolean hasIndexBasedOrdering()
     {
         return nonPrimaryKeyRestrictions.restrictions().stream().anyMatch(SingleRestriction::isIndexBasedOrdering);
     }
 
     public void throwRequiresAllowFilteringError(TableMetadata table, ClientState state)
     {
-        if (hasIndxBasedOrdering())
+        if (hasIndexBasedOrdering())
             throw invalidRequest(StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE);
 
         throwRequiresAllowFilteringError(table, indexHints, allColumnRestrictions(clusteringColumnsRestrictions, nonPrimaryKeyRestrictions), state);
