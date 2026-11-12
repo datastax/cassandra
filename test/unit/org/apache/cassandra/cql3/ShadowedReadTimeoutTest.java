@@ -1,13 +1,11 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
+ * Copyright IBM Corp.
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -47,7 +45,7 @@ import static org.junit.Assert.fail;
 public class ShadowedReadTimeoutTest extends CQLTester
 {
     private static final int SSTABLES = 10;
-    private static final int ROWS_PER_SSTABLE = 20_000;
+    private static final int ROWS_PER_SSTABLE = 50_000;
     private static final long TIMEOUT_MS = 10;
 
     @Test
@@ -99,8 +97,9 @@ public class ShadowedReadTimeoutTest extends CQLTester
         long start = System.nanoTime();
         assertTrue(Util.getAll(commands.get()).isEmpty());
         long fullScanMs = NANOSECONDS.toMillis(System.nanoTime() - start);
-        Assume.assumeTrue("Reading the deleted rows took only " + fullScanMs + " ms, too fast to tell if it is cancelled",
-                          fullScanMs >= 5 * TIMEOUT_MS);
+        assertTrue("Reading the deleted rows took only " + fullScanMs + " ms, too fast to tell if it is cancelled.\n" +
+                   "Please increase this test's ROWS_PER_SSTABLE and/or SSTABLES.",
+                   fullScanMs >= 5 * TIMEOUT_MS);
 
         // With a timeout, executed the way ReadCommandVerbHandler does it, the read must be cancelled.
         ReadCommand command = commands.get();
