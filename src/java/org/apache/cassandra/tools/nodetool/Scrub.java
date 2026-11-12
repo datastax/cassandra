@@ -24,6 +24,7 @@ import io.airlift.airline.Option;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.cassandra.io.sstable.IScrubber;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.NodeTool.NodeToolCmd;
 import org.apache.cassandra.tools.StandaloneScrubber;
@@ -54,6 +55,27 @@ public class Scrub extends NodeToolCmd
     description = StandaloneScrubber.REINSERT_OVERFLOWED_TTL_OPTION_DESCRIPTION)
     private boolean reinsertOverflowedTTL = false;
 
+    @Option(title = "overwrite-ttl",
+            name = {"-o", "--overwrite-ttl"},
+            description = "Overwrite TTL info. Possible argument values:\n" +
+                          "- NONE: does nothing\n" +
+                          "- NO_TTL: removes TTL from all cells, including already expired ones (resurrected).\n" +
+                          "Cells keep their original timestamp, so this is only safe if every copy of the data is\n" +
+                          "scrubbed before anything reads or compacts it (e.g. restoring a backup); otherwise\n" +
+                          "un-scrubbed expiring copies and expiration tombstones at the same timestamp win over\n" +
+                          "the scrubbed cells. See --bump-ttl-timestamp\n" +
+                          "- REINSERT_OVERFLOWED_TTL: same as --reinsert-overflowed-ttl option")
+    private IScrubber.OverwriteTTLMode overwriteTTLMode = IScrubber.OverwriteTTLMode.NONE;
+
+    @Option(title = "bump_ttl_timestamp",
+            name = {"--bump-ttl-timestamp"},
+            description = "Only with '--overwrite-ttl NO_TTL': rewrite cells whose TTL is removed with their original\n" +
+                          "timestamp incremented by one, so that they supersede un-scrubbed expiring copies and\n" +
+                          "expiration tombstones of the same cells. Use it when the data can be read or compacted\n" +
+                          "before every copy is scrubbed. It changes writetime() and can override a write or delete\n" +
+                          "made at exactly timestamp + 1. (default false)")
+    private boolean bumpTTLTimestamp = false;
+
     @Option(title = "jobs",
             name = {"-j", "--jobs"},
             description = "Number of sstables to scrub simultanously, set to 0 to use all available compaction threads")
@@ -65,11 +87,19 @@ public class Scrub extends NodeToolCmd
         List<String> keyspaces = parseOptionalKeyspace(args, probe);
         String[] tableNames = parseOptionalTables(args);
 
+        if (reinsertOverflowedTTL && overwriteTTLMode != IScrubber.OverwriteTTLMode.NONE)
+            throw new IllegalArgumentException("Only one of '--reinsert-overflowed-ttl' or '--overwrite-ttl' is permitted.");
+
+        if (bumpTTLTimestamp && overwriteTTLMode != IScrubber.OverwriteTTLMode.NO_TTL)
+            throw new IllegalArgumentException("'--bump-ttl-timestamp' can only be used with '--overwrite-ttl NO_TTL'.");
+
         for (String keyspace : keyspaces)
         {
             try
             {
-                probe.scrub(probe.output().out, disableSnapshot, skipCorrupted, !noValidation, reinsertOverflowedTTL, jobs, keyspace, tableNames);
+                probe.scrub(probe.output().out, disableSnapshot, skipCorrupted, !noValidation,
+                            reinsertOverflowedTTL ? IScrubber.OverwriteTTLMode.REINSERT_OVERFLOWED_TTL : overwriteTTLMode,
+                            bumpTTLTimestamp, jobs, keyspace, tableNames);
             }
             catch (IllegalArgumentException e)
             {

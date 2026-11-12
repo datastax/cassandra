@@ -181,6 +181,13 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     }
 
     @Override
+    public boolean hasDeletionBranchAtRoot()
+    {
+        int db = getAlternateBranch(root);
+        return !isNull(db);
+    }
+
+    @Override
     public D deletionAtRoot()
     {
         // Both calls handle NONE gracefully.
