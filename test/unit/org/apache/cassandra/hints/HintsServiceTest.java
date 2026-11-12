@@ -272,7 +272,12 @@ public class HintsServiceTest
         });
         HintsStore store = writeAndFlushHints(downHost, 100);
 
-        // the transfer completes only once every hint it sent was acknowledged, so the count is final here
+        // the transfer completes only once every hint it sent was acknowledged, so the count is final here:
+        // it delivers what it found when it started, and does not fail because of the hints written since
+        HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+        assertEquals(100, delivered.get());
+
+        // those are left for the next transfer, the one decommission runs once nothing coordinates writes any more
         HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
 
         assertEquals(150, delivered.get());
@@ -290,8 +295,8 @@ public class HintsServiceTest
 
         // Whenever the transfer moves on to a store, give the other one a new file, as the dispatch trigger does
         // when it closes the writer of a live host's store: whichever store goes first, it has a file again once
-        // the round is over. Do it twice per store, so that the old success criterion fails the first attempt
-        // and the retry too.
+        // the transfer is over. Do it twice per store, so that the old success criterion (no file left) fails
+        // the first attempt and the retry too.
         Map<UUID, AtomicInteger> newFiles = ImmutableMap.of(downHost1, new AtomicInteger(), downHost2, new AtomicInteger());
         AtomicReference<UUID> current = new AtomicReference<>();
         AtomicInteger delivered = new AtomicInteger();
@@ -309,8 +314,17 @@ public class HintsServiceTest
         writeAndFlushHints(downHost1, 10);
         writeAndFlushHints(downHost2, 10);
 
+        // the transfer succeeds although the store it went through first has a file again
         HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+        assertEquals(30, delivered.get());
+        assertTrue(HintsService.instance.getCatalog().hasFiles());
 
+        // and so does the next one; the third finds no new file and leaves nothing behind
+        HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
+        assertEquals(50, delivered.get());
+        assertTrue(HintsService.instance.getCatalog().hasFiles());
+
+        HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
         assertEquals(60, delivered.get());
         assertFalse(HintsService.instance.getCatalog().hasFiles());
     }
@@ -378,7 +392,8 @@ public class HintsServiceTest
         HintsDispatchExecutor executor = HintsService.instance.dispatcherExecutor();
 
         // While the transfer runs, hints for the target itself are written and their dispatch is asked for, as the
-        // trigger does for a live host: nothing is scheduled, the transfer picks them up in its next round.
+        // trigger does for a live host: nothing is scheduled, they are left to the transfer, this one if it has
+        // not gone past the target's store yet, else the next.
         AtomicInteger delivered = new AtomicInteger();
         AtomicBoolean asked = new AtomicBoolean();
         AtomicBoolean scheduled = new AtomicBoolean();
@@ -398,33 +413,11 @@ public class HintsServiceTest
 
         assertTrue(asked.get());
         assertFalse(scheduled.get());
-        assertEquals(20, delivered.get());
-        assertFalse(HintsService.instance.getCatalog().hasFiles());
-    }
 
-    @Test
-    public void testTransferSucceedsWhileHintsKeepComing() throws Exception
-    {
-        UUID target = StorageService.instance.getLocalHostUUID();
-        UUID downHost = addMember("127.0.0.2");
-        restartWithLiveHosts(target);
-
-        // A coordinator under load never stops writing hints for a down replica: every round finds one more.
-        // Write one during the first round, then one per delivery, so that no round ever finds the store empty.
-        AtomicInteger delivered = new AtomicInteger();
-        MockMessagingService.when(verb(HINT_REQ)).respond((message, to) -> {
-            int n = delivered.incrementAndGet();
-            if (n == 1 || n > 100)
-                writeHints(downHost, 1);
-            return Message.internalResponse(HINT_RSP, NoPayload.noPayload);
-        });
-        HintsStore store = writeAndFlushHints(downHost, 100);
-
-        // the transfer must not fail because of them: it stops after its rounds, with every hint it found delivered
         HintsService.instance.transferHints(() -> target).get(30, TimeUnit.SECONDS);
 
-        assertEquals(100 + HintsDispatchExecutor.MAX_TRANSFER_ROUNDS - 1, delivered.get());
-        assertTrue(store.hasFiles());
+        assertEquals(20, delivered.get());
+        assertFalse(HintsService.instance.getCatalog().hasFiles());
     }
 
     @Test

@@ -408,7 +408,7 @@ public final class HintsService implements HintsServiceMBean
      * make sure all hints are on disk and closes the hint writers so we don't leave any hint files around.
      *
      * After that, we serially dispatch all the hints in the HintsCatalog. Hints written meanwhile (this node keeps
-     * coordinating writes during a decommission) are flushed and transferred in further rounds, see
+     * coordinating writes during a decommission) are left for a later transfer, see
      * {@link HintsDispatchExecutor#transfer}.
      *
      * If we fail delivering all hints, we will ask the hostIdSupplier for a new target host
@@ -416,7 +416,7 @@ public final class HintsService implements HintsServiceMBean
      *
      * @param hostIdSupplier supplier of stream target host ids. This is generally
      *                       the closest one according to the DynamicSnitch
-     * @return When this future is done, it either has delivered every hint found by a round (see
+     * @return When this future is done, it either has delivered every hint present when the transfer started (see
      *         {@link HintsDispatchExecutor#transfer}, hints may keep being written for as long as this node
      *         coordinates) or has failed with a proper log message
      */
