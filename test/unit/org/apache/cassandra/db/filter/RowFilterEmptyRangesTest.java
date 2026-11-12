@@ -42,6 +42,10 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.assertj.core.api.Assertions;
 
+import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE;
+import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE;
+import static org.apache.cassandra.cql3.restrictions.StatementRestrictions.NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE;
+
 /// Tests for the optimization of row filters built from restrictions that:
 /// * Replaces conjunctions with always-false branches by an optimized always-false filter element.
 /// * Removes always-false branches from disjunctions.
@@ -478,6 +482,90 @@ public class RowFilterEmptyRangesTest extends CQLTester
         assertIsNotEmptyQuery("SELECT * FROM vk.vt WHERE a = 0 OR (c < '10.0.0.1' AND c > '10.0.0.2')", "a = 0");
     }
 
+    @Test
+    public void testTopK()
+    {
+        Assume.assumeTrue(index);
+
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, n int, s text, v vector<float, 2>)");
+        String nIdx = createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+        String sIdx = createIndex("CREATE CUSTOM INDEX ON %s(s) USING 'StorageAttachedIndex' WITH OPTIONS = { 'index_analyzer': 'standard' }");
+        String vIdx = createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+
+        for (int i = 1; i <= 10; i++)
+        {
+            execute("INSERT INTO %s (k, n, s, v) VALUES (?, ?, ?, ?)",
+                    i, i, String.valueOf(i), vector((float) i, (float) i));
+        }
+        maybeFlush();
+
+        // generic ORDER BY
+        assertIsNotEmptyQuery("SELECT * FROM %s ORDER BY n LIMIT 10");
+        assertIsNotEmptyQuery("SELECT * FROM %s WHERE n > 0 ORDER BY n LIMIT 10");
+        String unsatisfiableQuery = "SELECT * FROM %s WHERE n < 0 AND n > 1 ORDER BY n LIMIT 10";
+        assertIsEmptyQuery(unsatisfiableQuery);
+        assertInvalidMessage("Top-K queries cannot be run with an offset", unsatisfiableQuery + " OFFSET 1");
+        assertInvalidMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR,
+                             unsatisfiableQuery + " WITH included_indexes={" + nIdx + '}');
+        assertInvalidMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR,
+                             unsatisfiableQuery + " WITH included_indexes={" + sIdx + '}');
+        assertInvalidMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR,
+                             unsatisfiableQuery + " WITH included_indexes={" + vIdx + '}');
+        assertInvalidMessage(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 'n'),
+                             unsatisfiableQuery + " WITH excluded_indexes={" + nIdx + '}');
+        assertIsEmptyQuery(unsatisfiableQuery + " WITH excluded_indexes={" + sIdx + '}');
+        assertIsEmptyQuery(unsatisfiableQuery + " WITH excluded_indexes={" + vIdx + '}');
+        assertInvalidMessage(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 'n'),
+                             unsatisfiableQuery + " WITH excluded_indexes={*}");
+
+        // ANN
+        assertIsNotEmptyQuery("SELECT * FROM %s ORDER BY v ANN OF [1, 1] LIMIT 10");
+        assertIsNotEmptyQuery("SELECT * FROM %s WHERE n > 0 ORDER BY v ANN OF [1, 1] LIMIT 10");
+        unsatisfiableQuery = "SELECT * FROM %s WHERE n < 0 AND n > 1 ORDER BY v ANN OF [1, 1] LIMIT 10";
+        assertIsEmptyQuery(unsatisfiableQuery);
+        assertInvalidMessage("Top-K queries cannot be run with an offset",
+                             unsatisfiableQuery + " OFFSET 1");
+        assertIsEmptyQuery(unsatisfiableQuery + " WITH ann_options = {'rerank_k': 0}");
+        assertInvalidMessage("Invalid rerank_k value 5 greater than 0 and less than limit 10",
+                             unsatisfiableQuery + " WITH ann_options = {'rerank_k': 5}");
+        assertInvalidMessage("Invalid value 'bad' for option 'hybrid_sort_order'",
+                             unsatisfiableQuery + " WITH optimizer_options = {'hybrid_sort_order': 'bad'}");
+        assertInvalidMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR,
+                             unsatisfiableQuery + " WITH included_indexes={" + vIdx + '}');
+        assertInvalidMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR,
+                             unsatisfiableQuery + " WITH included_indexes={" + nIdx + '}');
+        assertInvalidMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR,
+                             unsatisfiableQuery + " WITH included_indexes={" + sIdx + '}');
+        assertInvalidMessage(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 'v'),
+                             unsatisfiableQuery + " WITH excluded_indexes={" + vIdx + '}');
+        assertInvalidMessage(NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             unsatisfiableQuery + " WITH excluded_indexes={" + nIdx + '}');
+        assertIsEmptyQuery(unsatisfiableQuery + " WITH excluded_indexes={" + sIdx + '}');
+        assertInvalidMessage(String.format(NON_CLUSTER_ORDERING_REQUIRES_INDEX_MESSAGE, 'v'),
+                             unsatisfiableQuery + " WITH excluded_indexes={*}");
+
+        // BM25
+        assertIsNotEmptyQuery("SELECT * FROM %s ORDER BY s BM25 OF '0' LIMIT 10");
+        assertIsNotEmptyQuery("SELECT * FROM %s WHERE n > 0 ORDER BY s BM25 OF '0' LIMIT 10");
+        unsatisfiableQuery = "SELECT * FROM %s WHERE n < 0 AND n > 1 ORDER BY s BM25 OF '0' LIMIT 10";
+        assertIsEmptyQuery(unsatisfiableQuery);
+        assertInvalidMessage("Top-K queries cannot be run with an offset",
+                             unsatisfiableQuery + " OFFSET 1");
+        assertInvalidMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR,
+                             unsatisfiableQuery + " WITH included_indexes={" + nIdx + '}');
+        assertInvalidMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR,
+                             unsatisfiableQuery + " WITH included_indexes={" + sIdx + '}');
+        assertInvalidMessage(IndexHints.NON_INCLUDABLE_INDEXES_ERROR,
+                             unsatisfiableQuery + " WITH included_indexes={" + vIdx + '}');
+        assertInvalidMessage(NON_CLUSTER_ORDERING_REQUIRES_ALL_RESTRICTED_NON_PARTITION_KEY_COLUMNS_INDEXED_MESSAGE,
+                             unsatisfiableQuery + " WITH excluded_indexes={" + nIdx + '}');
+        assertInvalidMessage(String.format(BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, 's'),
+                             unsatisfiableQuery + " WITH excluded_indexes={" + sIdx + '}');
+        assertIsEmptyQuery(unsatisfiableQuery + " WITH excluded_indexes={" + vIdx + '}');
+        assertInvalidMessage(String.format(BM25_ORDERING_REQUIRES_ANALYZED_INDEX_MESSAGE, 's'),
+                             unsatisfiableQuery + " WITH excluded_indexes={*}");
+    }
+
     private void maybeIndex(String... columns)
     {
         if (!index)
@@ -501,7 +589,9 @@ public class RowFilterEmptyRangesTest extends CQLTester
         if (index)
         {
             doAssertIsEmptyQuery(query);
-            doAssertIsEmptyQuery(query + " ALLOW FILTERING WITH excluded_indexes = {*}");
+
+            if (!query.toUpperCase().contains("ORDER BY"))
+                doAssertIsEmptyQuery(query + " ALLOW FILTERING WITH excluded_indexes = {*}");
         }
         else
         {
@@ -538,7 +628,9 @@ public class RowFilterEmptyRangesTest extends CQLTester
         if (index)
         {
             doAssertIsNotEmptyQuery(query, optimizedFilters);
-            doAssertIsNotEmptyQuery(query + " ALLOW FILTERING WITH excluded_indexes = {*}", optimizedFilters);
+
+            if (!query.toUpperCase().contains("ORDER BY"))
+                doAssertIsNotEmptyQuery(query + " ALLOW FILTERING WITH excluded_indexes = {*}", optimizedFilters);
         }
         else
         {

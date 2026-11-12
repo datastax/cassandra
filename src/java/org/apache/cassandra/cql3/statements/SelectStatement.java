@@ -593,17 +593,8 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
         if (restrictions.isKeyRange() && restrictions.usesSecondaryIndexing() && !SchemaConstants.isLocalSystemKeyspace(table.keyspace))
             Guardrails.nonPartitionRestrictedIndexQueryEnabled.ensureEnabled(state);
 
-        ReadQuery query;
-
-        if (rowFilter.isUnsatisfiable())
-            query = ReadQuery.empty(table);
-        else if (restrictions.isKeyRange())
-            query = getRangeCommand(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry);
-        else
-            query = getSliceCommands(options, state, columnFilter, rowFilter, dataLimits, nowInSec, indexRegistry);
-
         // Handle additional validation for topK queries
-        if (query.isTopK())
+        if (restrictions.hasIndxBasedOrdering())
         {
             // We aren't going to allow SERIAL at all, so we can error out on those.
             checkFalse(options.getConsistency() == ConsistencyLevel.LOCAL_SERIAL ||
@@ -627,6 +618,15 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
             // We don't support aggregation for top-k queries because we don't support paging.
             checkFalse(aggregationSpec != null, TOPK_AGGREGATION_ERROR);
         }
+
+        ReadQuery query;
+
+        if (rowFilter.isUnsatisfiable())
+            query = ReadQuery.empty(table, dataLimits);
+        else if (restrictions.isKeyRange())
+            query = getRangeCommand(options, state, columnFilter, rowFilter, dataLimits, nowInSec);
+        else
+            query = getSliceCommands(options, state, columnFilter, rowFilter, dataLimits, nowInSec);
 
         query.validateSelectOptions(selectOptions, state);
 
@@ -1004,12 +1004,11 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     }
 
     private ReadQuery getSliceCommands(QueryOptions options, ClientState state, ColumnFilter columnFilter,
-                                       RowFilter rowFilter, DataLimits limit, long nowInSec,
-                                       IndexRegistry indexRegistry)
+                                       RowFilter rowFilter, DataLimits limit, long nowInSec)
     {
         Collection<ByteBuffer> keys = restrictions.getPartitionKeys(options, state);
         if (keys.isEmpty())
-            return ReadQuery.empty(table);
+            return ReadQuery.empty(table, limit);
 
         if (restrictions.keyIsInRelation())
         {
@@ -1018,7 +1017,7 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
 
         ClusteringIndexFilter filter = makeClusteringIndexFilter(options, state, columnFilter);
         if (filter == null || filter.isEmpty(table.comparator))
-            return ReadQuery.empty(table);
+            return ReadQuery.empty(table, limit);
 
         List<DecoratedKey> decoratedKeys = new ArrayList<>(keys.size());
         for (ByteBuffer key : keys)
@@ -1081,18 +1080,17 @@ public class SelectStatement implements CQLStatement.SingleKeyspaceCqlStatement
     }
 
     private ReadQuery getRangeCommand(QueryOptions options, ClientState state, ColumnFilter columnFilter,
-                                      RowFilter rowFilter, DataLimits limit, long nowInSec,
-                                      IndexRegistry indexRegistry)
+                                      RowFilter rowFilter, DataLimits limit, long nowInSec)
     {
         ClusteringIndexFilter clusteringIndexFilter = makeClusteringIndexFilter(options, state, columnFilter);
         if (clusteringIndexFilter == null)
-            return ReadQuery.empty(table);
+            return ReadQuery.empty(table, limit);
 
         // The LIMIT provided by the user is the number of CQL row he wants returned.
         // We want to have getRangeSlice to count the number of columns, not the number of keys.
         AbstractBounds<PartitionPosition> keyBounds = restrictions.getPartitionKeyBounds(options);
         if (keyBounds == null)
-            return ReadQuery.empty(table);
+            return ReadQuery.empty(table, limit);
 
         return PartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limit, new DataRange(keyBounds, clusteringIndexFilter));
     }
