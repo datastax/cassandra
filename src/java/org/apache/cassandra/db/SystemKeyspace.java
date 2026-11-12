@@ -1627,6 +1627,9 @@ public final class SystemKeyspace
      */
     public static synchronized void resetTransferredRanges()
     {
+        // Deliberately outside the try/catch below: this is the table the decommission consults, so a failure
+        // to truncate it must fail the decommission. Carrying on with stale entries would skip streaming the
+        // ranges they name, and lose whatever was written to them since the previous attempt.
         Keyspace.open(SchemaConstants.SYSTEM_KEYSPACE_NAME).getColumnFamilyStore(TRANSFERRED_RANGES_V2).truncateBlockingWithoutSnapshot();
         try
         {
@@ -1664,6 +1667,7 @@ public final class SystemKeyspace
     // and it would still miss the ranges moving the other way.
     public static synchronized Map<InetAddressAndPort, Set<Range<Token>>> getTransferredRanges(StreamOperation streamOperation, String keyspace, IPartitioner partitioner)
     {
+        assert streamOperation == StreamOperation.DECOMMISSION : "transferred ranges are only recorded for decommission, got " + streamOperation;
         Map<InetAddressAndPort, Set<Range<Token>>> result = new HashMap<>();
         String query = "SELECT * FROM system.%s WHERE operation = ? AND keyspace_name = ?";
         UntypedResultSet rs = executeInternal(String.format(query, TRANSFERRED_RANGES_V2), streamOperation.getDescription(), keyspace);
