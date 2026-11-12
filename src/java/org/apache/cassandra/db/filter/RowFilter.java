@@ -626,8 +626,14 @@ public class RowFilter
             for (ExternalRestriction expression : restrictions.filterRestrictions().getExternalExpressions())
                 addAllAsConjunction(b -> expression.addToRowFilter(b, table, options));
 
-            // Add children, optimizing out any conjunctions/disjunctions with always-true or always-false restrictions.
-            // Optimizing is not needed for correctness.
+            /*
+             * Add children, optimizing out any conjunctions/disjunctions with always-true or always-false restrictions.
+             * Optimizing is not needed for correctness.
+             * TODO: further row filter simplifications could be added at some point:
+             *  * a = 0 AND (a != 0 OR b = 1) -> a = 0 AND b = 1"
+             *  * a = 0 OR (a != 0 AND b = 1) -> a = 0 OR b = 1"
+             *  This should be done by <https://github.com/riptano/cndb/issues/20167>.
+             */
             List<StatementRestrictions> children = restrictions.children();
             return restrictions.isDisjunction()
                    ? buildDisjunction(element, children, table, options, annOptions)

@@ -191,13 +191,6 @@ public class RowFilterEmptyRangesTest extends CQLTester
                              "SELECT * FROM %s WHERE a > 0 AND a < 2 AND a > 4 AND a < 6");
         assertInvalidMessage("More than one restriction was found for the start bound on a",
                              "SELECT * FROM %s WHERE (a > 0 AND a < 2) AND (a > 4 AND a < 6)");
-
-        /*
-         * TODO: further row filter simplifications could be added at some point:
-         *  assertIsNotEmptyQuery("SELECT * FROM %s WHERE a = 0 AND (a != 0 OR b = 1)", "a = 0 AND b = 1");
-         *  assertIsNotEmptyQuery("SELECT * FROM %s WHERE a = 0 OR (a != 0 AND b = 1)", "a = 0 OR b = 1");
-         *  This should be done by <https://github.com/riptano/cndb/issues/20167.
-         */
     }
 
     @Test
