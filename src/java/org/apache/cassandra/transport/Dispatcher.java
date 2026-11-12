@@ -366,7 +366,7 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
                     if (ex == null)
                     {
                         toFlush = forFlusher.toFlushItem(channel, request, response);
-                        Message.logger.trace("Responding: {}, v={}", response, connection.getVersion());
+                        Message.logger.trace("Responding: {}, v={}", response.toString(Redaction.REDACT), connection.getVersion());
                     }
                     else
                     {

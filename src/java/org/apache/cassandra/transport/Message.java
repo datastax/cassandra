@@ -360,6 +360,19 @@ public abstract class Message
                 throw new IllegalArgumentException();
         }
 
+        /**
+         * Returns a string representation of this response. Responses that can contain sensitive data, such as the
+         * message of an error, should redact it when asked to do so. Redaction should be applied when the
+         * representation is written to logs, and it shouldn't be applied when it is meant for authorized users.
+         *
+         * @param redaction whether the sensitive data in the response should be redacted
+         * @return the string representation of this response
+         */
+        public String toString(Redaction redaction)
+        {
+            return toString();
+        }
+
         public Message setTracingId(TimeUUID tracingId)
         {
             this.tracingId = tracingId;

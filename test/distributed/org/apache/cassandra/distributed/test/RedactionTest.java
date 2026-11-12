@@ -64,7 +64,10 @@ public class RedactionTest extends TestBaseImpl
     public static void setupCluster() throws Exception
     {
         // setup cluster
-        cluster = init(Cluster.build(1).withConfig(config -> config.with(GOSSIP, NETWORK, NATIVE_PROTOCOL)).start());
+        cluster = init(Cluster.build(1)
+                              .withConfig(config -> config.with(GOSSIP, NETWORK, NATIVE_PROTOCOL)
+                                                          .set("user_defined_functions_enabled", true))
+                              .start());
         coordinator = cluster.coordinator(1);
         node = cluster.get(1);
 
@@ -160,7 +163,7 @@ public class RedactionTest extends TestBaseImpl
                           ? withKeyspace("stored prepared statement for logged keyspace '%s': ")
                           : withKeyspace("not persisting prepared statement for logged keyspace '%s': ");
         expected += quote(redactedCQL);
-        assertLogsContain(mark, expected);
+        assertNoSecretsInLogs(mark, expected);
     }
 
     /// Verify that the warn-level log message about failed prepared statement recreation uses redaction.
@@ -178,7 +181,7 @@ public class RedactionTest extends TestBaseImpl
         node.runOnInstance(() -> QueryProcessor.instance.preloadPreparedStatements());
 
         String expected = "Prepared statement recreation error, removing statement: .* " + quote("SELECT ... ") + KEYSPACE;
-        assertLogsContain(mark, expected);
+        assertNoSecretsInLogs(mark, expected);
     }
 
     /// Verify that the binding of variables of prepared statements don't leak their values.
@@ -200,6 +203,36 @@ public class RedactionTest extends TestBaseImpl
         assertNoSecretsInLogs(mark);
     }
 
+    /// Verify that the logs about failed invocations of user-defined functions and aggregates don't leak the values
+    /// that made them fail, which are included in the messages of the exceptions thrown by the function.
+    @Test
+    public void testUserDefinedFunctionFailure()
+    {
+        table = "udf_failure";
+        cluster.schemaChange(format("CREATE TABLE %s.%s (k int PRIMARY KEY, v text)"));
+        coordinator.execute(format("INSERT INTO %s.%s (k, v) VALUES (1, 'secret_v')"), ConsistencyLevel.ONE);
+
+        cluster.schemaChange(format("CREATE FUNCTION %s.parse_int(input text) " +
+                                    "CALLED ON NULL INPUT RETURNS int LANGUAGE java AS " +
+                                    "'return Integer.parseInt(input);'"));
+        cluster.schemaChange(format("CREATE FUNCTION %s.sum_parsed(state int, input text) " +
+                                    "CALLED ON NULL INPUT RETURNS int LANGUAGE java AS " +
+                                    "'return state + Integer.parseInt(input);'"));
+        cluster.schemaChange(format("CREATE AGGREGATE %s.sum_all(text) SFUNC sum_parsed STYPE int INITCOND 0"));
+
+        // the function fails with "NumberFormatException: For input string: "secret_v""
+        long mark = node.logs().mark();
+        Assertions.assertThatThrownBy(() -> driverSession.execute(format("SELECT " + KEYSPACE + ".parse_int(v) FROM %s.%s WHERE k = 1")))
+                  .hasMessageContaining("For input string: \"secret_v\""); // the client is allowed to see it
+        assertNoSecretsInLogs(mark, "failed with class java.lang.NumberFormatException");
+
+        // same for the state function of an aggregate
+        mark = node.logs().mark();
+        Assertions.assertThatThrownBy(() -> driverSession.execute(format("SELECT " + KEYSPACE + ".sum_all(v) FROM %s.%s WHERE k = 1")))
+                  .hasMessageContaining("For input string: \"secret_v\"");
+        assertNoSecretsInLogs(mark, "failed with class java.lang.NumberFormatException");
+    }
+
     /// Verify that the trace-level log message about processed queries uses redaction.
     @Test
     public void testProcessedStatement()
@@ -219,7 +252,7 @@ public class RedactionTest extends TestBaseImpl
 
         long mark = node.logs().mark();
         driverSession.execute(cql);
-        assertLogsContain(mark, "Process " + quote(redactedCQL) + " @CL");
+        assertNoSecretsInLogs(mark, "Process " + quote(redactedCQL) + " @CL");
     }
 
     /// Verify that the trace-level log messages about received requests use redaction.
@@ -230,27 +263,27 @@ public class RedactionTest extends TestBaseImpl
 
         long mark = node.logs().mark();
         driverSession.execute(format("CREATE TABLE %s.%s (k text PRIMARY KEY, v text)"));
-        assertLogsContain(mark, quote("Received: QUERY CREATE TABLE ..."));
+        assertNoSecretsInLogs(mark, quote("Received: QUERY CREATE TABLE ..."));
 
         // insert
         mark = node.logs().mark();
         driverSession.execute(format("INSERT INTO %s.%s (k, v) VALUES ('secret_k', 'secret_v')"));
-        assertLogsContain(mark, quote("Received: QUERY INSERT INTO ... [pageSize = 5000 rows]"));
+        assertNoSecretsInLogs(mark, quote("Received: QUERY INSERT INTO ... [pageSize = 5000 rows]"));
 
         // select
         mark = node.logs().mark();
         driverSession.execute(format("SELECT * FROM %s.%s WHERE k = 'secret_k' AND v = 'secret_v' ALLOW FILTERING"));
-        assertLogsContain(mark, quote("Received: QUERY SELECT ... [pageSize = 5000 rows]"));
+        assertNoSecretsInLogs(mark, quote("Received: QUERY SELECT ... [pageSize = 5000 rows]"));
 
         // prepare
         mark = node.logs().mark();
         PreparedStatement prepared = driverSession.prepare(format("INSERT INTO %s.%s (k, v) VALUES ('secret_k', 'secret_v')"));
-        assertLogsContain(mark, quote("Received: PREPARE INSERT INTO ..."));
+        assertNoSecretsInLogs(mark, quote("Received: PREPARE INSERT INTO ..."));
 
         // execute
         mark = node.logs().mark();
         driverSession.execute(prepared.bind());
-        assertLogsContain(mark, "Received: EXECUTE");
+        assertNoSecretsInLogs(mark, "Received: EXECUTE");
 
         // batch
         mark = node.logs().mark();
@@ -258,7 +291,7 @@ public class RedactionTest extends TestBaseImpl
         batch.add(new SimpleStatement(format("INSERT INTO %s.%s (k, v) VALUES ('secret_k1', 'secret_v1')")));
         batch.add(new SimpleStatement(format("UPDATE %s.%s SET v = 'secret_v2' WHERE k = 'secret_k2'")));
         driverSession.execute(batch);
-        assertLogsContain(mark, quote("Received: BATCH of [INSERT INTO ... with 0 values, UPDATE ... with 0 values]"));
+        assertNoSecretsInLogs(mark, quote("Received: BATCH of [INSERT INTO ... with 0 values, UPDATE ... with 0 values]"));
     }
 
     /// Verify that client `Tracing` don't use redaction, since it's meant to be consumed by the client.
@@ -330,25 +363,22 @@ public class RedactionTest extends TestBaseImpl
     {
         long mark = node.logs().mark();
         coordinator.execute(format(cql), ConsistencyLevel.ONE);
-        assertLogsContain(mark, "has exceeded the size warning threshold .* with query " + quote(format(redactedCql)));
+        assertNoSecretsInLogs(mark, "has exceeded the size warning threshold .* with query " + quote(format(redactedCql)));
     }
 
     private void assertReadSizeFailure(String cql, String redactedCql)
     {
         long mark = node.logs().mark();
         Assertions.assertThatThrownBy(() -> coordinator.execute(format(cql), ConsistencyLevel.ONE)).isNotNull();
-        assertLogsContain(mark, "has exceeded the size failure threshold .* with query " + quote(format(redactedCql)));
+        assertNoSecretsInLogs(mark, "has exceeded the size failure threshold .* with query " + quote(format(redactedCql)));
     }
 
-    private void assertLogsContain(long mark, String expected)
-    {
-        Assertions.assertThat(node.logs().grep(mark, expected).getResult()).hasSize(1);
-        assertNoSecretsInLogs(mark);
-    }
-
-    private void assertNoSecretsInLogs(long mark)
+    private void assertNoSecretsInLogs(long mark, String... expected)
     {
         Assertions.assertThat(node.logs().grep(mark, "secret_").getResult()).isEmpty();
+
+        for (String s : expected)
+            Assertions.assertThat(node.logs().grep(mark, s).getResult()).isNotEmpty();
     }
 
     private static String format(String query)

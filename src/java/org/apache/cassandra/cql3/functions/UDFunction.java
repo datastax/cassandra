@@ -449,7 +449,7 @@ public abstract class UDFunction extends UserFunction implements ScalarFunction
         }
         catch (Throwable t)
         {
-            logger.trace("Invocation of user-defined function '{}' failed", this, t);
+            logger.trace("Invocation of user-defined function '{}' failed with {}", this, t.getClass());
             if (t instanceof VirtualMachineError)
                 throw (VirtualMachineError) t;
             throw FunctionExecutionException.create(this, t);
@@ -480,7 +480,7 @@ public abstract class UDFunction extends UserFunction implements ScalarFunction
         }
         catch (Throwable t)
         {
-            logger.debug("Invocation of user-defined function '{}' failed", this, t);
+            logger.debug("Invocation of user-defined function '{}' failed with {}", this, t.getClass());
             if (t instanceof VirtualMachineError)
                 throw (VirtualMachineError) t;
             throw FunctionExecutionException.create(this, t);
