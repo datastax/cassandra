@@ -18,7 +18,6 @@ package org.apache.cassandra.cql3;
 
 import java.util.function.Supplier;
 
-import org.junit.Assume;
 import org.junit.Test;
 
 import org.apache.cassandra.UpdateBuilder;
@@ -41,11 +40,14 @@ import static org.junit.Assert.fail;
  * cancellation check that {@link ReadCommand#executeLocally} applies to the merged result. The merge has to check
  * for cancellation itself. Otherwise such a read runs on past its timeout, keeping its read OpOrder group open (and
  * memtable reclaim blocked) for as long as the scan takes.
+ * <p>
+ * The same goes for a legacy secondary index read going through stale or deleted index entries.
  */
 public class ShadowedReadTimeoutTest extends CQLTester
 {
     private static final int SSTABLES = 10;
     private static final int ROWS_PER_SSTABLE = 50_000;
+    private static final int INDEXED_ROWS = 100_000;
     private static final long TIMEOUT_MS = 10;
 
     @Test
@@ -53,7 +55,7 @@ public class ShadowedReadTimeoutTest extends CQLTester
     {
         ColumnFamilyStore cfs = populate();
         execute("DELETE FROM %s USING TIMESTAMP ? WHERE pk = 0 AND ck < ?", (long) SSTABLES + 1, SSTABLES * ROWS_PER_SSTABLE);
-        assertCancelled(() -> Util.cmd(cfs, 0).build());
+        assertSlowAndCancelled(() -> Util.cmd(cfs, 0).build());
     }
 
     @Test
@@ -61,7 +63,7 @@ public class ShadowedReadTimeoutTest extends CQLTester
     {
         ColumnFamilyStore cfs = populate();
         execute("DELETE FROM %s USING TIMESTAMP ? WHERE pk = 0 AND ck < ?", (long) SSTABLES + 1, SSTABLES * ROWS_PER_SSTABLE);
-        assertCancelled(() -> Util.cmd(cfs).build());
+        assertSlowAndCancelled(() -> Util.cmd(cfs).build());
     }
 
     @Test
@@ -69,7 +71,26 @@ public class ShadowedReadTimeoutTest extends CQLTester
     {
         ColumnFamilyStore cfs = populate();
         execute("DELETE FROM %s USING TIMESTAMP ? WHERE pk = 0", (long) SSTABLES + 1);
-        assertCancelled(() -> Util.cmd(cfs).build());
+        assertSlowAndCancelled(() -> Util.cmd(cfs).build());
+    }
+
+    @Test
+    public void testLegacyIndexReadOfStaleEntries() throws Throwable
+    {
+        ColumnFamilyStore cfs = populateWithStaleIndexEntries();
+        // A read deletes the stale entries it goes through, so the read with a timeout must come first. The read
+        // without one then goes through the entries the first read did not get to.
+        assertCancelled(Util.cmd(cfs).filterOn("v", Operator.EQ, 1).build());
+        assertSlowerThanTimeout(Util.cmd(cfs).filterOn("v", Operator.EQ, 1).build());
+    }
+
+    @Test
+    public void testLegacyIndexReadOfDeletedEntries() throws Throwable
+    {
+        ColumnFamilyStore cfs = populateWithStaleIndexEntries();
+        // This read deletes all the stale entries.
+        assertTrue(Util.getAll(Util.cmd(cfs).filterOn("v", Operator.EQ, 1).build()).isEmpty());
+        assertSlowAndCancelled(() -> Util.cmd(cfs).filterOn("v", Operator.EQ, 1).build());
     }
 
     /**
@@ -91,31 +112,64 @@ public class ShadowedReadTimeoutTest extends CQLTester
         return cfs;
     }
 
-    private void assertCancelled(Supplier<ReadCommand> commands)
+    /**
+     * Writes rows indexed by a legacy secondary index, then changes the indexed value of all of them. The entries for
+     * the old value stay, as stale entries, because the old rows had already been flushed when the value changed.
+     */
+    private ColumnFamilyStore populateWithStaleIndexEntries() throws Throwable
     {
-        // Without a timeout, the read goes through all the rows and returns nothing.
-        long start = System.nanoTime();
-        assertTrue(Util.getAll(commands.get()).isEmpty());
-        long fullScanMs = NANOSECONDS.toMillis(System.nanoTime() - start);
-        assertTrue("Reading the deleted rows took only " + fullScanMs + " ms, too fast to tell if it is cancelled.\n" +
-                   "Please increase this test's ROWS_PER_SSTABLE and/or SSTABLES.",
-                   fullScanMs >= 5 * TIMEOUT_MS);
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v int)");
+        createIndex("CREATE INDEX ON %s(v)");
+        waitForTableIndexesQueryable();
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.disableAutoCompaction();
+        for (int i = 0; i < INDEXED_ROWS; ++i)
+            UpdateBuilder.create(cfs.metadata(), i).withTimestamp(1).newRow().add("v", 1).applyUnsafe();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+        for (int i = 0; i < INDEXED_ROWS; ++i)
+            UpdateBuilder.create(cfs.metadata(), i).withTimestamp(2).newRow().add("v", 2).applyUnsafe();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+        return cfs;
+    }
 
-        // With a timeout, executed the way ReadCommandVerbHandler does it, the read must be cancelled.
-        ReadCommand command = commands.get();
+    private void assertSlowAndCancelled(Supplier<ReadCommand> commands)
+    {
+        assertSlowerThanTimeout(commands.get());
+        assertCancelled(commands.get());
+    }
+
+    /**
+     * Without a timeout, the read goes through all the data and returns nothing. It must take long enough to tell if a
+     * read with a timeout is cancelled.
+     */
+    private void assertSlowerThanTimeout(ReadCommand command)
+    {
+        long start = System.nanoTime();
+        assertTrue(Util.getAll(command).isEmpty());
+        long fullScanMs = NANOSECONDS.toMillis(System.nanoTime() - start);
+        assertTrue("Reading the deleted data took only " + fullScanMs + " ms, too fast to tell if it is cancelled.\n" +
+                   "Please increase the amount of data this test writes.",
+                   fullScanMs >= 5 * TIMEOUT_MS);
+    }
+
+    /**
+     * With a timeout, executed the way ReadCommandVerbHandler does it, the read must be cancelled.
+     */
+    private void assertCancelled(ReadCommand command)
+    {
         command.setMonitoringTime(approxTime.now(), false, MILLISECONDS.toNanos(TIMEOUT_MS), MILLISECONDS.toNanos(TIMEOUT_MS));
-        start = System.nanoTime();
+        long start = System.nanoTime();
         try (ReadExecutionController controller = command.executionController();
              UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
             command.createResponse(iterator, controller.getRepairedDataInfo());
-            fail(String.format("Read with a %d ms timeout was not cancelled, it took %d ms (%d ms without a timeout)",
-                               TIMEOUT_MS, NANOSECONDS.toMillis(System.nanoTime() - start), fullScanMs));
+            fail(String.format("Read with a %d ms timeout was not cancelled, it took %d ms",
+                               TIMEOUT_MS, NANOSECONDS.toMillis(System.nanoTime() - start)));
         }
         catch (QueryCancelledException e)
         {
-            logger.info("Read with a {} ms timeout cancelled after {} ms ({} ms without a timeout)",
-                        TIMEOUT_MS, NANOSECONDS.toMillis(System.nanoTime() - start), fullScanMs);
+            logger.info("Read with a {} ms timeout cancelled after {} ms",
+                        TIMEOUT_MS, NANOSECONDS.toMillis(System.nanoTime() - start));
         }
         assertTrue(command.isAborted());
         assertFalse(command.complete());
