@@ -29,10 +29,11 @@ import org.apache.cassandra.utils.concurrent.RunnableFuture;
  * A FutureTask that utilises Cassandra's {@link AsyncFuture}, making it compatible with {@link ExecutorPlus}.
  * Propagates exceptions to the uncaught exception handler.
  */
-public class FutureTask<V> extends AsyncFuture<V> implements RunnableFuture<V>
+public class FutureTask<V> extends AsyncFuture<V> implements RunnableFuture<V>, TimedTask
 {
     private Callable<? extends V> call;
     private volatile DebuggableTask debuggable;
+    private long enqueuedAtNanos;
 
     public FutureTask(Callable<? extends V> call)
     {
@@ -59,6 +60,26 @@ public class FutureTask<V> extends AsyncFuture<V> implements RunnableFuture<V>
     V call() throws Exception
     {
         return call.call();
+    }
+
+    @Override
+    public long enqueuedAtNanos()
+    {
+        return enqueuedAtNanos;
+    }
+
+    @Override
+    public void markEnqueued(long approxNanos)
+    {
+        enqueuedAtNanos = approxNanos;
+    }
+
+    /** The class of the callable, or of the runnable it adapts; this class once the task has run. */
+    @Override
+    public Class<?> taskClass()
+    {
+        Callable<?> call = this.call;
+        return call == null ? getClass() : WrappedTask.classOf(call);
     }
 
     public void run()
@@ -91,7 +112,7 @@ public class FutureTask<V> extends AsyncFuture<V> implements RunnableFuture<V>
     {
         if (run instanceof DebuggableTask.RunnableDebuggableTask)
         {
-            return new DebuggableTask.CallableDebuggableTask<T>()
+            return new DebuggableRunnableCallable<T>(run)
             {
                 final RunnableDebuggableTask task = (RunnableDebuggableTask) run;
                 public T call()
@@ -117,7 +138,7 @@ public class FutureTask<V> extends AsyncFuture<V> implements RunnableFuture<V>
             };
         }
 
-        return new Callable<T>()
+        return new RunnableCallable<T>(run)
         {
             public T call()
             {
@@ -134,7 +155,7 @@ public class FutureTask<V> extends AsyncFuture<V> implements RunnableFuture<V>
 
     public static <T> Callable<T> callable(Object id, Runnable run)
     {
-        return new Callable<T>()
+        return new RunnableCallable<T>(run)
         {
             public T call()
             {
@@ -151,7 +172,7 @@ public class FutureTask<V> extends AsyncFuture<V> implements RunnableFuture<V>
 
     public static <T> Callable<T> callable(Runnable run, T result)
     {
-        return new Callable<T>()
+        return new RunnableCallable<T>(run)
         {
             public T call()
             {
@@ -168,7 +189,7 @@ public class FutureTask<V> extends AsyncFuture<V> implements RunnableFuture<V>
 
     public static <T> Callable<T> callable(Object id, Runnable run, T result)
     {
-        return new Callable<T>()
+        return new RunnableCallable<T>(run)
         {
             public T call()
             {
@@ -188,5 +209,30 @@ public class FutureTask<V> extends AsyncFuture<V> implements RunnableFuture<V>
     {
         Object desc = call;
         return desc == null ? null : call.toString();
+    }
+
+    // a callable that runs a Runnable, naming the Runnable's class to the executor liveness gauges
+    abstract static class RunnableCallable<T> implements Callable<T>, WrappedTask
+    {
+        final Runnable run;
+
+        RunnableCallable(Runnable run)
+        {
+            this.run = run;
+        }
+
+        @Override
+        public Class<?> taskClass()
+        {
+            return WrappedTask.classOf(run);
+        }
+    }
+
+    abstract static class DebuggableRunnableCallable<T> extends RunnableCallable<T> implements DebuggableTask.CallableDebuggableTask<T>
+    {
+        DebuggableRunnableCallable(Runnable run)
+        {
+            super(run);
+        }
     }
 }

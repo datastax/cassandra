@@ -38,6 +38,7 @@ import org.apache.cassandra.metrics.ThreadPoolMetrics;
 
 import static org.apache.cassandra.concurrent.SEPExecutor.TakeTaskPermitResult.*;
 import static org.apache.cassandra.concurrent.SEPWorker.Work;
+import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 import static org.apache.cassandra.utils.concurrent.Condition.newOneTimeCondition;
 
 public class SEPExecutor implements LocalAwareExecutorPlus, SEPExecutorMBean
@@ -84,19 +85,83 @@ public class SEPExecutor implements LocalAwareExecutorPlus, SEPExecutorMBean
         completedTasks.incrementAndGet();
     }
 
+    /**
+     * The time since this executor queued the task at the head, for every task; native-transport backpressure reads
+     * {@link #oldestDebuggableTaskQueueTime()} instead.
+     */
     @Override
     public long oldestTaskQueueTime()
     {
-        Runnable task = tasks.peek();
-        if (!(task instanceof FutureTask))
-            return 0L;
+        return TimedTask.queuedNanos(tasks.peek());
+    }
 
-        FutureTask<?> futureTask = (FutureTask<?>) task;
-        DebuggableTask debuggableTask = futureTask.debuggableTask();
+    @Override
+    public long oldestDebuggableTaskQueueTime()
+    {
+        DebuggableTask debuggableTask = submittedDebuggableTask(tasks.peek());
         if (debuggableTask == null)
             return 0L;
 
         return debuggableTask.elapsedSinceCreation();
+    }
+
+    private static DebuggableTask submittedDebuggableTask(Runnable task)
+    {
+        if (!(task instanceof FutureTask))
+            return null;
+
+        return ((FutureTask<?>) task).debuggableTask();
+    }
+
+    @Override
+    public long longestRunningTaskTime()
+    {
+        RunningTask oldest = oldestRunningTask();
+        return oldest == null ? 0L : TimedTask.ageNanos(oldest.capturedStartNanos);
+    }
+
+    @Override
+    public String getLongestRunningTaskClass()
+    {
+        RunningTask oldest = oldestRunningTask();
+        return oldest == null ? null : oldest.taskClass.getName();
+    }
+
+    // the stamp and class of this executor's oldest running task, both captured in the scan that selected it, so
+    // neither is re-read from a worker that may since have moved on
+    private static final class RunningTask
+    {
+        final long capturedStartNanos;
+        final Class<?> taskClass;
+
+        RunningTask(long capturedStartNanos, Class<?> taskClass)
+        {
+            this.capturedStartNanos = capturedStartNanos;
+            this.taskClass = taskClass;
+        }
+    }
+
+    // the oldest task running for this executor, or null when none is; see SEPWorker.runningFor for the read protocol.
+    // The stamp read is at least as new as the task and executor read, so this never over-reports. A read racing a task
+    // boundary or a reassignment can attribute the new task's near-zero running time to the previous task's class
+    // (possibly a task of the executor the worker just left); we accept that, as the reported time is then near zero.
+    private RunningTask oldestRunningTask()
+    {
+        Runnable oldest = null;
+        long oldestStart = Long.MAX_VALUE;
+        for (SEPWorker worker : pool.allWorkers)
+        {
+            Runnable task = worker.currentTask.get();
+            if (task == null || worker.runningFor.get() != this)
+                continue;
+            long start = worker.taskStartedAtNanos;
+            if (start < oldestStart)
+            {
+                oldestStart = start;
+                oldest = task;
+            }
+        }
+        return oldest == null ? null : new RunningTask(oldestStart, WrappedTask.classOf(oldest));
     }
 
     @Override
@@ -118,6 +183,9 @@ public class SEPExecutor implements LocalAwareExecutorPlus, SEPExecutorMBean
 
     protected <T extends Runnable> T addTask(T task)
     {
+        if (task instanceof TimedTask)
+            ((TimedTask) task).markEnqueued(approxTime.now());
+
         // we add to the queue first, so that when a worker takes a task permit it can be certain there is a task available
         // this permits us to schedule threads non-spuriously; it also means work is serviced fairly
         tasks.add(task);

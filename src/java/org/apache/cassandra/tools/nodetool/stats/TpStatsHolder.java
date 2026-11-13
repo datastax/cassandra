@@ -21,7 +21,10 @@ package org.apache.cassandra.tools.nodetool.stats;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.tools.NodeProbe;
+
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 public class TpStatsHolder implements StatsHolder
 {
@@ -48,6 +51,8 @@ public class TpStatsHolder implements StatsHolder
             threadPool.put("CompletedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "CompletedTasks"));
             threadPool.put("CurrentlyBlockedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "CurrentlyBlockedTasks"));
             threadPool.put("TotalBlockedTasks", probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), "TotalBlockedTasks"));
+            threadPool.put("OldestTaskQueueMicros", nanosToMicros(probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), ThreadPoolMetrics.OLDEST_TASK_QUEUE_TIME)));
+            threadPool.put("LongestRunningTaskMicros", nanosToMicros(probe.getThreadPoolMetric(tp.getKey(), tp.getValue(), ThreadPoolMetrics.LONGEST_RUNNING_TASK_TIME)));
             threadPools.put(tp.getValue(), threadPool);
         }
         result.put("ThreadPools", threadPools);
@@ -70,5 +75,11 @@ public class TpStatsHolder implements StatsHolder
         result.put("WaitLatencies", waitLatencies);
 
         return result;
+    }
+
+    /** A nanosecond metric value in microseconds; a value that is not a number (e.g. "N/A") is returned as is. */
+    static Object nanosToMicros(Object nanos)
+    {
+        return nanos instanceof Number ? NANOSECONDS.toMicros(((Number) nanos).longValue()) : nanos;
     }
 }

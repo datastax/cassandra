@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -101,7 +102,7 @@ public class TpStatsTest extends CQLTester
         ToolRunner.ToolResult tool = ToolRunner.invokeNodetool("tpstats");
         tool.assertOnCleanExit();
         String stdout = tool.getStdout();
-        assertThat(stdout).containsPattern("Pool Name \\s+ Active Pending Completed Blocked All time blocked");
+        assertThat(stdout).containsPattern("Pool Name \\s+ Active Pending Completed Blocked All time blocked Oldest task queue \\(micros\\) Longest running task \\(micros\\)");
         assertThat(stdout).contains("Latencies waiting in queue (micros) per dropped message types");
 
         // Does inserting data alter tpstats?
@@ -157,6 +158,25 @@ public class TpStatsTest extends CQLTester
             assertThat(isYAMLString(yaml)).isTrue();
             assertThat(yaml).containsPattern("WaitLatencies:\\s*[A-Z0-9|_]+:\\s+-\\s");
         });
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    public void testFormatsHaveLivenessKeys() throws Throwable
+    {
+        ToolRunner.ToolResult tool = ToolRunner.invokeNodetool("tpstats", "-F", "json");
+        tool.assertOnCleanExit();
+        Map<String, Object> json = JsonUtils.JSON_OBJECT_MAPPER.readValue(tool.getStdout(), Map.class);
+        tool = ToolRunner.invokeNodetool("tpstats", "-F", "yaml");
+        tool.assertOnCleanExit();
+        Map<String, Object> yaml = new Yaml().load(tool.getStdout());
+        for (Map<String, Object> root : Arrays.asList(json, yaml))
+        {
+            Map<String, Object> pool = ((Map<String, Map<String, Object>>) root.get("ThreadPools")).get("MemtablePostFlush");
+            assertThat(pool).isNotNull();
+            for (String key : Arrays.asList("OldestTaskQueueMicros", "LongestRunningTaskMicros"))
+                assertThat(pool.get(key)).as(key).isInstanceOf(Number.class);
+        }
     }
 
     public static boolean isJSONString(String str)

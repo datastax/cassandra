@@ -17,10 +17,13 @@
  */
 package org.apache.cassandra.metrics;
 
+import java.lang.management.ManagementFactory;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
 
 import org.junit.Test;
 
@@ -62,6 +65,81 @@ public class ThreadPoolMetricsTest
                                                                                                            "internal");
 
         testMetricsWithNoBlockedThreads(executor, executor.metrics);
+    }
+
+    @Test
+    public void testLivenessGaugesRegisterAndRead() throws Exception
+    {
+        ThreadPoolExecutorPlus executor = (ThreadPoolExecutorPlus) executorFactory()
+                .withJmxInternal()
+                .configurePooled("ThreadPoolMetricsTest-liveness", 1)
+                .withQueueLimit(4)
+                .build();
+        String prefix = "org.apache.cassandra.metrics:type=ThreadPools,path=internal,scope=ThreadPoolMetricsTest-liveness,name=";
+        MBeanServer server = ManagementFactory.getPlatformMBeanServer();
+        try
+        {
+            ThreadPoolMetrics metrics = ((ThreadPoolExecutorJMXAdapter) executor.onShutdown()).metrics();
+            assertEquals(Long.valueOf(0L), metrics.oldestTaskQueueTime.getValue());
+            assertEquals(Long.valueOf(0L), metrics.longestRunningTaskTime.getValue());
+            assertNull(metrics.longestRunningTaskClass.get());
+            assertTrue(server.isRegistered(new ObjectName(prefix + ThreadPoolMetrics.OLDEST_TASK_QUEUE_TIME)));
+            assertTrue(server.isRegistered(new ObjectName(prefix + ThreadPoolMetrics.LONGEST_RUNNING_TASK_TIME)));
+
+            BlockingTask t1 = new BlockingTask();
+            BlockingTask t2 = new BlockingTask();
+            executor.execute(t1);
+            spinAssertEquals(true, t1::isStarted);
+            executor.execute(t2);
+            Thread.sleep(50);
+            Util.spinAssertEquals(true, () -> metrics.oldestTaskQueueTime.getValue() >= TimeUnit.MILLISECONDS.toNanos(40), 5);
+            Util.spinAssertEquals(true, () -> metrics.longestRunningTaskTime.getValue() >= TimeUnit.MILLISECONDS.toNanos(40), 5);
+            assertEquals(BlockingTask.class.getName(), metrics.longestRunningTaskClass.get());
+
+            // the executor MBean reports the same, including the task class
+            ObjectName mbean = new ObjectName("org.apache.cassandra.internal:type=ThreadPoolMetricsTest-liveness");
+            assertEquals(BlockingTask.class.getName(), server.getAttribute(mbean, "LongestRunningTaskClass"));
+            long running = (Long) server.invoke(mbean, "longestRunningTaskTime", new Object[0], new String[0]);
+            assertTrue(running >= TimeUnit.MILLISECONDS.toNanos(40));
+            long queued = (Long) server.invoke(mbean, "oldestTaskQueueTime", new Object[0], new String[0]);
+            assertTrue(queued >= TimeUnit.MILLISECONDS.toNanos(40));
+            t1.allowToComplete();
+            t2.allowToComplete();
+        }
+        finally
+        {
+            executor.shutdownNow();
+            assertFalse(server.isRegistered(new ObjectName(prefix + ThreadPoolMetrics.OLDEST_TASK_QUEUE_TIME)));
+            assertFalse(server.isRegistered(new ObjectName(prefix + ThreadPoolMetrics.LONGEST_RUNNING_TASK_TIME)));
+        }
+    }
+
+    @Test
+    public void testSEPExecutorLivenessGauges() throws Exception
+    {
+        SharedExecutorPool pool = new SharedExecutorPool("ThreadPoolMetricsTest-4");
+        SEPExecutor executor = (SEPExecutor) pool.newExecutor(1, "internal", "ThreadPoolMetricsTest-5");
+        String prefix = "org.apache.cassandra.metrics:type=ThreadPools,path=internal,scope=ThreadPoolMetricsTest-5,name=";
+        MBeanServer server = ManagementFactory.getPlatformMBeanServer();
+        try
+        {
+            assertEquals(Long.valueOf(0L), executor.metrics.longestRunningTaskTime.getValue());
+            assertTrue(server.isRegistered(new ObjectName(prefix + ThreadPoolMetrics.LONGEST_RUNNING_TASK_TIME)));
+
+            BlockingTask t1 = new BlockingTask();
+            executor.execute(t1);
+            spinAssertEquals(true, t1::isStarted);
+            Util.spinAssertEquals(true, () -> executor.metrics.longestRunningTaskTime.getValue() >= TimeUnit.MILLISECONDS.toNanos(40), 5);
+            assertEquals(BlockingTask.class.getName(), executor.metrics.longestRunningTaskClass.get());
+            ObjectName mbean = new ObjectName("org.apache.cassandra.internal:type=ThreadPoolMetricsTest-5");
+            assertEquals(BlockingTask.class.getName(), server.getAttribute(mbean, "LongestRunningTaskClass"));
+            t1.allowToComplete();
+        }
+        finally
+        {
+            pool.shutdownAndWait(1, TimeUnit.MINUTES);
+            assertFalse(server.isRegistered(new ObjectName(prefix + ThreadPoolMetrics.LONGEST_RUNNING_TASK_TIME)));
+        }
     }
 
     private static void testMetricsWithBlockedThreads(ExecutorPlus threadPool, ThreadPoolMetrics metrics)

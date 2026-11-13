@@ -25,6 +25,7 @@ import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 final class ThreadPoolsTable extends AbstractVirtualTable
@@ -36,6 +37,9 @@ final class ThreadPoolsTable extends AbstractVirtualTable
     private static final String COMPLETED_TASKS = "completed_tasks";
     private static final String BLOCKED_TASKS = "blocked_tasks";
     private static final String BLOCKED_TASKS_ALL_TIME = "blocked_tasks_all_time";
+    private static final String OLDEST_TASK_QUEUE_MICROS = "oldest_task_queue_micros";
+    private static final String LONGEST_RUNNING_TASK_MICROS = "longest_running_task_micros";
+    private static final String LONGEST_RUNNING_TASK_CLASS = "longest_running_task_class";
 
     ThreadPoolsTable(String keyspace)
     {
@@ -49,6 +53,9 @@ final class ThreadPoolsTable extends AbstractVirtualTable
                            .addRegularColumn(COMPLETED_TASKS, LongType.instance)
                            .addRegularColumn(BLOCKED_TASKS, LongType.instance)
                            .addRegularColumn(BLOCKED_TASKS_ALL_TIME, LongType.instance)
+                           .addRegularColumn(OLDEST_TASK_QUEUE_MICROS, LongType.instance)
+                           .addRegularColumn(LONGEST_RUNNING_TASK_MICROS, LongType.instance)
+                           .addRegularColumn(LONGEST_RUNNING_TASK_CLASS, UTF8Type.instance)
                            .build());
     }
 
@@ -80,6 +87,9 @@ final class ThreadPoolsTable extends AbstractVirtualTable
                .column(PENDING_TASKS, metrics.pendingTasks.getValue())
                .column(COMPLETED_TASKS, metrics.completedTasks.getValue())
                .column(BLOCKED_TASKS, metrics.currentBlocked.getCount())
-               .column(BLOCKED_TASKS_ALL_TIME, metrics.totalBlocked.getCount());
+               .column(BLOCKED_TASKS_ALL_TIME, metrics.totalBlocked.getCount())
+               .column(OLDEST_TASK_QUEUE_MICROS, NANOSECONDS.toMicros(metrics.oldestTaskQueueTime.getValue()))
+               .column(LONGEST_RUNNING_TASK_MICROS, NANOSECONDS.toMicros(metrics.longestRunningTaskTime.getValue()))
+               .column(LONGEST_RUNNING_TASK_CLASS, metrics.longestRunningTaskClass.get());
     }
 }
