@@ -214,8 +214,62 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
     }
 
     /**
-     * A uuid range and {@code !=}: the index serves the range, not the {@code !=}, which is evaluated as a separate
-     * expression, with the same results as without the index.
+     * {@code !=} and {@code NOT IN} alone: the index serves them as the union of the ranges of terms before and
+     * after each excluded value, so they don't need {@code ALLOW FILTERING}.
+     */
+    @Test
+    public void testInequalities()
+    {
+        for (String type : new String[]{ "text", "ascii" })
+        {
+            createTable("CREATE TABLE %s (pk int PRIMARY KEY, v " + type + ')');
+            createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+            insertCities("pk", "v");
+            execute("INSERT INTO %s (pk, v) VALUES (5, 'Rom')");
+            execute("INSERT INTO %s (pk, v) VALUES (6, 'Rome2')");
+            execute("INSERT INTO %s (pk, v) VALUES (7, '')");
+
+            for (int i = 0; i < 3; i++)
+            {
+                // the values the excluded one is a prefix of, and its prefixes, are not excluded
+                assertSelected(List.of(2, 3, 4, 5, 6, 7), "v != 'Rome'");
+                assertSelected(List.of(1, 2, 3, 4, 5, 6, 7), "v != 'Nowhere'");
+                assertSelected(List.of(1, 2, 3, 4, 5, 6), "v != ''");
+                assertSelected(List.of(2, 3, 4, 6, 7), "v != 'Rome' AND v != 'Rom'");
+                assertSelected(List.of(2, 4, 5, 6, 7), "v NOT IN ('Rome', 'Turin', 'Nowhere')");
+                flushOrCompact(i);
+            }
+        }
+    }
+
+    @Test
+    public void testInequalitiesBooleanAndUuid()
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, b boolean, u uuid)");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        createIndex("CREATE CUSTOM INDEX ON %s(u) USING 'StorageAttachedIndex'");
+        UUID[] uuids = new UUID[4];
+        for (int i = 0; i < uuids.length; i++)
+        {
+            uuids[i] = UUID.fromString(String.format("%08x-0000-4000-8000-000000000000", i + 1));
+            execute("INSERT INTO %s (pk, b, u) VALUES (?, ?, ?)", i + 1, i % 2 == 0, uuids[i]);
+        }
+
+        for (int i = 0; i < 3; i++)
+        {
+            assertSelected(List.of(1, 3), "b != false");
+            assertSelected(List.of(2, 4), "b != true");
+            assertSelected(List.of(), "b NOT IN (true, false)");
+            assertSelected(List.of(1, 3, 4), "u != " + uuids[1]);
+            assertSelected(List.of(1, 2, 3, 4), "u != " + UUID.fromString("00000009-0000-4000-8000-000000000000"));
+            assertSelected(List.of(2, 3), "u NOT IN (" + uuids[0] + ", " + uuids[3] + ')');
+            flushOrCompact(i);
+        }
+    }
+
+    /**
+     * A uuid range and {@code !=} on the same column are a single expression of the index, the range with the
+     * excluded values, with the same results as without the index.
      */
     @Test
     public void testRangeWithExclusionsUuid()
@@ -259,8 +313,6 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
         {
             assertEquals(List.of(1, 3), keys(execute("SELECT pk FROM %s WHERE v >= false AND v != false")));
             assertEquals(List.of(2), keys(execute("SELECT pk FROM %s WHERE v <= true AND v != true")));
-            assertEquals(List.of(1, 3), keys(execute("SELECT pk FROM %s WHERE v != false ALLOW FILTERING")));
-            assertEquals(List.of(), keys(execute("SELECT pk FROM %s WHERE v NOT IN (true, false) ALLOW FILTERING")));
             flushOrCompact(i);
         }
     }
@@ -660,15 +712,16 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
         for (int i = 0; i < 3; i++)
         {
             assertEquals(List.of(2), keys(execute("SELECT pk FROM %s WHERE v >= 'p'")));
-            assertEquals(List.of(2, 3), keys(execute("SELECT pk FROM %s WHERE v != 'Paris' ALLOW FILTERING")));
+            // served by the plain index, on the raw values
+            assertEquals(List.of(2, 3), keys(execute("SELECT pk FROM %s WHERE v != 'Paris'")));
             assertEquals(List.of(1, 2), keys(execute("SELECT pk FROM %s WHERE v : 'PARIS'")));
             flushOrCompact(i);
         }
     }
 
     /**
-     * Indexes with an analyzer don't serve ranges, as the results of a query must not depend on the indexes on the
-     * column: without one of those, the ranges compare the raw values, as without any index.
+     * Indexes with an analyzer don't serve ranges and inequalities, as the results of a query must not depend on the
+     * indexes on the column: without one of those, they compare the raw values, as without any index.
      */
     @Test
     public void testAnalyzedIndexes()
@@ -689,8 +742,14 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
                     assertInvalidMessage("has an index but does not support the operators specified in the query",
                                          "SELECT pk FROM %s WHERE " + range);
 
+                // nor the inequalities, which exclude the raw value and not the rows with one of its terms
+                for (String inequality : new String[]{ "v != 'paris'", "v NOT IN ('paris', 'rome')" })
+                    assertInvalidMessage("has an index but does not support the operators specified in the query",
+                                         "SELECT pk FROM %s WHERE " + inequality);
+
                 assertEquals(options, List.of(2), keys(execute("SELECT pk FROM %s WHERE v >= 'p' ALLOW FILTERING")));
                 assertEquals(options, List.of(1), keys(execute("SELECT pk FROM %s WHERE v < 'p' ALLOW FILTERING")));
+                assertEquals(options, List.of(1), keys(execute("SELECT pk FROM %s WHERE v != 'paris' ALLOW FILTERING")));
                 flushOrCompact(i);
             }
         }

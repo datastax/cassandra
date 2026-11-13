@@ -33,7 +33,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.collect.ImmutableSet;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,14 +47,10 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.AsciiType;
-import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.IntegerType;
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
@@ -126,11 +121,6 @@ public class IndexContext
 
     public static final String MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE =
     "Index hints including a SAI index used for ORDER BY cannot include any other index";
-
-    // The types on which only EQ, IN and RANGE are served (see supports(Expression.Op)). The validator of a reversed
-    // (DESC clustering) column is a ReversedType, which is not in this set: such columns are also served NOT_EQ.
-    private static final Set<AbstractType<?>> EQ_AND_RANGE_ONLY_TYPES =
-            ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, UUIDType.instance);
 
     public static final String ENABLE_SEGMENT_COMPACTION_OPTION_NAME = "enable_segment_compaction";
 
@@ -831,7 +821,11 @@ public class IndexContext
             return true;
         if (operator == Expression.Op.RANGE)
             return !TypeUtil.isLiteral(validator) || supportsLiteralRangeQueries();
-        if (operator != Expression.Op.EQ && EQ_AND_RANGE_ONLY_TYPES.contains(validator)) return false;
+        // NOT_EQ is the union of the two scans of the terms before and after the excluded one (see
+        // QueryController#buildInequalityPlan), in any order of the terms: it only needs the terms to be the values,
+        // which the terms of an analyzer are not
+        if (operator == Expression.Op.NOT_EQ)
+            return !isAnalyzed;
         return operator != null;
     }
 
