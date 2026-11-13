@@ -208,8 +208,8 @@ public class RowFilterTest
     public void testRowFilterAll()
     {
         // RowFilter.ALL is the singleton unsatisfiable filter
-        assertTrue(RowFilter.ALL.isUnsatisfiable());
-        assertTrue(RowFilter.ALL.isEmpty());
+        assertTrue(RowFilter.REJECT_ALL.isUnsatisfiable());
+        assertTrue(RowFilter.REJECT_ALL.isEmpty());
 
         // isSatisfiedBy always returns false
         TableMetadata metadata = TableMetadata.builder("k", "t")
@@ -222,7 +222,7 @@ public class RowFilterTest
                                   LivenessInfo.EMPTY,
                                   Row.Deletion.LIVE,
                                   BTree.singleton(new BufferCell(r, 1, Cell.NO_TTL, Cell.NO_DELETION_TIME, one, null)));
-        assertFalse(RowFilter.ALL.isSatisfiedBy(metadata, null, row, 1));
+        assertFalse(RowFilter.REJECT_ALL.isSatisfiedBy(metadata, null, row, 1));
 
         // filter(UnfilteredPartitionIterator) closes the non-empty input and returns an empty iterator
         AtomicBoolean closed = new AtomicBoolean();
@@ -240,7 +240,7 @@ public class RowFilterTest
             public void close() { closed.set(true); }
         });
         assertTrue(unfiltereds.hasNext());
-        assertFalse(RowFilter.ALL.filter(unfiltereds, 1).hasNext());
+        assertFalse(RowFilter.REJECT_ALL.filter(unfiltereds, 1).hasNext());
         assertTrue(closed.get());
 
         // filter(PartitionIterator) closes the non-empty input and returns an empty iterator
@@ -253,7 +253,7 @@ public class RowFilterTest
             public void close() { closed.set(true); }
         };
         assertTrue(partitions.hasNext());
-        assertFalse(RowFilter.ALL.filter(partitions, metadata, 1).hasNext());
+        assertFalse(RowFilter.REJECT_ALL.filter(partitions, metadata, 1).hasNext());
         assertTrue(closed.get());
     }
 }

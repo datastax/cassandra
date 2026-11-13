@@ -116,7 +116,7 @@ public interface ReadQuery
             @Override
             public RowFilter rowFilter()
             {
-                return RowFilter.ALL; // filters out all rows, so no rows are returned
+                return RowFilter.REJECT_ALL; // filters out all rows, so no rows are returned
             }
 
             @Override

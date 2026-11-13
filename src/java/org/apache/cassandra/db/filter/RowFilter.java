@@ -119,14 +119,14 @@ public class RowFilter
     /**
      * An empty row filter that filters no rows, so it is always satisfied.
      */
-    public static final RowFilter NONE = new RowFilter(FilterElement.NONE, false, IndexHints.NONE, OptimizerOptions.NONE);
+    public static final RowFilter REJECT_NONE = new RowFilter(FilterElement.REJECT_NONE, false, IndexHints.NONE, OptimizerOptions.NONE);
 
     /**
      * A row filter that filters all rows, so it can never be satisfied.
      * Used when the CQL restrictions are detected to be trivially unsatisfiable,
      * for example for {@code x < 1 AND x > 2}.
      */
-    public static final RowFilter ALL = new RowFilter(FilterElement.ALL, false, IndexHints.NONE, OptimizerOptions.NONE)
+    public static final RowFilter REJECT_ALL = new RowFilter(FilterElement.REJECT_ALL, false, IndexHints.NONE, OptimizerOptions.NONE)
     {
         @Override
         public UnfilteredPartitionIterator filter(UnfilteredPartitionIterator partitions, long nowInSec)
@@ -170,7 +170,7 @@ public class RowFilter
 
     public static RowFilter none()
     {
-        return NONE;
+        return REJECT_NONE;
     }
 
     public FilterElement root()
@@ -525,7 +525,7 @@ public class RowFilter
      */
     public boolean isUnsatisfiable()
     {
-        return root.isNeverSatisfied();
+        return root.isUnsatisfiable();
     }
 
     @Override
@@ -603,8 +603,8 @@ public class RowFilter
         {
             FilterElement root = doBuild(restrictions, table, options, annOptions);
 
-            if (root.isNeverSatisfied())
-                return ALL;
+            if (root.isUnsatisfiable())
+                return REJECT_ALL;
 
             if (Guardrails.queryFilters.enabled(state))
                 Guardrails.queryFilters.guard(root.numFilteredValues(), "Select query", false, state);
@@ -655,19 +655,19 @@ public class RowFilter
                 FilterElement childElement = doBuild(child, table, options, annOptions);
 
                 // `OR FALSE` elements can be skipped in disjunctions.
-                if (childElement.isNeverSatisfied())
+                if (childElement.isUnsatisfiable())
                     continue;
 
                 // `OR TRUE` swallows all other restrictions in disjunctions.
                 if (childElement.isAlwaysSatisfied())
-                    return FilterElement.NONE;
+                    return FilterElement.REJECT_NONE;
 
                 disjunction.children.add(childElement);
             }
 
             // If every OR branch was dropped the whole disjunction can never be satisfied.
             if (disjunction.expressions.isEmpty() && disjunction.children.isEmpty())
-                return FilterElement.ALL;
+                return FilterElement.REJECT_ALL;
 
             return flattenOrBuild(disjunction);
         }
@@ -683,15 +683,15 @@ public class RowFilter
                                                ANNOptions annOptions)
         {
             if (CellBounds.isAlwaysFalse(conjunction.expressions, table, indexHints))
-                return FilterElement.ALL;
+                return FilterElement.REJECT_ALL;
 
             for (StatementRestrictions child : children)
             {
                 FilterElement childElement = doBuild(child, table, options, annOptions);
 
                 // `AND FALSE` swallows all other restrictions in conjunctions.
-                if (childElement.isNeverSatisfied())
-                    return FilterElement.ALL;
+                if (childElement.isUnsatisfiable())
+                    return FilterElement.REJECT_ALL;
 
                 // `AND TRUE` does nothing in conjunctions, so don't add it.
                 if (!childElement.isAlwaysSatisfied())
@@ -863,10 +863,10 @@ public class RowFilter
         public static final Serializer serializer = new Serializer();
 
         /** A filter element that filters no rows, so it is always satisfied. */
-        public static final FilterElement NONE = new FilterElement(false, Collections.emptyList(), Collections.emptyList());
+        public static final FilterElement REJECT_NONE = new FilterElement(false, Collections.emptyList(), Collections.emptyList());
 
         /** A filter element that filters all rows, so it can never be satisfied. */
-        public static final FilterElement ALL = new FilterElement(true, Collections.emptyList(), Collections.emptyList());
+        public static final FilterElement REJECT_ALL = new FilterElement(true, Collections.emptyList(), Collections.emptyList());
 
         private final boolean isDisjunction;
 
@@ -914,7 +914,7 @@ public class RowFilter
         private FilterElement withoutDisjunctions()
         {
             if (isDisjunction)
-                return NONE;
+                return REJECT_NONE;
 
             FilterElement.Builder builder = new Builder(false);
             builder.expressions.addAll(expressions);
@@ -958,8 +958,8 @@ public class RowFilter
         }
 
         /**
-         * @return whether this filter element is always satisfied by any row, that is, whether
-         * {@link #isSatisfiedBy(TableMetadata, DecoratedKey, Row, long)} always returns {@code true} for any row.
+         * @return whether this filter element accepts any row in
+         * {@link #isSatisfiedBy(TableMetadata, DecoratedKey, Row, long)}.
          */
         public boolean isAlwaysSatisfied()
         {
@@ -967,12 +967,12 @@ public class RowFilter
         }
 
         /**
-         * @return whether this filter element is never satisfied by any row, that is, whether
-         * {@link #isSatisfiedBy(TableMetadata, DecoratedKey, Row, long)} always returns {@code false} for any row.
+         * @return whether this filter element doesn't accept any row in
+         * {@link #isSatisfiedBy(TableMetadata, DecoratedKey, Row, long)}.
          */
-        public boolean isNeverSatisfied()
+        public boolean isUnsatisfiable()
         {
-            return this == ALL;
+            return this == REJECT_ALL;
         }
 
         public boolean contains(Expression expression)
@@ -1009,7 +1009,7 @@ public class RowFilter
 
         public boolean isSatisfiedBy(TableMetadata table, DecoratedKey key, Row row, long nowInSec)
         {
-            if (this == ALL)
+            if (this == REJECT_ALL)
                 return false;
 
             if (isEmpty())
@@ -1112,7 +1112,7 @@ public class RowFilter
                 assert (!operation.isDisjunction && operation.children().isEmpty()) || version >= MessagingService.VERSION_DS_10 :
                 "Attempting to serialize a disjunct row filter to a node that doesn't support disjunction";
 
-                if (operation == FilterElement.ALL)
+                if (operation == FilterElement.REJECT_ALL)
                 {
                     throw new AssertionError("An unsatisfiable row filter should either have produced an immediate " +
                                              "coordinator response or have been removed from the row filter.");

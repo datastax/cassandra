@@ -601,7 +601,7 @@ public class RowFilterEmptyRangesTest extends CQLTester
 
         RowFilter rowFilter = readQuery.rowFilter();
         Assertions.assertThat(rowFilter)
-                  .isEqualTo(RowFilter.ALL)
+                  .isEqualTo(RowFilter.REJECT_ALL)
                   .matches(RowFilter::isEmpty);
 
         // the unsatisfiable row filter shouldn't be sent to replicas; the serializer should reject it.
@@ -640,7 +640,7 @@ public class RowFilterEmptyRangesTest extends CQLTester
 
         RowFilter rowFilter = readQuery.rowFilter();
         Assertions.assertThat(rowFilter)
-                  .matches(f -> f != RowFilter.ALL);
+                  .matches(f -> f != RowFilter.REJECT_ALL);
 
         if (optimizedFilters != null && optimizedFilters.length > 0)
             Assertions.assertThat(rowFilter.toCQLString(Redaction.NONE)).isIn((Object[]) optimizedFilters);
