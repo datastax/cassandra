@@ -22,6 +22,8 @@ import javax.annotation.Nullable;
 
 import org.junit.Test;
 
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.SyntaxException;
 import org.assertj.core.api.Assertions;
 
 public class RedactionUtilTest
@@ -128,5 +130,29 @@ public class RedactionUtilTest
             Assertions.assertThat(RedactionUtil.redactUnparsedCQL(cql.toLowerCase())).isEqualTo(expected);
             Assertions.assertThat(RedactionUtil.redactUnparsedCQL(cql.toUpperCase())).isEqualTo(expected);
         }
+    }
+
+    @Test
+    public void testRedactThrowable()
+    {
+        // exceptions with a redacted message
+        Assertions.assertThat(RedactionUtil.redact(new InvalidRequestException("Invalid constant (secret)", "Invalid constant (?)")))
+                  .isEqualTo("InvalidRequestException: Invalid constant (?)");
+
+        // exceptions without a redacted message, the message is not included since it might contain sensitive data
+        Assertions.assertThat(RedactionUtil.redact(new InvalidRequestException("Invalid constant (secret)")))
+                  .isEqualTo("InvalidRequestException");
+        Assertions.assertThat(RedactionUtil.redact(new InvalidRequestException("Invalid constant (secret)", new RuntimeException("secret"))))
+                  .isEqualTo("InvalidRequestException");
+        Assertions.assertThat(RedactionUtil.redact(new SyntaxException("Invalid input (secret)")))
+                  .isEqualTo("SyntaxException");
+
+        // exceptions that are not Cassandra exceptions
+        Assertions.assertThat(RedactionUtil.redact(new NumberFormatException("For input string: \"secret\"")))
+                  .isEqualTo("NumberFormatException");
+        Assertions.assertThat(RedactionUtil.redact(new RuntimeException()))
+                  .isEqualTo("RuntimeException");
+        Assertions.assertThat(RedactionUtil.redact(new AssertionError("secret")))
+                  .isEqualTo("AssertionError");
     }
 }

@@ -184,6 +184,55 @@ public class RedactionTest extends TestBaseImpl
         assertNoSecretsInLogs(mark, expected);
     }
 
+    /// Verify that the warn-level log message about failed prepared statement recreation doesn't leak the user data
+    /// that can be included in the message of the exception that made the recreation fail.
+    @SuppressWarnings("Convert2MethodRef") // method refs don't work with runOnInstance
+    @Test
+    public void testPreparedStatementRecreationErrorMessage()
+    {
+        table = "recreation_error_message";
+        cluster.schemaChange(format("CREATE TABLE %s.%s (k int PRIMARY KEY, v int)"));
+
+        // write directly to the system table a statement that can't be prepared because it has a text constant for an
+        // int column, with the error message 'Invalid STRING constant (secret_k) for "k" of type int' for the client
+        // and 'Invalid STRING constant (?) for "k" of type int' for the logs
+        String cql = format("SELECT * FROM %s.%s WHERE k='secret_k'");
+        ByteBuffer id = ByteBuffer.wrap(new byte[]{ 1, 2, 3 });
+        node.executeInternal("INSERT INTO system.prepared_statements (prepared_id, logged_keyspace, query_string) VALUES (?, ?, ?)",
+                             id, KEYSPACE, cql);
+
+        long mark = node.logs().mark();
+        node.runOnInstance(() -> QueryProcessor.instance.preloadPreparedStatements());
+
+        assertNoSecretsInLogs(mark,
+                              quote(withKeyspace("Prepared statement recreation error, " +
+                                                 "removing statement: 010203 SELECT ... %s, " +
+                                                 "error details: InvalidRequestException: " +
+                                                 "Invalid STRING constant (?) for \"k\" of type int")));
+    }
+
+    /// Verify that the error-level log message about unparseable statements doesn't leak the user data that can be
+    /// included in the message of the exception thrown by the parser.
+    @Test
+    public void testUnparseableStatement()
+    {
+        table = "unparseable_statement";
+
+        // The dimension of the vector is not a valid int, so the parser fails with a NumberFormatException with the
+        // message 'For input string: "99999999999"'. We use that number as a stand-in for sensitive data, since the
+        // exception message includes the text of the offending token.
+        String sensitive = "99999999999";
+        String cql = format("CREATE TABLE %s.%s (k text PRIMARY KEY, v vector<float, " + sensitive + ">)");
+
+        long mark = node.logs().mark();
+        Assertions.assertThatThrownBy(() -> driverSession.execute(cql))
+                  .hasMessageContaining(sensitive); // the client is allowed to see it
+
+        Assertions.assertThat(node.logs().grep(mark, "could not be parsed").getResult()).isNotEmpty();
+        Assertions.assertThat(node.logs().grep(mark, sensitive).getResult()).isEmpty();
+        assertNoSecretsInLogs(mark, quote("The statement: [CREATE TABLE ...] could not be parsed, error: NumberFormatException"));
+    }
+
     /// Verify that the binding of variables of prepared statements don't leak their values.
     @Test
     public void testPreparedStatementBoundVariables()
@@ -224,13 +273,13 @@ public class RedactionTest extends TestBaseImpl
         long mark = node.logs().mark();
         Assertions.assertThatThrownBy(() -> driverSession.execute(format("SELECT " + KEYSPACE + ".parse_int(v) FROM %s.%s WHERE k = 1")))
                   .hasMessageContaining("For input string: \"secret_v\""); // the client is allowed to see it
-        assertNoSecretsInLogs(mark, "failed with class java.lang.NumberFormatException");
+        assertNoSecretsInLogs(mark, "Invocation of user-defined function", "failed with NumberFormatException");
 
         // same for the state function of an aggregate
         mark = node.logs().mark();
         Assertions.assertThatThrownBy(() -> driverSession.execute(format("SELECT " + KEYSPACE + ".sum_all(v) FROM %s.%s WHERE k = 1")))
                   .hasMessageContaining("For input string: \"secret_v\"");
-        assertNoSecretsInLogs(mark, "failed with class java.lang.NumberFormatException");
+        assertNoSecretsInLogs(mark, "Invocation of user-defined function", "failed with NumberFormatException");
     }
 
     /// Verify that the trace-level log message about processed queries uses redaction.

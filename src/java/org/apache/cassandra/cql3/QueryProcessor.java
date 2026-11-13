@@ -221,7 +221,7 @@ public class QueryProcessor implements QueryHandler
             {
                 JVMStabilityInspector.inspectThrowable(e);
                 logger.warn("Prepared statement recreation error, removing statement: {} {} {}, error details: {}",
-                            id, RedactionUtil.redactUnparsedCQL(query), keyspace, e.getMessage());
+                            id, RedactionUtil.redactUnparsedCQL(query), keyspace, RedactionUtil.redact(e));
                 SystemKeyspace.removePreparedStatement(id);
                 return null;
             }
@@ -1027,7 +1027,8 @@ public class QueryProcessor implements QueryHandler
         }
         catch (RuntimeException re)
         {
-            logger.error(String.format("The statement: [%s] could not be parsed.", RedactionUtil.redactUnparsedCQL(queryStr)), re);
+            logger.error("The statement: [{}] could not be parsed, error: {}",
+                         RedactionUtil.redactUnparsedCQL(queryStr), RedactionUtil.redact(re));
             throw new SyntaxException(String.format("Failed parsing statement: [%s] reason: %s %s",
                                                     queryStr,
                                                     re.getClass().getSimpleName(),

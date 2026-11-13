@@ -22,6 +22,7 @@ import javax.annotation.Nullable;
 import org.apache.commons.lang3.StringUtils;
 
 import org.apache.cassandra.cql3.ReservedKeywords;
+import org.apache.cassandra.exceptions.CassandraException;
 
 /**
  * Utility class for redacting sensitive data values while preserving some orientative size information.
@@ -177,5 +178,30 @@ public final class RedactionUtil
         }
 
         return redacted.append("...").toString();
+    }
+
+    /**
+     * Describes an exception in a way that is safe to be written to logs. Messages of exceptions can contain sensitive
+     * data, so only the class of the exception is included, plus the redacted message if the exception provides one.
+     *
+     * @param t an exception
+     * @return a description of the exception without sensitive data
+     * @see CassandraException#getRedactedMessage()
+     */
+    public static String redact(Throwable t)
+    {
+        String redactedMessage = t instanceof WithRedactedMessage ? ((WithRedactedMessage) t).getRedactedMessage() : null;
+        return redactedMessage == null
+               ? t.getClass().getSimpleName()
+               : t.getClass().getSimpleName() + ": " + redactedMessage;
+    }
+
+    /**
+     * Something providing a redacted message suitable to be printed in logs or any other unsafe place.
+     */
+    public interface WithRedactedMessage
+    {
+        @Nullable
+        String getRedactedMessage();
     }
 }
