@@ -204,18 +204,55 @@ public abstract class TraceState implements ProgressEventNotifier
 
     public void trace(String message)
     {
+        traceSensitive(message, message);
+    }
+
+    /**
+     * Traces a message with an argument that contains sensitive data.
+     *
+     * @param format the message format, with a single {@code {}} placeholder for the argument
+     * @param sensitiveArg the argument for the message sent to the client, possibly containing sensitive data
+     * @param redactedArg the same argument without any sensitive data
+     * @see #traceSensitive(String, String)
+     */
+    public void traceSensitive(String format, String sensitiveArg, String redactedArg)
+    {
+        traceSensitive(MessageFormatter.format(format, sensitiveArg).getMessage(),
+                       MessageFormatter.format(format, redactedArg).getMessage());
+    }
+
+    /**
+     * Traces a message that contains sensitive data. The {@code message} is meant for the client that requested the
+     * trace, so it is stored in the trace events and sent to the progress listeners. The {@code redactedMessage} is
+     * the version of the message that is safe to be written to the server logs.
+     *
+     * @param sensitiveMessage the message for the client, possibly containing sensitive data
+     * @param redactedMessage the same message without any sensitive data, so it can be written to logs
+     */
+    public void traceSensitive(String sensitiveMessage, String redactedMessage)
+    {
         if (notify)
             notifyActivity();
 
-        traceImpl(message);
+        traceImpl(sensitiveMessage, redactedMessage);
 
         for (ProgressListener listener : listeners)
         {
-            listener.progress(tag, ProgressEvent.createNotification(message));
+            listener.progress(tag, ProgressEvent.createNotification(sensitiveMessage));
         }
     }
 
     protected abstract void traceImpl(String message);
+
+    /**
+     * Implementations that write trace messages to the server logs should override this method to log the
+     * {@code redactedMessage} rather than the {@code sensitiveMessage}.
+     * By default, it ignores the redacted message.
+     */
+    protected void traceImpl(String sensitiveMessage, String redactedMessage)
+    {
+        traceImpl(sensitiveMessage);
+    }
 
     protected void waitForPendingEvents()
     {

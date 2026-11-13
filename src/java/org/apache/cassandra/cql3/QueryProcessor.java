@@ -62,6 +62,7 @@ import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.SinglePartitionReadQuery;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.RedactionUtil;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
@@ -219,7 +220,8 @@ public class QueryProcessor implements QueryHandler
             catch (RequestValidationException e)
             {
                 JVMStabilityInspector.inspectThrowable(e);
-                logger.warn("Prepared statement recreation error, removing statement: {} {} {}, error details: {}", id, query, keyspace, e.getMessage());
+                logger.warn("Prepared statement recreation error, removing statement: {} {} {}, error details: {}",
+                            id, RedactionUtil.redactUnparsedCQL(query), keyspace, RedactionUtil.redact(e));
                 SystemKeyspace.removePreparedStatement(id);
                 return null;
             }
@@ -302,7 +304,14 @@ public class QueryProcessor implements QueryHandler
     public ResultMessage processStatement(CQLStatement statement, QueryState queryState, QueryOptions options, Map<String, ByteBuffer> customPayload, Dispatcher.RequestTime requestTime)
     throws RequestExecutionException, RequestValidationException
     {
-        logger.trace("Process {} @CL.{}", statement, options.getConsistency());
+        if (logger.isTraceEnabled())
+        {
+            // the statement's toString() may include the raw query and sensitive data such as role passwords
+            String rawCQL = statement.getRawCQLStatement();
+            logger.trace("Process {} @CL.{}",
+                         rawCQL == null ? statement.getClass().getSimpleName() : RedactionUtil.redactUnparsedCQL(rawCQL),
+                         options.getConsistency());
+        }
         ClientState clientState = queryState.getClientState();
 
         Tracing.trace("Authorizing against client state");
@@ -932,11 +941,6 @@ public class QueryProcessor implements QueryHandler
                 throw new InvalidRequestException(String.format("there were %d markers(?) in CQL but %d bound variables",
                                                                 statement.getBindVariables().size(),
                                                                 variables.size()));
-
-            // at this point there is a match in count between markers and variables that is non-zero
-            if (logger.isTraceEnabled())
-                for (int i = 0; i < variables.size(); i++)
-                    logger.trace("[{}] '{}'", i+1, variables.get(i));
         }
 
         metrics.preparedStatementsExecuted.inc();
@@ -984,7 +988,9 @@ public class QueryProcessor implements QueryHandler
     public static CQLStatement getStatement(String queryStr, ClientState clientState)
     throws RequestValidationException
     {
-        Tracing.trace("Parsing {}", queryStr);
+        if (Tracing.isTracing())
+            Tracing.traceSensitive("Parsing {}", queryStr, RedactionUtil.redactUnparsedCQL(queryStr));
+
         CQLStatement.Raw statement = parseStatement(queryStr);
 
         Tracing.trace("Preparing statement");
@@ -1021,7 +1027,8 @@ public class QueryProcessor implements QueryHandler
         }
         catch (RuntimeException re)
         {
-            logger.error(String.format("The statement: [%s] could not be parsed.", queryStr), re);
+            logger.error("The statement: [{}] could not be parsed, error: {}",
+                         RedactionUtil.redactUnparsedCQL(queryStr), RedactionUtil.redact(re));
             throw new SyntaxException(String.format("Failed parsing statement: [%s] reason: %s %s",
                                                     queryStr,
                                                     re.getClass().getSimpleName(),

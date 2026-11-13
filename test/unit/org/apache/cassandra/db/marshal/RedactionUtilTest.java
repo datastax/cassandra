@@ -18,8 +18,12 @@ package org.apache.cassandra.db.marshal;
 
 import java.nio.ByteBuffer;
 
+import javax.annotation.Nullable;
+
 import org.junit.Test;
 
+import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.SyntaxException;
 import org.assertj.core.api.Assertions;
 
 public class RedactionUtilTest
@@ -85,5 +89,70 @@ public class RedactionUtilTest
     private static void assertRedactSize(int size, String expected)
     {
         Assertions.assertThat(RedactionUtil.redact(size)).isEqualTo(expected);
+    }
+
+    @Test
+    public void testRedactUnparsedCQL()
+    {
+        assertRedactUnparsedCQL("SELECT * FROM k.t WHERE v = 'secret'", "SELECT ...");
+        assertRedactUnparsedCQL("INSERT INTO k.t (k) VALUES ('secret')", "INSERT INTO ...");
+        assertRedactUnparsedCQL("UPDATE k.t SET v = v + 1 WHERE pk = 'secret'", "UPDATE ...");
+        assertRedactUnparsedCQL("DELETE FROM k.t WHERE k='secret'",  "DELETE FROM ...");
+        assertRedactUnparsedCQL("CREATE TABLE k.t(k PRIMARY KEY, v int)", "CREATE TABLE ...");
+        assertRedactUnparsedCQL("DROP TABLE k.t", "DROP TABLE ...");
+        assertRedactUnparsedCQL("ALTER TABLE k.t WITH default_time_to_live=10", "ALTER TABLE ...");
+        assertRedactUnparsedCQL("CREATE INDEX idx ON k.t(v)", "CREATE INDEX ...");
+        assertRedactUnparsedCQL("CREATE CUSTOM INDEX idx ON k.t(v)", "CREATE ..."); // CUSTOM is not reserved
+        assertRedactUnparsedCQL("CREATE TYPE k.udt (txt text, i int)", "CREATE ..."); // TYPE is not reserved
+        assertRedactUnparsedCQL("CREATE MATERIALIZED VIEW mv AS SELECT * FROM t " +
+                                "WHERE a IS NOT NULL AND b IS NOT NULL PRIMARY KEY (a, b)",
+                                "CREATE MATERIALIZED VIEW ...");
+        assertRedactUnparsedCQL("BEGIN BATCH " +
+                                "INSERT INTO k.t (k) VALUES ('secret'); " +
+                                "UPDATE k.t SET v = 'secret' WHERE k = 'secret'; " +
+                                "APPLY BATCH;",
+                                "BEGIN BATCH INSERT INTO ...");
+
+        assertRedactUnparsedCQL(null, "");
+        assertRedactUnparsedCQL("", "");
+        assertRedactUnparsedCQL("   ", "...");
+        assertRedactUnparsedCQL("I typed my password by mistake", "...");
+        assertRedactUnparsedCQL("  insert \t\n  into\n\n   k.t (k) VALUES ('secret')", "INSERT INTO ...");
+        assertRedactUnparsedCQL("'SELECT secret'", "...");
+        assertRedactUnparsedCQL("\"select\" * FROM k.t", "...");
+    }
+
+    private void assertRedactUnparsedCQL(@Nullable String cql, String expected)
+    {
+        Assertions.assertThat(RedactionUtil.redactUnparsedCQL(cql)).isEqualTo(expected);
+        if (cql != null)
+        {
+            Assertions.assertThat(RedactionUtil.redactUnparsedCQL(cql.toLowerCase())).isEqualTo(expected);
+            Assertions.assertThat(RedactionUtil.redactUnparsedCQL(cql.toUpperCase())).isEqualTo(expected);
+        }
+    }
+
+    @Test
+    public void testRedactThrowable()
+    {
+        // exceptions with a redacted message
+        Assertions.assertThat(RedactionUtil.redact(new InvalidRequestException("Invalid constant (secret)", "Invalid constant (?)")))
+                  .isEqualTo("InvalidRequestException: Invalid constant (?)");
+
+        // exceptions without a redacted message, the message is not included since it might contain sensitive data
+        Assertions.assertThat(RedactionUtil.redact(new InvalidRequestException("Invalid constant (secret)")))
+                  .isEqualTo("InvalidRequestException");
+        Assertions.assertThat(RedactionUtil.redact(new InvalidRequestException("Invalid constant (secret)", new RuntimeException("secret"))))
+                  .isEqualTo("InvalidRequestException");
+        Assertions.assertThat(RedactionUtil.redact(new SyntaxException("Invalid input (secret)")))
+                  .isEqualTo("SyntaxException");
+
+        // exceptions that are not Cassandra exceptions
+        Assertions.assertThat(RedactionUtil.redact(new NumberFormatException("For input string: \"secret\"")))
+                  .isEqualTo("NumberFormatException");
+        Assertions.assertThat(RedactionUtil.redact(new RuntimeException()))
+                  .isEqualTo("RuntimeException");
+        Assertions.assertThat(RedactionUtil.redact(new AssertionError("secret")))
+                  .isEqualTo("AssertionError");
     }
 }
