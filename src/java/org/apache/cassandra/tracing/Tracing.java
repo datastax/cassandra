@@ -204,33 +204,56 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
 
     public UUID newSession(ClientState state, Map<String,ByteBuffer> customPayload)
     {
+        return newSession(state, false, customPayload);
+    }
+
+    public UUID newSession(ClientState state, boolean wasProbabilistic, Map<String,ByteBuffer> customPayload)
+    {
         return newSession(
                 state,
                 TimeUUIDType.instance.compose(ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes())),
                 TraceType.QUERY,
+                wasProbabilistic,
                 customPayload);
     }
 
     public UUID newSession(ClientState state, TraceType traceType)
     {
+        return newSession(state, traceType, false);
+    }
+
+    public UUID newSession(ClientState state, TraceType traceType, boolean wasProbabilistic)
+    {
         return newSession(
                 state,
                 TimeUUIDType.instance.compose(ByteBuffer.wrap(UUIDGen.getTimeUUIDBytes())),
                 traceType,
-                Collections.EMPTY_MAP);
+                wasProbabilistic,
+                Collections.emptyMap());
     }
 
     public UUID newSession(ClientState state, UUID sessionId, Map<String,ByteBuffer> customPayload)
     {
-        return newSession(state, sessionId, TraceType.QUERY, customPayload);
+        return newSession(state, sessionId, false, customPayload);
     }
 
-    /** This method is intended to be overridden in tracing implementations that need access to the customPayload */
-    protected UUID newSession(ClientState state, UUID sessionId, TraceType traceType, Map<String,ByteBuffer> customPayload)
+    public UUID newSession(ClientState state, UUID sessionId, boolean wasProbabilistic, Map<String,ByteBuffer> customPayload)
+    {
+        return newSession(state, sessionId, TraceType.QUERY, wasProbabilistic, customPayload);
+    }
+
+    /**
+     * This method is intended to be overridden in tracing implementations that need access to the customPayload
+     *
+     * @param wasProbabilistic set to True if the session is created due to probabilistic tracing, false if it
+     *                         was set by client request. It is ignored by default, but subclasses can use that
+     *                         information
+     * */
+    protected UUID newSession(ClientState state, UUID sessionId, TraceType traceType, boolean wasProbabilistic, Map<String,ByteBuffer> customPayload)
     {
         assert get() == null;
 
-        TraceState ts = newTraceState(state, FBUtilities.getLocalAddressAndPort(), sessionId, traceType);
+        TraceState ts = newTraceState(state, FBUtilities.getLocalAddressAndPort(), sessionId, traceType, wasProbabilistic);
         set(ts);
         sessions.put(sessionId, ts);
 
@@ -306,7 +329,7 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
         TraceType traceType = header.traceType();
 
         ClientState clientState = TracingClientState.withTracedKeyspace(header.traceKeyspace());
-        ts = newTraceState(clientState, header.from, sessionId, traceType);
+        ts = newTraceState(clientState, header.from, sessionId, traceType, header.tracedProbabilistically());
 
         if (header.verb.isResponse())
         {
@@ -340,6 +363,7 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
                 TraceType traceType = message.traceType();
                 String traceKeyspace = message.header.traceKeyspace();
                 ClientState clientState = TracingClientState.withTracedKeyspace(traceKeyspace);
+                // this is a fire-and-forget execution, the future will not be checked for if it completed.
                 trace(clientState, ByteBuffer.wrap(UUIDGen.decompose(sessionId)), logMessage, traceType.getTTL());
             }
             else
@@ -359,9 +383,11 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
     {
         assert isTracing();
 
-        addToMutable.put(ParamType.TRACE_SESSION, Tracing.instance.getSessionId());
-        addToMutable.put(ParamType.TRACE_TYPE, Tracing.instance.getTraceType());
-        String keyspace = Tracing.instance.get().tracedKeyspace();
+        TraceState traceState = Tracing.instance.get();
+        addToMutable.put(ParamType.TRACE_SESSION, traceState.sessionId);
+        addToMutable.put(ParamType.TRACE_TYPE, traceState.traceType);
+        addToMutable.put(ParamType.TRACED_PROBABILISTICALLY, traceState.isProbabilistic);
+        String keyspace = traceState.tracedKeyspace();
         if (keyspace != null)
         {
             addToMutable.put(ParamType.TRACE_KEYSPACE, keyspace);
@@ -373,7 +399,7 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
         ClientState state,
         InetAddressAndPort coordinator,
         UUID sessionId,
-        Tracing.TraceType traceType);
+        Tracing.TraceType traceType, boolean wasProbabilistic);
 
     // repair just gets a varargs method since it's so heavyweight anyway
     public static void traceRepair(String format, Object... args)
