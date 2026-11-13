@@ -65,6 +65,7 @@
                  <exclude name="pylib/cqlshlib/test/test_authproviderhandling_config/*"/>
                  <exclude name="test/**/cassandra*.conf"/>
                  <exclude name="test/**/*.csv"/>
+                 <exclude name="test/**/*.tsv"/>
                  <exclude name="test/**/*.txt"/>
                  <exclude name="test/data/**/*.adler32"/>
                  <exclude name="test/data/**/*.crc32"/>
@@ -75,6 +76,7 @@
                  <exclude name="test/data/**/*.keep"/>
                  <exclude name="test/data/CASSANDRA-15313/lz4-jvm-crash-failure.txt"/>
                  <exclude name="test/data/jmxdump/cassandra-*-jmx.yaml"/>
+                 <exclude name="test/data/dse-compat/conf/**"/>
                  <exclude name=".github/**"/>
                  <!-- Documentation files -->
                  <exclude name=".github/pull_request_template.md"/>

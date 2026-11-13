@@ -1,0 +1,1859 @@
+
+CREATE KEYSPACE system_auth WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}  AND durable_writes = true;
+
+CREATE TABLE system_auth.role_members (
+    role text,
+    member text,
+    PRIMARY KEY (role, member)
+) WITH CLUSTERING ORDER BY (member ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'role memberships lookup table'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 7776000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_auth.role_permissions (
+    role text,
+    resource text,
+    grantables set<text>,
+    permissions set<text>,
+    restricted set<text>,
+    PRIMARY KEY (role, resource)
+) WITH CLUSTERING ORDER BY (resource ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'permissions granted to db roles'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 7776000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_auth.roles (
+    role text PRIMARY KEY,
+    can_login boolean,
+    is_superuser boolean,
+    member_of set<text>,
+    salted_hash text
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'role definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 7776000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE system_schema WITH replication = {'class': 'LocalStrategy'}  AND durable_writes = true;
+
+CREATE TABLE system_schema.aggregates (
+    keyspace_name text,
+    aggregate_name text,
+    argument_types frozen<list<text>>,
+    deterministic boolean,
+    final_func text,
+    initcond text,
+    return_type text,
+    state_func text,
+    state_type text,
+    PRIMARY KEY (keyspace_name, aggregate_name, argument_types)
+) WITH CLUSTERING ORDER BY (aggregate_name ASC, argument_types ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'user defined aggregate definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema."columns" (
+    keyspace_name text,
+    table_name text,
+    column_name text,
+    clustering_order text,
+    column_name_bytes blob,
+    kind text,
+    position int,
+    required_for_liveness boolean,
+    type text,
+    PRIMARY KEY (keyspace_name, table_name, column_name)
+) WITH CLUSTERING ORDER BY (table_name ASC, column_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'column definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.dropped_columns (
+    keyspace_name text,
+    table_name text,
+    column_name text,
+    dropped_time timestamp,
+    kind text,
+    type text,
+    PRIMARY KEY (keyspace_name, table_name, column_name)
+) WITH CLUSTERING ORDER BY (table_name ASC, column_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'dropped column registry'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.edges (
+    keyspace_name text,
+    table_name text,
+    label_name text,
+    from_clustering_columns frozen<list<text>>,
+    from_partition_key_columns frozen<list<text>>,
+    from_table text,
+    to_clustering_columns frozen<list<text>>,
+    to_partition_key_columns frozen<list<text>>,
+    to_table text,
+    PRIMARY KEY (keyspace_name, table_name, label_name)
+) WITH CLUSTERING ORDER BY (table_name ASC, label_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'graph edge labels definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.functions (
+    keyspace_name text,
+    function_name text,
+    argument_types frozen<list<text>>,
+    argument_names frozen<list<text>>,
+    body text,
+    called_on_null_input boolean,
+    deterministic boolean,
+    language text,
+    monotonic boolean,
+    monotonic_on frozen<list<text>>,
+    return_type text,
+    PRIMARY KEY (keyspace_name, function_name, argument_types)
+) WITH CLUSTERING ORDER BY (function_name ASC, argument_types ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'user defined function definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.hidden_columns (
+    keyspace_name text,
+    table_name text,
+    column_name text,
+    clustering_order text,
+    column_name_bytes blob,
+    kind text,
+    position int,
+    required_for_liveness boolean,
+    type text,
+    PRIMARY KEY (keyspace_name, table_name, column_name)
+) WITH CLUSTERING ORDER BY (table_name ASC, column_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'hidden column definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.indexes (
+    keyspace_name text,
+    table_name text,
+    index_name text,
+    kind text,
+    options frozen<map<text, text>>,
+    PRIMARY KEY (keyspace_name, table_name, index_name)
+) WITH CLUSTERING ORDER BY (table_name ASC, index_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'secondary index definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.keyspaces (
+    keyspace_name text PRIMARY KEY,
+    durable_writes boolean,
+    graph_engine text,
+    replication frozen<map<text, text>>
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'keyspace definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.tables (
+    keyspace_name text,
+    table_name text,
+    additional_write_policy text,
+    bloom_filter_fp_chance double,
+    caching frozen<map<text, text>>,
+    cdc boolean,
+    comment text,
+    compaction frozen<map<text, text>>,
+    compression frozen<map<text, text>>,
+    crc_check_chance double,
+    dclocal_read_repair_chance double,
+    default_time_to_live int,
+    extensions frozen<map<text, blob>>,
+    flags frozen<set<text>>,
+    gc_grace_seconds int,
+    id uuid,
+    max_index_interval int,
+    memtable_flush_period_in_ms int,
+    min_index_interval int,
+    nodesync frozen<map<text, text>>,
+    read_repair text,
+    read_repair_chance double,
+    speculative_retry text,
+    PRIMARY KEY (keyspace_name, table_name)
+) WITH CLUSTERING ORDER BY (table_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'table definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.triggers (
+    keyspace_name text,
+    table_name text,
+    trigger_name text,
+    options frozen<map<text, text>>,
+    PRIMARY KEY (keyspace_name, table_name, trigger_name)
+) WITH CLUSTERING ORDER BY (table_name ASC, trigger_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'trigger definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.types (
+    keyspace_name text,
+    type_name text,
+    field_names frozen<list<text>>,
+    field_types frozen<list<text>>,
+    PRIMARY KEY (keyspace_name, type_name)
+) WITH CLUSTERING ORDER BY (type_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'user defined type definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.vertices (
+    keyspace_name text,
+    table_name text,
+    label_name text,
+    PRIMARY KEY (keyspace_name, table_name, label_name)
+) WITH CLUSTERING ORDER BY (table_name ASC, label_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'graph vertex labels definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_schema.views (
+    keyspace_name text,
+    view_name text,
+    additional_write_policy text,
+    base_table_id uuid,
+    base_table_name text,
+    bloom_filter_fp_chance double,
+    caching frozen<map<text, text>>,
+    cdc boolean,
+    comment text,
+    compaction frozen<map<text, text>>,
+    compression frozen<map<text, text>>,
+    crc_check_chance double,
+    dclocal_read_repair_chance double,
+    default_time_to_live int,
+    extensions frozen<map<text, blob>>,
+    gc_grace_seconds int,
+    id uuid,
+    include_all_columns boolean,
+    max_index_interval int,
+    memtable_flush_period_in_ms int,
+    min_index_interval int,
+    nodesync frozen<map<text, text>>,
+    read_repair text,
+    read_repair_chance double,
+    speculative_retry text,
+    version int,
+    where_clause text,
+    PRIMARY KEY (keyspace_name, view_name)
+) WITH CLUSTERING ORDER BY (view_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'view definitions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 604800
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE dse_system_local WITH replication = {'class': 'LocalStrategy'}  AND durable_writes = true;
+
+CREATE TABLE dse_system_local.solr_resources (
+    core_name text,
+    resource_name text,
+    resource_value blob,
+    PRIMARY KEY (core_name, resource_name)
+) WITH CLUSTERING ORDER BY (resource_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = ''
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 7776000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE dse_system WITH replication = {'class': 'EverywhereStrategy'}  AND durable_writes = true;
+
+CREATE TABLE dse_system.encrypted_keys (
+    key_file text,
+    cipher text,
+    strength int,
+    key_id timeuuid,
+    key text,
+    PRIMARY KEY (key_file, cipher, strength, key_id)
+) WITH CLUSTERING ORDER BY (cipher ASC, strength ASC, key_id ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = ''
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 7776000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE test_ks WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}  AND durable_writes = true;
+
+CREATE TABLE test_ks.test_table (
+    id uuid PRIMARY KEY,
+    name text,
+    ts timestamp,
+    value int
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = ''
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE dse_leases WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}  AND durable_writes = true;
+
+CREATE TABLE dse_leases.leases (
+    name text,
+    dc text,
+    duration_ms int,
+    epoch bigint,
+    holder inet,
+    PRIMARY KEY ((name, dc))
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'DSE Lease coordination'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 1209600
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE dse_leases.logs (
+    name text,
+    dc text,
+    monitor inet,
+    at timestamp,
+    new_holder inet,
+    old_holder inet,
+    PRIMARY KEY ((name, dc), monitor, at)
+) WITH CLUSTERING ORDER BY (monitor ASC, at ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'DSE Lease history'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 1209600
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE solr_admin WITH replication = {'class': 'EverywhereStrategy'}  AND durable_writes = true;
+
+CREATE TABLE solr_admin.solr_resources (
+    core_name text,
+    resource_name text,
+    resource_value blob,
+    PRIMARY KEY (core_name, resource_name)
+) WITH CLUSTERING ORDER BY (resource_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = ''
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 7776000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE dse_insights WITH replication = {'class': 'EverywhereStrategy'}  AND durable_writes = true;
+
+CREATE TYPE dse_insights.insights_filters_rule_type (
+    policy text,
+    pattern text,
+    scope text
+);
+
+CREATE TYPE dse_insights.insights_config_type (
+    mode text,
+    upload_url text,
+    upload_interval_in_seconds int,
+    metric_sampling_interval_in_seconds int,
+    data_dir_max_size_in_mb int,
+    proxy_type text,
+    proxy_url text,
+    proxy_authentication text,
+    node_system_info_report_period text,
+    config_refresh_interval_in_seconds int,
+    filtering_rules frozen<set<frozen<insights_filters_rule_type>>>
+);
+
+CREATE TABLE dse_insights.insights_config (
+    key int PRIMARY KEY,
+    "config" insights_config_type
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'DSE Insights Config'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'deadline_target_sec': '1200', 'enabled': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE dse_insights.tokens (
+    "node" uuid PRIMARY KEY,
+    bearer_token ascii,
+    last_updated timestamp,
+    max_added_date_seen_by_node timestamp
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'DSE Insights Tokens'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'deadline_target_sec': '1200', 'enabled': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE dse_insights_local WITH replication = {'class': 'LocalStrategy'}  AND durable_writes = true;
+
+CREATE TYPE dse_insights_local.insights_filters_rule_type (
+    policy text,
+    pattern text,
+    scope text
+);
+
+CREATE TYPE dse_insights_local.insights_config_type (
+    mode text,
+    upload_url text,
+    upload_interval_in_seconds int,
+    metric_sampling_interval_in_seconds int,
+    data_dir_max_size_in_mb int,
+    proxy_type text,
+    proxy_url text,
+    proxy_authentication text,
+    node_system_info_report_period text,
+    config_refresh_interval_in_seconds int,
+    filtering_rules frozen<set<frozen<insights_filters_rule_type>>>
+);
+
+CREATE TABLE dse_insights_local.insights_config (
+    key int PRIMARY KEY,
+    "config" insights_config_type
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'DSE Insights Config'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE system_distributed WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '3'}  AND durable_writes = true;
+
+CREATE TYPE system_distributed.backup_upload_metrics (
+    uploaded_files int,
+    existing_files int,
+    uploaded_data_in_kb bigint,
+    existing_data_in_kb bigint,
+    upload_duration duration,
+    total_duration duration,
+    percentage_of_completion int
+);
+
+CREATE TYPE system_distributed.backup_task_metrics (
+    snapshotted_sstables int,
+    snapshotting_duration duration,
+    upload_metrics frozen<map<text, frozen<backup_upload_metrics>>>,
+    cleanup_duration duration,
+    total_duration duration
+);
+
+CREATE TYPE system_distributed.nodesync_metrics (
+    data_validated bigint,
+    data_repaired bigint,
+    objects_validated bigint,
+    objects_repaired bigint,
+    repair_data_sent bigint,
+    repair_objects_sent bigint,
+    pages_outcomes frozen<map<text, bigint>>
+);
+
+CREATE TYPE system_distributed.nodesync_validation (
+    started_at timestamp,
+    outcome tinyint,
+    missing_nodes set<inet>,
+    was_incremental boolean
+);
+
+CREATE TYPE system_distributed.restore_download_metrics (
+    downloaded_files int,
+    downloaded_data_in_kb bigint,
+    download_duration duration,
+    percentage_of_completion int
+);
+
+CREATE TYPE system_distributed.restore_task_metrics (
+    download_metrics frozen<restore_download_metrics>,
+    loading_duration duration,
+    total_duration duration
+);
+
+CREATE TABLE system_distributed.backup_task_state (
+    backup_config_name text,
+    backup_id text,
+    node_id uuid,
+    retry_count int,
+    error_message text,
+    error_stacktrace text,
+    metrics frozen<backup_task_metrics>,
+    state text,
+    transitioned_at timestamp,
+    type text,
+    PRIMARY KEY (backup_config_name, backup_id, node_id, retry_count)
+) WITH CLUSTERING ORDER BY (backup_id DESC, node_id ASC, retry_count DESC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'in progress backup states'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 2419200
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_distributed.backups (
+    keyspace_name text,
+    store_id text,
+    backup_id text,
+    node_id uuid,
+    component_store_id text,
+    datacenter text,
+    has_encryption_keys boolean,
+    has_local_encryption_keys boolean,
+    keyspace_hash uuid,
+    nodes_by_dc frozen<map<text, frozen<set<uuid>>>>,
+    partitioner text,
+    replication_factor int,
+    replication_factor_by_dc frozen<map<text, int>>,
+    replication_params frozen<map<text, text>>,
+    snapshotting_time timestamp,
+    state text,
+    table_names frozen<set<text>>,
+    time timestamp,
+    token_nodes frozen<map<uuid, frozen<set<text>>>>,
+    PRIMARY KEY (keyspace_name, store_id, backup_id, node_id)
+) WITH CLUSTERING ORDER BY (store_id ASC, backup_id ASC, node_id ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'the available backups'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_distributed.nodesync_status (
+    keyspace_name text,
+    table_name text,
+    range_group blob,
+    start_token bigint,
+    end_token bigint,
+    last_successful_validation frozen<nodesync_validation>,
+    last_unsuccessful_validation frozen<nodesync_validation>,
+    locked_by inet,
+    PRIMARY KEY ((keyspace_name, table_name, range_group), start_token, end_token)
+) WITH CLUSTERING ORDER BY (start_token ASC, end_token ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'Tracks NodeSync recent validations'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 2419200
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_distributed.nodesync_user_validations (
+    id text,
+    "node" inet,
+    ended_at timestamp,
+    incremental boolean,
+    keyspace_name text static,
+    metrics frozen<nodesync_metrics>,
+    outcomes frozen<map<text, bigint>>,
+    segments_to_validate bigint,
+    segments_validated bigint,
+    started_at timestamp,
+    status text,
+    table_name text static,
+    validated_ranges frozen<set<text>>,
+    PRIMARY KEY (id, "node")
+) WITH CLUSTERING ORDER BY ("node" ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'NodeSync user-triggered validations status'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 86400
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_distributed.parent_repair_history (
+    parent_id timeuuid PRIMARY KEY,
+    columnfamily_names set<text>,
+    exception_message text,
+    exception_stacktrace text,
+    finished_at timestamp,
+    keyspace_name text,
+    options map<text, text>,
+    requested_ranges set<text>,
+    started_at timestamp,
+    successful_ranges set<text>
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'Repair history'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy', 'compaction_window_size': '1', 'compaction_window_unit': 'DAYS', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 2592000
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_distributed.repair_history (
+    keyspace_name text,
+    columnfamily_name text,
+    id timeuuid,
+    coordinator inet,
+    exception_message text,
+    exception_stacktrace text,
+    finished_at timestamp,
+    parent_id timeuuid,
+    participants set<inet>,
+    range_begin text,
+    range_end text,
+    started_at timestamp,
+    status text,
+    PRIMARY KEY ((keyspace_name, columnfamily_name), id)
+) WITH CLUSTERING ORDER BY (id ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'Repair history'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy', 'compaction_window_size': '1', 'compaction_window_unit': 'DAYS', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 2592000
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_distributed.restore_task_state (
+    restore_id uuid,
+    node_id uuid,
+    backup_id text,
+    error_message text,
+    error_stacktrace text,
+    metrics frozen<restore_task_metrics>,
+    missing_token_ranges set<frozen<tuple<text, text>>>,
+    state text,
+    targets text,
+    transitioned_at timestamp,
+    PRIMARY KEY (restore_id, node_id)
+) WITH CLUSTERING ORDER BY (node_id ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'in progress restore state'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 2419200
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_distributed.view_build_status (
+    keyspace_name text,
+    view_name text,
+    host_id uuid,
+    status text,
+    PRIMARY KEY ((keyspace_name, view_name), host_id)
+) WITH CLUSTERING ORDER BY (host_id ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'Materialized View build status'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE system_backups WITH replication = {'class': 'EverywhereStrategy'}  AND durable_writes = true;
+
+CREATE TABLE system_backups.backup_configurations (
+    name text PRIMARY KEY,
+    frequency text,
+    include_encryption_keys boolean,
+    is_enabled boolean,
+    store_names frozen<list<text>>,
+    targets frozen<set<text>>
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'Backup configurations'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_backups.backup_stores (
+    name text PRIMARY KEY,
+    class text,
+    settings map<text, text>
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'backup stores'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 864000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE system WITH replication = {'class': 'LocalStrategy'}  AND durable_writes = true;
+
+CREATE TABLE system."IndexInfo" (
+    table_name text,
+    index_name text,
+    value blob,
+    PRIMARY KEY (table_name, index_name)
+) WITH CLUSTERING ORDER BY (index_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'built column indexes'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.available_ranges (
+    keyspace_name text PRIMARY KEY,
+    ranges set<blob>
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'available keyspace/ranges during bootstrap/replace that are ready to be served'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.batches (
+    id timeuuid PRIMARY KEY,
+    mutations list<blob>,
+    version int
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'batches awaiting replay'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '2'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.built_views (
+    keyspace_name text,
+    view_name text,
+    status_replicated boolean,
+    PRIMARY KEY (keyspace_name, view_name)
+) WITH CLUSTERING ORDER BY (view_name ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'built views'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.compaction_history (
+    id uuid PRIMARY KEY,
+    bytes_in bigint,
+    bytes_out bigint,
+    columnfamily_name text,
+    compacted_at timestamp,
+    keyspace_name text,
+    rows_merged map<int, bigint>
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'week-long compaction history'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 604800
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.local (
+    key text PRIMARY KEY,
+    bootstrapped text,
+    broadcast_address inet,
+    cluster_name text,
+    cql_version text,
+    data_center text,
+    dse_version text,
+    gossip_generation int,
+    graph boolean,
+    host_id uuid,
+    jmx_port int,
+    last_nodesync_checkpoint_time bigint,
+    listen_address inet,
+    native_protocol_version text,
+    native_transport_address inet,
+    native_transport_port int,
+    native_transport_port_ssl int,
+    partitioner text,
+    rack text,
+    release_version text,
+    rpc_address inet,
+    schema_version uuid,
+    server_id text,
+    storage_port int,
+    storage_port_ssl int,
+    tokens set<text>,
+    truncated_at map<uuid, blob>,
+    workload text,
+    workloads frozen<set<text>>
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'information about the local node'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.nodesync_checkpoints (
+    keyspace_name text,
+    table_name text,
+    start_token bigint,
+    end_token bigint,
+    checkpoint_time bigint,
+    PRIMARY KEY ((keyspace_name, table_name), start_token, end_token)
+) WITH CLUSTERING ORDER BY (start_token ASC, end_token ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'repairs'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 2419200
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.paxos (
+    row_key blob,
+    cf_id uuid,
+    in_progress_ballot timeuuid,
+    most_recent_commit blob,
+    most_recent_commit_at timeuuid,
+    most_recent_commit_version int,
+    proposal blob,
+    proposal_ballot timeuuid,
+    proposal_version int,
+    PRIMARY KEY (row_key, cf_id)
+) WITH CLUSTERING ORDER BY (cf_id ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.1
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'in-progress paxos proposals'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.LeveledCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.peer_events (
+    peer inet PRIMARY KEY,
+    hints_dropped map<uuid, int>
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'events related to peers'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.peers (
+    peer inet PRIMARY KEY,
+    data_center text,
+    dse_version text,
+    graph boolean,
+    host_id uuid,
+    jmx_port int,
+    native_transport_address inet,
+    native_transport_port int,
+    native_transport_port_ssl int,
+    preferred_ip inet,
+    rack text,
+    release_version text,
+    rpc_address inet,
+    schema_version uuid,
+    server_id text,
+    storage_port int,
+    storage_port_ssl int,
+    tokens set<text>,
+    workload text,
+    workloads frozen<set<text>>
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'information about known peers in the cluster'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.prepared_statements (
+    prepared_id blob PRIMARY KEY,
+    logged_keyspace text,
+    query_string text
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'prepared statements'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.range_xfers (
+    token_bytes blob PRIMARY KEY,
+    requested_at timestamp
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'ranges requested for transfer'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.repairs (
+    parent_id timeuuid PRIMARY KEY,
+    cfids set<uuid>,
+    coordinator inet,
+    last_update timestamp,
+    participants set<inet>,
+    ranges set<blob>,
+    repaired_at timestamp,
+    started_at timestamp,
+    state int
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'repairs'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.size_estimates (
+    keyspace_name text,
+    table_name text,
+    range_start text,
+    range_end text,
+    mean_partition_size bigint,
+    partitions_count bigint,
+    PRIMARY KEY (keyspace_name, table_name, range_start, range_end)
+) WITH CLUSTERING ORDER BY (table_name ASC, range_start ASC, range_end ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'per-table primary range size estimates'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.sstable_activity (
+    keyspace_name text,
+    columnfamily_name text,
+    generation int,
+    rate_120m double,
+    rate_15m double,
+    PRIMARY KEY ((keyspace_name, columnfamily_name, generation))
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'historic sstable read rates'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.transferred_ranges (
+    operation text,
+    keyspace_name text,
+    peer inet,
+    ranges set<blob>,
+    PRIMARY KEY ((operation, keyspace_name), peer)
+) WITH CLUSTERING ORDER BY (peer ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'record of transferred ranges for streaming operation'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system.view_builds_in_progress (
+    keyspace_name text,
+    view_name text,
+    start_token text,
+    end_token text,
+    keys_built bigint,
+    last_token text,
+    PRIMARY KEY (keyspace_name, view_name, start_token, end_token)
+) WITH CLUSTERING ORDER BY (view_name ASC, start_token ASC, end_token ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'views builds current progress'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE dse_perf WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}  AND durable_writes = true;
+
+CREATE TABLE dse_perf.node_slow_log (
+    node_ip inet,
+    date timestamp,
+    start_time timeuuid,
+    commands list<text>,
+    duration bigint,
+    parameters map<text, text>,
+    source_ip inet,
+    table_names set<text>,
+    tracing_session_id uuid,
+    username text,
+    PRIMARY KEY ((node_ip, date), start_time)
+) WITH CLUSTERING ORDER BY (start_time DESC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = ''
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.TimeWindowCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 60
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE system_traces WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '2'}  AND durable_writes = true;
+
+CREATE TABLE system_traces.events (
+    session_id uuid,
+    event_id timeuuid,
+    activity text,
+    source inet,
+    source_elapsed int,
+    thread text,
+    PRIMARY KEY (session_id, event_id)
+) WITH CLUSTERING ORDER BY (event_id ASC)
+    AND additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'tracing events'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE system_traces.sessions (
+    session_id uuid PRIMARY KEY,
+    client inet,
+    command text,
+    coordinator inet,
+    duration int,
+    parameters map<text, text>,
+    request text,
+    started_at timestamp
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'tracing sessions'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 0
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 3600000
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE KEYSPACE dse_security WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '1'}  AND durable_writes = true;
+
+CREATE TABLE dse_security.digest_tokens (
+    id blob PRIMARY KEY,
+    password blob
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'digest_tokens'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 7776000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE dse_security.role_options (
+    role text PRIMARY KEY,
+    options map<text, text>
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'role options'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 7776000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+CREATE TABLE dse_security.spark_security (
+    dc text PRIMARY KEY,
+    shared_secret text
+) WITH additional_write_policy = '99PERCENTILE'
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'NONE'}
+    AND comment = 'Spark security settings'
+    AND compaction = {'class': 'org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy', 'max_threshold': '32', 'min_threshold': '4'}
+    AND compression = {'chunk_length_in_kb': '64', 'class': 'org.apache.cassandra.io.compress.LZ4Compressor'}
+    AND crc_check_chance = 1.0
+    AND default_time_to_live = 0
+    AND gc_grace_seconds = 7776000
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND nodesync = {'enabled': 'true', 'incremental': 'true'}
+    AND read_repair = 'BLOCKING'
+    AND speculative_retry = '99PERCENTILE';
+
+/*
+Warning: Keyspace system_virtual_schema is a virtual keyspace and cannot be recreated with CQL.
+Structure, for reference:*/
+// VIRTUAL KEYSPACE system_virtual_schema;
+
+/*
+Warning: Table system_virtual_schema.columns is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_virtual_schema."columns" (
+    keyspace_name text,
+    table_name text,
+    column_name text,
+    clustering_order text,
+    column_name_bytes blob,
+    kind text,
+    position int,
+    type text,
+    PRIMARY KEY (keyspace_name, table_name, column_name)
+) WITH CLUSTERING ORDER BY (table_name ASC, column_name ASC)
+    AND comment = 'virtual column definitions';
+*/
+
+/*
+Warning: Table system_virtual_schema.keyspaces is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_virtual_schema.keyspaces (
+    keyspace_name text PRIMARY KEY
+) WITH comment = 'virtual keyspace definitions';
+*/
+
+/*
+Warning: Table system_virtual_schema.tables is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_virtual_schema.tables (
+    keyspace_name text,
+    table_name text,
+    comment text,
+    PRIMARY KEY (keyspace_name, table_name)
+) WITH CLUSTERING ORDER BY (table_name ASC)
+    AND comment = 'virtual table definitions';
+*/
+
+
+/*
+Warning: Keyspace system_views is a virtual keyspace and cannot be recreated with CQL.
+Structure, for reference:*/
+// VIRTUAL KEYSPACE system_views;
+
+/*
+Warning: Table system_views.caches is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.caches (
+    name text PRIMARY KEY,
+    capacity_bytes bigint,
+    entry_count int,
+    hit_count bigint,
+    hit_ratio double,
+    recent_hit_rate_per_second bigint,
+    recent_request_rate_per_second bigint,
+    request_count bigint,
+    size_bytes bigint
+) WITH comment = 'system caches';
+*/
+
+/*
+Warning: Table system_views.clients is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.clients (
+    address inet,
+    port int,
+    connection_stage text,
+    driver_name text,
+    driver_version text,
+    hostname text,
+    protocol_version int,
+    request_count bigint,
+    ssl_cipher_suite text,
+    ssl_enabled boolean,
+    ssl_protocol text,
+    username text,
+    PRIMARY KEY (address, port)
+) WITH CLUSTERING ORDER BY (port ASC)
+    AND comment = 'currently connected clients';
+*/
+
+/*
+Warning: Table system_views.indexes is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.indexes (
+    keyspace_name text,
+    index_name text,
+    analyzer text,
+    cell_count bigint,
+    column_name text,
+    indexed_sstable_count int,
+    is_building boolean,
+    is_queryable boolean,
+    is_string boolean,
+    per_column_disk_size bigint,
+    per_table_disk_size bigint,
+    sstable_count int,
+    table_name text,
+    PRIMARY KEY (keyspace_name, index_name)
+) WITH CLUSTERING ORDER BY (index_name ASC)
+    AND comment = 'Storage-attached column index metadata';
+*/
+
+/*
+Warning: Table system_views.local_node is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.local_node (
+    key text PRIMARY KEY,
+    bootstrapped text,
+    broadcast_address inet,
+    cluster_name text,
+    cql_version text,
+    data_center text,
+    dse_version text,
+    gossip_generation int,
+    graph boolean,
+    host_id uuid,
+    jmx_port int,
+    last_nodesync_checkpoint_time bigint,
+    listen_address inet,
+    native_protocol_version text,
+    native_transport_address inet,
+    native_transport_port int,
+    native_transport_port_ssl int,
+    partitioner text,
+    rack text,
+    release_version text,
+    rpc_address inet,
+    schema_version uuid,
+    server_id text,
+    storage_port int,
+    storage_port_ssl int,
+    tokens frozen<set<text>>,
+    truncated_at frozen<map<uuid, blob>>,
+    workload text,
+    workloads frozen<set<text>>
+) WITH comment = '';
+*/
+
+/*
+Warning: Table system_views.node_status is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.node_status (
+    id text PRIMARY KEY,
+    gossip_active boolean,
+    native_transport_active boolean,
+    stop_node_exception text,
+    stop_node_reason text
+) WITH comment = 'node status';
+*/
+
+/*
+Warning: Table system_views.peer_nodes is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.peer_nodes (
+    peer inet PRIMARY KEY,
+    data_center text,
+    dse_version text,
+    graph boolean,
+    host_id uuid,
+    jmx_port int,
+    native_transport_address inet,
+    native_transport_port int,
+    native_transport_port_ssl int,
+    preferred_ip inet,
+    rack text,
+    release_version text,
+    rpc_address inet,
+    schema_version uuid,
+    server_id text,
+    storage_port int,
+    storage_port_ssl int,
+    tokens frozen<set<text>>,
+    workload text,
+    workloads frozen<set<text>>
+) WITH comment = '';
+*/
+
+/*
+Warning: Table system_views.pending_hints is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.pending_hints (
+    host_id uuid PRIMARY KEY,
+    address inet,
+    dc text,
+    files int,
+    keyspace_name text,
+    newest timestamp,
+    oldest timestamp,
+    port int,
+    rack text,
+    status text
+) WITH comment = 'Pending hints that this node has for other nodes';
+*/
+
+/*
+Warning: Table system_views.settings is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.settings (
+    name text PRIMARY KEY,
+    value text,
+    writeable boolean
+) WITH comment = 'current settings';
+*/
+
+/*
+Warning: Table system_views.sstable_index_segments is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.sstable_index_segments (
+    keyspace_name text,
+    index_name text,
+    sstable_name text,
+    segment_row_id_offset bigint,
+    cell_count bigint,
+    column_name text,
+    component_metadata frozen<map<text, map<text, text>>>,
+    end_token text,
+    max_sstable_row_id bigint,
+    max_term text,
+    min_sstable_row_id bigint,
+    min_term text,
+    start_token text,
+    table_name text,
+    PRIMARY KEY (keyspace_name, index_name, sstable_name, segment_row_id_offset)
+) WITH CLUSTERING ORDER BY (index_name ASC, sstable_name ASC, segment_row_id_offset ASC)
+    AND comment = 'SSTable index segment metadata';
+*/
+
+/*
+Warning: Table system_views.sstable_indexes is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.sstable_indexes (
+    keyspace_name text,
+    index_name text,
+    sstable_name text,
+    cell_count bigint,
+    column_name text,
+    end_token text,
+    format_version text,
+    max_row_id bigint,
+    min_row_id bigint,
+    per_column_disk_size bigint,
+    per_table_disk_size bigint,
+    start_token text,
+    table_name text,
+    PRIMARY KEY (keyspace_name, index_name, sstable_name)
+) WITH CLUSTERING ORDER BY (index_name ASC, sstable_name ASC)
+    AND comment = 'SSTable index metadata';
+*/
+
+/*
+Warning: Table system_views.sstable_tasks is a virtual table and cannot be recreated with CQL.
+Structure, for reference:
+VIRTUAL TABLE system_views.sstable_tasks (
+    keyspace_name text,
+    table_name text,
+    task_id uuid,
+    kind text,
+    progress bigint,
+    total bigint,
+    unit text,
+    PRIMARY KEY (keyspace_name, table_name, task_id)
+) WITH CLUSTERING ORDER BY (table_name ASC, task_id ASC)
+    AND comment = 'current sstable tasks';
+*/
+
+
