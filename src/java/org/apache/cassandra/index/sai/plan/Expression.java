@@ -31,6 +31,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterators;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
@@ -205,6 +207,54 @@ public class Expression
         return context.isLiteral();
     }
 
+    /**
+     * Whether the index orders its terms in the reverse order of the column values, so that the lower bound of a
+     * range of values is the upper bound of the range of terms, and vice versa.
+     * <p>
+     * That is the case for the non-literal types of the reversed (DESC clustering) columns, whose terms are encoded
+     * by {@code ReversedType}. It is not for the literal types: their terms are the raw bytes of the values at any
+     * clustering order, so the bounds of a range of values are the bounds of the range of terms.
+     */
+    private boolean isReversedTerms()
+    {
+        return context.getDefinition().isReversedType() && !TypeUtil.isLiteral(validator);
+    }
+
+    /**
+     * Whether this is a range over the terms of a non-composite literal index, which are the raw value bytes at
+     * every index version: the raw bounds delimit exactly the terms of the range.
+     */
+    public boolean isLiteralTermRange()
+    {
+        return operation == Op.RANGE && TypeUtil.isLiteral(validator) && !TypeUtil.isComposite(validator);
+    }
+
+    /**
+     * Returns the lower bound of a {@link #isLiteralTermRange() literal term range} as the inclusive start of a scan
+     * of the on-disk terms, or {@code null} if the range has no lower bound.
+     * <p>
+     * The bounds of the composite terms select whether the term equal to the bound is part of the range with the
+     * terminator of their byte-comparable encoding (see {@link #getEncodedLowerBoundByteComparable}). The literal
+     * terms are raw bytes without a terminator, so an exclusive lower bound is encoded as the term that immediately
+     * follows it in the unsigned byte order: the bound with a zero byte appended.
+     */
+    @Nullable
+    public ByteComparable getLiteralRangeScanStart(Version version)
+    {
+        assert isLiteralTermRange() : "Not a literal term range: " + this;
+        if (lower == null)
+            return null;
+
+        ByteBuffer bound = lower.value.encoded;
+        if (!lower.inclusive)
+        {
+            ByteBuffer next = ByteBuffer.allocate(bound.remaining() + 1);
+            next.put(bound.duplicate()).put((byte) 0).flip();
+            bound = next;
+        }
+        return version.onDiskFormat().encodeForTrie(bound, validator);
+    }
+
     public Expression add(Operator op, ByteBuffer value)
     {
         boolean lowerInclusive, upperInclusive;
@@ -261,7 +311,7 @@ public class Expression
                 break;
 
             case LTE:
-                if (context.getDefinition().isReversedType())
+                if (isReversedTerms())
                 {
                     this.lowerInclusive = true;
                     lowerInclusive = true;
@@ -273,14 +323,14 @@ public class Expression
                 }
             case LT:
                 operation = Op.RANGE;
-                if (context.getDefinition().isReversedType())
+                if (isReversedTerms())
                     lower = new Bound(value, validator, lowerInclusive);
                 else
                     upper = new Bound(value, validator, upperInclusive);
                 break;
 
             case GTE:
-                if (context.getDefinition().isReversedType())
+                if (isReversedTerms())
                 {
                     this.upperInclusive = true;
                     upperInclusive = true;
@@ -292,7 +342,7 @@ public class Expression
                 }
             case GT:
                 operation = Op.RANGE;
-                if (context.getDefinition().isReversedType())
+                if (isReversedTerms())
                     upper = new Bound(value, validator,  upperInclusive);
                 else
                     lower = new Bound(value, validator, lowerInclusive);
@@ -364,10 +414,15 @@ public class Expression
                     return cmp == 0;
 
                 if (operation == Op.NOT_EQ || operation == Op.NOT_CONTAINS_KEY || operation == Op.NOT_CONTAINS_VALUE)
-                    return cmp != 0;
-
-                if (cmp > 0 || (cmp == 0 && !lowerInclusive))
+                {
+                    // the NEQ that follow the first one are exclusions, checked below
+                    if (cmp == 0)
+                        return false;
+                }
+                else if (cmp > 0 || (cmp == 0 && !lowerInclusive))
+                {
                     return false;
+                }
             }
         }
 
@@ -376,7 +431,8 @@ public class Expression
             // string (prefix or suffix) check
             if (TypeUtil.isLiteral(validator))
             {
-                if (!validateStringValue(value.raw, upper.value.raw))
+                // for a range, the check of the lower bound above already tested both bounds
+                if (!(operation == Op.RANGE && lower != null) && !validateStringValue(value.raw, upper.value.raw))
                     return false;
             }
             else
@@ -390,10 +446,10 @@ public class Expression
 
         // as a last step let's check exclusions for the given field,
         // this covers EQ/RANGE with exclusions.
+        // The excluded values are compared with the value itself, never with the terms of an analyzer.
         for (ByteBuffer term : exclusions)
         {
-            if (TypeUtil.isLiteral(validator) && validateStringValue(value.raw, term) ||
-                TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
+            if (TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
                 return false;
         }
 
@@ -466,9 +522,7 @@ public class Expression
 
     /**
      * For {@link Op#AUTOMATON} expressions, returns the compiled byte-level automaton of the pattern carried by
-     * this expression, compiling it on first use. The pattern value in {@link #lower} is the (possibly
-     * normalized, e.g. lowercased) pattern produced by the analysis in {@code Operation#analyzeGroup}, matching
-     * how the stored terms are normalized.
+     * this expression, compiling it on first use.
      *
      * @throws org.apache.cassandra.exceptions.InvalidPatternException if the pattern is invalid or too complex
      */
@@ -596,7 +650,7 @@ public class Expression
                         break;
 
                     case AUTOMATON:
-                        // pattern matching over the (possibly normalized) term, with the exact same automaton
+                        // pattern matching over the term, with the exact same automaton
                         // used by the index searchers
                         isMatch = LikePatterns.accepts(getAutomaton(), term);
                         break;
@@ -633,7 +687,7 @@ public class Expression
         if (!hasLower())
             return true;
 
-        int cmp = validator.compare(value, lower.value.raw);
+        int cmp = compareLiteral(value, lower.value.raw);
         return cmp > 0 || cmp == 0 && lower.inclusive;
     }
 
@@ -642,8 +696,18 @@ public class Expression
         if (!hasUpper())
             return true;
 
-        int cmp = validator.compare(value, upper.value.raw);
+        int cmp = compareLiteral(value, upper.value.raw);
         return cmp < 0 || cmp == 0 && upper.inclusive;
+    }
+
+    /**
+     * Compares two literal terms in the order of the index. The validator of a reversed (DESC clustering) column is
+     * a {@code ReversedType}, which compares in the reverse order, while the terms of the index are in the order of
+     * the base type at any clustering order.
+     */
+    private int compareLiteral(ByteBuffer left, ByteBuffer right)
+    {
+        return validator.unwrap().compare(left, right);
     }
 
     public float getEuclideanSearchThreshold()

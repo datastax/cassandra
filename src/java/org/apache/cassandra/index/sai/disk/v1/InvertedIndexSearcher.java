@@ -125,7 +125,15 @@ public class InvertedIndexSearcher extends IndexSearcher
                                  indexFiles.postingLists(),
                                  root,
                                  footerPointer,
-                                 version);
+                                 version,
+                                 maxSegmentRowId(segmentMetadata));
+    }
+
+    private static int maxSegmentRowId(SegmentMetadata metadata)
+    {
+        // only a hint to size the buffers of the range queries: keep it in the range of the row ids whatever the metadata says
+        long max = metadata.maxSSTableRowId - metadata.segmentRowIdOffset;
+        return (int) Math.max(0, Math.min(max, PostingList.END_OF_STREAM - 1));
     }
 
     @Override
@@ -156,6 +164,16 @@ public class InvertedIndexSearcher extends IndexSearcher
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             return reader.exactMatch(term, listener, context);
         }
+        else if (exp.isLiteralTermRange())
+        {
+            QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
+            // The terms are the raw value bytes, which have no terminator to adjust for an exclusive bound. The
+            // start of the scan encodes an exclusive lower bound as the term that follows it, and the scan stops
+            // before the term equal to an exclusive upper bound.
+            var start = exp.getLiteralRangeScanStart(version);
+            var end = exp.getEncodedUpperBoundByteComparable(version);
+            return reader.rangeMatch(start, end, exp.upper == null || exp.upper.inclusive, listener, context);
+        }
         else if (exp.getOp() == Expression.Op.RANGE)
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
@@ -166,16 +184,14 @@ public class InvertedIndexSearcher extends IndexSearcher
         else if (exp.getOp() == Expression.Op.PREFIX)
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
-            // A prefix query is a bounded scan over the trie: [enc(prefix), nextOf(enc(prefix))), computed on the
-            // unterminated byte-comparable. Prefix queries are only supported on non-composite literal indexes,
-            // whose terms are stored as their raw, order-preserving bytes at every index version (only composite
-            // terms are stored in a non-order-preserving encoding before DB, which is what filterRangeResults is
-            // about), so the scan bounds delimit exactly the terms starting with the prefix, except that the end
-            // bound of the trie scan is inclusive: the term exactly equal to nextOf(enc(prefix)), if any, is the only
-            // possible over-match, and is excluded at the reader level instead of post-filtering every matched term.
+            // A prefix query is a scan over the trie from enc(prefix), included, to nextOf(enc(prefix)), excluded,
+            // computed on the unterminated byte-comparable. Prefix queries are only supported on non-composite
+            // literal indexes, whose terms are stored as their raw, order-preserving bytes at every index version
+            // (only composite terms are stored in a non-order-preserving encoding before DB, which is what
+            // filterRangeResults is about), so the scan bounds delimit exactly the terms starting with the prefix.
             var lower = version.onDiskFormat().encodeForTrie(exp.lower.value.encoded, indexContext.getValidator());
             var upper = exp.getPrefixUpperBoundByteComparable(version);
-            return reader.rangeMatchExcludingUpperBoundTerm(lower, upper, listener, context);
+            return reader.rangeMatch(lower, upper, false, listener, context);
         }
         else if (exp.getOp() == Expression.Op.AUTOMATON)
         {
@@ -228,13 +244,15 @@ public class InvertedIndexSearcher extends IndexSearcher
     {
         if (!orderer.isBM25())
         {
-            // A LIKE restriction on the ordering column only scans the terms it can match; otherwise the whole terms
-            // dictionary is scanned, and the ordered rows are post-filtered by the query.
-            boolean patternFilter = slice != null
-                                    && (slice.getOp() == Expression.Op.PREFIX || slice.getOp() == Expression.Op.AUTOMATON);
-            var terms = patternFilter
-                        ? reader.patternTerms(slice, orderer.isAscending())
-                        : reader.allTerms(orderer.isAscending());
+            // A LIKE or literal range restriction on the ordering column only scans the terms it can match;
+            // otherwise the whole terms dictionary is scanned, and the ordered rows are post-filtered by the query.
+            TermsIterator terms;
+            if (slice != null && (slice.getOp() == Expression.Op.PREFIX || slice.getOp() == Expression.Op.AUTOMATON))
+                terms = reader.patternTerms(slice, orderer.isAscending());
+            else if (slice != null && slice.isLiteralTermRange())
+                terms = reader.rangeTerms(slice, orderer.isAscending());
+            else
+                terms = reader.allTerms(orderer.isAscending());
             var iter = new RowIdWithTermsIterator(terms);
             return toMetaSortedIterator(iter, queryContext);
         }

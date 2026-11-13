@@ -21,7 +21,9 @@ package org.apache.cassandra.io.tries;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.LongSupplier;
@@ -231,6 +233,67 @@ public class WalkerTest extends AbstractTrieTestBase
 
         checkIterates(buf.asNewBuffer(), rootPos, "155", "156", ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES, 3);
         checkIterates(buf.asNewBuffer(), rootPos, "154", "156", ValueIterator.LeftBoundTreatment.ADMIT_PREFIXES, 3);
+    }
+
+    /**
+     * The entry equal to the end is excluded with {@code RightBoundTreatment.LESS}, in both directions, while the
+     * entries before it are returned, its prefixes included. Checked against the sorted map of the entries for all
+     * the pairs of bounds among the entries, their prefixes and some absent keys.
+     */
+    @Test
+    public void testIteratorWithExclusiveEnd() throws IOException
+    {
+        DataOutputBuffer buf = new DataOutputBufferPaged();
+        IncrementalTrieWriter<Integer> builder = makeTrie(buf);
+        long rootPos = builder.complete();
+        ByteBuffer buffer = buf.asNewBuffer();
+        Rebufferer source = new ByteBufRebufferer(buffer);
+
+        List<String> bounds = new ArrayList<>(memoryTrieEntryMap.keySet());
+        bounds.addAll(Arrays.asList(null, "", "0", "1", "11", "15", "1510", "154", "5", "55", "5555", "7", "705", "70510", "71", "7370", "8"));
+
+        for (String from : bounds)
+        {
+            for (String to : bounds)
+            {
+                if (from != null && to != null && from.compareTo(to) > 0)
+                    continue;
+
+                for (boolean inclusiveStart : new boolean[]{ true, false })
+                {
+                    for (boolean inclusiveEnd : new boolean[]{ true, false })
+                    {
+                        int[] expected = memoryTrieEntryMap.entrySet()
+                                                           .stream()
+                                                           .filter(e -> from == null || e.getKey().compareTo(from) >= (inclusiveStart ? 0 : 1))
+                                                           .filter(e -> to == null || e.getKey().compareTo(to) <= (inclusiveEnd ? 0 : -1))
+                                                           .mapToInt(Map.Entry::getValue)
+                                                           .toArray();
+                        var left = inclusiveStart ? ValueIterator.LeftBoundTreatment.ADMIT_EXACT : ValueIterator.LeftBoundTreatment.GREATER;
+                        var right = inclusiveEnd ? ValueIterator.RightBoundTreatment.ADMIT_EXACT : ValueIterator.RightBoundTreatment.LESS;
+                        String testCase = (inclusiveStart ? "[" : "(") + from + ", " + to + (inclusiveEnd ? "]" : ")");
+
+                        ValueIterator<?> it = new ValueIterator<>(source, rootPos, source(from), source(to), left, right, true, version);
+                        checkReturns(testCase, it::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), it::collectedKey, expected);
+
+                        if (from != null)
+                        {
+                            ValueIterator<?> skipping = new ValueIterator<>(source, rootPos, null, source(to), left, right, true, version);
+                            skipping.skipTo(source(from), left);
+                            checkReturns(testCase + " skipTo", skipping::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), skipping::collectedKey, expected);
+                        }
+
+                        // the start of the reverse iteration has no GREATER treatment
+                        if (inclusiveStart)
+                        {
+                            ReverseValueIterator<?> rit = new ReverseValueIterator<>(source, rootPos, source(from), source(to), left, right, true, version);
+                            reverse(expected);
+                            checkReturns(testCase + " reverse", rit::nextPayloadedNode, pos -> getPayloadFlags(buffer, (int) pos), rit::collectedKey, expected);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private void checkIterates(ByteBuffer buffer, long rootPos, String from, String to, ValueIterator.LeftBoundTreatment admitPrefix, int... expected)

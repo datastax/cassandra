@@ -33,7 +33,6 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.base.MoreObjects;
-import com.google.common.collect.ImmutableSet;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -48,14 +47,10 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.lifecycle.LifecycleNewTracker;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.db.marshal.AsciiType;
-import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DecimalType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.IntegerType;
-import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
@@ -64,7 +59,6 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
-import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
@@ -127,9 +121,6 @@ public class IndexContext
 
     public static final String MULTIPLE_HINTS_WITH_ORDER_BY_ERROR_MESSAGE =
     "Index hints including a SAI index used for ORDER BY cannot include any other index";
-
-    private static final Set<AbstractType<?>> EQ_ONLY_TYPES =
-            ImmutableSet.of(UTF8Type.instance, AsciiType.instance, BooleanType.instance, UUIDType.instance);
 
     public static final String ENABLE_SEGMENT_COMPACTION_OPTION_NAME = "enable_segment_compaction";
 
@@ -733,42 +724,49 @@ public class IndexContext
     }
 
     /**
-     * Returns whether this index supports the CQL {@code LIKE} restrictions: prefix ({@code LIKE '<term>%'}),
-     * suffix, contains and generic patterns.
+     * Whether this index supports the {@code LIKE} operators: prefix ({@code 'abc%'}), suffix ({@code '%abc'}),
+     * contains ({@code '%abc%'}) and generic patterns with the {@code %} and {@code _} wildcards.
      * <p>
-     * These are supported on non-tokenized indexes of plain {@code text}/{@code ascii} columns: the terms
-     * dictionary then contains whole (though possibly normalized, e.g. lowercased) terms in sorted order, so
-     * prefixes map to contiguous scans of it and the other patterns to automaton intersections with it.
-     * Tokenizing (Lucene) analyzers break the 1:1 mapping between column values and indexed terms, making
-     * pattern semantics over the indexed terms undefined.
+     * These are supported on the indexes of plain {@code text}/{@code ascii} columns whose terms are the values
+     * (see {@link #hasValuesAsTerms()}): the prefixes map to contiguous scans of the terms dictionary and the other
+     * patterns to automaton intersections with it.
      * <p>
      * Collections are not supported, frozen (the term is the whole serialized collection) or not: {@code LIKE}
      * is a restriction on the value of a column, and CQL defines no element-wise semantics for it, as it does for
      * {@code CONTAINS}/{@code CONTAINS KEY} (which {@code LIKE_KEY}/{@code LIKE_VALUE} operators and the
-     * corresponding post-filtering would have to introduce). The terms of the keys/values/entries indexes of
-     * non-frozen collections could serve such a feature (the entries index excepted: its terms are composites).
+     * corresponding post-filtering would have to introduce).
      * <p>
      * Reversed (DESC clustering) string columns are supported: their terms are the raw, un-reversed value bytes.
      */
     public boolean supportsLikeQueries()
     {
         // a string type: the validators of frozen collections and of map entries are not
-        return TypeUtil.isUTF8OrAscii(validator)
-               // not the keys or values of a non-frozen collection, whose validator is the element type
-               && !isNonFrozenCollection()
-               // no tokenizing analyzer, so that the terms are whole (possibly normalized) values
-               && !hasCustomAnalyzer();
+        return TypeUtil.isUTF8OrAscii(validator) && hasValuesAsTerms();
     }
 
     /**
-     * @return whether this index uses a custom (Lucene) index or query analyzer, i.e. one that may tokenize
-     * a value into multiple terms. Indexes with only the non-tokenizing options (case_sensitive, normalize,
-     * ascii) are not considered custom-analyzed.
+     * Whether this index serves range restrictions on a literal column, in the unsigned byte order of its terms.
      */
-    private boolean hasCustomAnalyzer()
+    private boolean supportsLiteralRangeQueries()
     {
-        return config != null && (config.options.containsKey(LuceneAnalyzer.INDEX_ANALYZER)
-                                  || config.options.containsKey(LuceneAnalyzer.QUERY_ANALYZER));
+        // a string or a boolean, whose raw bytes are in the order of the values: the serialized bytes of the frozen
+        // collections, tuples and UDTs, and the composite terms of the map entries, are not
+        return (TypeUtil.isUTF8OrAscii(validator) || TypeUtil.isBoolean(validator)) && hasValuesAsTerms();
+    }
+
+    /**
+     * Whether the terms of this index are the values of the column, which the operators that match or order the
+     * whole values ({@code LIKE} and the ranges on literal columns) need.
+     * <p>
+     * That excludes the indexes with an analyzer, tokenizing or not: the results of a query must not depend on the
+     * indexes on the column, and an analyzer would make these operators match its terms (e.g. lowercased) instead of
+     * the values. Only {@code =} matches the terms of an analyzer, for backwards compatibility (see
+     * {@link org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport}).
+     */
+    private boolean hasValuesAsTerms()
+    {
+        // not the keys or values of a non-frozen collection, whose validator is the element type
+        return !isNonFrozenCollection() && !isAnalyzed;
     }
 
     public boolean supports(Operator op)
@@ -821,9 +819,14 @@ public class IndexContext
         AbstractType<?> validator = getValidator();
         if (operator == Expression.Op.IN)
             return true;
-        if (operator != Expression.Op.EQ && EQ_ONLY_TYPES.contains(validator)) return false;
-        // RANGE only applicable to non-literal indexes
-        return (operator != null) && !(TypeUtil.isLiteral(validator) && operator == Expression.Op.RANGE);
+        if (operator == Expression.Op.RANGE)
+            return !TypeUtil.isLiteral(validator) || supportsLiteralRangeQueries();
+        // NOT_EQ is the union of the two scans of the terms before and after the excluded one (see
+        // QueryController#buildInequalityPlan), in any order of the terms: it only needs the terms to be the values,
+        // which the terms of an analyzer are not
+        if (operator == Expression.Op.NOT_EQ)
+            return !isAnalyzed;
+        return operator != null;
     }
 
     public ByteBuffer getValueOf(DecoratedKey key, Row row, long nowInSecs)

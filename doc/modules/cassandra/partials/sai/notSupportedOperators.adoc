@@ -3,5 +3,5 @@ ifeval::["{evalproduct}" == "dse"]
 * Strings or Numerics: `LIKE`, `OR`, `IN`
 endif::[]
 ifeval::["{evalproduct}" != "dse"]
-* Strings or Numerics: `LIKE`
+* Numerics, and strings with an analyzer: `LIKE`
 endif::[]

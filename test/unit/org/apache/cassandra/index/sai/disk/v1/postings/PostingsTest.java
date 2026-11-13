@@ -335,6 +335,65 @@ public class PostingsTest extends SaiRandomizedTest
         return summary;
     }
 
+    /**
+     * The short posting lists are read whole, with the same row ids as {@link PostingsReader} returns; the others
+     * are left alone.
+     */
+    @Test
+    public void testShortPostingsReader() throws Exception
+    {
+        for (boolean frequencies : new boolean[]{ false, true })
+        {
+            // the writer makes blocks of 128 row ids
+            int[] sizes = { 1, 1, 2, 31, 32, 33, 127, 128, 129, 500 };
+            int[][] expected = new int[sizes.length][];
+            long[] pointers = new long[sizes.length];
+
+            IndexComponents.ForWrite components = newIndexDescriptor().newPerIndexComponentsForWrite(indexContext);
+            try (PostingsWriter writer = new PostingsWriter(components, frequencies))
+            {
+                for (int i = 0; i < sizes.length; i++)
+                {
+                    // the first list is the row id zero alone, written as a block without bits
+                    expected[i] = i == 0 ? new int[]{ 0 } : randomPostings(sizes[i]);
+                    pointers[i] = writer.write(new IntArrayPostingList(expected[i]));
+                }
+                writer.complete();
+            }
+
+            try (IndexInput input = components.get(IndexComponentType.POSTING_LISTS).openInput())
+            {
+                ShortPostingsReader reader = new ShortPostingsReader(input, frequencies);
+                long decoded = 0;
+                for (int max : new int[]{ 1, 32, 128, 1000 })
+                {
+                    // in a random order, as the reader keeps no position
+                    for (int i : shuffle(IntStream.range(0, sizes.length).toArray()))
+                    {
+                        String message = String.format("%d row ids, at most %d, frequencies %s", sizes[i], max, frequencies);
+                        SortedRowIdsBuilder rowIds = new SortedRowIdsBuilder(Integer.MAX_VALUE - 1);
+                        boolean read = reader.readIfShort(pointers[i], max, rowIds);
+                        assertEquals(message, sizes[i] <= Math.min(max, 128), read);
+                        if (!read)
+                        {
+                            assertTrue(message, rowIds.isEmpty());
+                            continue;
+                        }
+
+                        decoded += sizes[i];
+                        int[] distinct = IntStream.of(expected[i]).distinct().toArray();
+                        PostingList postings = rowIds.build();
+                        assertEquals(message, distinct.length, postings.size());
+                        for (int rowId : distinct)
+                            assertEquals(message, rowId, postings.nextPosting());
+                        assertEquals(message, PostingList.END_OF_STREAM, postings.nextPosting());
+                    }
+                }
+                assertEquals(decoded, reader.postingsDecoded());
+            }
+        }
+    }
+
     private int[] randomPostings(int numPostings)
     {
         final AtomicInteger rowId = new AtomicInteger();
