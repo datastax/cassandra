@@ -28,6 +28,7 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 import javax.annotation.Nullable;
 
+import com.google.common.base.Equivalence;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -209,6 +210,35 @@ public final class Tables implements Iterable<TableMetadata>
         return builder().add(updated.values()).build();
     }
 
+    private static final Equivalence<TableMetadata> INDEX_TABLE_SCHEMA_EQUIVALENCE =
+        new Equivalence<TableMetadata>()
+        {
+            @Override
+            protected boolean doEquivalent(TableMetadata a, TableMetadata b)
+            {
+                return a.keyspace.equals(b.keyspace)
+                    && a.name.equals(b.name)
+                    && a.id.equals(b.id)
+                    && a.kind == b.kind
+                    && a.flags.equals(b.flags)
+                    && a.droppedColumns.equals(b.droppedColumns)
+                    && a.indexes.equals(b.indexes)
+                    && a.triggers.equals(b.triggers)
+                    && a.params.equals(b.params)
+                    && a.columns().equals(b.columns());
+            }
+
+            @Override
+            protected int doHash(TableMetadata t)
+            {
+                return java.util.Objects.hash(
+                    t.keyspace, t.name, t.id,
+                    t.kind, t.flags,
+                    t.droppedColumns, t.indexes, t.triggers,
+                    t.params, t.columns());
+            }
+        };
+
     MapDifference<String, TableMetadata> indexesDiff(Tables other)
     {
         Map<String, TableMetadata> thisIndexTables = new HashMap<>();
@@ -217,7 +247,7 @@ public final class Tables implements Iterable<TableMetadata>
         Map<String, TableMetadata> otherIndexTables = new HashMap<>();
         other.indexTables.values().forEach(t -> otherIndexTables.put(t.indexName().get(), t));
 
-        return Maps.difference(thisIndexTables, otherIndexTables);
+        return Maps.difference(thisIndexTables, otherIndexTables, INDEX_TABLE_SCHEMA_EQUIVALENCE);
     }
 
     @Override
