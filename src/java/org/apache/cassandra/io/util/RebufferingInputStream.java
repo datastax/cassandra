@@ -56,15 +56,28 @@ public abstract class RebufferingInputStream extends InputStream implements Data
         this.buffer = buffer;
     }
 
-    /**
-     * Implementations must implement this method to refill the buffer.
-     * They can expect the buffer to be empty when this method is invoked.
-     * @throws IOException
-     */
+    /// Refills the buffer with new data.
+    /// The buffer must be empty when this method is invoked.
+    /// The buffer must be filled with at least 1 byte of data unless EOF is reached.
+    ///
+    /// EOF is indicated by not writing any bytes to the buffer and leaving the buffer with no remaining content.
+    /// The implementations must not throw `EOFException` on EOF.
+    ///
+    /// Callers must not rely on the identity of the buffer object to stay the same after this call returns.
+    /// The buffer reference may be switched to a different buffer instance in order to provide new data, and the
+    /// previous buffer may be released if applicable.
+    /// The buffer reference may be switched to a static empty buffer in case of EOF, in order to release the current
+    /// exhausted buffer and to free up memory.
+    /// The buffer is not allowed to be set to null if the call to this method exits normally (no exception thrown).
+    ///
+    /// @throws IOException when data is expected but could not be read due to an I/O error
+    /// @throws IllegalStateException if the buffer hasn't been exhausted when this method is invoked
     protected abstract void reBuffer() throws IOException;
 
+    // This is final because it is a convenience method that simply delegates to readFully(byte[], int, int).
+    // Override that method instead if you want to change the behavior.
     @Override
-    public void readFully(byte[] b) throws IOException
+    public final void readFully(byte[] b) throws IOException
     {
         readFully(b, 0, b.length);
     }
@@ -72,9 +85,21 @@ public abstract class RebufferingInputStream extends InputStream implements Data
     @Override
     public void readFully(byte[] b, int off, int len) throws IOException
     {
-        int read = read(b, off, len);
-        if (read < len)
-            throw new EOFException("EOF after " + read + " bytes out of " + len);
+        // avoid int overflow
+        if (off < 0 || off > b.length || len < 0 || len > b.length - off)
+            throw new IndexOutOfBoundsException();
+
+        int copied = 0;
+        while (copied < len)
+        {
+            int read = readInternal(b, off, len - copied);
+            if (read == -1)
+                throw new EOFException("EOF after " + copied + " bytes out of " + len);
+            copied += read;
+            off += read;
+        }
+
+        assert copied == len;
     }
 
     @Override
@@ -84,29 +109,30 @@ public abstract class RebufferingInputStream extends InputStream implements Data
         if (off < 0 || off > b.length || len < 0 || len > b.length - off)
             throw new IndexOutOfBoundsException();
 
+        return readInternal(b, off, len);
+    }
+
+    /// Reads up to `len` bytes into `b` at offset `off` from the current buffer.
+    /// Returns number of bytes read, or -1 if EOF is reached before reading any bytes.
+    /// If the buffer is empty, it will be refilled via `reBuffer()` once.
+    /// If EOF is not reached, reads at least one byte.
+    private int readInternal(byte[] b, int off, int len) throws IOException
+    {
         if (len == 0)
             return 0;
 
-        int copied = 0;
-        while (copied < len)
+        if (!buffer.hasRemaining())
         {
-            int position = buffer.position();
-            int remaining = buffer.limit() - position;
-            if (remaining == 0)
-            {
-                reBuffer();
-                position = buffer.position();
-                remaining = buffer.limit() - position;
-                if (remaining == 0)
-                    return copied == 0 ? -1 : copied;
-            }
-            int toCopy = min(len - copied, remaining);
-            FastByteOperations.copy(buffer, position, b, off + copied, toCopy);
-            buffer.position(position + toCopy);
-            copied += toCopy;
+            reBuffer();
+            if (!buffer.hasRemaining())
+                return -1; // EOF
         }
 
-        return copied;
+        int toRead = min(len, buffer.remaining());
+        assert toRead > 0 : "toRead must be > 0";
+        FastByteOperations.copy(buffer, buffer.position(), b, off, toRead);
+        buffer.position(buffer.position() + toRead);
+        return toRead;
     }
 
     /**
@@ -139,6 +165,8 @@ public abstract class RebufferingInputStream extends InputStream implements Data
             buffer.position(position + toCopy);
             copied += toCopy;
         }
+
+        assert copied == len;
     }
 
     @DontInline
