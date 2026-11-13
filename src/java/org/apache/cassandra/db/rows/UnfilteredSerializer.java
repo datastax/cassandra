@@ -19,7 +19,10 @@ package org.apache.cassandra.db.rows;
 
 import java.io.IOException;
 
+import com.google.common.base.Throwables;
+
 import net.nicoulaj.compilecommand.annotations.Inline;
+import org.apache.cassandra.utils.memory.BufferPoolExhaustedException;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ClusteringBoundOrBoundary;
@@ -644,6 +647,9 @@ public class UnfilteredSerializer
         }
         catch (RuntimeException | AssertionError e)
         {
+            // A pool-exhaustion failure is a resource problem, not data corruption: re-throw it as-is so it is
+            // not misclassified as a CorruptSSTableException further up the call stack.
+            Throwables.throwIfInstanceOf(e, BufferPoolExhaustedException.class);
             // Corrupted data could be such that it triggers an assertion in the row Builder, or break one of its assumption.
             // Of course, a bug in said builder could also trigger this, but it's impossible a priori to always make the distinction
             // between a real bug and data corrupted in just the bad way. Besides, re-throwing as an IOException doesn't hide the

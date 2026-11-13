@@ -83,6 +83,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Refs;
+import org.apache.cassandra.utils.memory.BufferPoolExhaustedException;
 import org.apache.cassandra.utils.memory.HeapCloner;
 
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
@@ -387,6 +388,9 @@ public abstract class SortedTableScrubber<R extends SSTableReaderWithFilter> imp
     {
         if (th instanceof Error && !(th instanceof AssertionError || th instanceof IOError))
             throw (Error) th;
+        // Abort scrubbing if we run out of buffer pool memory and don't treat it as a corrupt sstable.
+        if (th instanceof BufferPoolExhaustedException)
+            throw (BufferPoolExhaustedException) th;
     }
 
     protected void throwIfCannotContinue(DecoratedKey key, Throwable th)

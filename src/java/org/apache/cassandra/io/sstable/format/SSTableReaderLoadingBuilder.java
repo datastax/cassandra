@@ -21,6 +21,7 @@ package org.apache.cassandra.io.sstable.format;
 import java.io.IOException;
 import java.util.Set;
 
+import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import org.slf4j.Logger;
@@ -41,6 +42,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.memory.BufferPoolExhaustedException;
 
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkNotNull;
@@ -105,6 +107,8 @@ public abstract class SSTableReaderLoadingBuilder<R extends SSTableReader, B ext
                 reader.selfRef().release();
 
             JVMStabilityInspector.inspectThrowable(ex);
+            // Buffer pool exhaustion is not a sign of corruption
+            Throwables.throwIfInstanceOf(ex, BufferPoolExhaustedException.class);
 
             if (ex instanceof CorruptSSTableException)
                 throw (CorruptSSTableException) ex;
