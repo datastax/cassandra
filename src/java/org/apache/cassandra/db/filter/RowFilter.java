@@ -682,7 +682,7 @@ public class RowFilter
                                                QueryOptions options,
                                                ANNOptions annOptions)
         {
-            if (CellBounds.isAlwaysFalse(conjunction.expressions, table, indexHints))
+            if (CellBounds.isConjunctionAlwaysFalse(conjunction.expressions, table, indexHints))
                 return FilterElement.REJECT_ALL;
 
             for (StatementRestrictions child : children)
@@ -1282,7 +1282,7 @@ public class RowFilter
          * For example, {@code x < 1 AND x > 2} is an unsatisfiable interval.
          */
         @VisibleForTesting
-        static boolean isAlwaysFalse(List<Expression> expressions, TableMetadata table, IndexHints hints)
+        static boolean isConjunctionAlwaysFalse(List<Expression> expressions, TableMetadata table, IndexHints hints)
         {
             if (expressions.size() <= 1)
                 return false;

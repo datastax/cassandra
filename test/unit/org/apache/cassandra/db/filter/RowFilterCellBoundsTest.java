@@ -222,6 +222,6 @@ public class RowFilterCellBoundsTest
 
     private static boolean isAlwaysFalse(RowFilter.Expression... expressions)
     {
-        return RowFilter.CellBounds.isAlwaysFalse(Arrays.asList(expressions), table, IndexHints.NONE);
+        return RowFilter.CellBounds.isConjunctionAlwaysFalse(Arrays.asList(expressions), table, IndexHints.NONE);
     }
 }
