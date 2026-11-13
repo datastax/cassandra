@@ -251,6 +251,11 @@ public class RepairRunnable implements Runnable, ProgressEventNotifier
         return result;
     }
 
+    public UUID getParentSessionId()
+    {
+        return parentSession;
+    }
+
     public void run()
     {
         try
