@@ -26,6 +26,7 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Objects;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 
 import org.slf4j.Logger;
@@ -230,10 +231,20 @@ public class Version implements Comparable<Version>
         return fileNameFormatter;
     }
 
-    public boolean useImmutableComponentFiles()
+    /**
+     * @param keyspace the keyspace of the sstable whose index components are built.
+     * @return whether new builds of index components of this version for the provided keyspace should use immutable
+     * component files (see {@link IndexComponents} for details).
+     */
+    public boolean useImmutableComponentFiles(String keyspace)
     {
-        return CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS.getBoolean()
-               && onOrAfter(parse(CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS_MIN_VERSION.getString()));
+        Preconditions.checkNotNull(keyspace, "Keyspace name must not be null");
+        return supportsImmutableComponentFiles() && ImmutableSAIComponentsConfigProvider.INSTANCE.useImmutableComponentsForKeyspace(keyspace);
+    }
+
+    public boolean supportsImmutableComponentFiles()
+    {
+        return onOrAfter(parse(CassandraRelevantProperties.IMMUTABLE_SAI_COMPONENTS_MIN_VERSION.getString()));
     }
 
     @Override
