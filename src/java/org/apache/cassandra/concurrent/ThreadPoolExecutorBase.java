@@ -36,7 +36,7 @@ import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
  *
  * We also provide a shutdown hook for JMX registration cleanup.
  */
-public class ThreadPoolExecutorBase extends ThreadPoolExecutor implements ResizableThreadPool
+public class ThreadPoolExecutorBase extends ThreadPoolExecutor implements ResizableThreadPool, RunningTaskSource
 {
     public static final RejectedExecutionHandler blockingExecutionHandler = (task, executor) ->
     {
@@ -190,6 +190,14 @@ public class ThreadPoolExecutorBase extends ThreadPoolExecutor implements Resiza
     {
         WorkerSlots.Running oldest = workerSlots.oldestRunning();
         return oldest == null ? null : oldest.taskClassName;
+    }
+
+    @Override
+    public RunningTaskSnapshot longestRunningTask()
+    {
+        WorkerSlots.Running oldest = workerSlots.oldestRunning();
+        return oldest == null ? null : new RunningTaskSnapshot(TimedTask.ageNanos(oldest.capturedStartNanos),
+                                                               oldest.taskClassName, oldest.threadName);
     }
 
     @VisibleForTesting

@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.Assert;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -40,6 +41,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static org.apache.cassandra.concurrent.DebuggableThreadPoolExecutorTest.checkLocalStateIsPropagated;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SET_SEP_THREAD_NAME;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 import static org.apache.cassandra.utils.MonotonicClock.Global.preciseTime;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -354,6 +356,68 @@ public class SEPExecutorTest
         }
         finally
         {
+            pool.shutdownAndWait(1, TimeUnit.MINUTES);
+        }
+    }
+
+    @Test
+    public void testLongestRunningTaskSnapshot() throws Exception
+    {
+        SharedExecutorPool pool = new SharedExecutorPool("LivenessPool-snapshot");
+        SEPExecutor es = (SEPExecutor) pool.newExecutor(1, "internal", "LivenessStage-snapshot");
+        try
+        {
+            Assert.assertNull(es.longestRunningTask());
+
+            Blocker a = new Blocker();
+            es.execute(a);
+            Assert.assertTrue(a.started.await(10, TimeUnit.SECONDS));
+            SEPWorker worker = pool.allWorkers.stream().filter(w -> w.runningFor.get() == es && w.currentTask.get() != null).findFirst().orElse(null);
+            Assert.assertNotNull(worker);
+            Thread.sleep(50);
+
+            Util.spinAssertEquals(true, () -> es.longestRunningTask().getRunningNanos() >= MILLISECONDS.toNanos(40), 5);
+            RunningTaskSnapshot running = es.longestRunningTask();
+            Assert.assertEquals(Blocker.class.getName(), running.getTaskClassName());
+            Assert.assertEquals(worker.thread.getName(), running.getThreadName());
+            // a worker renames its thread only when SET_SEP_THREAD_NAME is on
+            if (SET_SEP_THREAD_NAME.getBoolean())
+                Assert.assertTrue(running.getThreadName(), running.getThreadName().contains("LivenessStage-snapshot"));
+            Assert.assertEquals(running.getThreadName(), es.metrics.longestRunningTask.get().getThreadName());
+
+            a.countDown();
+            Util.spinAssertEquals(null, es::longestRunningTask, 5);
+        }
+        finally
+        {
+            pool.shutdownAndWait(1, TimeUnit.MINUTES);
+        }
+    }
+
+    @Test
+    public void testLongestRunningTaskThreadNameIsTheExecutors() throws Exception
+    {
+        // a worker renames its thread only when SET_SEP_THREAD_NAME is on
+        Assume.assumeTrue(SET_SEP_THREAD_NAME.getBoolean());
+        SharedExecutorPool pool = new SharedExecutorPool("LivenessPool-rename");
+        SEPExecutor es = (SEPExecutor) pool.newExecutor(1, "internal", "LivenessStage-rename");
+        Blocker a = new Blocker();
+        try
+        {
+            es.execute(a);
+            Assert.assertTrue(a.started.await(10, TimeUnit.SECONDS));
+            SEPWorker worker = pool.allWorkers.stream().filter(w -> w.runningFor.get() == es && w.currentTask.get() != null).findFirst().orElse(null);
+            Assert.assertNotNull(worker);
+            String name = worker.thread.getName();
+
+            // as a scan that read runningFor just before the worker moved on and renamed its thread for another executor
+            worker.thread.setName("LivenessStage-other-" + worker.workerId);
+            Assert.assertEquals(name, es.longestRunningTask().getThreadName());
+            worker.thread.setName(name);
+        }
+        finally
+        {
+            a.countDown();
             pool.shutdownAndWait(1, TimeUnit.MINUTES);
         }
     }

@@ -394,6 +394,72 @@ public class DebuggableThreadPoolExecutorTest
     }
 
     @Test
+    public void testLongestRunningTaskSnapshot() throws Exception
+    {
+        ThreadPoolExecutorPlus es = (ThreadPoolExecutorPlus) executorFactory().pooled("liveness-snapshot", 2);
+        // as the compaction executors, which wrap their pool
+        WrappedExecutorPlus wrapped = new WrappedExecutorPlus(es);
+        try
+        {
+            Assert.assertNull(es.longestRunningTask());
+            Assert.assertNull(wrapped.longestRunningTask());
+
+            Blocker a = new Blocker();
+            es.execute(a);
+            Assert.assertTrue(a.started.await(10, TimeUnit.SECONDS));
+            Thread.sleep(50);
+            Blocker b = new Blocker();
+            es.execute(b);
+            Assert.assertTrue(b.started.await(10, TimeUnit.SECONDS));
+
+            // the older of the two running tasks, and the thread that runs it
+            Util.spinAssertEquals(true, () -> es.longestRunningTask().getRunningNanos() >= MILLISECONDS.toNanos(40), 5);
+            RunningTaskSnapshot running = es.longestRunningTask();
+            Assert.assertEquals(Blocker.class.getName(), running.getTaskClassName());
+            Assert.assertTrue(running.getThreadName(), running.getThreadName().startsWith("liveness-snapshot:"));
+            String threadA = running.getThreadName();
+            Assert.assertEquals(threadA, wrapped.longestRunningTask().getThreadName());
+            Assert.assertTrue(es.longestRunningTaskTime() >= running.getRunningNanos());
+
+            a.release.countDown();
+            Util.spinAssertEquals(true, () -> !threadA.equals(es.longestRunningTask().getThreadName()), 5);
+            Assert.assertEquals(Blocker.class.getName(), es.longestRunningTask().getTaskClassName());
+            b.release.countDown();
+            Util.spinAssertEquals(null, es::longestRunningTask, 5);
+            Assert.assertNull(wrapped.longestRunningTask());
+        }
+        finally
+        {
+            es.shutdownNow();
+        }
+    }
+
+    @Test
+    public void testScheduledExecutorLongestRunningTaskSnapshot() throws Exception
+    {
+        ScheduledThreadPoolExecutorPlus es = (ScheduledThreadPoolExecutorPlus) executorFactory().scheduled("liveness-sched-snapshot");
+        try
+        {
+            Assert.assertNull(es.longestRunningTask());
+            Blocker a = new Blocker();
+            AtomicReference<String> threadName = new AtomicReference<>();
+            es.schedule(() -> { threadName.set(Thread.currentThread().getName()); a.run(); }, 0, MILLISECONDS);
+            Assert.assertTrue(a.started.await(10, TimeUnit.SECONDS));
+
+            RunningTaskSnapshot running = es.longestRunningTask();
+            Assert.assertNotNull(running);
+            Assert.assertNotNull(running.getTaskClassName());  // the JDK's ScheduledFutureTask
+            Assert.assertEquals(threadName.get(), running.getThreadName());
+            a.release.countDown();
+            Util.spinAssertEquals(null, es::longestRunningTask, 5);
+        }
+        finally
+        {
+            es.shutdownNow();
+        }
+    }
+
+    @Test
     public void testSubmitReportsUserClass() throws Exception
     {
         ThreadPoolExecutorPlus es = (ThreadPoolExecutorPlus) executorFactory().sequential("liveness-submit");
