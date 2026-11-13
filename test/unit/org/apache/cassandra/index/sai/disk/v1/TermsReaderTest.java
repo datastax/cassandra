@@ -28,6 +28,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -66,6 +67,8 @@ import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_T
 public class TermsReaderTest extends SaiRandomizedTest
 {
     public static final ByteComparable.Version VERSION = TypeUtil.BYTE_COMPARABLE_VERSION;
+
+    private final int maxLazyPostingLists = TermsReader.getMaxLazyPostingLists();
 
     private final Version version;
 
@@ -241,13 +244,24 @@ public class TermsReaderTest extends SaiRandomizedTest
      * inclusive, exclusive and missing bounds, the bounds being either indexed terms or not, and the terms and bounds
      * having bytes at or above 0x80.
      */
+    @After
+    public void restoreMaxLazyPostingLists()
+    {
+        TermsReader.setMaxLazyPostingLists(maxLazyPostingLists);
+    }
+
     @Test
     public void testRangeMatch() throws IOException
     {
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
         final String index = newIndex();
         final IndexContext indexContext = SAITester.createIndexContext(index, UTF8Type.instance);
-        final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildStringTermsEnum(version, 50, 3, () -> randomTerm(4, 10), () -> nextInt(0, 300));
+        final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildStringTermsEnum(version, 50, 300, () -> randomTerm(4, 10), () -> nextInt(0, 2000));
+        // Posting lists of all sizes, of one and of several blocks. The row ids are shared by many terms.
+        int[] postingListSizes = { 1, 3, 32, 128, 129, 300 };
+        boolean onlyShort = randomIntBetween(0, 4) == 0;
+        for (InvertedIndexBuilder.TermsEnum term : termsEnum)
+            term.postings.resize(onlyShort ? randomIntBetween(1, 3) : postingListSizes[randomIntBetween(0, postingListSizes.length - 1)]);
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
@@ -278,6 +292,10 @@ public class TermsReaderTest extends SaiRandomizedTest
         {
             for (int i = 0; i < 200; i++)
             {
+                // The range queries merge the posting lists lazily up to a number of terms, and read them all
+                // otherwise: here the ranges have up to 50 terms.
+                TermsReader.setMaxLazyPostingLists(new int[]{ 0, 1, 5, 20, 1024 }[randomIntBetween(0, 4)]);
+
                 // The scans require ordered bounds. Equal bounds are covered: unless both are inclusive the range is
                 // empty, with the start of the scan after its end when the lower bound is exclusive.
                 byte[] lower = randomBound(terms);

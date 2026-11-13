@@ -36,6 +36,7 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.disk.v1.TermsReader;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
@@ -399,6 +400,30 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
 
     @Test
     public void testRandomizedRanges()
+    {
+        randomizedRanges();
+    }
+
+    /**
+     * Above a number of terms in the range the posting lists of a segment are not merged lazily, they are all
+     * read into a set of row ids: same results with nearly all the ranges above that number.
+     */
+    @Test
+    public void testRandomizedRangesReadingAllPostingLists()
+    {
+        int maxLazyPostingLists = TermsReader.getMaxLazyPostingLists();
+        TermsReader.setMaxLazyPostingLists(random.nextInt(4));
+        try
+        {
+            randomizedRanges();
+        }
+        finally
+        {
+            TermsReader.setMaxLazyPostingLists(maxLazyPostingLists);
+        }
+    }
+
+    private void randomizedRanges()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");

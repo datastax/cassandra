@@ -33,6 +33,7 @@ import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -42,9 +43,11 @@ import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.io.IndexInput;
+import org.apache.cassandra.index.sai.disk.v1.postings.EagerPostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.ScanningPostingsReader;
+import org.apache.cassandra.index.sai.disk.v1.postings.SortedRowIdsBuilder;
 import org.apache.cassandra.index.sai.disk.v1.trie.ReverseTrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
@@ -88,7 +91,28 @@ public class TermsReader implements Closeable
     private final long termDictionaryRoot;
     private final Version version;
     private final ByteComparable.Version termDictionaryFileEncodingVersion;
+    private final int maxSegmentRowId;
 
+    /**
+     * The largest number of terms whose posting lists a range query keeps open and merges lazily. With more terms
+     * the query reads all the posting lists to the end, see {@link RangeQuery#readAndMergePostings}. An open
+     * {@link PostingsReader} retains a few hundred bytes.
+     */
+    private static volatile int maxLazyPostingLists = Math.max(0, CassandraRelevantProperties.SAI_RANGE_QUERY_MAX_LAZY_POSTING_LISTS.getInt());
+
+    @VisibleForTesting
+    public static int getMaxLazyPostingLists()
+    {
+        return maxLazyPostingLists;
+    }
+
+    @VisibleForTesting
+    public static void setMaxLazyPostingLists(int max)
+    {
+        maxLazyPostingLists = max;
+    }
+
+    @VisibleForTesting
     public TermsReader(IndexContext indexContext,
                        FileHandle termsData,
                        ByteComparable.Version termsDataEncodingVersion,
@@ -97,7 +121,23 @@ public class TermsReader implements Closeable
                        long termsFooterPointer,
                        Version version) throws IOException
     {
+        this(indexContext, termsData, termsDataEncodingVersion, postingLists, root, termsFooterPointer, version, PostingList.END_OF_STREAM - 1);
+    }
+
+    /**
+     * @param maxSegmentRowId the largest row id of the segment, which bounds the memory of the range queries
+     */
+    public TermsReader(IndexContext indexContext,
+                       FileHandle termsData,
+                       ByteComparable.Version termsDataEncodingVersion,
+                       FileHandle postingLists,
+                       long root,
+                       long termsFooterPointer,
+                       Version version,
+                       int maxSegmentRowId) throws IOException
+    {
         this.indexContext = indexContext;
+        this.maxSegmentRowId = maxSegmentRowId;
         this.version = version;
         termDictionaryFile = termsData;
         postingsFile = postingLists;
@@ -426,13 +466,23 @@ public class TermsReader implements Closeable
         /**
          * Reads the posting lists of the terms of the range accepted by the term filter, if any, and merges them
          * into a single posting list. It assumes that the posting list for each term is sorted.
+         * <p>
+         * The result is in row id order, so the first row id of every term is needed before the first row id can
+         * be returned: the work is proportional to the number of terms of the range whatever the limit of the
+         * query. What is bounded is the memory:
+         * <ul>
+         *     <li>up to {@link #maxLazyPostingLists} terms, each posting list stays open and they are merged
+         *     lazily, so that a query with a small limit reads the beginning of each list only;</li>
+         *     <li>above that, no posting list stays open: they are all read to the end, one after the other, into
+         *     a {@link SortedRowIdsBuilder}, which takes one bit per row of the segment at most.</li>
+         * </ul>
          *
          * @return the posting lists for the terms matching the query.
          */
         private PostingList readAndMergePostings(TrieTermsDictionaryReader reader) throws IOException
         {
             assert reader.hasNext();
-            ArrayList<PostingList> postingLists = new ArrayList<>();
+            int maxLazy = maxLazyPostingLists;
 
             // index inputs will be closed with the onClose method of the returned merged posting list;
             // if the second open throws, the first must be closed here instead of leaking
@@ -448,8 +498,15 @@ public class TermsReader implements Closeable
                 throw t;
             }
 
+            ArrayList<PostingList> postingLists = new ArrayList<>();
             try
             {
+                // The offsets of the posting lists of the first terms, until it is known whether the range has
+                // more terms than the lazy merge accepts.
+                long[] offsets = new long[Math.min(maxLazy, 16)];
+                int terms = 0;
+                EagerPostingsReader eagerReader = null;
+                SortedRowIdsBuilder rowIds = null;
                 do
                 {
                     long postingsOffset;
@@ -465,13 +522,44 @@ public class TermsReader implements Closeable
                         postingsOffset = entry.right;
                     }
 
-                    var currentReader = currentReader(postingsInput, postingsSummaryInput, postingsOffset);
+                    if (terms < maxLazy)
+                    {
+                        if (terms == offsets.length)
+                            offsets = Arrays.copyOf(offsets, (int) Math.min(terms * 2L, maxLazy));
+                        offsets[terms++] = postingsOffset;
+                        continue;
+                    }
 
-                    if (!currentReader.isEmpty())
-                        postingLists.add(currentReader);
-                    else
-                        FileUtils.close(currentReader);
+                    if (eagerReader == null)
+                    {
+                        // Too many terms. The summary input serves this reader: all its users seek before they read.
+                        eagerReader = new EagerPostingsReader(postingsSummaryInput, readFrequencies());
+                        rowIds = new SortedRowIdsBuilder(maxSegmentRowId);
+                        for (int i = 0; i < terms; i++)
+                            eagerReader.readAll(offsets[i], rowIds);
+                        offsets = null;
+                    }
+                    eagerReader.readAll(postingsOffset, rowIds);
+                    if ((++terms & 1023) == 0)
+                        context.checkpoint();
                 } while (reader.hasNext());
+
+                if (eagerReader != null)
+                {
+                    listener.postingListEventListener().postingDecoded(eagerReader.postingsDecoded());
+                    postingLists.add(rowIds.build());
+                }
+                else
+                {
+                    for (int i = 0; i < terms; i++)
+                    {
+                        var currentReader = currentReader(postingsInput, postingsSummaryInput, offsets[i]);
+                        if (!currentReader.isEmpty())
+                            postingLists.add(currentReader);
+                        else
+                            FileUtils.close(currentReader);
+                    }
+                }
             }
             catch (Throwable e)
             {
