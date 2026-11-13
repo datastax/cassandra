@@ -584,6 +584,11 @@ public class IndexQuerySupport
             query(tester, model, DataModel.ASCII_COLUMN, Operator.LT, "A");
             query(tester, model, DataModel.ASCII_COLUMN, Operator.GT, "X");
 
+            // a value of the column and one that isn't
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.NEQ, "MA");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.NEQ, "XX");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.NOT_IN, list("MA", "LA", "XX"));
+
             rangeQuery(tester, model, DataModel.ASCII_COLUMN, "AL", "TX");
             rangeQuery(tester, model, DataModel.ASCII_COLUMN, "B", "N");
 
@@ -728,6 +733,14 @@ public class IndexQuerySupport
             query(tester, model, DataModel.TEXT_COLUMN, Operator.LT, "");
             query(tester, model, DataModel.TEXT_COLUMN, Operator.GTE, "");
 
+            // values of the column, a prefix of some of them, one that isn't a value and the empty one
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NEQ, "Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NEQ, "State of Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NEQ, "M");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NEQ, "Nowhere");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NEQ, "");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NOT_IN, list("Alaska", "Wyoming", "Nowhere"));
+
             rangeQuery(tester, model, DataModel.TEXT_COLUMN, "Alabama", "Texas");
             rangeQuery(tester, model, DataModel.TEXT_COLUMN, "M", "N");
 
@@ -795,6 +808,11 @@ public class IndexQuerySupport
             query(tester, model, DataModel.UUID_COLUMN, Operator.LTE, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
             query(tester, model, DataModel.UUID_COLUMN, Operator.GT, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
             query(tester, model, DataModel.UUID_COLUMN, Operator.GTE, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+
+            query(tester, model, DataModel.UUID_COLUMN, Operator.NEQ, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.NEQ, UUIDType.instance.fromString("00000000-0000-4000-8000-000000000000"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.NOT_IN, list(UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"),
+                                                                             UUIDType.instance.fromString("e37394dc-d17b-11e8-a8d5-f2801f1b9fd1")));
 
             // the uuid type orders by version first: the time-based (version 1) lower bound is before the random
             // (version 4) upper bound

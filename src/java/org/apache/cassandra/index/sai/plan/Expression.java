@@ -446,10 +446,10 @@ public class Expression
 
         // as a last step let's check exclusions for the given field,
         // this covers EQ/RANGE with exclusions.
+        // The excluded values are compared with the value itself, never with the terms of an analyzer.
         for (ByteBuffer term : exclusions)
         {
-            if (TypeUtil.isLiteral(validator) && hasTerm(value.raw, term) ||
-                TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
+            if (TypeUtil.comparePostFilter(new Value(term, validator), value, validator) == 0)
                 return false;
         }
 
@@ -613,33 +613,6 @@ public class Expression
                 return !success;
         }
         return success;
-    }
-
-    /**
-     * Whether the excluded term is one of the terms the analyzer produces for the column value, as
-     * {@link #validateStringValue} tests for {@link Op#EQ}. Unlike that method it doesn't depend on the operation of
-     * this expression, which is not an equality when a {@code !=} follows a range or another {@code !=}.
-     * <p>
-     * The analyzer only splits or normalizes the value when a {@code !=} follows a {@code =} on an analyzed index:
-     * the ranges are not served by the analyzed indexes, so their values have a single term, the value itself.
-     */
-    private boolean hasTerm(ByteBuffer columnValue, ByteBuffer excludedTerm)
-    {
-        AbstractAnalyzer analyzer = analyzerFactory.create();
-        analyzer.reset(columnValue);
-        try
-        {
-            while (analyzer.hasNext())
-            {
-                if (validator.compare(analyzer.next(), excludedTerm) == 0)
-                    return true;
-            }
-            return false;
-        }
-        finally
-        {
-            analyzer.end();
-        }
     }
 
     private boolean validateStringValue(ByteBuffer columnValue, ByteBuffer requestedValue)
