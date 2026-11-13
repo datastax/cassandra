@@ -446,6 +446,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     {
         // Remove the ORDER BY filter expression from the filter tree, as it is added below.
         var filterElement = filterOperation().filter(e -> !Orderer.isFilterExpressionOrderer(e));
+        if (optimizerOptions.queryOptimizationLevel() > 0)
+            filterElement = Operation.removeRedundantDisjunctionBranches(filterElement);
         whereKeysPlan = Operation.Node.buildTree(this, filterElement)
                                       .analyzeTree(this)
                                       .plan(this);

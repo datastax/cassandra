@@ -22,8 +22,10 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
@@ -275,6 +277,134 @@ public class Operation
 
             default:
                 return 0;
+        }
+    }
+
+    /**
+     * Removes the disjunction branches that are made redundant by a less restrictive branch of the same disjunction, as
+     * {@code (a AND b) OR a} matches the same rows as {@code a}. Only the plan needs this: it avoids repeating index
+     * scans, for instance in a query that relaxes its criteria in each branch such as
+     * {@code (a AND b AND c) OR (a AND b) OR a}. The filter of the query can keep the original tree.
+     * <p>
+     * A branch is removed only if it is sure to be redundant, because a plan that misses a row can't be fixed by the
+     * filter. Only {@link RowFilter.SimpleExpression}s are compared, any other branch is left as it is.
+     *
+     * @return the equivalent tree, or the same instance if there is nothing to simplify
+     */
+    @VisibleForTesting
+    static RowFilter.FilterElement removeRedundantDisjunctionBranches(RowFilter.FilterElement element)
+    {
+        List<RowFilter.FilterElement> children = new ArrayList<>(element.children().size());
+        boolean changed = false;
+        for (RowFilter.FilterElement child : element.children())
+        {
+            RowFilter.FilterElement simplified = removeRedundantDisjunctionBranches(child);
+            changed |= simplified != child;
+            children.add(simplified);
+        }
+
+        List<RowFilter.Expression> expressions = element.expressions();
+        if (element.isDisjunction())
+        {
+            List<DisjunctionBranch> branches = new ArrayList<>(expressions.size() + children.size());
+            for (RowFilter.Expression expression : expressions)
+                branches.add(DisjunctionBranch.of(expression));
+            for (RowFilter.FilterElement child : children)
+                branches.add(DisjunctionBranch.of(child));
+
+            List<RowFilter.Expression> keptExpressions = new ArrayList<>(expressions.size());
+            List<RowFilter.FilterElement> keptChildren = new ArrayList<>(children.size());
+            for (int i = 0; i < branches.size(); i++)
+            {
+                if (isRedundantBranch(i, branches))
+                    continue;
+
+                if (i < expressions.size())
+                    keptExpressions.add(expressions.get(i));
+                else
+                    keptChildren.add(children.get(i - expressions.size()));
+            }
+
+            int kept = keptExpressions.size() + keptChildren.size();
+            if (kept < branches.size())
+            {
+                if (kept == 1 && !keptChildren.isEmpty())
+                    return keptChildren.get(0);
+
+                return new RowFilter.FilterElement(kept > 1, keptExpressions, keptChildren);
+            }
+        }
+
+        return changed ? new RowFilter.FilterElement(element.isDisjunction(), expressions, children) : element;
+    }
+
+    /**
+     * @return whether another branch matches all the rows of this branch, and hence this branch adds no rows to the
+     * disjunction. Of two equivalent branches, the first one is kept.
+     */
+    private static boolean isRedundantBranch(int index, List<DisjunctionBranch> branches)
+    {
+        DisjunctionBranch branch = branches.get(index);
+        for (int i = 0; i < branches.size(); i++)
+        {
+            DisjunctionBranch other = branches.get(i);
+            if (i != index && other.implies(branch) && (i < index || !branch.implies(other)))
+                return true;
+        }
+        return false;
+    }
+
+    /**
+     * What is known about a branch of a disjunction for telling if it's redundant.
+     */
+    private static final class DisjunctionBranch
+    {
+        /** The comparable expressions that all the rows matching the branch satisfy. */
+        private final Set<RowFilter.Expression> required;
+        /** Whether the branch has no other conditions than {@link #required}. */
+        private final boolean isExact;
+
+        private DisjunctionBranch(Set<RowFilter.Expression> required, boolean isExact)
+        {
+            this.required = required;
+            this.isExact = isExact;
+        }
+
+        static DisjunctionBranch of(RowFilter.Expression expression)
+        {
+            return isComparable(expression)
+                   ? new DisjunctionBranch(Set.of(expression), true)
+                   : new DisjunctionBranch(Collections.emptySet(), false);
+        }
+
+        static DisjunctionBranch of(RowFilter.FilterElement element)
+        {
+            if (element.isDisjunction())
+                return new DisjunctionBranch(Collections.emptySet(), false);
+
+            Set<RowFilter.Expression> required = new HashSet<>();
+            boolean isExact = element.children().isEmpty();
+            for (RowFilter.Expression expression : element.expressions())
+            {
+                if (isComparable(expression))
+                    required.add(expression);
+                else
+                    isExact = false;
+            }
+            return new DisjunctionBranch(required, isExact);
+        }
+
+        /**
+         * @return whether all the rows matching the other branch match this branch too
+         */
+        boolean implies(DisjunctionBranch other)
+        {
+            return isExact && !required.isEmpty() && other.required.containsAll(required);
+        }
+
+        private static boolean isComparable(RowFilter.Expression expression)
+        {
+            return expression instanceof RowFilter.SimpleExpression;
         }
     }
 
