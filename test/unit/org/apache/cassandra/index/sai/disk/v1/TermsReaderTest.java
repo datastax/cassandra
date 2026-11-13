@@ -323,9 +323,7 @@ public class TermsReaderTest extends SaiRandomizedTest
                 ByteComparable end = expression.getEncodedUpperBoundByteComparable(version);
                 QueryEventListener.TrieIndexEventListener listener = (QueryEventListener.TrieIndexEventListener) NO_OP_TRIE_LISTENER;
                 Set<Integer> actualRows = new TreeSet<>();
-                try (PostingList postings = end == null || upperInclusive
-                                            ? reader.rangeMatch(null, start, end, listener, new QueryContext())
-                                            : reader.rangeMatchExcludingUpperBoundTerm(start, end, listener, new QueryContext()))
+                try (PostingList postings = reader.rangeMatch(start, end, upperInclusive, listener, new QueryContext()))
                 {
                     for (long rowId = postings.nextPosting(); rowId != PostingList.END_OF_STREAM; rowId = postings.nextPosting())
                         actualRows.add((int) rowId);

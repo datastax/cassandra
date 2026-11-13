@@ -174,15 +174,14 @@ public class TermsReader implements Closeable
         ByteComparable lower = bound(prefix);
         ByteComparable upper = prefixUpperBound(prefix);
         Predicate<byte[]> termFilter = patternFilter(prefix, automaton);
-        return ascending ? new TermsScanner(lower, upper, termFilter, null)
-                         : new ReverseTermsScanner(lower, upper, termFilter, null);
+        return ascending ? new TermsScanner(lower, upper, true, termFilter)
+                         : new ReverseTermsScanner(lower, upper, true, termFilter);
     }
 
     /**
      * Iterates, in the given order, the terms of an ordering scan restricted by the given
      * {@link Expression#isLiteralTermRange() literal term range} on the ordering column. Only the terms of the
-     * range are read. As in {@link #rangeMatchExcludingUpperBoundTerm}, the term equal to an exclusive upper bound is
-     * looked up once and skipped by its postings offset, so the terms are not compared with the bound one by one.
+     * range are read.
      * <p>
      * The lower bound must not be above the upper one: the scans don't detect it, and the descending one would
      * return terms out of the range, which only the filtering of the rows by the query discards.
@@ -192,9 +191,9 @@ public class TermsReader implements Closeable
         Preconditions.checkArgument(range.isLiteralTermRange(), "Not a literal term range: %s", range);
         ByteComparable lower = range.getLiteralRangeScanStart(version);
         ByteComparable upper = range.getEncodedUpperBoundByteComparable(version);
-        ByteComparable excluded = upper == null || range.upper.inclusive ? null : upper;
-        return ascending ? new TermsScanner(lower, upper, null, excluded)
-                         : new ReverseTermsScanner(lower, upper, null, excluded);
+        boolean upperInclusive = range.upper == null || range.upper.inclusive;
+        return ascending ? new TermsScanner(lower, upper, upperInclusive, null)
+                         : new ReverseTermsScanner(lower, upper, upperInclusive, null);
     }
 
     public PostingList exactMatch(ByteComparable term, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
@@ -211,24 +210,24 @@ public class TermsReader implements Closeable
     {
         perQueryEventListener.onSegmentHit();
         Predicate<byte[]> termFilter = exp == null ? null : term -> exp.isSatisfiedBy(ByteBuffer.wrap(term));
-        return new RangeQuery(termFilter, lower, upper, false, perQueryEventListener, context).execute();
+        return new RangeQuery(termFilter, lower, upper, true, perQueryEventListener, context).execute();
     }
 
     /**
-     * Range query for scans whose only possible over-match is a term exactly equal to the upper bound: the end
-     * bound of the trie scan is always inclusive, so instead of collecting and post-filtering every matched term
-     * (see {@link #rangeMatch}), the postings of the single term equal to {@code upper}, if that term exists, are
-     * excluded from the merge. Used by prefix scans over {@code [enc(prefix), nextOf(enc(prefix)))} and by ranges
-     * with an exclusive upper bound of non-composite literal indexes, whose terms are stored order-preserving at
-     * every index version.
+     * Range query over the terms from {@code lower}, included, to {@code upper}, included or not as requested. Used
+     * by the prefix scans over {@code [enc(prefix), nextOf(enc(prefix)))} and by the ranges of the non-composite
+     * literal indexes, whose terms are stored order-preserving and without terminator at every index version: an
+     * exclusive upper bound cannot be encoded in the bound itself, so the scan of the trie stops before the term
+     * equal to it.
      *
      * @param lower the inclusive lower bound of the scan, {@code null} if unbounded
-     * @param upper the exclusive upper bound of the scan, {@code null} if unbounded
+     * @param upper the upper bound of the scan, {@code null} if unbounded
+     * @param upperInclusive whether the term equal to {@code upper} is part of the range
      */
-    public PostingList rangeMatchExcludingUpperBoundTerm(ByteComparable lower, ByteComparable upper, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
+    public PostingList rangeMatch(ByteComparable lower, ByteComparable upper, boolean upperInclusive, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
     {
         perQueryEventListener.onSegmentHit();
-        return new RangeQuery(null, lower, upper, true, perQueryEventListener, context).execute();
+        return new RangeQuery(null, lower, upper, upperInclusive, perQueryEventListener, context).execute();
     }
 
     /**
@@ -276,21 +275,7 @@ public class TermsReader implements Closeable
         ByteComparable upper = upperBytes == null
                                ? null
                                : ByteComparable.preencoded(termDictionaryFileEncodingVersion, upperBytes);
-        return new RangeQuery(term -> LikePatterns.accepts(automaton, term), lower, upper, false, perQueryEventListener, context).execute();
-    }
-
-    /**
-     * Looks up the postings offset (the trie payload) of the term exactly equal to the given key, or
-     * {@link TrieTermsDictionaryReader#NOT_FOUND} if the term is not present in this segment.
-     */
-    private long lookupExactTermOffset(ByteComparable term)
-    {
-        try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
-                                                                              termDictionaryRoot,
-                                                                              termDictionaryFileEncodingVersion))
-        {
-            return reader.exactMatch(term);
-        }
+        return new RangeQuery(term -> LikePatterns.accepts(automaton, term), lower, upper, true, perQueryEventListener, context).execute();
     }
 
     @VisibleForTesting
@@ -391,19 +376,18 @@ public class TermsReader implements Closeable
         private final Predicate<byte[]> termFilter;
         private final ByteComparable lower;
         private final ByteComparable upper;
-        private final boolean excludeExactUpperTerm;
+        private final boolean upperInclusive;
 
         // When the term filter is not null, only the terms it accepts are read
-        RangeQuery(@Nullable Predicate<byte[]> termFilter, ByteComparable lower, ByteComparable upper, boolean excludeExactUpperTerm, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
+        RangeQuery(@Nullable Predicate<byte[]> termFilter, ByteComparable lower, ByteComparable upper, boolean upperInclusive, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
-            assert termFilter == null || !excludeExactUpperTerm : "per-term filtering already excludes the upper bound term";
             this.listener = listener;
             this.termFilter = termFilter;
             lookupStartTime = Clock.Global.nanoTime();
             this.context = context;
             this.lower = lower;
             this.upper = upper;
-            this.excludeExactUpperTerm = excludeExactUpperTerm;
+            this.upperInclusive = upperInclusive;
         }
 
         public PostingList execute()
@@ -416,23 +400,15 @@ public class TermsReader implements Closeable
                                                                                   lower,
                                                                                   upper,
                                                                                   true,
+                                                                                  upperInclusive,
                                                                                   termFilter != null,
                                                                                   termDictionaryFileEncodingVersion))
             {
                 if (!reader.hasNext())
                     return PostingList.EMPTY;
 
-                // The end bound of the trie scan is inclusive. When the caller asked for an end-exclusive scan,
-                // look up the postings offset of the term exactly equal to the upper bound (a single extra trie
-                // descent) so its postings can be skipped by readAndMergePostings without collecting and
-                // comparing the bytes of every matched term. Deferred until the scan is known non-empty, so
-                // empty segments (the common case for selective prefixes over many segments) skip the descent.
-                long excludedPostingsOffset = excludeExactUpperTerm && upper != null
-                                              ? lookupExactTermOffset(upper)
-                                              : TrieTermsDictionaryReader.NOT_FOUND;
-
                 context.checkpoint();
-                PostingList postings = readAndMergePostings(reader, excludedPostingsOffset);
+                PostingList postings = readAndMergePostings(reader);
 
                 listener.onTraversalComplete(Clock.Global.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
 
@@ -451,11 +427,9 @@ public class TermsReader implements Closeable
          * Reads the posting lists of the terms of the range accepted by the term filter, if any, and merges them
          * into a single posting list. It assumes that the posting list for each term is sorted.
          *
-         * @param excludedPostingsOffset postings offset of the single term to exclude from the merge (the term
-         *        exactly matching an end-exclusive upper bound), or {@link TrieTermsDictionaryReader#NOT_FOUND}
          * @return the posting lists for the terms matching the query.
          */
-        private PostingList readAndMergePostings(TrieTermsDictionaryReader reader, long excludedPostingsOffset) throws IOException
+        private PostingList readAndMergePostings(TrieTermsDictionaryReader reader) throws IOException
         {
             assert reader.hasNext();
             ArrayList<PostingList> postingLists = new ArrayList<>();
@@ -482,8 +456,6 @@ public class TermsReader implements Closeable
                     if (termFilter == null)
                     {
                         postingsOffset = reader.nextAsLong();
-                        if (excludedPostingsOffset != TrieTermsDictionaryReader.NOT_FOUND && excludedPostingsOffset == postingsOffset)
-                            continue;
                     }
                     else
                     {
@@ -544,24 +516,15 @@ public class TermsReader implements Closeable
         protected final T terms;
         @Nullable
         private final Predicate<byte[]> filter;
-        @Nullable
-        private final ByteComparable excludedTerm;
-        // the postings offset of the excluded term, looked up when the scan returns its first term
-        private long excludedPostingsOffset = TrieTermsDictionaryReader.NOT_FOUND;
-        private boolean excludedTermLookedUp;
         private final IndexInput postingsInput;
         private final IndexInput postingsSummaryInput;
         private Pair<ByteComparable, Long> entry;
         private Pair<ByteComparable, Long> pending;
 
-        /**
-         * @param excludedTerm the single term to skip, if any
-         */
-        AbstractTermsScanner(T terms, @Nullable Predicate<byte[]> filter, @Nullable ByteComparable excludedTerm)
+        AbstractTermsScanner(T terms, @Nullable Predicate<byte[]> filter)
         {
             this.terms = terms;
             this.filter = filter;
-            this.excludedTerm = excludedTerm;
             // If an open throws, the constructor exits before the caller could clean up: close what was already
             // opened on the way out instead of leaking it.
             IndexInput postings = null;
@@ -627,17 +590,6 @@ public class TermsReader implements Closeable
             while (terms.hasNext())
             {
                 Pair<ByteComparable, Long> candidate = terms.next();
-                if (excludedTerm != null)
-                {
-                    // deferred until the scan is known not to be empty, as in RangeQuery
-                    if (!excludedTermLookedUp)
-                    {
-                        excludedPostingsOffset = lookupExactTermOffset(excludedTerm);
-                        excludedTermLookedUp = true;
-                    }
-                    if (candidate.right == excludedPostingsOffset)
-                        continue;
-                }
                 if (filter == null || filter.test(ByteSourceInverse.readBytes(candidate.left.asComparableBytes(termDictionaryFileEncodingVersion))))
                 {
                     pending = candidate;
@@ -658,7 +610,7 @@ public class TermsReader implements Closeable
 
         private TermsScanner(Version version, AbstractType<?> type)
         {
-            super(new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot, termDictionaryFileEncodingVersion), null, null);
+            super(new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot, termDictionaryFileEncodingVersion), null);
             // We decode based on the logic used to encode the min and max terms in the trie.
             if (version.onOrAfter(Version.DB) && TypeUtil.isComposite(type))
             {
@@ -673,20 +625,20 @@ public class TermsReader implements Closeable
         }
 
         /**
-         * The terms from {@code lower} to {@code upper}, both inclusive, the {@code null} bounds being unbounded,
-         * that the filter accepts and that are not the excluded term.
+         * The terms from {@code lower}, included, to {@code upper}, included or not as requested, that the filter
+         * accepts. The {@code null} bounds are unbounded.
          */
-        private TermsScanner(@Nullable ByteComparable lower, @Nullable ByteComparable upper, @Nullable Predicate<byte[]> filter, @Nullable ByteComparable excludedTerm)
+        private TermsScanner(@Nullable ByteComparable lower, @Nullable ByteComparable upper, boolean upperInclusive, @Nullable Predicate<byte[]> filter)
         {
             super(new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
                                                 termDictionaryRoot,
                                                 lower,
                                                 upper,
                                                 true,
+                                                upperInclusive,
                                                 true,
                                                 termDictionaryFileEncodingVersion),
-                  filter,
-                  excludedTerm);
+                  filter);
             // reading them would move the reader, and only the full scans of segment merging need them
             this.minTerm = null;
             this.maxTerm = null;
@@ -717,22 +669,22 @@ public class TermsReader implements Closeable
     {
         private ReverseTermsScanner()
         {
-            super(new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot), null, null);
+            super(new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot), null);
         }
 
         /**
-         * The terms from {@code upper} down to {@code lower}, both inclusive, the {@code null} bounds being
-         * unbounded, that the filter accepts and that are not the excluded term.
+         * The terms from {@code upper}, included or not as requested, down to {@code lower}, included, that the
+         * filter accepts. The {@code null} bounds are unbounded.
          */
-        private ReverseTermsScanner(@Nullable ByteComparable lower, @Nullable ByteComparable upper, @Nullable Predicate<byte[]> filter, @Nullable ByteComparable excludedTerm)
+        private ReverseTermsScanner(@Nullable ByteComparable lower, @Nullable ByteComparable upper, boolean upperInclusive, @Nullable Predicate<byte[]> filter)
         {
             super(new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
                                                        termDictionaryRoot,
                                                        lower,
                                                        upper,
+                                                       upperInclusive,
                                                        termDictionaryFileEncodingVersion),
-                  filter,
-                  excludedTerm);
+                  filter);
         }
     }
 

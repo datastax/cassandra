@@ -34,6 +34,8 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
 @NotThreadSafe
 public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends BaseValueIterator<CONCRETE>
 {
+    /** Whether the entry exactly equal to the end is excluded, see {@link RightBoundTreatment#LESS}. */
+    private final boolean excludeExactEnd;
 
     protected ValueIterator(Rebufferer source, long root, ByteComparable.Version version)
     {
@@ -43,6 +45,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
     protected ValueIterator(Rebufferer source, long root, boolean collecting, ByteComparable.Version version)
     {
         super(source, root, null, true, version);
+        excludeExactEnd = false;
         initializeNoLeftBound(root, 256);
     }
 
@@ -51,9 +54,14 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
         this(source, root, start, end, admitPrefix, false, version);
     }
 
+    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting, ByteComparable.Version version)
+    {
+        this(source, root, start, end, admitPrefix, RightBoundTreatment.ADMIT_EXACT, collecting, version);
+    }
+
     /**
-     * Constrained iterator. The end position is always treated as inclusive, and we have three possible treatments for
-     * the start, specified in admitPrefix:
+     * Constrained iterator. The entry equal to the end position is included unless endTreatment is {@code LESS}, and
+     * we have three possible treatments for the start, specified in admitPrefix:
      * <ul>
      *   <li> When {@code GREATER}, exact matches and any prefixes of the start are excluded.
      *   <li> When {@code ADMIT_EXACT}, exact matches are included.
@@ -63,9 +71,10 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
      * </ul>
      * This behaviour is shared with the reverse counterpart {@link ReverseValueIterator}.
      */
-    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting, ByteComparable.Version version)
+    protected ValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, RightBoundTreatment endTreatment, boolean collecting, ByteComparable.Version version)
     {
         super(source, root, end != null ? end.asComparableBytes(version) : null, collecting, version);
+        excludeExactEnd = endTreatment == RightBoundTreatment.LESS;
 
         if (start != null)
             initializeWithLeftBound(root, start.asComparableBytes(byteComparableVersion), admitPrefix, limit != null);
@@ -93,7 +102,7 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
         try
         {
             go(root);
-            if (hasPayload())
+            if (hasPayload() && !isExcludedEnd(limitByte))
                 next = root;
             else
                 next = NOT_PREPARED;
@@ -191,8 +200,18 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
         childIndex = -1 - childIndex - 1;
         stack = new IterationPosition(position, childIndex, limitByte, stackPrev);
 
-        // Advancing now gives us first match if we didn't find one already.
-        next = maybeAcceptPayloadedNode(admitPrefix, skipToFirstByte, payloadedNode);
+        // Advancing now gives us first match if we didn't find one already. When the start is the excluded end there
+        // is no match at all: this node is the only one within the limit.
+        next = isExcludedEnd(limitByte) ? NOT_PREPARED : maybeAcceptPayloadedNode(admitPrefix, skipToFirstByte, payloadedNode);
+    }
+
+    /**
+     * Whether the node whose path consumed the limit up to the given byte is the entry equal to an exclusive end:
+     * the limit is exhausted exactly at that node.
+     */
+    private boolean isExcludedEnd(int limitByte)
+    {
+        return excludeExactEnd && limitByte == ByteSource.END_OF_STREAM;
     }
 
     private long maybeAcceptPayloadedNode(LeftBoundTreatment admitPrefix, int trailingByte, long payloadedNode)
@@ -269,7 +288,9 @@ public class ValueIterator<CONCRETE extends ValueIterator<CONCRETE>> extends Bas
                 if (collector != null)
                     collector.add(transitionByte);
 
-                if (payloadFlags() != 0)
+                // the entry equal to an exclusive end is skipped: the next iteration ascends from it, as all of
+                // its children are beyond the limit
+                if (payloadFlags() != 0 && !isExcludedEnd(l))
                     return child;
             }
             else
