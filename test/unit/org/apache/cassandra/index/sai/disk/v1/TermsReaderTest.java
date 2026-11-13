@@ -247,7 +247,13 @@ public class TermsReaderTest extends SaiRandomizedTest
         final IndexDescriptor indexDescriptor = newIndexDescriptor();
         final String index = newIndex();
         final IndexContext indexContext = SAITester.createIndexContext(index, UTF8Type.instance);
-        final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildStringTermsEnum(version, 50, 3, () -> randomTerm(4, 10), () -> nextInt(0, 300));
+        final List<InvertedIndexBuilder.TermsEnum> termsEnum = buildStringTermsEnum(version, 50, 300, () -> randomTerm(4, 10), () -> nextInt(0, 2000));
+        // Posting lists of all kinds: the short ones, that a range query reads when it finds their term, the ones
+        // just above that limit, and the ones of several blocks. The row ids are shared by many terms.
+        int[] postingListSizes = { 1, 3, TermsReader.MAX_POSTINGS_READ_EAGERLY, TermsReader.MAX_POSTINGS_READ_EAGERLY + 1, 128, 129, 300 };
+        boolean onlyShort = randomIntBetween(0, 4) == 0;
+        for (InvertedIndexBuilder.TermsEnum term : termsEnum)
+            term.postings.resize(onlyShort ? randomIntBetween(1, 3) : postingListSizes[randomIntBetween(0, postingListSizes.length - 1)]);
 
         SegmentMetadata.ComponentMetadataMap indexMetas;
         IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);

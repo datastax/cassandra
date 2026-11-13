@@ -45,6 +45,8 @@ import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.ScanningPostingsReader;
+import org.apache.cassandra.index.sai.disk.v1.postings.ShortPostingsReader;
+import org.apache.cassandra.index.sai.disk.v1.postings.SortedRowIdsBuilder;
 import org.apache.cassandra.index.sai.disk.v1.trie.ReverseTrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
@@ -88,7 +90,18 @@ public class TermsReader implements Closeable
     private final long termDictionaryRoot;
     private final Version version;
     private final ByteComparable.Version termDictionaryFileEncodingVersion;
+    private final int maxSegmentRowId;
 
+    /**
+     * In a range query, the posting lists with at most this number of row ids are read when their term is found,
+     * instead of staying open until the merged posting list is consumed. An open {@link PostingsReader} retains
+     * a few hundred bytes, a row id read eagerly four: below this size reading the whole list is cheaper in memory
+     * than keeping it open, and it costs no additional read as the list fits in one block.
+     */
+    @VisibleForTesting
+    static final int MAX_POSTINGS_READ_EAGERLY = 32;
+
+    @VisibleForTesting
     public TermsReader(IndexContext indexContext,
                        FileHandle termsData,
                        ByteComparable.Version termsDataEncodingVersion,
@@ -97,7 +110,23 @@ public class TermsReader implements Closeable
                        long termsFooterPointer,
                        Version version) throws IOException
     {
+        this(indexContext, termsData, termsDataEncodingVersion, postingLists, root, termsFooterPointer, version, PostingList.END_OF_STREAM - 1);
+    }
+
+    /**
+     * @param maxSegmentRowId the largest row id of the segment, which bounds the memory of the range queries
+     */
+    public TermsReader(IndexContext indexContext,
+                       FileHandle termsData,
+                       ByteComparable.Version termsDataEncodingVersion,
+                       FileHandle postingLists,
+                       long root,
+                       long termsFooterPointer,
+                       Version version,
+                       int maxSegmentRowId) throws IOException
+    {
         this.indexContext = indexContext;
+        this.maxSegmentRowId = maxSegmentRowId;
         this.version = version;
         termDictionaryFile = termsData;
         postingsFile = postingLists;
@@ -426,6 +455,12 @@ public class TermsReader implements Closeable
         /**
          * Reads the posting lists of the terms of the range accepted by the term filter, if any, and merges them
          * into a single posting list. It assumes that the posting list for each term is sorted.
+         * <p>
+         * The merge needs the first row id of every term before it can return its own first row id, so the work is
+         * proportional to the number of terms of the range whatever the limit of the query. To keep the memory low
+         * on the ranges with many selective terms, only the long posting lists stay open as sources of the merge:
+         * the short ones are read to the end right away, see {@link #MAX_POSTINGS_READ_EAGERLY}, into a
+         * {@link SortedRowIdsBuilder}, which takes one bit per row of the segment at most.
          *
          * @return the posting lists for the terms matching the query.
          */
@@ -433,6 +468,7 @@ public class TermsReader implements Closeable
         {
             assert reader.hasNext();
             ArrayList<PostingList> postingLists = new ArrayList<>();
+            SortedRowIdsBuilder shortPostings = new SortedRowIdsBuilder(maxSegmentRowId);
 
             // index inputs will be closed with the onClose method of the returned merged posting list;
             // if the second open throws, the first must be closed here instead of leaking
@@ -450,6 +486,8 @@ public class TermsReader implements Closeable
 
             try
             {
+                // the summary input serves the short lists too: all its users seek before they read
+                ShortPostingsReader shortPostingsReader = new ShortPostingsReader(postingsSummaryInput, readFrequencies());
                 do
                 {
                     long postingsOffset;
@@ -465,13 +503,13 @@ public class TermsReader implements Closeable
                         postingsOffset = entry.right;
                     }
 
-                    var currentReader = currentReader(postingsInput, postingsSummaryInput, postingsOffset);
-
-                    if (!currentReader.isEmpty())
-                        postingLists.add(currentReader);
-                    else
-                        FileUtils.close(currentReader);
+                    if (!shortPostingsReader.readIfShort(postingsOffset, MAX_POSTINGS_READ_EAGERLY, shortPostings))
+                        postingLists.add(currentReader(postingsInput, postingsSummaryInput, postingsOffset));
                 } while (reader.hasNext());
+
+                listener.postingListEventListener().postingDecoded(shortPostingsReader.postingsDecoded());
+                if (!shortPostings.isEmpty())
+                    postingLists.add(shortPostings.build());
             }
             catch (Throwable e)
             {
