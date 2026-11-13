@@ -98,6 +98,9 @@ New features
 
 Upgrading
 ---------
+    - Use static and regular columns under the same OR only once all nodes are upgraded: older replicas evaluate
+      those filters with the old semantics and may silently miss rows at consistency levels where they are the
+      only replica read.
     - Breaking change in CQL LIKE patterns: every '%' is now a wildcard wherever it appears (previously only the
       leading and trailing ones), '_' is now a single-character wildcard (previously a literal character), and a
       pattern without wildcards matches only equal values. Queries whose pattern contains '_' or an inner '%' may
