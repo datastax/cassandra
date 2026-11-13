@@ -1249,7 +1249,7 @@ public class RowFilter
             // (e.g. x = 2 AND x > 5), so there is no need to check an equality against the slice bounds.
             assert eqValue == null || (lowerBound == null && upperBound == null) : EQUALITY_WITH_BOUNDS_MESSAGE;
 
-            if (lowerBound == null || upperBound == null)
+            if (eqValue != null || lowerBound == null || upperBound == null)
                 return false;
 
             int cmp = type.compareForCQL(lowerBound, upperBound);
