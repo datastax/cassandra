@@ -682,7 +682,7 @@ public class RowFilter
                                                QueryOptions options,
                                                ANNOptions annOptions)
         {
-            if (CellBounds.isConjunctionAlwaysFalse(conjunction.expressions, table, indexHints))
+            if (CellBounds.isUnsatisfiableConjunction(conjunction.expressions, table, indexHints))
                 return FilterElement.REJECT_ALL;
 
             for (StatementRestrictions child : children)
@@ -1243,7 +1243,7 @@ public class RowFilter
          *   <li>NEQ eliminates a single-point interval (e.g. {@code x >= 0 AND x <= 0 AND x != 0})</li>
          * </ul>
          */
-        private boolean isAlwaysFalse()
+        private boolean isUnsatisfiable()
         {
             // CQL validation forbids combining an equality with any other relation on the same column or map element
             // (e.g. x = 2 AND x > 5), so there is no need to check an equality against the slice bounds.
@@ -1282,7 +1282,7 @@ public class RowFilter
          * For example, {@code x < 1 AND x > 2} is an unsatisfiable interval.
          */
         @VisibleForTesting
-        static boolean isConjunctionAlwaysFalse(List<Expression> expressions, TableMetadata table, IndexHints hints)
+        static boolean isUnsatisfiableConjunction(List<Expression> expressions, TableMetadata table, IndexHints hints)
         {
             if (expressions.size() <= 1)
                 return false;
@@ -1302,7 +1302,7 @@ public class RowFilter
 
             for (CellBounds bounds : perCellBounds.values())
             {
-                if (bounds.isAlwaysFalse())
+                if (bounds.isUnsatisfiable())
                     return true;
             }
 

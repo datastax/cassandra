@@ -135,18 +135,18 @@ public class RowFilterCellBoundsTest
     public void testValidCombinations()
     {
         // one lower bound and one upper bound
-        assertIsNotAlwaysFalse(simple(Operator.GT, 1), simple(Operator.LT, 2));
-        assertIsAlwaysFalse(simple(Operator.GT, 2), simple(Operator.LT, 1));
+        assertIsNotUnsatisfiable(simple(Operator.GT, 1), simple(Operator.LT, 2));
+        assertIsUnsatisfiable(simple(Operator.GT, 2), simple(Operator.LT, 1));
 
         // equalities in different cells, and with bounds in other cells
-        assertIsNotAlwaysFalse(simple(Operator.EQ, 1), map(Operator.GT, "k", 2));
-        assertIsNotAlwaysFalse(map(Operator.EQ, "k1", 1), map(Operator.GT, "k2", 2));
-        assertIsNotAlwaysFalse(map(Operator.GT, "k1", 1), map(Operator.GT, "k2", 2));
-        assertIsNotAlwaysFalse(map(Operator.LT, "k1", 1), map(Operator.LT, "k2", 2));
+        assertIsNotUnsatisfiable(simple(Operator.EQ, 1), map(Operator.GT, "k", 2));
+        assertIsNotUnsatisfiable(map(Operator.EQ, "k1", 1), map(Operator.GT, "k2", 2));
+        assertIsNotUnsatisfiable(map(Operator.GT, "k1", 1), map(Operator.GT, "k2", 2));
+        assertIsNotUnsatisfiable(map(Operator.LT, "k1", 1), map(Operator.LT, "k2", 2));
 
         // equalities and inequalities
-        assertIsNotAlwaysFalse(simple(Operator.EQ, 1), simple(Operator.NEQ, 1));
-        assertIsNotAlwaysFalse(simple(Operator.NEQ, 1), simple(Operator.NEQ, 2));
+        assertIsNotUnsatisfiable(simple(Operator.EQ, 1), simple(Operator.NEQ, 1));
+        assertIsNotUnsatisfiable(simple(Operator.NEQ, 1), simple(Operator.NEQ, 2));
     }
 
     /// Verifies the expressions that are ignored.
@@ -154,24 +154,24 @@ public class RowFilterCellBoundsTest
     public void testIgnoredExpressions()
     {
         // a single expression can't be empty
-        assertIsNotAlwaysFalse(simple(Operator.GT, 1));
-        assertIsNotAlwaysFalse();
+        assertIsNotUnsatisfiable(simple(Operator.GT, 1));
+        assertIsNotUnsatisfiable();
 
         // operators other than slices, EQ and NEQ are ignored
-        assertIsNotAlwaysFalse(simple(Operator.CONTAINS, 1), simple(Operator.GT, 1));
-        assertIsAlwaysFalse(simple(Operator.GT, 2), simple(Operator.CONTAINS, 1), simple(Operator.LT, 1));
+        assertIsNotUnsatisfiable(simple(Operator.CONTAINS, 1), simple(Operator.GT, 1));
+        assertIsUnsatisfiable(simple(Operator.GT, 2), simple(Operator.CONTAINS, 1), simple(Operator.LT, 1));
 
         // counters are not comparable
-        assertIsNotAlwaysFalse(counter(Operator.GT, 2), counter(Operator.LT, 1));
+        assertIsNotUnsatisfiable(counter(Operator.GT, 2), counter(Operator.LT, 1));
     }
 
     /// Verifies NEQ in map elements.
     @Test
     public void testMapNotEquals()
     {
-        assertIsAlwaysFalse(map(Operator.GTE, "k", 1), map(Operator.LTE, "k", 1), map(Operator.NEQ, "k", 1));
-        assertIsNotAlwaysFalse(map(Operator.GTE, "k", 1), map(Operator.LTE, "k", 1), map(Operator.NEQ, "k", 2));
-        assertIsNotAlwaysFalse(map(Operator.GTE, "k1", 1), map(Operator.LTE, "k1", 1), map(Operator.NEQ, "k2", 1));
+        assertIsUnsatisfiable(map(Operator.GTE, "k", 1), map(Operator.LTE, "k", 1), map(Operator.NEQ, "k", 1));
+        assertIsNotUnsatisfiable(map(Operator.GTE, "k", 1), map(Operator.LTE, "k", 1), map(Operator.NEQ, "k", 2));
+        assertIsNotUnsatisfiable(map(Operator.GTE, "k1", 1), map(Operator.LTE, "k1", 1), map(Operator.NEQ, "k2", 1));
     }
 
     @Test
@@ -190,7 +190,7 @@ public class RowFilterCellBoundsTest
 
     private static void assertFails(String message, RowFilter.Expression... expressions)
     {
-        Assertions.assertThatThrownBy(() -> isAlwaysFalse(expressions))
+        Assertions.assertThatThrownBy(() -> isUnsatisfiable(expressions))
                   .isInstanceOf(AssertionError.class)
                   .hasMessage(message);
     }
@@ -210,18 +210,18 @@ public class RowFilterCellBoundsTest
         return new RowFilter.MapComparisonExpression(mapColumn, ByteBufferUtil.bytes(key), operator, ByteBufferUtil.bytes(value));
     }
 
-    private static void assertIsAlwaysFalse(RowFilter.Expression... expressions)
+    private static void assertIsUnsatisfiable(RowFilter.Expression... expressions)
     {
-        assertTrue(isAlwaysFalse(expressions));
+        assertTrue(isUnsatisfiable(expressions));
     }
 
-    private static void assertIsNotAlwaysFalse(RowFilter.Expression... expressions)
+    private static void assertIsNotUnsatisfiable(RowFilter.Expression... expressions)
     {
-        assertFalse(isAlwaysFalse(expressions));
+        assertFalse(isUnsatisfiable(expressions));
     }
 
-    private static boolean isAlwaysFalse(RowFilter.Expression... expressions)
+    private static boolean isUnsatisfiable(RowFilter.Expression... expressions)
     {
-        return RowFilter.CellBounds.isConjunctionAlwaysFalse(Arrays.asList(expressions), table, IndexHints.NONE);
+        return RowFilter.CellBounds.isUnsatisfiableConjunction(Arrays.asList(expressions), table, IndexHints.NONE);
     }
 }
