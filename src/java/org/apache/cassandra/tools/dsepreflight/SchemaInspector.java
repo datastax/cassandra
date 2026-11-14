@@ -88,9 +88,10 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.rootCause;
  * <p>
  * The schema of a DSE 5.1 node ({@link #forDse51}) is read from its big sstables and checked by the same parsers, with
  * what DSE 5.1 has and lacks: no hidden columns, graph engine or graph tables, so that a view needs no hidden column;
- * no check of the replication; the traces of the features HCD 2.0 does not support left to the node inspection, which
- * gathers them with the rules of the start check of {@code DSE_5_1}; and the checks of DSE 5.1 alone, blocking: SASI
- * indexes, the materialized views restricted to rows, and the rows a failed {@code UNRESTRICT ROWS} on a view leaves.
+ * the replication checked as DSE 6's, against the nodes of {@code system.local} and {@code system.peers}; the traces
+ * of the features HCD 2.0 does not support left to the node inspection, which gathers them with the rules of the start
+ * check of {@code DSE_5_1}; and the checks of DSE 5.1 alone, blocking: SASI indexes, the materialized views restricted
+ * to rows, and the rows a failed {@code UNRESTRICT ROWS} on a view leaves.
  */
 final class SchemaInspector
 {
@@ -119,6 +120,21 @@ final class SchemaInspector
                                                             "solr_admin", "system_backups");
     /** The recommendation of the remedies of {@code SYSTEM_AUTH_REPLICATION} and {@code KEYSPACE_REPLICATION}. */
     private static final String RECOMMENDED = RECOMMENDED_REPLICAS + " replicas, or as many as its nodes if fewer, are recommended";
+    /**
+     * With {@code dse51}, the remedy of a blocking {@code SYSTEM_AUTH_REPLICATION} in the mixed phase, when the
+     * replication can no longer be changed: what the replication does until it is changed, in {@code DSE_5_1}.
+     */
+    private static final String MIXED_PHASE_AUTH_REMEDY_DSE51 =
+        "the upgrade has started (UPGRADED_PEERS), and the replication cannot be changed in the mixed phase (no " +
+        "schema change and no repair then, and the upgraded nodes do not receive DSE's schema changes): upgrade no " +
+        "further node and report to the upgrade owner; until it is changed, in a data center whose replicas of " +
+        "system_auth cannot make a LOCAL_QUORUM (while too few of them are up there, and always where the data " +
+        "center lacks replicas, not listed, at 0 or SimpleStrategy over several data centers, or has fewer nodes " +
+        "than its LOCAL_QUORUM needs, with EverywhereStrategy the quorum of the whole ring) an upgraded node starts " +
+        "only after the wait of dse_restrictions_check_wait_seconds, on the check of its own replica, and the logins " +
+        "on it fail for the roles whose replicas cannot make that quorum; and with a replication HCD 2.0 cannot use " +
+        "(no class or another class, replicas that are no number, or no replication_factor) an upgraded node cannot " +
+        "start";
     /** The remedy of a replication warning in the mixed phase, when the replication can no longer be changed. */
     private static final String MIXED_PHASE_NO_CHANGE = "the upgrade has started (UPGRADED_PEERS), so the replication stays as it is (no schema " +
                                                         "change and no repair in the mixed phase)";
@@ -161,11 +177,23 @@ final class SchemaInspector
     /** How a remedy on DSE 5.1 starts. */
     private static final String DSE51_BEFORE = "on DSE 5.1, before the first node is upgraded: ";
     /**
-     * What the remedies of a view restricted to rows say of themselves: the drop and creation of the view, decided for
-     * the upgrade, has not been run on real DSE 5.1.51 nodes yet.
+     * What a DSE 5.1 inspection says in the mixed phase where its remedies drop and create a view, a schema change the
+     * upgraded nodes do not take from DSE: the remedies of {@code RESTRICTED_VIEW}, {@code VIEW_TABLE_ROW} and the
+     * {@code UNLOADABLE_TABLE} of views, and the {@code Materialized views} step.
      */
-    static final String VIEW_REMEDY_NOT_VALIDATED = "this remedy is not validated on DSE 5.1.51 nodes yet: " +
-                                                    "confirm it with the upgrade owner before running it";
+    static final String NO_VIEW_CHANGE_IN_MIXED_PHASE =
+        "the upgrade has started (UPGRADED_PEERS): no view is dropped or created in the mixed phase, whose DSE " +
+        "schema changes the upgraded nodes do not take: upgrade no further node and report to the upgrade owner";
+    /** The remedy of {@code RESTRICTED_VIEW} and {@code VIEW_TABLE_ROW} in the mixed phase, before their end. */
+    static final String MIXED_PHASE_NO_VIEW_CHANGE_PREFIX = NO_VIEW_CHANGE_IN_MIXED_PHASE + "; ";
+    /** What the remedies of a view restricted to rows say of the drop of the view. */
+    static final String DROP_REMOVES_VIEW_GRANTS = "DROP MATERIALIZED VIEW, which also removes the view's rows/ grants";
+    /** What the remedies of a view restricted to rows say of a view beside which {@code VIEW_TABLE_ROW} names a row. */
+    static final String DROP_FAILS_BESIDE_THE_ROW = "a DROP MATERIALIZED VIEW on that node fails and leaves the row " +
+                                                    "without columns";
+    /** How a view's {@code RESTRICT ROWS} spreads, as a local trial on DSE 5.1.51 nodes found. */
+    static final String RESTRICTION_SPREADS_AT_RESTART = "only until that node restarts; after it, the other nodes " +
+                                                         "take it from that node's schema";
     /** What the remedies of a DSE 5.1 node say of {@code UNRESTRICT ROWS} on a view. */
     static final String NEVER_UNRESTRICT_VIEW = "never UNRESTRICT ROWS on a view: on DSE 5.1.51 it fails and leaves " +
                                                 "on the node that ran it a row of system_schema.tables after which " +
@@ -175,8 +203,9 @@ final class SchemaInspector
      * Whether the schema is DSE 5.1's ({@link #forDse51}): read from big sstables; no {@code hidden_columns},
      * {@code graph_engine}, {@code vertices} or {@code edges}, so that no view has a hidden column; the traces of the
      * features HCD 2.0 does not support left to the node inspection ({@code Dse6NonCoreTraces.Dse51Markers}), which
-     * takes the rows read here ({@link #rowsOf}); no check of the replication; and the checks of DSE 5.1 alone: SASI
-     * indexes, the materialized views restricted to rows, and the rows of {@code system_schema.tables} a failed
+     * takes the rows read here ({@link #rowsOf}); the replication checked against the nodes of {@code system.local}
+     * and {@code system.peers}, with no NodeSync in its remedies; and the checks of DSE 5.1 alone: SASI indexes, the
+     * materialized views restricted to rows, and the rows of {@code system_schema.tables} a failed
      * {@code UNRESTRICT ROWS} on a view leaves.
      */
     private final boolean dse51;
@@ -199,26 +228,34 @@ final class SchemaInspector
      * sets their compression back itself at its first start with the setting off
      */
     private final boolean systemInfoEncryption;
-    /** the nodes of each data center, this node included, as nodes/local and nodes/peers record them */
+    /**
+     * the nodes of each data center, this node included, as nodes/local and nodes/peers record them, or with
+     * {@link #dse51} {@code system.local} and {@code system.peers}
+     */
     private final Map<String, Integer> nodesByDataCenter;
-    /** the nodes whose data center nodes/local and nodes/peers do not give, not counted in {@link #nodesByDataCenter} */
+    /**
+     * the nodes whose data center nodes/local and nodes/peers (or {@code system.local} and {@code system.peers}) do
+     * not give, not counted in {@link #nodesByDataCenter}
+     */
     private final int nodesWithoutDataCenter;
     /**
      * whether nodes/local and nodes/peers could both be read and trusted (a missing nodes/peers read as no peer; nodes/peers
      * not trusted as {@code NodeInspector.peersFileProblem} says: its attributes unreadable, the file changed while it was
      * read, a nodes/peers.old left, or a nodes/peers.txn left with the file missing; nor when its read failed,
      * {@code NodeInspector.peersReadFailure}, or when it is missing while nodetool status lists other nodes), so that
-     * every node is either counted or without a data center
+     * every node is either counted or without a data center; with {@link #dse51}, whether {@code system.local} has this
+     * node's row and {@code system.local} and {@code system.peers} were read
      */
     private final boolean nodesFilesRead;
     /**
-     * whether nodes/peers could be read and trusted, without which the mixed phase (a peer already on HCD 2.0) cannot be
-     * told
+     * whether nodes/peers (with {@link #dse51}, {@code system.peers}) could be read and trusted, without which the
+     * mixed phase (a peer already on HCD 2.0) cannot be told
      */
     private final boolean peersRead;
     /**
      * whether nodes/peers is missing and read as no peer, as on a node that never had a peer, with nodes/local read and
-     * recording a data center: this node is then counted alone, which a lost file would make wrong
+     * recording a data center: this node is then counted alone, which a lost file would make wrong; always false with
+     * {@link #dse51}, a {@code system.peers} without sstable being told by the node inspection ({@code NO_PEERS})
      */
     private final boolean peersFileMissing;
     /**
@@ -315,6 +352,12 @@ final class SchemaInspector
     private Map<String, String> replicationClassByKeyspace;
     /** With {@link #dse51}: whether a table or view of the schema has an encrypting compression ({@code TDE_TABLE}). */
     boolean encryptedTablesFound;
+    /**
+     * Whether an {@code UNLOADABLE_TABLE} names tables or dropped columns, not only views: the step of the schema of a
+     * DSE 5.1 node leaves the views to the step of the views in the mixed phase. Set by both inspections, read by the
+     * DSE 5.1 one only.
+     */
+    boolean unloadableTablesFound;
     /** The tables of {@code system_schema} the traces of the node inspection of DSE 5.1 are read from. */
     static final List<String> MARKER_SCHEMA_TABLES = List.of(SchemaKeyspaceTables.KEYSPACES,
                                                              SchemaKeyspaceTables.INDEXES,
@@ -357,13 +400,23 @@ final class SchemaInspector
      *                                      left out of the checks as the traces the node inspection reports are
      * @param rowLevelAccessControlEnforced whether DSE 5.1 enforces row-level access control on this node; null when
      *                                      it is not known
+     * @param nodesByDataCenter             the nodes of each data center, this node included, as {@code system.local}
+     *                                      and {@code system.peers} record them
+     * @param nodesWithoutDataCenter        the nodes of those tables that record no data center
+     * @param nodesTablesRead               whether {@code system.local} has this node's row and both tables were read
+     * @param peersRead                     whether {@code system.peers} was read
+     * @param mixedPhase                    whether a peer already runs HCD 2.0 ({@code UPGRADED_PEERS})
      */
     static SchemaInspector forDse51(List<File> dataDirectories, @Nullable String dsefsKeyspace,
                                     IPartitioner partitioner, @Nullable Boolean rowLevelAccessControlEnforced,
+                                    Map<String, Integer> nodesByDataCenter, int nodesWithoutDataCenter,
+                                    boolean nodesTablesRead, boolean peersRead, boolean mixedPhase,
                                     List<Finding> findings)
     {
+        // a system.peers without sstable reads as no peer, as on a node that never had one, which NO_PEERS says
         return new SchemaInspector(true, rowLevelAccessControlEnforced, dataDirectories, dsefsKeyspace, partitioner,
-                                   false, Map.of(), 0, false, false, false, false, findings);
+                                   false, nodesByDataCenter, nodesWithoutDataCenter, nodesTablesRead, peersRead, false,
+                                   mixedPhase, findings);
     }
 
     void inspect()
@@ -386,8 +439,7 @@ final class SchemaInspector
             checkFunctions();
             checkTriggers();
         }
-        // DSE 5.1: no check of the replication
-        if (schemaRead && !dse51)
+        if (schemaRead)
         {
             // the other keyspaces first, so that the remedies of system_auth know whether their check completed
             try
@@ -763,7 +815,11 @@ final class SchemaInspector
      * names (the replicas listed kept when higher), to be lowered by hand where a data center has fewer nodes, and a
      * warning asking for the check by hand when nothing blocks. A schema without {@code system_auth} blocks; a
      * replication that cannot be read is left to {@code UNLOADABLE_KEYSPACE}. The grading is {@link #grade}'s, which
-     * {@link #checkKeyspaceReplication} shares.
+     * {@link #checkKeyspaceReplication} shares. With {@link #dse51} the nodes are those of {@code system.local} and
+     * {@code system.peers}, which the texts name, graded as for DSE 6: logins depend on the replication during the
+     * mixed phase, on every node, and an upgraded node in {@code DSE_5_1} that cannot read at {@code LOCAL_QUORUM}
+     * starts on the check of its own replica after the wait of {@code dse_restrictions_check_wait_seconds} instead of
+     * not starting.
      */
     private void checkAuthReplication()
     {
@@ -808,27 +864,44 @@ final class SchemaInspector
         boolean aboveTheNodes = false;
         for (Shortfall shortfall : grade.shortfalls)
         {
-            shortfalls.add(shortfall.text + ": an upgraded node there cannot start while another node of " + shortfall.dataCenter + " is down");
+            String whileDown = " while another node of " + shortfall.dataCenter + " is down";
+            shortfalls.add(shortfall.text + ": " + (dse51 ? "too few" : upgradedNodeWithoutQuorum()) + whileDown);
             shortOf.add(shortfall.dataCenter);
             fewerThanRecommended |= !shortfall.above;
             aboveTheNodes |= shortfall.above;
         }
         String everyDataCenter = nodesByDataCenter.isEmpty() ? "every data center of the cluster (nodetool status names them)"
-                                                             : "every data center of nodes/local and nodes/peers";
-        String recommendation = RECOMMENDED + ": in a data center of " + RECOMMENDED_REPLICAS + " nodes or more they let the upgrade go on while a " +
-                                "node is down";
+                                                             : "every data center of " + nodesSources();
+        // in DSE_5_1 the upgrade goes on with a node down; what more replicas buy is the logins and a start at once
+        String recommendation = dse51 ? RECOMMENDED + ": in a data center of " + RECOMMENDED_REPLICAS + " nodes or " +
+                                        "more they keep the logins working and an upgraded node starting at once " +
+                                        "while a node is down"
+                                      : RECOMMENDED + ": in a data center of " + RECOMMENDED_REPLICAS + " nodes or " +
+                                        "more they let the upgrade go on while a node is down";
         // the other replicated system keyspaces are checked when nodes/local and nodes/peers name several data centers
         // (checkKeyspaceReplication); otherwise, with the data centers of the nodes not all known, they may be several
+        String checkedOnlyWhen = "center too, which this tool checks only when " + nodesSources() + " name several";
         String otherKeyspaces = countsExact ? ""
                                 : !otherKeyspacesChecked() ? "; with several data centers, the other replicated system keyspaces need every data " +
-                                                             "center too, which this tool checks only when nodes/local and nodes/peers name several"
+                                                             checkedOnlyWhen
                                 : otherReplicationCompleted ? "; the other replicated system keyspaces were checked against the nodes whose data " +
                                                               "center is known only: check by hand that each has replicas in every data center too"
                                                             : "; the check of the other replicated system keyspaces did not complete (see " +
                                                               "INSPECTION_ERROR): check by hand that each has replicas in every data center too";
+        // DSE_5_1 falls back on this node's replica after the wait; the logins need system_auth on every node
+        String whenItCannot = dse51 ? "; when it cannot, it starts on the check of its own replica only after a " +
+                                      "wait of up to dse_restrictions_check_wait_seconds, and the logins of a role " +
+                                      "fail while the replicas of its partition are down, on the DSE 5.1 nodes and " +
+                                      "the HCD 2.0 nodes alike"
+                                    : " and refuses to start when it cannot";
         String reads = "an upgraded node reads DSE's access controls from system_auth at LOCAL_QUORUM (HCD 2.0's default " +
-                       "auth_read_consistency_level) when it starts and refuses to start when it cannot";
-        String keepUp = shortOf.isEmpty() ? "" : "keep every node of " + NodeInspector.namesWithAnd(shortOf) + " up while an upgraded node there starts";
+                       "auth_read_consistency_level) when it starts" + whenItCannot;
+        String keepUp = shortOf.isEmpty() ? ""
+                        : dse51 ? "keep every node of " + NodeInspector.namesWithAnd(shortOf) + " up as long as " +
+                                  "possible: while one is down, the logins its replicas serve fail and an upgraded " +
+                                  "node there starts only after the wait of dse_restrictions_check_wait_seconds"
+                        : "keep every node of " + NodeInspector.namesWithAnd(shortOf) + " up while an upgraded " +
+                          "node there starts";
         String unknown = unknownDataCenters();
         if (problems.isEmpty() && !countsExact)
         {
@@ -852,13 +925,16 @@ final class SchemaInspector
         }
         if (problems.isEmpty() && shortfalls.isEmpty())
         {
-            authReplicationStep = shown + ", enough in every data center of nodes/local and nodes/peers" +
+            authReplicationStep = shown + ", enough in every data center of " + nodesSources() +
                                   (peersFileMissing ? " (no nodes/peers: this node counted alone, see NO_PEERS_FILE)" : "");
             return;
         }
 
+        String twoNodes = dse51 ? "a node down still delays the start of an upgraded node there and fails the " +
+                                  "logins its replicas serve"
+                                : "an upgraded node still cannot start while the other one is down";
         String change = change(SchemaConstants.AUTH_KEYSPACE_NAME, grade, recommendation) +
-                        (grade.twoNodes ? "; in a data center of 2 nodes, an upgraded node still cannot start while the other one is down" : "") +
+                        (grade.twoNodes ? "; in a data center of 2 nodes, " + twoNodes : "") +
                         otherKeyspaces;
         if (problems.isEmpty())
         {
@@ -870,7 +946,9 @@ final class SchemaInspector
                           : fewerThanRecommended ? "more replicas (" + RECOMMENDED_REPLICAS + ", or up to the nodes of the data center) let"
                                                  : "as many replicas as the nodes of the data center let";
             String message = "the replication of system_auth is " + shown + ": " + items(shortfalls) + "; " + reads +
-                             (mixedPhase ? "" : "; " + more + " the upgrade go on while a node is down");
+                             (mixedPhase ? "" : "; " + more + (dse51 ? " the logins work and an upgraded node start " +
+                                                                       "at once while a node is down"
+                                                                     : " the upgrade go on while a node is down"));
             findings.add(warning("SYSTEM_AUTH_REPLICATION", message,
                                  mixedPhase ? MIXED_PHASE_NO_CHANGE + ": " + keepUp
                                             // no caveat on nodes/peers: a shortfall needs a data center of 3 nodes or more counted
@@ -878,13 +956,21 @@ final class SchemaInspector
             authReplicationStep = "see SYSTEM_AUTH_REPLICATION";
             return;
         }
+        // a replication HCD 2.0 cannot use fails the load of the keyspace: no start in either mode
+        String orNot = dse51 ? ", or the logins on the HCD 2.0 nodes there fail for the roles whose replicas cannot " +
+                               "make a LOCAL_QUORUM there and an upgraded node there starts only after the wait of " +
+                               "dse_restrictions_check_wait_seconds, on the check of its own replica, even with " +
+                               "every node up (with a replication HCD 2.0 cannot use, no class or another class, " +
+                               "replicas that are no number or no replication_factor, an upgraded node cannot start)"
+                             : ", or an upgraded node there cannot start, even with every node up";
         String message = "the replication of system_auth is " + shown + ": " + items(problems) + "; " + reads + ", so " + everyDataCenter + " needs " +
                          "replicas of system_auth (with several data centers, NetworkTopologyStrategy listing each), no more in a data center " +
-                         "than its nodes can make a LOCAL_QUORUM of, or an upgraded node there cannot start, even with every node up" +
+                         "than its nodes can make a LOCAL_QUORUM of" + orNot +
                          (shortfalls.isEmpty() ? "" : "; besides, " + items(shortfalls));
         if (mixedPhase)
         {
             findings.add(blocking("SYSTEM_AUTH_REPLICATION", message,
+                                  dse51 ? MIXED_PHASE_AUTH_REMEDY_DSE51 :
                                   "the upgrade has started (UPGRADED_PEERS), and the replication cannot be changed in the mixed phase (no schema change " +
                                   "and no repair then, and the upgraded nodes do not receive DSE's schema changes): upgrade no further node and report " +
                                   "to the upgrade owner; until it is changed, an upgraded node cannot start while too few of the replicas in its data " +
@@ -1046,7 +1132,7 @@ final class SchemaInspector
         else if (checked.isEmpty())
             otherReplicationStep = "none on SimpleStrategy or NetworkTopologyStrategy" + notRead;
         else
-            otherReplicationStep = list(checked) + ", enough in every data center of nodes/local and nodes/peers" +
+            otherReplicationStep = list(checked) + ", enough in every data center of " + nodesSources() +
                                    (countsExact() ? "" : ", checked against the nodes whose data center is known only (" + unknownDataCenters() + ')') +
                                    notRead;
     }
@@ -1061,6 +1147,9 @@ final class SchemaInspector
      */
     private boolean isReplicatedSystemKeyspace(String keyspace)
     {
+        // with dse51 the keyspaces of the traces of the node inspection are not read at all (tracedKeyspaces)
+        if (dse51 && tracedKeyspaces.contains(keyspace))
+            return false;
         boolean named = keyspace.startsWith("system_") || keyspace.startsWith("dse_") || keyspace.equals("solr_admin");
         return named && !keyspace.equals(SchemaConstants.AUTH_KEYSPACE_NAME) && Dse6NonCoreTraces.nonCoreKeyspaceFeature(keyspace) == null &&
                !keyspace.equals(dsefsKeyspace);
@@ -1095,19 +1184,48 @@ final class SchemaInspector
     /** Why the data centers of the nodes are not all known, when {@link #countsExact} is false. */
     private String unknownDataCenters()
     {
+        if (!nodesFilesRead && dse51)
+            return "system.local has no row of this node, or system.local or system.peers could not be read, and the " +
+                   "data centers of the nodes are not all known";
         if (!nodesFilesRead)
             return "nodes/local is missing, or nodes/local or nodes/peers could not be read, or nodes/peers was being rewritten by DSE, and the " +
                    "data centers of the nodes are not all known";
         if (nodesByDataCenter.isEmpty())
-            return "no data center is known from nodes/local and nodes/peers";
+            return "no data center is known from " + nodesSources();
         return (nodesWithoutDataCenter == 1 ? "the data center of 1 node is" : "the data centers of " + nodesWithoutDataCenter + " nodes are") +
-               " not known from nodes/local and nodes/peers";
+               " not known from " + nodesSources();
+    }
+
+    /**
+     * The sources of the nodes of each data center, as the texts name them: DSE 6's {@code nodes/local} and
+     * {@code nodes/peers}, or, with {@link #dse51}, the tables {@code system.local} and {@code system.peers}.
+     */
+    private String nodesSources()
+    {
+        return dse51 ? "system.local and system.peers" : "nodes/local and nodes/peers";
+    }
+
+    /** The source of the peers, as the texts name it: {@code nodes/peers}, or {@code system.peers} for DSE 5.1. */
+    private String peersSource()
+    {
+        return dse51 ? "system.peers" : "nodes/peers";
+    }
+
+    /**
+     * What a {@code system_auth} that misses {@code LOCAL_QUORUM} in a data center while a node is down does to an
+     * upgraded node there, for DSE 6: it cannot start. With {@link #dse51} a shortfall says "too few" only, the text
+     * of the read saying what a node in {@code DSE_5_1} does.
+     */
+    private static String upgradedNodeWithoutQuorum()
+    {
+        return "an upgraded node there cannot start";
     }
 
     /**
      * The change the remedies of {@code SYSTEM_AUTH_REPLICATION} and {@code KEYSPACE_REPLICATION} give for
-     * {@code keyspace}: with the NodeSync flag off, the {@code ALTER KEYSPACE} with the replicas {@code grade} wants,
-     * the checks of the schema version, {@code nodetool repair -full} on every node and a new run.
+     * {@code keyspace}: with the NodeSync flag off (DSE 6; DSE 5.1 has no NodeSync), the {@code ALTER KEYSPACE} with
+     * the replicas {@code grade} wants, the checks of the schema version, {@code nodetool repair -full} on every node
+     * and a new run.
      */
     private String change(String keyspace, ReplicationGrade grade, String recommendation)
     {
@@ -1119,24 +1237,30 @@ final class SchemaInspector
         grade.wanted.forEach((dataCenter, replicas) -> alter.append(", ").append(quoted(dataCenter)).append(": ").append(replicas));
         alter.append("};");
         String unknown = unknownDataCenters();
+        String noNode = " with no node in " + nodesSources() + ", left out";
         String dataCenters = grade.factorNotCarried +
                              (nodesByDataCenter.isEmpty() ? "; " + unknown + ": list each data center nodetool status shows, and lower the " +
                                                             RECOMMENDED_REPLICAS + " replicas of a data center of fewer nodes to its nodes"
                                                           : countsExact ? "" : "; " + unknown + ": check by hand the data center of each node " +
                                                                                "and its replicas, and lower the " + RECOMMENDED_REPLICAS + " replicas " +
                                                                                "of a data center of fewer nodes to its nodes") +
-                             (grade.leftOut.isEmpty() ? "" : "; " + list(new ArrayList<>(grade.leftOut)) + ", listed but with no node in nodes/local " +
-                                                             "and nodes/peers, left out") +
+                             (grade.leftOut.isEmpty() ? "" : "; " + list(new ArrayList<>(grade.leftOut)) +
+                                                             ", listed but" + noNode) +
                              (grade.unnumbered.isEmpty() ? ""
                                                          : countsExact ? "; " + list(new ArrayList<>(grade.unnumbered)) + ", listed with no number of " +
-                                                                         "replicas and with no node in nodes/local and nodes/peers, left out"
+                                                                         "replicas and" + noNode
                                                                        : "; " + list(new ArrayList<>(grade.unnumbered)) + ", listed with no number of " +
                                                                          "replicas, left out: set it by hand if that data center has nodes");
-        return "with the NodeSync flag off on the tables of " + keyspace + " (DSE's repair skips a table whose flag is on), through one DSE node: " +
+        // DSE 5.1 has no NodeSync, whose tables DSE 6's repair skips
+        String throughOneNode = dse51 ? "on DSE 5.1, through one DSE node: "
+                                      : "with the NodeSync flag off on the tables of " + keyspace +
+                                        " (DSE's repair skips a table whose flag is on), through one DSE node: ";
+        String exiting = dse51 ? "each exiting 0" : "each exiting 0 and printing no Skipping anti-entropy repair line";
+        return throughOneNode +
                alter + " (every data center, its exact name as nodetool status shows it; " + recommendation + "; a higher replication factor is " +
                (countsExact ? "kept up to the nodes of the data center" : "kept as listed") + dataCenters + "); DESCRIBE KEYSPACE " + cqlName +
                " then shows the new map and nodetool describecluster one schema version; right after, nodetool repair -full " + keyspace +
-               " on every node, one at a time, each exiting 0 and printing no Skipping anti-entropy repair line, a failed one run again, whole, " +
+               " on every node, one at a time, " + exiting + ", a failed one run again, whole, " +
                "on its node (the ALTER and the repair in a quiet period, without a pause between them); then nodetool flush system_schema on " +
                "this node and run this tool again";
     }
@@ -1150,7 +1274,9 @@ final class SchemaInspector
      */
     private String mixedPhaseUnknown()
     {
-        return peersRead ? "" : "; only if no peer already runs HCD 2.0, which this tool cannot tell while nodes/peers cannot be read or " +
+        String cannotTell = "; only if no peer already runs HCD 2.0, which this tool cannot tell while " +
+                            peersSource();
+        return peersRead ? "" : cannotTell + " cannot be read or " +
                                 "trusted (in the mixed phase, no schema change and no repair; if one does, upgrade no further node and " +
                                 "report to the upgrade owner)";
     }
@@ -1310,9 +1436,9 @@ final class SchemaInspector
             if (nodesByDataCenter.size() > 1)
             {
                 // SimpleStrategy places the replicas around the ring regardless of the data centers
-                problems.add(new Problem(ProblemKind.SIMPLE_SPREAD, "SimpleStrategy does not place replicas in each data center, and nodes/local and " +
-                                                                    "nodes/peers name " + nodesByDataCenter.size() + " (" +
-                                                                    list(nodesByDataCenter.keySet()) + ')'));
+                String spread = "SimpleStrategy does not place replicas in each data center, and " + nodesSources() +
+                                " name " + nodesByDataCenter.size() + " (" + list(nodesByDataCenter.keySet()) + ')';
+                problems.add(new Problem(ProblemKind.SIMPLE_SPREAD, spread));
                 if (factor != null && factor > 0)
                     grade.factorNotCarried = "; the replication factor of SimpleStrategy spans the data centers, so it is not carried over";
             }
@@ -1362,7 +1488,8 @@ final class SchemaInspector
             // whatever the nodes not counted, one of them cannot
             else if (nodesByDataCenter.size() > 1)
                 problems.add(new Problem(ProblemKind.CLASS, "with EverywhereStrategy, LOCAL_QUORUM counts the replicas of the whole ring, which only a " +
-                                                            "data center of more than half of the nodes meets, and nodes/local and nodes/peers name " +
+                                                            "data center of more than half of the nodes meets, and " +
+                                                            nodesSources() + " name " +
                                                             nodesByDataCenter.size() + " (" + list(nodesByDataCenter.keySet()) + "), so LOCAL_QUORUM " +
                                                             "cannot be met in each"));
         }
@@ -1592,6 +1719,7 @@ final class SchemaInspector
                                   "tables with a compaction or compression class HCD 2.0 cannot load: " + list(unloadableClasses),
                                   "ALTER these tables on DSE to classes DSE and HCD 2.0 both have (for example SizeTieredCompactionStrategy or " +
                                   "LeveledCompactionStrategy, LZ4Compressor)"));
+        unloadableTablesFound |= !unloadableTables.isEmpty();
         if (!unloadableTables.isEmpty())
             findings.add(blocking("UNLOADABLE_TABLE",
                                   "tables HCD 2.0 cannot load: " + list(unloadableTables),
@@ -1868,7 +1996,10 @@ final class SchemaInspector
         if (!unloadable.isEmpty())
             findings.add(blocking("UNLOADABLE_TABLE",
                                   "materialized views HCD 2.0 cannot load: " + list(unloadable),
-                                  "drop these views on DSE before the upgrade and create them again once no node runs DSE"));
+                                  dse51 && mixedPhase
+                                  ? NO_VIEW_CHANGE_IN_MIXED_PHASE
+                                  : "drop these views on DSE before the upgrade and create them again once no node " +
+                                    "runs DSE"));
     }
 
     // ---- vector columns ----
@@ -2032,7 +2163,9 @@ final class SchemaInspector
      * their keyspace in {@code system_schema.views}, the row DSE 5.1.51 leaves on the node where
      * {@code UNRESTRICT ROWS} on the view failed (the start check of {@code DSE_5_1} refuses them by the same rule,
      * before the schema load, in every keyspace, where this check reads the keyspaces {@link #schemaRows} keeps).
-     * Blocking, with no repair: none is validated yet.
+     * Blocking, with the repair of a node that still runs, as a local trial on DSE 5.1.51 nodes chose it
+     * ({@code SchemaKeyspace.DSE51_TABLE_ROW_REPAIR}), the procedures for a node already down left to the upgrade
+     * documentation.
      */
     private void checkViewTableRows()
     {
@@ -2088,9 +2221,12 @@ final class SchemaInspector
                                   "DSE 5.1.51 leaves such a row on the node where UNRESTRICT ROWS on a view failed, " +
                                   "after which neither DSE 5.1.51 (\"Attempting to load already loaded view\") nor " +
                                   "HCD 2.0 starts the node",
-                                  "this tool does not repair the row, and no repair is validated yet: do not upgrade " +
-                                  "this node, report to the upgrade owner before DSE is stopped on it, and " +
-                                  NEVER_UNRESTRICT_VIEW));
+                                  (mixedPhase
+                                   ? MIXED_PHASE_NO_VIEW_CHANGE_PREFIX
+                                   : DSE51_BEFORE + "repair each row while DSE still runs on this node, before it " +
+                                     "is stopped: " + SchemaKeyspace.DSE51_TABLE_ROW_REPAIR + "; then run the tool " +
+                                     "again (a node already down takes the procedures the upgrade documentation " +
+                                     "gives for it); ") + NEVER_UNRESTRICT_VIEW));
     }
 
     /** {@code keyspace.table}, with the names quoted where CQL needs it, as the start refusal shows them. */
@@ -2118,6 +2254,7 @@ final class SchemaInspector
                 unloadable.add(name + " (type " + (row.has("type") ? row.getString("type") : null) + ": " + message(e) + ')');
             }
         }
+        unloadableTablesFound |= !unloadable.isEmpty();
         if (!unloadable.isEmpty())
             findings.add(blocking("UNLOADABLE_TABLE",
                                   "dropped columns of a type HCD 2.0 cannot load (the schema load parses them too): " + list(unloadable),
@@ -2364,7 +2501,8 @@ final class SchemaInspector
     /**
      * With {@link #dse51}: the materialized views whose {@code extensions} hold the key
      * {@value Dse6AccessControlCheck#RLAC_EXTENSION_KEY}. DSE 5.1 writes it with {@code RESTRICT ROWS} on a view in the
-     * schema of the node that runs the statement only, so a node's report names the views restricted in its own schema,
+     * schema of the node that runs the statement only until that node restarts, after which the other nodes take it
+     * from that node's schema, so a node's report names the views restricted in its own schema,
      * and the aggregate of the reports names the nodes. The remedy is never {@code UNRESTRICT ROWS}: the view is
      * dropped and created again without the restriction.
      */
@@ -2394,16 +2532,18 @@ final class SchemaInspector
                                   Dse6AccessControlCheck.RLAC_EXTENSION_KEY + ") in this node's schema: " +
                                   list(restrictedViews) + "; HCD 2.0 does not enforce it, and a node in DSE_5_1 mode " +
                                   "refuses to start while its schema holds it; DSE 5.1 keeps a RESTRICT ROWS on a " +
-                                  "view in the schema of the node that ran it only, so the reports of the other " +
-                                  "nodes may not show it",
-                                  DSE51_BEFORE + accessBeforeRestrictionsGo("views") + "REVOKE the rows/ grants on " +
-                                  "each view, drop it (DROP MATERIALIZED VIEW) and create it again without the " +
-                                  "restriction, which builds it again from its base table (" +
-                                  VIEW_REMEDY_NOT_VALIDATED + "); " +
-                                  (restrictedViewsWithTableRow.isEmpty()
-                                   ? ""
-                                   : "do not drop " + list(restrictedViewsWithTableRow) + " before the upgrade " +
-                                     "owner has chosen the repair of the row VIEW_TABLE_ROW names beside it; ") +
+                                  "view in the schema of the node that ran it " + RESTRICTION_SPREADS_AT_RESTART +
+                                  ", so the reports of the other nodes may not show it",
+                                  (mixedPhase
+                                   ? MIXED_PHASE_NO_VIEW_CHANGE_PREFIX
+                                   : DSE51_BEFORE +
+                                     (restrictedViewsWithTableRow.isEmpty()
+                                      ? ""
+                                      : "for " + list(restrictedViewsWithTableRow) + ", repair the row " +
+                                        "VIEW_TABLE_ROW names beside it first (" + DROP_FAILS_BESIDE_THE_ROW + "); ") +
+                                     accessBeforeRestrictionsGo("views") + "REVOKE the rows/ grants on each view, " +
+                                     "drop it (" + DROP_REMOVES_VIEW_GRANTS + ") and create it again without the " +
+                                     "restriction, which builds it again from its base table; ") +
                                   NEVER_UNRESTRICT_VIEW));
     }
 

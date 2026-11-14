@@ -220,7 +220,8 @@ public final class NodeReport
         public Map<String, String> tls = new LinkedHashMap<>();
         /**
          * the materialized views restricted to rows in this node's schema, as {@code ks.view (tenant column c)}: DSE
-         * 5.1 keeps a {@code RESTRICT ROWS} on a view on the node that ran it only, so the aggregate names the nodes;
+         * 5.1 keeps a {@code RESTRICT ROWS} on a view on the node that ran it only until that node restarts, so the
+         * aggregate names the nodes;
          * null when the schema or its views could not be read, or its inspection failed
          */
         @JsonProperty("restricted_views")

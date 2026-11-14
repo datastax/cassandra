@@ -27,11 +27,13 @@ import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -280,14 +282,32 @@ public class Dse51PreflightTest
         assertThat(run.findings("ROW_LEVEL_ACCESS").get(0).remedy)
         .contains("UNRESTRICT ROWS on every restricted table, REVOKE the rows/ grants, then set " +
                   "allow_row_level_security: false; drop a materialized view restricted to rows and create it " +
-                  "again without the restriction (see RESTRICTED_VIEW where a node reports it; " +
-                  SchemaInspector.VIEW_REMEDY_NOT_VALIDATED +
-                  "; never UNRESTRICT ROWS on a view");
+                  "again without the restriction (see RESTRICTED_VIEW where a node reports it; DROP MATERIALIZED " +
+                  "VIEW, which also removes the view's rows/ grants; " + SchemaInspector.NEVER_UNRESTRICT_VIEW + ')');
         Set<String> warnings = new HashSet<>(run.codes(Finding.Severity.WARNING));
         warnings.removeAll(List.of("JAVA", "LOW_DISK_SPACE")); // they depend on the machine
         // the proxy grants DSE gave the creator of the roles reader and writer, which the fixture holds
         assertThat(warnings).containsExactlyInAnyOrder("ROW_LEVEL_ACCESS", "SNITCH", "PENDING_HINTS",
-                                                       "AUTH_CONFIG_CHANGE", "PROXY_GRANT");
+                                                       "AUTH_CONFIG_CHANGE", "PROXY_GRANT", "SYSTEM_AUTH_REPLICATION");
+        // DSE 5.1's default replication of system_auth, one replica, in a data center of three nodes: a warning
+        assertThat(run.messages("SYSTEM_AUTH_REPLICATION"))
+        .isEqualTo("the replication of system_auth is {'class': 'SimpleStrategy', 'replication_factor': '1'}: " +
+                   "Cassandra has 1 replica and 3 nodes: too few while another node of Cassandra is down; an " +
+                   "upgraded node reads DSE's access controls from system_auth at LOCAL_QUORUM (HCD 2.0's default " +
+                   "auth_read_consistency_level) when it starts; when it cannot, it starts on the check of its own " +
+                   "replica only after a wait of up to dse_restrictions_check_wait_seconds, and the logins of a role " +
+                   "fail while the replicas of its partition are down, on the DSE 5.1 nodes and the HCD 2.0 nodes " +
+                   "alike; more replicas (3, or up to the nodes of the data center) let the logins work and an " +
+                   "upgraded node start at once while a node is down");
+        assertThat(run.findings("SYSTEM_AUTH_REPLICATION").get(0).remedy)
+        .startsWith("optional, before the first node of the cluster is upgraded, on DSE 5.1, through one DSE node: " +
+                    "ALTER KEYSPACE system_auth WITH replication = {'class': 'NetworkTopologyStrategy', " +
+                    "'Cassandra': 3};")
+        .contains("3 replicas, or as many as its nodes if fewer, are recommended: in a data center of 3 nodes or " +
+                  "more they keep the logins working and an upgraded node starting at once while a node is down")
+        .contains("nodetool repair -full system_auth on every node, one at a time, each exiting 0, a failed one")
+        .doesNotContain("NodeSync")
+        .doesNotContain("Skipping anti-entropy repair");
         assertThat(run.findings("NO_PEERS")).isEmpty();
         assertThat(run.findings("SNITCH").get(0).remedy).contains("endpoint_snitch: GossipingPropertyFileSnitch")
                                                        .contains("dc=Cassandra and rack=rack1 (from system.local)");
@@ -315,11 +335,14 @@ public class Dse51PreflightTest
                                                          "com.datastax.bdp.cassandra.auth.DseAuthorizer)");
         assertThat(report.upgradePath.upgradeSteps)
         .contains("Thrift: off", "Sstable formats: every sstable is big me",
+                  "Replication of system_auth: see SYSTEM_AUTH_REPLICATION",
+                  "Replication of the other system keyspaces: with one data center they stay as they are",
                   "DSE core only: no trace of DSE Search, Graph, Analytics, DSEFS, CFS, Advanced Replication, tiered " +
                   "storage or in-memory tables, nor a compaction strategy HCD 2.0 no longer has, was found",
                   "Schema: no table, index, type or function HCD 2.0 refuses or cannot load was found",
                   "Materialized views: 2 view(s), none to change in this node's schema; a RESTRICT ROWS on a view " +
-                  "is in the schema of the node that ran it only: aggregate the reports of every node",
+                  "is in the schema of the node that ran it only until that node restarts; after it, the other nodes " +
+                  "take it from that node's schema: aggregate the reports of every node",
                   "Security: review the access control warnings above");
         // the keyspaces of system and system_schema, which DSE 5.1 lists in its schema too, are left out
         assertThat(report.inputs.get("schema"))
@@ -337,7 +360,10 @@ public class Dse51PreflightTest
     /**
      * Node 1's schema as DSE 5.1.51 left it: its two compact tables, its SASI index, its table restricted to rows, its
      * view restricted to rows (on node 1 only, which ran RESTRICT ROWS on it) and the row of system_schema.tables the
-     * failed UNRESTRICT ROWS on the view left there, each blocking; DSE's proxy grants a warning.
+     * failed UNRESTRICT ROWS on the view left there, each blocking; DSE's proxy grants a warning. In the mixed phase
+     * (an upgraded peer) the remedies of the view and of its row change no view; with a column of the view of a type
+     * this software does not have, the view is one to drop and create again, before the mixed phase, and in it no view
+     * is changed: the step of the views says so, and the step of the schema leaves the view to it.
      */
     @Test
     public void theSchemaAsDseLeftItBlocks() throws IOException
@@ -377,15 +403,18 @@ public class Dse51PreflightTest
         .isEqualTo("materialized views restricted to rows by DSE row-level access control (DSE_RLACA) in this " +
                    "node's schema: test_ks.rlac_by_v (tenant column region); HCD 2.0 does not enforce it, and a node " +
                    "in DSE_5_1 mode refuses to start while its schema holds it; DSE 5.1 keeps a RESTRICT ROWS on a " +
-                   "view in the schema of the node that ran it only, so the reports of the other nodes may not show " +
-                   "it");
+                   "view in the schema of the node that ran it only until that node restarts; after it, the other " +
+                   "nodes take it from that node's schema, so the reports of the other nodes may not show it");
+        // the row beside the view is repaired first, the drop of the view failing beside it
         assertThat(run.findings("RESTRICTED_VIEW").get(0).remedy)
-        .contains("; then REVOKE the rows/ grants on each view, drop it (DROP MATERIALIZED VIEW) and create it " +
-                  "again without the restriction, which builds it again from its base table (" +
-                  SchemaInspector.VIEW_REMEDY_NOT_VALIDATED + "); do not drop test_ks.rlac_by_v before the upgrade " +
-                  "owner has chosen the repair of the row VIEW_TABLE_ROW names beside it; " +
-                  SchemaInspector.NEVER_UNRESTRICT_VIEW)
-        .doesNotContain("UNRESTRICT ROWS ON");
+        .startsWith("on DSE 5.1, before the first node is upgraded: for test_ks.rlac_by_v, repair the row " +
+                    "VIEW_TABLE_ROW names beside it first (a DROP MATERIALIZED VIEW on that node fails and leaves " +
+                    "the row without columns); give the users who read these views")
+        .endsWith("; then REVOKE the rows/ grants on each view, drop it (DROP MATERIALIZED VIEW, which also " +
+                  "removes the view's rows/ grants) and create it again without the restriction, which builds it " +
+                  "again from its base table; " + SchemaInspector.NEVER_UNRESTRICT_VIEW)
+        .doesNotContain("UNRESTRICT ROWS ON")
+        .doesNotContain("upgrade owner");
 
         String leftover = "the table row test_ks.rlac_by_v (id " + Dse51Fixtures.RLAC_VIEW_ID + ") beside the " +
                           "materialized view test_ks.rlac_by_v (id " + Dse51Fixtures.RLAC_VIEW_ID + ')';
@@ -394,8 +423,19 @@ public class Dse51PreflightTest
                    "its id, in this node's schema: " + leftover + "; DSE 5.1.51 leaves such a row on the node where " +
                    "UNRESTRICT ROWS on a view failed, after which neither DSE 5.1.51 (\"Attempting to load already " +
                    "loaded view\") nor HCD 2.0 starts the node");
+        // the repair of a node that still runs, chosen by the local trial
         assertThat(run.findings("VIEW_TABLE_ROW").get(0).remedy)
-        .startsWith("this tool does not repair the row, and no repair is validated yet: do not upgrade this node");
+        .isEqualTo("on DSE 5.1, before the first node is upgraded: repair each row while DSE still runs on this " +
+                   "node, before it is stopped: as a superuser on the node that holds the row, DELETE FROM " +
+                   "system_schema.tables WHERE keyspace_name = '<keyspace>' AND table_name = '<table>', the table " +
+                   "row named, which has the view's name where a failed UNRESTRICT ROWS left it (and the view's " +
+                   "rows of system_schema.columns only if a DROP MATERIALIZED VIEW already ran on it), drain and " +
+                   "restart it, check the schema agreement with nodetool describecluster, then remove the view's " +
+                   "restriction, which that restart spreads to every node: REVOKE the view's rows/ grants, drop the " +
+                   "view, unless a DROP MATERIALIZED VIEW already ran, and create it again without the " +
+                   "restriction; then run the tool again (a node already down takes the procedures the upgrade " +
+                   "documentation gives for it); " +
+                   SchemaInspector.NEVER_UNRESTRICT_VIEW);
         // the row is not checked as a table
         assertThat(run.findings("UNLOADABLE_TABLE")).isEmpty();
         assertThat(run.report.inputs.get("schema")).satisfies(summary -> {
@@ -418,14 +458,158 @@ public class Dse51PreflightTest
         assertThat(report.upgradePath.upgradeSteps)
         .contains("Schema: change on DSE 5.1, before the first node is upgraded, what COMPACT_STORAGE, SASI_INDEX " +
                   "name",
-                  "Materialized views: on DSE 5.1, REVOKE the rows/ grants on test_ks.rlac_by_v (tenant column " +
-                  "region), then drop it and create it again without the restriction (see RESTRICTED_VIEW; " +
-                  SchemaInspector.VIEW_REMEDY_NOT_VALIDATED + "), only once the upgrade owner has chosen the repair " +
-                  "of the row VIEW_TABLE_ROW names beside it; this node cannot be " +
-                  "upgraded while the rows VIEW_TABLE_ROW names are in its schema: report to the upgrade owner; a " +
-                  "RESTRICT ROWS on a view " +
-                  "is in the schema of the node that ran it only: aggregate the reports of every node",
+                  "Materialized views: on DSE 5.1, repair the rows VIEW_TABLE_ROW names while DSE still runs on " +
+                  "this node, before it is stopped (see VIEW_TABLE_ROW); on DSE 5.1, REVOKE the rows/ grants on " +
+                  "test_ks.rlac_by_v (tenant column region), then drop it and create it again without the " +
+                  "restriction (see RESTRICTED_VIEW; DROP MATERIALIZED VIEW, which also removes the view's rows/ " +
+                  "grants), only once the row VIEW_TABLE_ROW names beside it is repaired (a DROP MATERIALIZED VIEW " +
+                  "on that node fails and leaves the row without columns); a RESTRICT ROWS on a view is in the " +
+                  "schema of the node that ran it only until that node restarts; after it, the other nodes take it " +
+                  "from that node's schema: aggregate the reports of every node",
                   "Security: resolve the blocking access control findings above, on DSE 5.1");
+
+        // in the mixed phase no view is dropped or created: the remedies say so
+        List<Finding> mixed = new ArrayList<>();
+        SchemaInspector.forDse51(List.of(new File(node.data)), null, Murmur3Partitioner.instance, true,
+                                 Map.of(), 0, true, true, true, mixed).inspect();
+        for (String code : List.of("RESTRICTED_VIEW", "VIEW_TABLE_ROW"))
+            assertThat(mixed.stream().filter(f -> f.code.equals(code)).findFirst().orElseThrow(AssertionError::new)
+                            .remedy)
+            .as(code)
+            .isEqualTo(SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX + SchemaInspector.NEVER_UNRESTRICT_VIEW)
+            .startsWith("the upgrade has started (UPGRADED_PEERS): no view is dropped or created in the mixed " +
+                        "phase, whose DSE schema changes the upgraded nodes do not take: upgrade no further node " +
+                        "and report to the upgrade owner; never UNRESTRICT ROWS on a view");
+
+        // a column of the view of a type this software does not have: the view is one to drop and create again
+        node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                       row("test_ks", "rlac_by_v", "bad").with("clustering_order", "none")
+                                                         .with("column_name_bytes", ByteBufferUtil.bytes("bad"))
+                                                         .with("kind", "regular")
+                                                         .with("position", -1)
+                                                         .with("type", "'org.apache.cassandra.db.marshal.NoSuchType'"));
+        String everyNode = "a RESTRICT ROWS on a view is in the schema of the node that ran it only until that node " +
+                           "restarts; after it, the other nodes take it from that node's schema: aggregate the " +
+                           "reports of every node";
+        DsePreflightTest.Run unloadable = assertBlocked(run(node), "UNLOADABLE_TABLE");
+        assertThat(unloadable.findings("UNLOADABLE_TABLE"))
+        .filteredOn(f -> f.message.startsWith("materialized views HCD 2.0 cannot load: test_ks.rlac_by_v"))
+        .singleElement()
+        .satisfies(f -> assertThat(f.remedy).isEqualTo("drop these views on DSE before the upgrade and create them " +
+                                                       "again once no node runs DSE"));
+        assertThat(unloadable.report.upgradePath.upgradeSteps)
+        .filteredOn(s -> s.startsWith("Materialized views: "))
+        .singleElement()
+        .asString()
+        .contains("drop test_ks.rlac_by_v on DSE 5.1, and create it again once no node runs DSE; " + everyNode);
+        assertThat(unloadable.report.upgradePath.upgradeSteps)
+        .filteredOn(s -> s.startsWith("Schema: "))
+        .containsExactly("Schema: change on DSE 5.1, before the first node is upgraded, what COMPACT_STORAGE, " +
+                         "SASI_INDEX, UNLOADABLE_TABLE name");
+
+        // in the mixed phase, a peer already on this software, the step and the remedy say that no view is changed
+        node.writeRows("system", "peers", List.of("peer"), List.of(),
+                       row(InetAddress.getByName("127.0.51.14")).with("release_version",
+                                                                      FBUtilities.getReleaseVersionString()));
+        DsePreflightTest.Run mixedRun = assertBlocked(run(node), "UNLOADABLE_TABLE");
+        assertThat(mixedRun.report.peers).anyMatch(p -> p.upgraded);
+        assertThat(mixedRun.findings("UNLOADABLE_TABLE"))
+        .filteredOn(f -> f.message.startsWith("materialized views HCD 2.0 cannot load: test_ks.rlac_by_v"))
+        .singleElement()
+        .satisfies(f -> assertThat(f.remedy).isEqualTo(SchemaInspector.NO_VIEW_CHANGE_IN_MIXED_PHASE));
+        assertThat(mixedRun.report.upgradePath.upgradeSteps)
+        .contains("Materialized views: the upgrade has started (UPGRADED_PEERS): no view is dropped or created in " +
+                  "the mixed phase, whose DSE schema changes the upgraded nodes do not take: upgrade no further node " +
+                  "and report to the upgrade owner (see RESTRICTED_VIEW, VIEW_TABLE_ROW, UNLOADABLE_TABLE); " +
+                  everyNode);
+        assertThat(mixedRun.report.upgradePath.upgradeSteps)
+        .filteredOn(s -> s.startsWith("Schema: "))
+        .containsExactly("Schema: change on DSE 5.1, before the first node is upgraded, what COMPACT_STORAGE, " +
+                         "SASI_INDEX name; for the views UNLOADABLE_TABLE names, see Materialized views");
+    }
+
+    /**
+     * In the mixed phase a view HCD 2.0 cannot load, the only blocking finding of the schema, is left to the step of
+     * the views, which changes no view then; a table or a dropped column HCD 2.0 cannot load besides it brings
+     * UNLOADABLE_TABLE back to the step of the schema, which still points to the views; a table of system_schema that
+     * cannot be read is named after the pointer.
+     */
+    @Test
+    public void inTheMixedPhaseAViewThatCannotBeLoadedIsLeftToTheStepOfTheViews() throws IOException
+    {
+        Dse51NodeFixture node = viewThatCannotBeLoadedInTheMixedPhase();
+        DsePreflightTest.Run run = assertBlocked(run(node), "UNLOADABLE_TABLE");
+        assertThat(run.report.peers).anyMatch(p -> p.upgraded);
+        assertThat(run.findings("UNLOADABLE_TABLE"))
+        .singleElement()
+        .satisfies(f -> assertThat(f.remedy).isEqualTo(SchemaInspector.NO_VIEW_CHANGE_IN_MIXED_PHASE));
+        assertThat(run.report.upgradePath.upgradeSteps)
+        .filteredOn(s -> s.startsWith("Schema: ") || s.startsWith("Materialized views: "))
+        .containsExactly("Schema: for the views UNLOADABLE_TABLE names, see Materialized views",
+                         "Materialized views: " + SchemaInspector.NO_VIEW_CHANGE_IN_MIXED_PHASE +
+                         " (see UNLOADABLE_TABLE); a RESTRICT ROWS on a view is in the schema of the node that ran " +
+                         "it only until that node restarts; after it, the other nodes take it from that node's " +
+                         "schema: aggregate the reports of every node");
+
+        // a table HCD 2.0 cannot load besides the view: the step of the schema names UNLOADABLE_TABLE again
+        node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                       row("test_ks", "t", "bad").with("clustering_order", "none")
+                                                 .with("column_name_bytes", ByteBufferUtil.bytes("bad"))
+                                                 .with("kind", "regular")
+                                                 .with("position", -1)
+                                                 .with("type", "'org.apache.cassandra.db.marshal.NoSuchType'"));
+        DsePreflightTest.Run withTable = assertBlocked(run(node), "UNLOADABLE_TABLE");
+        assertThat(withTable.report.upgradePath.upgradeSteps)
+        .filteredOn(s -> s.startsWith("Schema: ") || s.startsWith("Materialized views: "))
+        .containsExactly("Schema: change on DSE 5.1, before the first node is upgraded, what UNLOADABLE_TABLE name; " +
+                         "for the views UNLOADABLE_TABLE names, see Materialized views",
+                         "Materialized views: " + SchemaInspector.NO_VIEW_CHANGE_IN_MIXED_PHASE +
+                         " (see UNLOADABLE_TABLE); a RESTRICT ROWS on a view is in the schema of the node that ran " +
+                         "it only until that node restarts; after it, the other nodes take it from that node's " +
+                         "schema: aggregate the reports of every node");
+
+        // a dropped column of a type HCD 2.0 cannot load besides the view: UNLOADABLE_TABLE stays too
+        Dse51NodeFixture dropped = viewThatCannotBeLoadedInTheMixedPhase();
+        dropped.writeRows(SchemaInspector.SCHEMA, "dropped_columns", KEYSPACES_KEY,
+                          List.of("table_name", "column_name"),
+                          row("test_ks", "t", "old").with("dropped_time", new Date(1))
+                                                    .with("type", "'org.apache.cassandra.db.marshal.NoSuchType'"));
+        assertThat(assertBlocked(run(dropped), "UNLOADABLE_TABLE").report.upgradePath.upgradeSteps)
+        .filteredOn(s -> s.startsWith("Schema: "))
+        .containsExactly("Schema: change on DSE 5.1, before the first node is upgraded, what UNLOADABLE_TABLE name; " +
+                         "for the views UNLOADABLE_TABLE names, see Materialized views");
+
+        // the view alone, with a table of system_schema that cannot be read: the step says both
+        Dse51NodeFixture notRead = viewThatCannotBeLoadedInTheMixedPhase();
+        Path functions = notRead.data.resolve("system_schema").resolve("functions-96489b7980be3e14a70166a0b9159450");
+        try (Stream<Path> files = Files.list(functions))
+        {
+            for (Path file : (Iterable<Path>) files::iterator)
+                if (file.getFileName().toString().endsWith("-Data.db"))
+                    Files.write(file, new byte[]{ 1, 2, 3 });
+        }
+        assertThat(assertBlocked(run(notRead), "UNLOADABLE_TABLE").report.upgradePath.upgradeSteps)
+        .filteredOn(s -> s.startsWith("Schema: "))
+        .singleElement()
+        .asString()
+        .startsWith("Schema: for the views UNLOADABLE_TABLE names, see Materialized views; not checked completely " +
+                    "(not read: system_schema.functions");
+    }
+
+    /** {@link #thriftOff}'s node with a column of its view of a type this software does not have, a peer upgraded. */
+    private Dse51NodeFixture viewThatCannotBeLoadedInTheMixedPhase() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                       row("test_ks", "rlac_by_v", "bad").with("clustering_order", "none")
+                                                         .with("column_name_bytes", ByteBufferUtil.bytes("bad"))
+                                                         .with("kind", "regular")
+                                                         .with("position", -1)
+                                                         .with("type", "'org.apache.cassandra.db.marshal.NoSuchType'"));
+        node.writeRows("system", "peers", List.of("peer"), List.of(),
+                       row(InetAddress.getByName("127.0.51.14")).with("release_version",
+                                                                      FBUtilities.getReleaseVersionString()));
+        return node;
     }
 
     /**
@@ -472,19 +656,24 @@ public class Dse51PreflightTest
         {
             List<Finding> findings = new ArrayList<>();
             SchemaInspector.forDse51(List.of(new File(node.data)), null, Murmur3Partitioner.instance, enforced,
-                                     findings).inspect();
+                                     Map.of(), 0, false, false, false, findings).inspect();
             for (String code : List.of("ROW_LEVEL_ACCESS", "RESTRICTED_VIEW"))
             {
                 Finding finding = findings.stream().filter(f -> f.code.equals(code)).findFirst()
                                           .orElseThrow(() -> new AssertionError(code + " with " + enforced));
+                // the view has the row a failed UNRESTRICT ROWS leaves beside it, repaired first
+                String first = code.equals("RESTRICTED_VIEW")
+                               ? "for test_ks.rlac_by_v, repair the row VIEW_TABLE_ROW names beside it first (a DROP " +
+                                 "MATERIALIZED VIEW on that node fails and leaves the row without columns); "
+                               : "";
                 if (enforced == null || enforced)
                     assertThat(finding.remedy).as("%s with %s", code, enforced)
-                                              .startsWith("on DSE 5.1, before the first node is upgraded: give the " +
-                                                          "users who read these ")
+                                              .startsWith("on DSE 5.1, before the first node is upgraded: " + first +
+                                                          "give the users who read these ")
                                               .contains(notes.get(enforced));
                 else
                     assertThat(finding.remedy).as("%s with %s", code, enforced)
-                                              .startsWith("on DSE 5.1, before the first node is upgraded: " +
+                                              .startsWith("on DSE 5.1, before the first node is upgraded: " + first +
                                                           (code.equals("ROW_LEVEL_ACCESS")
                                                            ? "UNRESTRICT ROWS ON"
                                                            : "REVOKE the rows/ grants"));
@@ -891,7 +1080,8 @@ public class Dse51PreflightTest
         .contains("DSE core only: not checked completely (not read: " + failed + ')',
                   "Schema: not checked completely (not read: " + failed + ')',
                   "Materialized views: not checked (see INSPECTION_ERROR); a RESTRICT ROWS on a view is in the " +
-                  "schema of the node that ran it only: aggregate the reports of every node",
+                  "schema of the node that ran it only until that node restarts; after it, the other nodes take it " +
+                  "from that node's schema: aggregate the reports of every node",
                   "Security: review the access control warnings above; not checked completely (not read: the " +
                   "schema, system_auth.role_permissions, " + failed + ')');
         assertThat(run.report.dse51.restrictedViews).isNull();
@@ -907,6 +1097,96 @@ public class Dse51PreflightTest
         assertThat(run.messages("TLS")).startsWith("DSE's cassandra.yaml sets internode_encryption: all, with the " +
                                                    "TLS settings {server_encryption_options.protocol=TLSv1.2}");
         assertThat(run.report.dse51.tls).containsEntry("server_encryption_options.protocol", "TLSv1.2");
+    }
+
+    /**
+     * The replication of system_auth and of the other replicated system keyspaces is graded as for DSE 6, against the
+     * nodes of each data center of system.local and system.peers, which the texts name: DSE 5.1's default over two
+     * data centers blocks, and the other keyspaces on SimpleStrategy are warned about; in the mixed phase the remedy
+     * says what a node in DSE_5_1 does until the replication is changed; with the tables not read the counts are a
+     * lower bound, and the texts say why.
+     */
+    @Test
+    public void theReplicationIsCheckedAgainstSystemLocalAndSystemPeers() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        // DSE Search's keyspace, a trace of the node inspection, which the checks of the schema leave to it
+        node.writeRows("system_schema", "keyspaces", List.of("keyspace_name"), List.of(),
+                       row("solr_admin").with("durable_writes", true)
+                                        .with("replication",
+                                              Map.of("class", "org.apache.cassandra.locator.SimpleStrategy",
+                                                     "replication_factor", "1")));
+        // sorted, as the node inspection counts them
+        Map<String, Integer> twoDataCenters = new TreeMap<>(Map.of("Cassandra", 3, "DC2", 2));
+        List<Finding> findings = new ArrayList<>();
+        SchemaInspector.forDse51(List.of(new File(node.data)), null, Murmur3Partitioner.instance, true,
+                                 twoDataCenters, 0, true, true, false, findings).inspect();
+        Finding auth = findings.stream().filter(f -> f.code.equals("SYSTEM_AUTH_REPLICATION")).findFirst()
+                               .orElseThrow(AssertionError::new);
+        assertThat(auth.severity).isEqualTo(Finding.Severity.BLOCKING);
+        assertThat(auth.message)
+        .startsWith("the replication of system_auth is {'class': 'SimpleStrategy', 'replication_factor': '1'}: " +
+                    "SimpleStrategy does not place replicas in each data center, and system.local and system.peers " +
+                    "name 2 (Cassandra, DC2), so LOCAL_QUORUM cannot be met in each")
+        .contains("so every data center of system.local and system.peers needs replicas of system_auth")
+        .contains(", or the logins on the HCD 2.0 nodes there fail for the roles whose replicas cannot make a " +
+                  "LOCAL_QUORUM there and an upgraded node there starts only after the wait of " +
+                  "dse_restrictions_check_wait_seconds, on the check of its own replica, even with every node up " +
+                  "(with a replication HCD 2.0 cannot use, no class or another class, replicas that are no number " +
+                  "or no replication_factor, an upgraded node cannot start)")
+        .doesNotContain("nodes/");
+        assertThat(auth.remedy)
+        .startsWith("before the first node of the cluster is upgraded, on DSE 5.1, through one DSE node: ALTER " +
+                    "KEYSPACE system_auth WITH replication = {'class': 'NetworkTopologyStrategy', 'Cassandra': 3, " +
+                    "'DC2': 2};")
+        .contains("; in a data center of 2 nodes, a node down still delays the start of an upgraded node there and " +
+                  "fails the logins its replicas serve")
+        .doesNotContain("nodes/");
+        List<Finding> others = findings.stream().filter(f -> f.code.equals("KEYSPACE_REPLICATION"))
+                                       .collect(Collectors.toList());
+        assertThat(others).isNotEmpty()
+                          .allSatisfy(f -> assertThat(f.severity).isEqualTo(Finding.Severity.WARNING))
+                          .allSatisfy(f -> assertThat(f.message).contains("system.local and system.peers name 2")
+                                                                .doesNotContain("nodes/")
+                                                                // a keyspace of the traces, left to them
+                                                                .doesNotContain("solr_admin"));
+
+        // in the mixed phase the replication stays as it is
+        findings.clear();
+        SchemaInspector.forDse51(List.of(new File(node.data)), null, Murmur3Partitioner.instance, true,
+                                 twoDataCenters, 0, true, true, true, findings).inspect();
+        assertThat(findings.stream().filter(f -> f.code.equals("SYSTEM_AUTH_REPLICATION")).findFirst()
+                           .orElseThrow(AssertionError::new).remedy)
+        .startsWith("the upgrade has started (UPGRADED_PEERS), and the replication cannot be changed in the mixed " +
+                    "phase")
+        .endsWith("until it is changed, in a data center whose replicas of system_auth cannot make a LOCAL_QUORUM " +
+                  "(while too few of them are up there, and always where the data center lacks replicas, not " +
+                  "listed, at 0 or SimpleStrategy over several data centers, or has fewer nodes than its " +
+                  "LOCAL_QUORUM needs, with EverywhereStrategy the quorum of the whole ring) an upgraded node starts " +
+                  "only after the wait of dse_restrictions_check_wait_seconds, on the check of its own replica, and " +
+                  "the logins on it fail for the roles whose replicas cannot make that quorum; and with a " +
+                  "replication HCD 2.0 cannot use (no class or another class, replicas that are no number, or no " +
+                  "replication_factor) an upgraded node cannot start");
+        // a shortfall in the mixed phase asks for no change, only that the nodes of the data center stay up
+        findings.clear();
+        SchemaInspector.forDse51(List.of(new File(node.data)), null, Murmur3Partitioner.instance, true,
+                                 Map.of("Cassandra", 3), 0, true, true, true, findings).inspect();
+        assertThat(findings.stream().filter(f -> f.code.equals("SYSTEM_AUTH_REPLICATION")).findFirst()
+                           .orElseThrow(AssertionError::new).remedy)
+        .isEqualTo("the upgrade has started (UPGRADED_PEERS), so the replication stays as it is (no schema change " +
+                   "and no repair in the mixed phase): keep every node of Cassandra up as long as possible: while " +
+                   "one is down, the logins its replicas serve fail and an upgraded node there starts only after the " +
+                   "wait of dse_restrictions_check_wait_seconds");
+
+        // system.local or system.peers not read: the nodes counted are a lower bound
+        findings.clear();
+        SchemaInspector.forDse51(List.of(new File(node.data)), null, Murmur3Partitioner.instance, true,
+                                 Map.of(), 0, false, false, false, findings).inspect();
+        assertThat(findings.stream().filter(f -> f.code.equals("SYSTEM_AUTH_REPLICATION")).findFirst()
+                           .orElseThrow(AssertionError::new).message)
+        .startsWith("system.local has no row of this node, or system.local or system.peers could not be read, and " +
+                    "the data centers of the nodes are not all known, so the replication of system_auth, " +
+                    "{'class': 'SimpleStrategy', 'replication_factor': '1'}, was checked for its class only");
     }
 
     /** The files HCD 2.0 writes in DSE_5_1 mode are reported by their names; DSE 6's are not DSE 5.1's. */
@@ -954,7 +1234,11 @@ public class Dse51PreflightTest
                   "storage_compatibility_mode HCD_1");
     }
 
-    /** A metadata directory that can be listed but not searched: DSE 6's files may be there, as the start says. */
+    /**
+     * A metadata directory that can be listed but not searched: its listing tells what is there, DSE 6's marker named
+     * as there and its record, not listed, not named. One that can be neither listed nor searched: DSE 6's files may
+     * be there, as the start says.
+     */
     @Test
     public void theFilesOfDse6ThatMayBeThereBlock() throws IOException
     {
@@ -965,6 +1249,24 @@ public class Dse51PreflightTest
         {
             Assume.assumeFalse("the permissions do not apply to this user", Files.isExecutable(node.metadata));
             DsePreflightTest.Run run = assertBlocked(run(node), "DSE6_UPGRADE_FILES");
+            assertThat(run.messages("DSE6_UPGRADE_FILES"))
+            .contains("holds the DSE 6 upgrade marker dse-upgrade-in-progress, files of the upgrade from DSE 6")
+            .doesNotContain("may hold")
+            .doesNotContain(DsePeersRecord.FILE_NAME);
+
+            // a record listed there cannot be read, which refuses the start as the start check reads it
+            Files.setPosixFilePermissions(node.metadata, PosixFilePermissions.fromString("rwx------"));
+            Files.write(node.metadata.resolve(DsePeersRecord.FILE_NAME),
+                        "10.0.0.2:7000\n".getBytes(StandardCharsets.UTF_8));
+            Files.setPosixFilePermissions(node.metadata, PosixFilePermissions.fromString("r--------"));
+            run = assertBlocked(run(node), "DSE6_UPGRADE_FILES");
+            assertThat(run.messages("DSE6_UPGRADE_FILES"))
+            .contains("holds the DSE 6 upgrade marker dse-upgrade-in-progress and the record of DSE 6 peers " +
+                      "dse-peers-seen that cannot be read (")
+            .doesNotContain("may hold");
+
+            Files.setPosixFilePermissions(node.metadata, PosixFilePermissions.fromString("---------"));
+            run = assertBlocked(run(node), "DSE6_UPGRADE_FILES");
             assertThat(run.messages("DSE6_UPGRADE_FILES"))
             .contains("holds the DSE 6 upgrade marker dse-upgrade-in-progress (or may hold it: its presence cannot " +
                       "be checked) and the record of DSE 6 peers dse-peers-seen (or may hold it: its presence " +
@@ -1109,7 +1411,8 @@ public class Dse51PreflightTest
                   "table))",
                   "Schema: not checked completely (not read: system_schema.keyspaces (no sstable of the table))",
                   "Materialized views: not checked (the schema could not be read); a RESTRICT ROWS on a view is in " +
-                  "the schema of the node that ran it only: aggregate the reports of every node",
+                  "the schema of the node that ran it only until that node restarts; after it, the other nodes take " +
+                  "it from that node's schema: aggregate the reports of every node",
                   "Security: review the access control warnings above; not checked completely (not read: the " +
                   "schema)");
         assertThat(schema.report.dse51.restrictedViews).isNull();
@@ -1357,7 +1660,7 @@ public class Dse51PreflightTest
         assertThat(Dse51NodeInspector.hintsHeader(compression("com.example.NoSuchCompressor")))
         .containsExactly(Dse51NodeInspector.HintsHeader.UNKNOWN_COMPRESSOR);
         assertThat(Dse51NodeInspector.hintsHeader(Map.of("encryption", Map.of())))
-        .containsExactly(Dse51NodeInspector.HintsHeader.ENCRYPTED_BY_TDE);
+        .containsExactly(Dse51NodeInspector.HintsHeader.ENCRYPTION_SECTION);
         assertThat(Dse51NodeInspector.hintsHeader(compression("LZ4Compressor")))
         .containsExactly(Dse51NodeInspector.HintsHeader.COMPRESSED);
         assertThat(Dse51NodeInspector.hintsHeader(Map.of())).containsExactly(Dse51NodeInspector.HintsHeader.PLAIN);
@@ -1372,7 +1675,7 @@ public class Dse51PreflightTest
         .containsExactlyInAnyOrder(Dse51NodeInspector.HintsHeader.COMPRESSED,
                                    Dse51NodeInspector.HintsHeader.UNKNOWN_PARAMETER);
 
-        // encrypted by transparent_data_encryption_options: its setting is named
+        // an encryption section, which DSE 5.1.51's writer does not write: no setting of DSE 5.1 is named
         Dse51NodeFixture tde = thriftOff();
         // the section as Apache Cassandra 3.11's hints descriptor writes it, its IV left out of every text
         String iv = "00112233445566778899aabbccddeeff";
@@ -1388,11 +1691,13 @@ public class Dse51PreflightTest
             assertThat(text).doesNotContain(iv).doesNotContain("testing:1");
         assertThat(encrypted.messages("HINTS_COMPRESSION"))
         .isEqualTo("DSE 5.1 hints files whose header records a compression, an encryption or another parameter: an " +
-                   "encryption (transparent_data_encryption_options): " + node3 + "-1793958749100-1.hints " +
-                   "(encryption); HCD 2.0 has neither DSE's encrypting compressors nor its keys");
+                   "encryption section, which DSE 5.1.51's writer does not write: " + node3 +
+                   "-1793958749100-1.hints (encryption); HCD 2.0 has neither DSE's encrypting compressors nor its " +
+                   "keys");
         assertThat(encrypted.findings("HINTS_COMPRESSION").get(0).remedy)
-        .startsWith("set enabled: false under transparent_data_encryption_options in DSE's cassandra.yaml, and " +
-                    "restart DSE on this node");
+        .isEqualTo("find out what wrote the files with an encryption section, which DSE 5.1.51's writer does not " +
+                   "write; with every node up, wait until DSE has delivered the files written before and they are " +
+                   "gone, before the first node of the cluster is upgraded, then run this tool again");
 
         // a compressor HCD 2.0 does not have: what wrote it is to be found out, no setting is named
         Dse51NodeFixture unknownClass = thriftOff();
@@ -1535,8 +1840,16 @@ public class Dse51PreflightTest
                      "transparent_data_encryption_options:\n    enabled: true");
         node.append(NodeLayout.DSE_YAML, "dsefs_options:", "    enabled: true");
         DsePreflightTest.Run run = assertBlocked(run(node), "TDE_COMMITLOG");
-        assertThat(run.messages("TDE_COMMITLOG")).contains("DSE 5.1 encrypts the commit log and the hints files it " +
-                                                           "writes");
+        // the commit log only: DSE 5.1.51's writer of hints files writes no encryption
+        assertThat(run.messages("TDE_COMMITLOG"))
+        .isEqualTo("transparent_data_encryption_options.enabled is true in DSE's cassandra.yaml: the commit log DSE " +
+                   "5.1 writes is encrypted; encryption is out of scope of this upgrade, and HCD 2.0's replay of " +
+                   "DSE's commit log was not validated with encrypted segments");
+        assertThat(run.findings("TDE_COMMITLOG").get(0).remedy)
+        .isEqualTo("set enabled: false under transparent_data_encryption_options and restart DSE on every node, with " +
+                   "the keystore that section names still in place, so that DSE replays the commit log segments " +
+                   "written before and writes its segments unencrypted from then on, before the first node is " +
+                   "upgraded");
         assertBlocked(run, "DSEFS");
         assertThat(run.report.upgradePath.upgradeSteps)
         .anyMatch(step -> step.startsWith("DSE core only: remove the traces listed above"));

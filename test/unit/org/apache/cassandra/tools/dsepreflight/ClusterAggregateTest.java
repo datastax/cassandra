@@ -43,6 +43,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.DseFixtures;
+import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
 
@@ -1354,18 +1355,36 @@ public class ClusterAggregateTest
         assertThat(aggregate.messages("RESTRICTED_VIEW"))
         .isEqualTo("materialized views restricted to rows, with the nodes whose schema holds the restriction: " + view +
                    " on [10.0.0.1, 10.0.0.3]; DSE 5.1 keeps a RESTRICT ROWS on a view in the schema of the node that " +
-                   "ran it only, and a node in DSE_5_1 mode refuses to start while its schema holds one");
+                   "ran it only until that node restarts; after it, the other nodes take it from that node's schema, " +
+                   "and a node in DSE_5_1 mode refuses to start while its schema holds one");
         assertThat(remedy(aggregate, "RESTRICTED_VIEW"))
-        .isEqualTo("on DSE 5.1, before the first node is upgraded: give the users who read these views through " +
-                   "rows/ grants the access they need without row-level access control where DSE enforces it (the " +
-                   "ROW_LEVEL_ACCESS finding of a node's settings says so), then REVOKE the rows/ grants on each " +
-                   "view, drop it and create it again without the restriction (" +
-                   SchemaInspector.VIEW_REMEDY_NOT_VALIDATED + "); do not drop a view beside which VIEW_TABLE_ROW " +
-                   "names a row before the upgrade owner has chosen the repair of that row; " +
+        .isEqualTo("on DSE 5.1, before the first node is upgraded: repair first the row VIEW_TABLE_ROW names " +
+                   "beside a view, on its node (a DROP MATERIALIZED VIEW on that node fails and leaves the row " +
+                   "without columns); give the users who read these views through rows/ grants the access they need " +
+                   "without row-level access control where DSE enforces it (the ROW_LEVEL_ACCESS finding of a " +
+                   "node's settings says so), then REVOKE the rows/ grants on each view, drop it (DROP MATERIALIZED " +
+                   "VIEW, which also removes the view's rows/ grants) and create it again without the restriction; " +
                    SchemaInspector.NEVER_UNRESTRICT_VIEW);
         assertThat(aggregate.messages("VIEW_TABLE_ROW")).contains(row + " on [10.0.0.1]; DSE 5.1.51 leaves such a row");
         assertThat(remedy(aggregate, "VIEW_TABLE_ROW"))
-        .startsWith("no repair is validated yet: upgrade none of these nodes");
+        .isEqualTo("on DSE 5.1, before the first node is upgraded, repair each row on its node while DSE still runs " +
+                   "there, before it is stopped: " + SchemaKeyspace.DSE51_TABLE_ROW_REPAIR + "; then run the tool " +
+                   "again on that node (a node already down takes the procedures the upgrade documentation gives " +
+                   "for it); " + SchemaInspector.NEVER_UNRESTRICT_VIEW);
+
+        // in the mixed phase, a peer already on HCD 2.0 in a report: no view is dropped or created
+        rewrite(reports.resolve("node2.json"), report -> {
+            NodeReport.Peer upgraded = new NodeReport.Peer();
+            upgraded.address = "10.0.0.9";
+            upgraded.hostId = "00000000-0000-0000-0000-000000000009";
+            upgraded.upgraded = true;
+            report.peers.add(upgraded);
+        });
+        Aggregate mixed = aggregate(reports);
+        for (String code : List.of("RESTRICTED_VIEW", "VIEW_TABLE_ROW"))
+            assertThat(remedy(mixed, code)).as(code)
+                                           .isEqualTo(SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX +
+                                                      SchemaInspector.NEVER_UNRESTRICT_VIEW);
     }
 
     @Test

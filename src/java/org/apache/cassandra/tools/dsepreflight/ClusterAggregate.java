@@ -49,6 +49,8 @@ import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
+// for a compile-time constant only, inlined: the aggregate loads no class of the server for it
+import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
 
@@ -96,9 +98,9 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.list;
  * {@code system.local} and {@code system.peers}, which the texts then name, and by three more: every DSE 5.1 node runs
  * DSE 5.1.51 ({@code DSE_RELEASE}); the views restricted to rows ({@code RESTRICTED_VIEW}) and the rows of
  * {@code system_schema.tables} a failed {@code UNRESTRICT ROWS} on a view left ({@code VIEW_TABLE_ROW}) are named with
- * the nodes whose schema holds them, since DSE 5.1 keeps both on the node that ran the statement only. Reports of DSE
- * 5.1 nodes beside reports of DSE 6 nodes block the cluster ({@code MIXED_SOURCES}), the texts then naming DSE 6's
- * files.
+ * the nodes whose schema holds them, since DSE 5.1 keeps both on the node that ran the statement only (a view's
+ * restriction until that node restarts). Reports of DSE 5.1 nodes beside reports of DSE 6 nodes block the cluster
+ * ({@code MIXED_SOURCES}), the texts then naming DSE 6's files.
  */
 final class ClusterAggregate
 {
@@ -293,6 +295,9 @@ final class ClusterAggregate
             findings.add(blocking("UNREADABLE_REPORT", "reports that cannot be read: " + list(unreadable),
                                   "run the tool again on those nodes with --json, with the same release of HCD 2.0, and remove from the " +
                                   "directory any file that is not a node report of this tool"));
+        // in the order of their names, not the order of the directory, which differs from one file system to another
+        Collections.sort(dse51Reports);
+        Collections.sort(dse6Reports);
         if (!dse51Reports.isEmpty() && !dse6Reports.isEmpty())
             findings.add(blocking("MIXED_SOURCES",
                                   "reports of DSE 5.1 nodes and of DSE 6 nodes in one aggregate: DSE 5.1 " +
@@ -495,6 +500,8 @@ final class ClusterAggregate
                                   "the nodes record different schema versions in " + sources.local + ": " +
                                   groups(schemaVersions),
                                   "wait for schema agreement (nodetool describecluster shows one version), then run the tool on every node again"));
+        // a peer already on HCD 2.0 in a report: the views are no longer dropped and created again
+        boolean mixedPhase = reports.values().stream().anyMatch(r -> r.peers.stream().anyMatch(p -> p.upgraded));
         if (!restrictedViews.isEmpty())
         {
             List<String> items = new ArrayList<>();
@@ -502,17 +509,20 @@ final class ClusterAggregate
             findings.add(blocking("RESTRICTED_VIEW",
                                   "materialized views restricted to rows, with the nodes whose schema holds the " +
                                   "restriction: " + list(items) + "; DSE 5.1 keeps a RESTRICT ROWS on a view in the " +
-                                  "schema of the node that ran it only, and a node in DSE_5_1 mode refuses to start " +
-                                  "while its schema holds one",
-                                  "on DSE 5.1, before the first node is upgraded: give the users who read these " +
-                                  "views through rows/ grants the access they need without row-level access control " +
-                                  "where DSE enforces it (the ROW_LEVEL_ACCESS finding of a node's settings says " +
-                                  "so), then REVOKE the rows/ grants on each view, drop it and create it again " +
-                                  "without the restriction (" + SchemaInspector.VIEW_REMEDY_NOT_VALIDATED + "); " +
-                                  (viewTableRows.isEmpty()
-                                   ? ""
-                                   : "do not drop a view beside which VIEW_TABLE_ROW names a row before the upgrade " +
-                                     "owner has chosen the repair of that row; ") +
+                                  "schema of the node that ran it " + SchemaInspector.RESTRICTION_SPREADS_AT_RESTART +
+                                  ", and a node in DSE_5_1 mode refuses to start while its schema holds one",
+                                  (mixedPhase
+                                   ? SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX
+                                   : "on DSE 5.1, before the first node is upgraded: " +
+                                     (viewTableRows.isEmpty()
+                                      ? ""
+                                      : "repair first the row VIEW_TABLE_ROW names beside a view, on its node (" +
+                                        SchemaInspector.DROP_FAILS_BESIDE_THE_ROW + "); ") +
+                                     "give the users who read these views through rows/ grants the access they need " +
+                                     "without row-level access control where DSE enforces it (the ROW_LEVEL_ACCESS " +
+                                     "finding of a node's settings says so), then REVOKE the rows/ grants on each " +
+                                     "view, drop it (" + SchemaInspector.DROP_REMOVES_VIEW_GRANTS + ") and create it " +
+                                     "again without the restriction; ") +
                                   SchemaInspector.NEVER_UNRESTRICT_VIEW));
         }
         if (!viewsNotKnown.isEmpty())
@@ -531,9 +541,13 @@ final class ClusterAggregate
                                   "with the nodes whose schema holds them: " + list(items) + "; DSE 5.1.51 leaves " +
                                   "such a row on the node where UNRESTRICT ROWS on a view failed, after which " +
                                   "neither DSE 5.1.51 nor HCD 2.0 starts that node",
-                                  "no repair is validated yet: upgrade none of these nodes, and report to the " +
-                                  "upgrade owner before DSE is stopped on any of them; " +
-                                  SchemaInspector.NEVER_UNRESTRICT_VIEW));
+                                  (mixedPhase
+                                   ? SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX
+                                   : "on DSE 5.1, before the first node is upgraded, repair each row on its node " +
+                                     "while DSE still runs there, before it is stopped: " +
+                                     SchemaKeyspace.DSE51_TABLE_ROW_REPAIR + "; then run the tool again on that " +
+                                     "node (a node already down takes the procedures the upgrade documentation " +
+                                     "gives for it); ") + SchemaInspector.NEVER_UNRESTRICT_VIEW));
         }
         if (authorizationOn && rolePermissionsRows == 0 && sources == Sources.DSE51)
             findings.add(Finding.warning("NO_GRANTS_READ",
