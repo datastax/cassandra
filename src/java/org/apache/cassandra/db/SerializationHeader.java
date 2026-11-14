@@ -305,19 +305,21 @@ public class SerializationHeader
 
     /**
      * Writes {@code dt} as {@link #writeDeletionTime(DeletionTime, DataOutputPlus)} does, but for a LIVE deletion
-     * time sent to a pre-4.0 peer (a DSE 6 node, in DSE 6 compatibility mode). DSE 6, like Cassandra 3.x, reads the
-     * local deletion time as a 32-bit delta from the header's minimum and takes a deletion time for LIVE only when that
-     * time is {@code Integer.MAX_VALUE}: LIVE is written with the delta that decodes to it, as Cassandra 3.x writes it.
-     * With the zero delta of the default encoding a DSE 6 node would read LIVE as a deletion, and the row layout writes
-     * one for every complex column of a row as soon as one of them has a complex deletion: the DSE 6 node would store
-     * it, and its digests would no longer match those of the replicas DSE 6 wrote. From 4.0 on, without the mode and in
-     * sstables the bytes are those of the default encoding.
+     * time serialized at a pre-4.0 version in a DSE compatibility mode: sent to a DSE 6 or DSE 5.1 node, or written
+     * into a hints file of version 1 in the DSE 5.1 compatibility mode, which DSE 5.1 reads. DSE 6, like Cassandra 3.x
+     * and DSE 5.1, reads the local deletion time as a 32-bit delta from the header's minimum and takes a deletion time
+     * for LIVE only when that time is {@code Integer.MAX_VALUE}: LIVE is written with the delta that decodes to it, as
+     * Cassandra 3.x writes it. With the zero delta of the default encoding a DSE 6 or DSE 5.1 node (a node rolled back
+     * to DSE 5.1 delivering the hint among them) would read LIVE as a deletion, and the row layout writes one for every
+     * complex column of a row as soon as one of them has a complex deletion: the DSE node would store it, and its
+     * digests would no longer match those of the replicas DSE wrote. From 4.0 on and without the mode the bytes are
+     * those of the default encoding, and so are those of sstables but the big {@code me} ones below.
      * <p>
      * Sstables keep the default encoding: nb, written at {@link MessagingService#VERSION_30}, and the trie-indexed bb
      * sstables that DSE 6 compatibility mode writes and DSE 6 reads after a rollback, whose LIVE complex deletions a
      * 32-bit reader would thus read as deletions that are not LIVE (digest mismatches after a rollback, no data lost):
-     * a known gap, not changed here. The big {@code me} sstables of the DSE 5.1 compatibility mode take the same
-     * encoding ({@link #forSSTableVersion}).
+     * a known gap, not changed here. The big {@code me} sstables of the DSE 5.1 compatibility mode take this method's
+     * encoding of LIVE ({@link #forSSTableVersion}).
      *
      * @param version the messaging version {@code dt} is serialized at
      */
@@ -334,7 +336,10 @@ public class SerializationHeader
         }
     }
 
-    /** True for a header for messaging serialized at a pre-4.0 version, which only DSE 6 compatibility mode uses. */
+    /**
+     * True for a header for messaging serialized at a pre-4.0 version, which only the DSE compatibility modes use
+     * (with DSE 6 and DSE 5.1 nodes, and for the hints files of the DSE 5.1 mode).
+     */
     private boolean isPre40Messaging(int version)
     {
         return !isForSSTable && DseCompat.isPre40Layout(version);
@@ -355,11 +360,13 @@ public class SerializationHeader
     }
 
     /**
-     * For a header of {@link #forSSTableVersion}: the delta from the header's minimum local deletion time that a
-     * 32-bit reader (Cassandra 3.x, DSE 5.1) adds to that minimum to get {@code Integer.MAX_VALUE}, its local deletion
-     * time of LIVE, computed as that reader adds it, in 32-bit arithmetic: such a reader reads the minimum in 32 bits
-     * too, so the delta of a minimum outside {@code [0, Integer.MAX_VALUE]} (a negative local deletion time of
-     * CASSANDRA-14092 data) wraps as its sum does, and is written, as Cassandra 3.x writes it, sign-extended.
+     * For a header of {@link #forSSTableVersion}, and for one serialized at a pre-4.0 messaging version
+     * ({@link #writeDeletionTime(DeletionTime, DataOutputPlus, int)}): the delta from the header's minimum local
+     * deletion time that a 32-bit reader (Cassandra 3.x, DSE 6, DSE 5.1) adds to that minimum to get
+     * {@code Integer.MAX_VALUE}, its local deletion time of LIVE, computed as that reader adds it, in 32-bit
+     * arithmetic: such a reader reads the minimum in 32 bits too, so the delta of a minimum outside
+     * {@code [0, Integer.MAX_VALUE]} (a negative local deletion time of CASSANDRA-14092 data) wraps as its sum does,
+     * and is written, as Cassandra 3.x writes it, sign-extended.
      */
     private int pre40LiveLocalDeletionTimeDelta()
     {
