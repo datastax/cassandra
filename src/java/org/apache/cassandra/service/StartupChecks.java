@@ -1076,10 +1076,13 @@ public class StartupChecks
      * it would speak DSE 6's dialect to its DSE 5.1 peers. Only files known to be there ({@code Files.exists}) count,
      * so that a {@code DSE_6} node that never ran in {@code DSE_5_1} is not affected, nor is one whose metadata
      * directory is not a directory or cannot be searched, where {@code Files.exists} is false. A record that is there
-     * but cannot be read refuses the start, as with {@code NONE}. The DSE 6 files are not read. With the override
-     * property set the start goes on and writes the DSE 6 upgrade marker, as every start in {@code DSE_6} does, which
-     * then refuses the start in {@code DSE_5_1} until it is deleted; the DSE 5.1 files stay, and refuse a start with
-     * {@code NONE} once the DSE 6 ones are deleted.
+     * but cannot be read refuses the start, as with {@code NONE}. The refusal names the remedies of both cases: a node
+     * of the upgrade from DSE 5.1 starts in {@code DSE_5_1} again, and a node of the upgrade from DSE 6 whose DSE 5.1
+     * files are left from an earlier upgrade from DSE 5.1 deletes them once no DSE 5.1 node is left in the cluster, its
+     * peers not speaking DSE 5.1's dialect. The DSE 6 files are not read. With the override property set the start
+     * goes on and writes the DSE 6 upgrade marker, as every start in {@code DSE_6} does, which then refuses the start
+     * in {@code DSE_5_1} until it is deleted; the DSE 5.1 files stay, and refuse a start with {@code NONE} once the
+     * DSE 6 ones are deleted.
      */
     public static final StartupCheck checkDsePeersWithoutFlag = new StartupCheck()
     {
@@ -1178,11 +1181,23 @@ public class StartupChecks
         // a configuration refusal whatever the evidence, an unreadable record included: the start without the mode of
         // the upgrade is what is refused, and that mode is one of its remedies (loadDsePeersRecord, which cannot do
         // without the record, reports the same file as a disk state error)
+        String remedies;
+        if (mode.isDse6())
+            // the DSE 5.1 files on a node in DSE_6: a node of the upgrade from DSE 5.1 started in DSE_6 by mistake goes
+            // back to DSE_5_1, but one of the upgrade from DSE 6 that kept them from an earlier upgrade from DSE 5.1
+            // has peers that do not speak DSE 5.1's dialect, and deletes them instead
+            remedies = String.format("On a node of the upgrade from %s, set internode_compatibility_mode: %s, or %s. " +
+                                     "On a node of the upgrade from %s whose %s files are left from an earlier " +
+                                     "upgrade from %s, delete those files once no %s node is left in the cluster. " +
+                                     "Or start with -D%s=true",
+                                     release, source, remedy, mode.source(), release, release, release, ignoreKey);
+        else
+            remedies = String.format("Set internode_compatibility_mode: %s, or %s, or start with -D%s=true",
+                                     source, remedy, ignoreKey);
         throw new StartupException(StartupException.ERR_WRONG_CONFIG,
                                    String.format("internode_compatibility_mode is %s but %s: %s peers may still be " +
-                                                 "in the cluster. Set internode_compatibility_mode: %s, or %s, or " +
-                                                 "start with -D%s=true",
-                                                 mode, found, release, source, remedy, ignoreKey));
+                                                 "in the cluster. %s",
+                                                 mode, found, release, remedies));
     }
 
     /**
