@@ -24,6 +24,8 @@ import java.util.function.BiFunction;
 
 import org.junit.After;
 import org.junit.BeforeClass;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -39,8 +41,20 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 /// driven by those operations rather than by a walk of its own -- the intersection moves it past each range with
 /// `skipTo` -- and its `tailCursor`, as the tails are taken rooted wherever the sampled prefix lands, including
 /// inside a chain node.
+@RunWith(Parameterized.class)
 public class OnDiskIntersectedTailsTest extends IntersectedTailsTest
 {
+    /// The node writer the tries are serialized with, and the kind of output it writes to. The tests are long, so
+    /// they are only run with one page-aware kind.
+    @Parameterized.Parameter
+    public TrieUtil.OnDiskWriterKind kind = TrieUtil.IMMEDIATE;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static List<Object[]> kinds()
+    {
+        return TrieUtil.asParameters(List.of(TrieUtil.IMMEDIATE, TrieUtil.pageAware(256)));
+    }
+
     @BeforeClass
     public static void setUpOnDisk()
     {
@@ -66,7 +80,7 @@ public class OnDiskIntersectedTailsTest extends IntersectedTailsTest
     private Trie<ByteBuffer> readBack(Trie<ByteBuffer> trie)
     {
         // The base class builds its trie with the ordered strategy, so it has to be written and read as ordered too.
-        FileTries.Plain<ByteBuffer> read = TrieUtil.onDiskRoundtrip(trie, true, BUFFER_SERDE, BUFFER_SERDE);
+        FileTries.Plain<ByteBuffer> read = TrieUtil.onDiskFileRoundtrip(trie, true, BUFFER_SERDE, BUFFER_SERDE, kind);
         opened.add(read);
         return read;
     }

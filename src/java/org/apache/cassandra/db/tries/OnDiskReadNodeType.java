@@ -54,13 +54,13 @@ enum OnDiskReadNodeType
         @Override
         public long advance(OnDiskCursor<?> state)
         {
-            return state.exhaustedPosition;
+            return OnDiskCursor.NO_CHILD;
         }
 
         @Override
         public long skipTo(OnDiskCursor<?> state, int transition)
         {
-            return state.exhaustedPosition;
+            return OnDiskCursor.NO_CHILD;
         }
 
         @Override
@@ -72,7 +72,7 @@ enum OnDiskReadNodeType
         @Override
         public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
         {
-            return 0;
+            return OnDiskCursor.NO_CHILD;
         }
 
         @Override
@@ -116,7 +116,7 @@ enum OnDiskReadNodeType
         public long advanceMultiple(OnDiskCursor<?> state, TransitionsReceiver receiver)
         {
             int length = length(state.nodeCode);
-            long postCodePos = state.postCodePos;
+            long nextBytePos = state.postCodePos;
             int skippedBytes = length - 1;
             long encodedPosition = state.currentEncodedPosition;
             if (skippedBytes > 0)
@@ -125,21 +125,21 @@ enum OnDiskReadNodeType
                 {
                     while (length > 1)
                     {
-                        int nextByte = state.readByteBefore(postCodePos);
+                        int nextByte = state.readByteBefore(nextBytePos);
                         receiver.addPathByte(nextByte);
-                        --postCodePos;
+                        --nextBytePos;
                         --length;
                     }
                 }
                 else
-                    postCodePos -= skippedBytes;
+                    nextBytePos -= skippedBytes;
 
                 encodedPosition += Cursor.DEPTH_ADJUSTMENT_ONE * skippedBytes;
             }
-            int nextByte = state.readByteBefore(postCodePos);
+            int nextByte = state.readByteBefore(nextBytePos);
             long nextPos = Cursor.positionForDescentWithByte(encodedPosition, nextByte);
 
-            return state.descendInto(nextPos, postCodePos - 1);
+            return state.descendInto(nextPos, nextBytePos - 1);
         }
 
         @Override
@@ -147,7 +147,7 @@ enum OnDiskReadNodeType
         {
             int nextByte = state.readByteBefore(state.postCodePos);
             if (Cursor.direction(state.currentEncodedPosition).lt(nextByte, transition))
-                return state.exhaustedPosition;
+                return OnDiskCursor.NO_CHILD;
 
             return descend(state, nextByte);
         }
@@ -243,7 +243,7 @@ enum OnDiskReadNodeType
             {
                 currIndex += direction.increase;
                 if (!direction.inLoop(currIndex, 0, length - 1))
-                    return state.exhaustedPosition;
+                    return OnDiskCursor.NO_CHILD;
             }
 
             return descendToChild(state, currIndex, direction, length, encodedPositionForChild(state, currIndex));
@@ -329,7 +329,7 @@ enum OnDiskReadNodeType
                 return advance(state);
             int currTransition = findNext(state, direction, state.nodeCode, state.postCodePos, transition);
             if (!direction.inLoop(currTransition, 0, 255))
-                return state.exhaustedPosition;
+                return OnDiskCursor.NO_CHILD;
             return descendToChild(state, direction, currTransition);
         }
 
@@ -392,9 +392,11 @@ enum OnDiskReadNodeType
             return (int) (state.nodeImplData >> 8) & 0xFF;
         }
 
+        /// The number of children. This can be all 256: a bitmap node is smaller than a dense one with a child for
+        /// every transition when the latter needs wider pointers (see [OnDiskWriteNodeType#selectChildrenType]).
         private int length(OnDiskCursor<?> state)
         {
-            return (int) (state.nodeImplData >> 16) & 0xFF;
+            return (int) (state.nodeImplData >> 16) & 0x1FF;
         }
 
         private int bytes(int nodeCode)
@@ -437,7 +439,7 @@ enum OnDiskReadNodeType
 
             int currTransition = findNextEntry(state, state.postCodePos, direction, transition);
             if (!direction.inLoop(currTransition, 0, 255))
-                return state.exhaustedPosition;
+                return OnDiskCursor.NO_CHILD;
             int currIndex = cardinality(state, state.postCodePos, currTransition);
             return descendToChild(state, direction, currTransition, currIndex);
         }
@@ -587,56 +589,38 @@ enum OnDiskReadNodeType
         @Override
         public void load(OnDiskCursor<?> state)
         {
+            if (state.currentFullNodePostCodePos != state.postCodePos)
+                throw OnDiskCursor.corrupt("chained prefix nodes at " + state.currentFullNodePostCodePos);
             long currentPos = state.postCodePos;
             int nodeCode = state.nodeCode;
             boolean hasAscent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) != 0;
             boolean hasDescent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0;
             boolean hasChild = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_CHILD) != 0;
-            boolean swap = state.swapContentSides;
             // The writer only emits this code for content; with neither flag it is reserved for backtrack entries.
             if (!hasAscent && !hasDescent)
                 throw OnDiskCursor.corrupt("prefix node " + nodeCode + " with no content before position " + currentPos);
             state.nodeImplData = -1;
 
-            if (state.alternateInAscentSlot)
-            {
-                loadWithBranchPointer(state, currentPos, hasAscent, hasDescent, hasChild);
+            if (!hasChild && maybePresentAsLeaf(state, currentPos, hasDescent, hasAscent))
                 return;
-            }
 
-            // ascent or descent-only prefix is presented immediately, possibly by switching position to return path
-            if (!hasChild && (hasDescent != hasAscent))
+            switch (state.contentStyle)
             {
-                state.currentImpl = LEAF; // no children
-                if (swap == hasDescent) // swap & descent | !swap & ascent
-                {
-                    if (Cursor.isRootPosition(state.currentEncodedPosition))
-                    {
-                        // the root position needs to be presented; add backtrack for the content
-                        addReturnPathBacktrack(state, currentPos);
-                        return;
-                    }
+                case UNORDERED:
+                    if (!hasDescent || hasAscent)
+                        throw OnDiskCursor.corrupt("unordered prefix node " + nodeCode + " with invalid flags descent " + hasDescent + " ascent " + hasAscent);
 
-                    state.currentEncodedPosition |= Cursor.ON_RETURN_PATH_BIT;
-                }
-
-                state.getContentAtPos(currentPos);
-                return;
-            }
-
-            if (!swap)
-            {
-                if (hasDescent)
-                    currentPos = state.getContentAtPos(currentPos);
-                if (hasAscent)
-                    currentPos = addBacktrackAndMaybeAdvanceOver(state, currentPos, hasChild);
-            }
-            else
-            {
-                if (hasDescent)
-                    currentPos = addBacktrackAndMaybeAdvanceOver(state, currentPos, hasChild || hasAscent);
-                if (hasAscent)
-                    currentPos = state.getContentAtPos(currentPos);
+                    currentPos = loadUnordered(state, currentPos);
+                    break;
+                case ORDERED:
+                    if (state.swapContentSides)
+                        currentPos = loadSwapped(state, currentPos, hasDescent, hasAscent, hasChild);
+                    else
+                        currentPos = loadOrdered(state, currentPos, hasDescent, hasAscent, hasChild);
+                    break;
+                case ALTERNATE_BRANCH:
+                    currentPos = loadWithBranchPointer(state, currentPos, hasDescent, hasAscent);
+                    break;
             }
 
             if (hasChild)
@@ -645,21 +629,74 @@ enum OnDiskReadNodeType
                 state.descendPostPrefixToEmpty(); // no children
         }
 
+        boolean maybePresentAsLeaf(OnDiskCursor<?> state, long currentPos, boolean hasDescent, boolean hasAscent)
+        {
+            switch (state.contentStyle)
+            {
+                case UNORDERED:
+                    break;
+                case ORDERED:
+                    if (hasAscent && hasDescent)
+                        return false;
+
+                    if (state.swapContentSides == hasDescent) // swap & descent | !swap & ascent
+                    {
+                        if (Cursor.isRootPosition(state.currentEncodedPosition))
+                        {
+                            state.currentImpl = LEAF; // no children
+                            // the root position needs to be presented; add backtrack for the content
+                            addReturnPathBacktrack(state, currentPos);
+                            return true;
+                        }
+
+                        state.currentEncodedPosition |= Cursor.ON_RETURN_PATH_BIT;
+                    }
+                    break;
+                case ALTERNATE_BRANCH:
+                    if (hasAscent)
+                        return false;
+                    break;
+            }
+
+            state.currentImpl = LEAF; // no children
+            state.getContentAtPos(currentPos);
+            return true;
+        }
+
+        long loadUnordered(OnDiskCursor<?> state, long currentPos)
+        {
+            return state.getContentAtPos(currentPos);
+        }
+
+        long loadOrdered(OnDiskCursor<?> state, long currentPos, boolean hasDescent, boolean hasAscent, boolean hasChild)
+        {
+            if (hasDescent)
+                currentPos = state.getContentAtPos(currentPos);
+            if (hasAscent)
+                currentPos = addBacktrackAndMaybeAdvanceOver(state, currentPos, hasChild);
+            return currentPos;
+        }
+
+        long loadSwapped(OnDiskCursor<?> state, long currentPos, boolean hasDescent, boolean hasAscent, boolean hasChild)
+        {
+            if (hasDescent)
+                currentPos = addBacktrackAndMaybeAdvanceOver(state, currentPos, hasChild || hasAscent);
+            if (hasAscent)
+                currentPos = state.getContentAtPos(currentPos);
+            return currentPos;
+        }
+
         /// [#load] for a node whose ascent slot holds an alternate-branch pointer, not content to present on the return
         /// path: flag it on the position and step over its bytes. The branch is read on demand, by
         /// [OnDiskCursor#alternateBranch]. A deletion-aware data trie is never written ordered, so the two sides are
         /// never swapped here.
-        private void loadWithBranchPointer(OnDiskCursor<?> state, long currentPos, boolean hasAscent, boolean hasDescent, boolean hasChild)
+        private long loadWithBranchPointer(OnDiskCursor<?> state, long currentPos, boolean hasDescent, boolean hasAscent)
         {
-            assert !state.swapContentSides;
             if (hasAscent)
                 state.currentEncodedPosition |= Cursor.MAY_HAVE_DELETION_BRANCH_BIT;
             if (hasDescent)
                 currentPos = state.getContentAtPos(currentPos);
-            if (hasChild)
-                state.descendPostPrefix(maybeSkipOverContent(state, currentPos, hasAscent));
-            else
-                state.descendPostPrefixToEmpty();
+            return maybeSkipOverContent(state, currentPos, hasAscent);
         }
 
         private long addBacktrackAndMaybeAdvanceOver(OnDiskCursor<?> state, long currentPos, boolean shouldAdvanceOverContent)
@@ -691,7 +728,7 @@ enum OnDiskReadNodeType
             // transition may be before the target's, in which case there is nothing here for the skip.
             long returnPathPosition = state.nodeImplData;
             if (Cursor.direction(returnPathPosition).lt(Cursor.incomingTransition(returnPathPosition), transition))
-                return state.exhaustedPosition;
+                return OnDiskCursor.NO_CHILD;
             return advance(state);
         }
 
@@ -702,7 +739,7 @@ enum OnDiskReadNodeType
             boolean hasDescent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0;
             boolean hasChild = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_CHILD) != 0;
             if (!hasChild)
-                return 0;
+                return OnDiskCursor.NO_CHILD;
             long pos = postCodePos;
             pos = maybeSkipOverContent(state, pos, hasDescent);
             pos = maybeSkipOverContent(state, pos, hasAscent);
@@ -713,7 +750,7 @@ enum OnDiskReadNodeType
         public long getAlternateBranch(OnDiskCursor<?> state, int nodeCode, long postCodePos)
         {
             if ((nodeCode & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) == 0)
-                return -1;
+                return OnDiskCursor.NO_CHILD;
             long pos = maybeSkipOverContent(state, postCodePos,
                                             (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0);
             int vintlen = state.readVIntLength(pos);
@@ -744,7 +781,7 @@ enum OnDiskReadNodeType
             boolean hasDescent = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) != 0;
             boolean hasChild = (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_CHILD) != 0;
             // An alternate-branch pointer in the ascent slot is not content and must never be handed back as such.
-            boolean hasAscent = !state.alternateInAscentSlot
+            boolean hasAscent = state.contentStyle == OnDiskCursor.ContentStyle.ORDERED
                                 && (nodeCode & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) != 0;
             long pos = postCodePos;
             if (direction.isForward())
@@ -784,7 +821,7 @@ enum OnDiskReadNodeType
             String ascentContent = "";
             if (hasAscent)
             {
-                if (state.alternateInAscentSlot)
+                if (state.contentStyle == OnDiskCursor.ContentStyle.ALTERNATE_BRANCH)
                 {
                     ascentContent = "alt: " + getAlternateBranch(state, nodeCode, state.postCodePos);
                     pos = maybeSkipOverContent(state, pos, true);
@@ -801,10 +838,59 @@ enum OnDiskReadNodeType
             String children = hasChild ? " --> " + pos : "";
             return "Prefix: " + descentContent + ascentContent + children;
         }
+    },
+    RELAY
+    {
+        @Override
+        public void load(OnDiskCursor<?> state)
+        {
+            // Immediately move to child node
+            state.descendPostRelay(relayTarget(state, state.postCodePos, state.nodeCode));
+        }
+
+        /// The position of the node that the relay whose code `nodeCode` is just before `postCodePos + 1` stands for. A
+        /// relay gives it as the distance from its own start to that node, in `bbb + 1` bytes.
+        long relayTarget(OnDiskCursor<?> state, long postCodePos, int nodeCode)
+        {
+            int bytes = (nodeCode & 0b111) + 1;
+            // The bytes being read can be corrupt (see readContentLength); do not let a bad pointer turn into an
+            // arbitrary position to seek to. An eight-byte delta can read back negative.
+            if (postCodePos < bytes)
+                throw OnDiskCursor.corrupt("relay at position " + (postCodePos + 1) + " has no room for its pointer");
+            long delta = state.readSizedInt(postCodePos, bytes);
+            long target = postCodePos - bytes - delta;
+            if (delta < 0 || target <= 0)
+                throw OnDiskCursor.corrupt("relay at position " + (postCodePos + 1) + " points outside the data");
+            return target;
+        }
+
+        @Override
+        public long advance(OnDiskCursor<?> state)
+        {
+            throw new IllegalStateException("Requesting advance from RELAY node");
+        }
+
+        @Override
+        public long skipTo(OnDiskCursor<?> state, int transition)
+        {
+            throw new IllegalStateException("Requesting advance from RELAY node");
+        }
+
+        @Override
+        public String dump(OnDiskCursor<?> state)
+        {
+            return "Relay --> " + relayTarget(state, state.postCodePos, state.nodeCode);
+        }
+
+        @Override
+        public long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos)
+        {
+            return relayTarget(state, postCodePos, nodeCode);
+        }
     };
 
     // prefix with no content and no child is used for backtrack entry to return ascent-side content
-    private static final int ASCENT_LEAF_CODE = OnDiskWriteNodeType.PREFIX.bits;
+    private static final int ASCENT_LEAF_CODE = OnDiskWriteNodeType.PREFIX_BITS;
 
     /// Record the content at `contentPos` to be presented on the return path of the cursor's current position, as a
     /// backtrack entry for a made-up [#PREFIX] node with no content and no child ([#ASCENT_LEAF_CODE]), which presents
@@ -855,11 +941,11 @@ enum OnDiskReadNodeType
     }
 
     /// The position of the alternate branch whose pointer is in the ascent-side content slot of the node described by
-    /// `nodeCode` and `postCodePos`, resolved from the delta stored there, or -1 if it has none. Only PREFIX nodes can
-    /// carry one.
+    /// `nodeCode` and `postCodePos`, resolved from the delta stored there, or [OnDiskCursor#NO_CHILD] if it has none.
+    /// Only PREFIX nodes can carry one.
     public long getAlternateBranch(OnDiskCursor<?> state, int nodeCode, long postCodePos)
     {
-        return -1;
+        return OnDiskCursor.NO_CHILD;
     }
 
     /// Step back over the length-prefixed content item that ends at `currentPos` if `shouldAdvanceOverContent` is set.
@@ -875,7 +961,8 @@ enum OnDiskReadNodeType
     }
 
     /// Return the position of the first child in the given direction of the node described by `nodeCode` and
-    /// `postCodePos`. This is used to descend to the nearest content of a branch and is called for nodes other than
+    /// `postCodePos`; the child in question may be a no-transition one, such as the child of a prefix or relay node.
+    /// This is used to descend to the nearest content of a branch and is called for nodes other than
     /// the one the cursor is positioned on, thus it must only use the passed node and never `state`'s own
     /// `nodeCode`/`postCodePos`.
     public abstract long getFirstChild(OnDiskCursor<?> state, Direction direction, int nodeCode, long postCodePos);
@@ -889,15 +976,12 @@ enum OnDiskReadNodeType
         LEAF, LEAF, LEAF, LEAF, LEAF, LEAF, LEAF, LEAF,
         CHAIN, CHAIN, CHAIN, CHAIN, CHAIN, CHAIN, CHAIN, CHAIN,
         SPARSE, SPARSE, SPARSE, SPARSE, SPARSE, SPARSE, SPARSE, SPARSE,
-        SPARSE, SPARSE, SPARSE, SPARSE, BITMAP, DENSE, PREFIX, null // code 31 (11111xxx) is reserved
+        SPARSE, SPARSE, SPARSE, SPARSE, BITMAP, DENSE, PREFIX, RELAY
     };
 
-    /// Selects the appropriate OnDiskReadNodeType based on the node code. Code `11111xxx` is reserved.
+    /// Selects the appropriate OnDiskReadNodeType based on the node code.
     static OnDiskReadNodeType selectNodeImpl(int nodeCode)
     {
-        OnDiskReadNodeType impl = IMPLEMENTATIONS[nodeCode >> 3];
-        if (impl == null)
-            throw OnDiskCursor.corrupt("reserved node code " + nodeCode);
-        return impl;
+        return IMPLEMENTATIONS[nodeCode >> 3];
     }
 }

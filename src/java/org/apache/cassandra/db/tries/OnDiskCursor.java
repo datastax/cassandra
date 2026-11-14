@@ -32,15 +32,28 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 
 public class OnDiskCursor<T> implements Cursor<T>
 {
+    /// Value returned by node implementations when they don't have further children when
+    /// asked to advance or skip. Must compare smaller than valid encoded positions.
+    static final long NO_CHILD = Long.MIN_VALUE;
+
+    enum ContentStyle
+    {
+        /// no ascend-side data
+        UNORDERED,
+        /// ordered, forward content in descend side, reverse in ascend side slot
+        ORDERED,
+        /// unordered, deletion branch in ascend-side slot
+        ALTERNATE_BRANCH
+    }
+
     public OnDiskCursor(DataDeserializer<T> deserializer,
                         RebuffererFactory rebuffererFactory,
                         ByteComparable.Version byteComparableVersion,
                         Direction direction,
-                        boolean isOrdered,
-                        boolean alternateInAscentSlot,
+                        ContentStyle contentStyle,
                         long root)
     {
-        this(deserializer, rebuffererFactory, byteComparableVersion, direction, isOrdered, alternateInAscentSlot);
+        this(deserializer, rebuffererFactory, byteComparableVersion, direction, contentStyle);
         try
         {
             descendInto(Cursor.rootPosition(direction), root);
@@ -55,19 +68,17 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// Start at a node given as the pair that identifies it, as [#currentFullNodePostCodePos] and
     /// [#currentFullNodeCode] hold it. Used for tails, whose root can be a position inside a chain node, which has
     /// no code byte of its own in the file.
-    public OnDiskCursor(DataDeserializer<T> deserializer,
-                        RebuffererFactory rebuffererFactory,
-                        ByteComparable.Version byteComparableVersion,
-                        Direction direction,
-                        boolean isOrdered,
-                        boolean alternateInAscentSlot,
-                        long rootPostCodePos,
-                        int rootNodeCode)
+    public OnDiskCursor(OnDiskCursor<T> source, Direction direction)
     {
-        this(deserializer, rebuffererFactory, byteComparableVersion, direction, isOrdered, alternateInAscentSlot);
+        this(source.rdr.deserializer,
+             source.rebuffererFactory,
+             source.byteComparableVersion,
+             direction,
+             source.contentStyle);
+        // TODO: Think about passing buffers between source and tail.
         try
         {
-            descendInto(Cursor.rootPosition(direction), rootPostCodePos, rootNodeCode);
+            descendInto(Cursor.rootPosition(direction), source.currentFullNodePostCodePos, source.currentFullNodeCode);
         }
         catch (Throwable t)
         {
@@ -84,8 +95,7 @@ public class OnDiskCursor<T> implements Cursor<T>
                  RebuffererFactory rebuffererFactory,
                  ByteComparable.Version byteComparableVersion,
                  Direction direction,
-                 boolean isOrdered,
-                 boolean alternateInAscentSlot)
+                 ContentStyle contentStyle)
     {
         this.rebuffererFactory = rebuffererFactory;
         this.rebufferer = rebuffererFactory.instantiateRebufferer(false);
@@ -94,10 +104,8 @@ public class OnDiskCursor<T> implements Cursor<T>
         this.currentBufferOffset = 0;
         this.rdr = new SharedStream(deserializer);
         this.byteComparableVersion = byteComparableVersion;
-        this.isOrdered = isOrdered;
-        this.alternateInAscentSlot = alternateInAscentSlot;
-        this.swapContentSides = direction.select(false, isOrdered);
-        this.exhaustedPosition = Cursor.exhaustedPosition(direction);
+        this.contentStyle = contentStyle;
+        this.swapContentSides = contentStyle == ContentStyle.ORDERED && !direction.isForward();
     }
 
     class SharedStream extends RebufferingInputStream
@@ -186,12 +194,8 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// Null once the cursor has been closed, which is what makes [#close] idempotent.
     Rebufferer rebufferer;
     final ByteComparable.Version byteComparableVersion;
+    final ContentStyle contentStyle;
     final boolean swapContentSides;
-    final boolean isOrdered; // determines swapContentSides above; needed if tailTrie switches direction
-    /// True when a node's ascent-side content slot holds an alternate-branch pointer rather than return-path content,
-    /// i.e. when this walks the data trie of a deletion-aware trie. The walk then never stops on that slot; it is read
-    /// on demand by [#alternateBranch]. See [OnDiskDeletionAwareTrieWriter].
-    final boolean alternateInAscentSlot;
 
 
     Rebufferer.BufferHolder currentBH;
@@ -200,8 +204,6 @@ public class OnDiskCursor<T> implements Cursor<T>
 
     long[] stack = new long[3 * 16];
     int stackLength;
-
-    final long exhaustedPosition;
 
     T content = null;
     OnDiskReadNodeType currentImpl;
@@ -215,6 +217,9 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// alone does not identify where a tail taken here must start -- the code carries how much of the chain is left.
     /// Both are left alone by [#descendPostPrefix], which moves the implementation on to the node a prefix points to
     /// while the cursor stays on the prefix.
+    ///
+    /// This is never a relay: relays adjust the full node pos (see [#descendPostRelay]), so that the code
+    /// here is always the one that describes the node's content and children.
     long currentFullNodePostCodePos;   // for tails
     int currentFullNodeCode;
 
@@ -240,10 +245,34 @@ public class OnDiskCursor<T> implements Cursor<T>
 
     void descendPostPrefix(long nodePos)
     {
-        // leave content and encodedPosition unchanged
+        // leave content, encodedPosition and full node pos and code unchanged
         this.nodeCode = readByteBefore(nodePos);
         this.postCodePos = nodePos - 1;
         this.currentImpl = OnDiskReadNodeType.selectNodeImpl(nodeCode);
+        if (currentImpl == OnDiskReadNodeType.LEAF)
+            throw corrupt("prefix to leaf at " + (currentFullNodePostCodePos + 1));
+        this.currentImpl.load(this); // may modify currentEncodedPosition
+    }
+
+    void descendPostRelay(long nodePos)
+    {
+        // Like the above, but if we are at the full node position, move that one too.
+        // Note that we shouldn't adjust content and encodedPosition as this relay
+        // may be after the prefix.
+        boolean adjustFullPos = postCodePos == currentFullNodePostCodePos;
+
+        this.nodeCode = readByteBefore(nodePos);
+        this.postCodePos = nodePos - 1;
+
+        this.currentImpl = OnDiskReadNodeType.selectNodeImpl(nodeCode);
+        if (currentImpl == OnDiskReadNodeType.RELAY)
+            throw corrupt("relay chain detected from " + (currentFullNodePostCodePos + 1));
+
+        if (adjustFullPos)
+        {
+            currentFullNodePostCodePos = postCodePos;
+            currentFullNodeCode = nodeCode;
+        }
         this.currentImpl.load(this); // may modify currentEncodedPosition
     }
 
@@ -277,7 +306,7 @@ public class OnDiskCursor<T> implements Cursor<T>
 
     private long returnOrAscend(long descend)
     {
-        if (descend != exhaustedPosition)
+        if (descend != NO_CHILD)
             return descend;
         else
             return ascend();
@@ -299,7 +328,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     {
         stackLength = 0;
         content = null;
-        return currentEncodedPosition = exhaustedPosition;
+        return currentEncodedPosition = Cursor.exhaustedPosition(currentEncodedPosition);
     }
 
     /// Follows the in-memory cursor's `skipTo` (see [InMemoryReadTrie]).
@@ -320,10 +349,11 @@ public class OnDiskCursor<T> implements Cursor<T>
         {
             // Descent requested. Jump to the given child transition or greater, and backtrack if there's no such.
             long position = currentImpl.skipTo(this, skipTransition);
-            if (position != exhaustedPosition && Cursor.compare(position, encodedSkipPosition) >= 0)
+            if (Cursor.compare(position, encodedSkipPosition) >= 0)
                 return position;
-            // Either there is no such child, or the target is the return path of the child we descended into, and the
-            // entry on top of the stack is the target or the first position after it.
+            // Either there is no such child (NO_CHILD compares smaller than any valid position), or the target is the
+            // return path of the child we descended into, and the entry on top of the stack is the target or the first
+            // position after it.
             return ascend();
         }
 
@@ -345,7 +375,7 @@ public class OnDiskCursor<T> implements Cursor<T>
             {
                 currentImpl = loadStackImpl(stackLength);
                 long position = currentImpl.skipTo(this, skipTransition);
-                if (position != exhaustedPosition && Cursor.compare(position, encodedSkipPosition) >= 0)
+                if (Cursor.compare(position, encodedSkipPosition) >= 0)
                     return position;
                 // We found nothing here, or descended into the child whose return path is the target and which may
                 // just have added a backtrack entry for it. The next iteration of the loop will find it.
@@ -363,13 +393,14 @@ public class OnDiskCursor<T> implements Cursor<T>
     @Override
     public Cursor<T> tailCursor(Direction direction)
     {
-        return new OnDiskCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction, isOrdered, alternateInAscentSlot, currentFullNodePostCodePos, currentFullNodeCode);
+        return new OnDiskCursor<>(this, direction);
     }
 
-    /// The position of the alternate branch the current node carries in its ascent-side content slot, or -1 if it
-    /// has none. Only meaningful when [#alternateInAscentSlot] is set.
+    /// The position of the alternate branch the current node carries in its ascent-side content slot, or [#NO_CHILD]
+    /// if it has none. Only meaningful when [#contentStyle] is `ALTERNATE_BRANCH`.
     long alternateBranch()
     {
+        assert contentStyle == ContentStyle.ALTERNATE_BRANCH;
         return OnDiskReadNodeType.selectNodeImpl(currentFullNodeCode)
                                  .getAlternateBranch(this, currentFullNodeCode, currentFullNodePostCodePos);
     }
@@ -613,7 +644,7 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// Used for debugging.
     String dumpNode(long node)
     {
-        try (OnDiskCursor<T> cursor = new OnDiskCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction(), isOrdered, alternateInAscentSlot, node))
+        try (OnDiskCursor<T> cursor = new OnDiskCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction(), contentStyle, node))
         {
             return cursor.dumpNode();
         }

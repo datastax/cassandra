@@ -35,27 +35,22 @@ class OnDiskDeletionAwareCursor<T, D extends RangeState<D>> extends OnDiskCursor
                               Direction direction,
                               long root)
     {
-        super(contentDeserializer, rebuffererFactory, byteComparableVersion, direction, false, true, root);
+        super(contentDeserializer, rebuffererFactory, byteComparableVersion, direction, ContentStyle.ALTERNATE_BRANCH, root);
         this.deletionDeserializer = deletionDeserializer;
     }
 
-    OnDiskDeletionAwareCursor(OnDiskCursor.DataDeserializer<T> contentDeserializer,
-                              OnDiskCursor.DataDeserializer<D> deletionDeserializer,
-                              RebuffererFactory rebuffererFactory,
-                              ByteComparable.Version byteComparableVersion,
-                              Direction direction,
-                              long rootPostCodePos,
-                              int rootNodeCode)
+    OnDiskDeletionAwareCursor(OnDiskDeletionAwareCursor<T, D> source,
+                              Direction direction)
     {
-        super(contentDeserializer, rebuffererFactory, byteComparableVersion, direction, false, true, rootPostCodePos, rootNodeCode);
-        this.deletionDeserializer = deletionDeserializer;
+        super(source, direction);
+        this.deletionDeserializer = source.deletionDeserializer;
     }
 
     @Override
     public RangeCursor<D> deletionBranchCursor(Direction direction)
     {
         long root = alternateBranch();
-        if (root < 0)
+        if (root == NO_CHILD)
             return null;
         return new OnDiskRangeCursor<>(deletionDeserializer, rebuffererFactory, byteComparableVersion, direction, root);
     }
@@ -63,7 +58,6 @@ class OnDiskDeletionAwareCursor<T, D extends RangeState<D>> extends OnDiskCursor
     @Override
     public DeletionAwareCursor<T, D> tailCursor(Direction direction)
     {
-        return new OnDiskDeletionAwareCursor<>(rdr.deserializer, deletionDeserializer, rebuffererFactory, byteComparableVersion,
-                                               direction, currentFullNodePostCodePos, currentFullNodeCode);
+        return new OnDiskDeletionAwareCursor<>(this, direction);
     }
 }

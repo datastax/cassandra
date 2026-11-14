@@ -48,6 +48,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 /// Covers the back-to-front integer decoding of [OnDiskCursor], which the round-trip tests only reach
 /// for the small content sizes they produce, its behaviour on lengths that a corrupt commit-log
@@ -160,26 +161,6 @@ public class OnDiskCursorTest
         }
     }
 
-    /// Code `11111xxx` is reserved. A reader that meets it must fail as on corruption, not dereference nothing.
-    @Test
-    public void testReservedNodeCodeIsRejected() throws IOException
-    {
-        try (DataOutputBuffer out = new DataOutputBuffer())
-        {
-            out.write(new byte[8]);
-            out.writeByte(0b11111000);
-            ByteBuffer buffer = out.asNewBuffer();
-            assertThrows(UncheckedIOException.class,
-                         () -> new OnDiskCursor<Void>((rdr, length) -> null,
-                                                      new ByteBufferRebufferer(buffer),
-                                                      VERSION,
-                                                      Direction.FORWARD,
-                                                      true,
-                                                      false,
-                                                      buffer.limit()));
-        }
-    }
-
     /// A child pointer must point before its parent. A dense node with eight-byte pointers can hold any delta, including
     /// one that makes the node its own child; following it would walk the same node forever.
     @Test(timeout = 60_000)
@@ -187,7 +168,7 @@ public class OnDiskCursorTest
     {
         ByteBuffer buffer = selfPointingDenseNode();
         OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
-                                                       Direction.FORWARD, false, false, buffer.limit());
+                                                       Direction.FORWARD, OnDiskCursor.ContentStyle.UNORDERED, buffer.limit());
         assertThrows(UncheckedIOException.class, cursor::advance);
     }
 
@@ -217,7 +198,7 @@ public class OnDiskCursorTest
         ByteBuffer buffer = ByteBuffer.allocate(node.limit() + 2);
         buffer.put(node);
         buffer.put((byte) 'a');
-        buffer.put((byte) OnDiskWriteNodeType.CHAIN.bits);     // the root, a chain to the node with "a"
+        buffer.put((byte) OnDiskWriteNodeType.CHAIN_BITS);     // the root, a chain to the node with "a"
         buffer.flip();
         TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
         OnDiskRangeCursor<TestRangeState> cursor = new OnDiskRangeCursor<>(TrieUtil.RANGE_SERDE, factory,
@@ -403,7 +384,7 @@ public class OnDiskCursorTest
         ByteBuffer buffer = ByteBuffer.allocate(size);
         for (int i = 0; i < 256 * 8; ++i)
             buffer.put(i, (byte) 0xFF);     // absent
-        buffer.put(size - 1, (byte) (OnDiskWriteNodeType.DENSE.bits | 7));
+        buffer.put(size - 1, (byte) (OnDiskWriteNodeType.DENSE[7].bits));
         long postCodePos = size - 1;
         long base = postCodePos - 256 * 8;
         long delta = base - size;           // child = base - delta = size, i.e. this node
@@ -417,21 +398,55 @@ public class OnDiskCursorTest
     @Test
     public void testLeafLongerThanTheDataIsRejected()
     {
-        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ 0, 0, (byte) (OnDiskWriteNodeType.LEAF.bits | 5) });
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ 0, 0, (byte) (OnDiskWriteNodeType.LEAF_BITS | 5) });
         assertThrows(UncheckedIOException.class,
                      () -> new OnDiskCursor<Void>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
-                                                  Direction.FORWARD, false, false, buffer.limit()));
+                                                  Direction.FORWARD, OnDiskCursor.ContentStyle.UNORDERED, buffer.limit()));
     }
 
     /// A prefix code with neither content flag is never written; the reader only uses it for its own backtrack entries.
     @Test
     public void testPrefixWithoutContentIsRejected()
     {
-        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ (byte) OnDiskWriteNodeType.LEAF.bits,
-                                                        (byte) (OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_CHILD) });
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ (byte) OnDiskWriteNodeType.LEAF_BITS,
+                                                        (byte) (OnDiskWriteNodeType.PREFIX_BITS | OnDiskWriteNodeType.PREFIX_HAS_CHILD) });
         assertThrows(UncheckedIOException.class,
                      () -> new OnDiskCursor<Void>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
-                                                  Direction.FORWARD, false, false, buffer.limit()));
+                                                  Direction.FORWARD, OnDiskCursor.ContentStyle.UNORDERED, buffer.limit()));
+    }
+
+    /// An unordered trie only has content on the descent side. A prefix node with a child that claims content for
+    /// the ascent side, with or without some for the descent side, is not one such a trie is written with; the same
+    /// bytes are well-formed as an ordered trie.
+    @Test
+    public void testAscentContentInUnorderedTrieIsRejected()
+    {
+        byte chain = (byte) OnDiskWriteNodeType.CHAIN_BITS;
+        int prefix = OnDiskWriteNodeType.PREFIX_BITS | OnDiskWriteNodeType.PREFIX_HAS_CHILD;
+        // an empty leaf, the chain "a" that leads to it, and a prefix node with a byte of ascent content
+        ByteBuffer ascentOnly = ByteBuffer.wrap(new byte[]{ 0,
+                                                            'a', chain,
+                                                            0, 1, (byte) (prefix | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) });
+        // the same with a byte of content on each side
+        ByteBuffer both = ByteBuffer.wrap(new byte[]{ 0,
+                                                      'a', chain,
+                                                      0, 1, 0, 1, (byte) (prefix
+                                                                          | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT
+                                                                          | OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) });
+        for (ByteBuffer buffer : new ByteBuffer[]{ ascentOnly, both })
+            for (Direction direction : Direction.values())
+            {
+                UncheckedIOException thrown =
+                    assertThrows(UncheckedIOException.class,
+                                 () -> new OnDiskCursor<Void>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                              direction, OnDiskCursor.ContentStyle.UNORDERED, buffer.limit()));
+                assertTrue(thrown.getCause().getMessage(), thrown.getCause().getMessage().contains("unordered prefix node"));
+
+                OnDiskCursor<Void> ordered = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                                direction, OnDiskCursor.ContentStyle.ORDERED, buffer.limit());
+                assertEquals(1, Cursor.depth(ordered.advance()));
+                ordered.close();
+            }
     }
 
     /// A range tail presents its root's ascent content through a backtrack entry that reads no bytes. A prefix whose
@@ -445,14 +460,14 @@ public class OnDiskCursorTest
     {
         ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ 0,                                          // descent content
                                                         1,                                          // its length
-                                                        (byte) (OnDiskWriteNodeType.PREFIX.bits
+                                                        (byte) (OnDiskWriteNodeType.PREFIX_BITS
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT),
                                                         'a',
-                                                        (byte) OnDiskWriteNodeType.CHAIN.bits,      // child "a"
+                                                        (byte) OnDiskWriteNodeType.CHAIN_BITS,      // child "a"
                                                         0,                                          // root's ascent content
                                                         1,                                          // its length
-                                                        (byte) (OnDiskWriteNodeType.PREFIX.bits
+                                                        (byte) (OnDiskWriteNodeType.PREFIX_BITS
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_CHILD) }); // root
         TestRangeState content = new TestRangeState(TrieUtil.directComparable("a"), -1, 1);
@@ -478,16 +493,16 @@ public class OnDiskCursorTest
     {
         ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ 0,                                          // descent content
                                                         1,                                          // its length
-                                                        (byte) (OnDiskWriteNodeType.PREFIX.bits
+                                                        (byte) (OnDiskWriteNodeType.PREFIX_BITS
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_CHILD),
                                                         'a',
-                                                        (byte) OnDiskWriteNodeType.CHAIN.bits,      // child "a"
+                                                        (byte) OnDiskWriteNodeType.CHAIN_BITS,      // child "a"
                                                         0,                                          // root's ascent content
                                                         1,                                          // its length
                                                         0,                                          // root's descent content
                                                         1,                                          // its length
-                                                        (byte) (OnDiskWriteNodeType.PREFIX.bits
+                                                        (byte) (OnDiskWriteNodeType.PREFIX_BITS
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT
                                                                 | OnDiskWriteNodeType.PREFIX_HAS_CHILD) }); // root
@@ -515,13 +530,13 @@ public class OnDiskCursorTest
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            out.writeByte(OnDiskWriteNodeType.LEAF.bits);       // a branch root, at position 1
+            out.writeByte(OnDiskWriteNodeType.LEAF_BITS);       // a branch root, at position 1
             OnDiskBaseTrieWriter.writeReversedSized(out, -1L, 8);   // the slot: delta -1
             OnDiskBaseTrieWriter.writeReversedVint(out, 8);
-            out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
+            out.writeByte(OnDiskWriteNodeType.PREFIX_BITS | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
             ByteBuffer buffer = out.asNewBuffer();
             OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
-                                                           Direction.FORWARD, false, true, buffer.limit());
+                                                           Direction.FORWARD, OnDiskCursor.ContentStyle.ALTERNATE_BRANCH, buffer.limit());
             assertThrows(UncheckedIOException.class, cursor::alternateBranch);
         }
     }
@@ -533,12 +548,12 @@ public class OnDiskCursorTest
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            out.writeByte(OnDiskWriteNodeType.LEAF.bits);       // a branch root, at position 1
+            out.writeByte(OnDiskWriteNodeType.LEAF_BITS);       // a branch root, at position 1
             OnDiskBaseTrieWriter.writeReversedVint(out, 0);     // the slot: empty
-            out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
+            out.writeByte(OnDiskWriteNodeType.PREFIX_BITS | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
             ByteBuffer buffer = out.asNewBuffer();
             OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
-                                                           Direction.FORWARD, false, true, buffer.limit());
+                                                           Direction.FORWARD, OnDiskCursor.ContentStyle.ALTERNATE_BRANCH, buffer.limit());
             assertEquals(1, cursor.alternateBranch());
         }
     }
@@ -550,13 +565,13 @@ public class OnDiskCursorTest
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            out.writeByte(OnDiskWriteNodeType.LEAF.bits);       // a branch root, at position 1
+            out.writeByte(OnDiskWriteNodeType.LEAF_BITS);       // a branch root, at position 1
             OnDiskBaseTrieWriter.writeReversedSized(out, 0, 1); // the slot: the delta 0 in one byte
             OnDiskBaseTrieWriter.writeReversedVint(out, 1);
-            out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
+            out.writeByte(OnDiskWriteNodeType.PREFIX_BITS | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
             ByteBuffer buffer = out.asNewBuffer();
             OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
-                                                           Direction.FORWARD, false, true, buffer.limit());
+                                                           Direction.FORWARD, OnDiskCursor.ContentStyle.ALTERNATE_BRANCH, buffer.limit());
             assertEquals(1, cursor.alternateBranch());
         }
     }
@@ -571,15 +586,15 @@ public class OnDiskCursorTest
         {
             try (DataOutputBuffer out = new DataOutputBuffer())
             {
-                out.writeByte(OnDiskWriteNodeType.LEAF.bits);       // the child, at position 1
+                out.writeByte(OnDiskWriteNodeType.SPARSE[0].bits);       // the child, at position 1
                 if (slotLength > 0)
                     OnDiskBaseTrieWriter.writeReversedSized(out, 0, slotLength);   // the slot: the delta 0
                 OnDiskBaseTrieWriter.writeReversedVint(out, slotLength);
-                out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT
+                out.writeByte(OnDiskWriteNodeType.PREFIX_BITS | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT
                               | OnDiskWriteNodeType.PREFIX_HAS_CHILD);
                 ByteBuffer buffer = out.asNewBuffer();
                 OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer),
-                                                               VERSION, Direction.FORWARD, false, true, buffer.limit());
+                                                               VERSION, Direction.FORWARD, OnDiskCursor.ContentStyle.ALTERNATE_BRANCH, buffer.limit());
                 assertThrows("slot of " + slotLength + " bytes", UncheckedIOException.class, cursor::alternateBranch);
             }
         }
@@ -592,10 +607,10 @@ public class OnDiskCursorTest
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             OnDiskBaseTrieWriter.writeReversedVint(out, 0);     // the slot: empty, delta 0 back to position 0
-            out.writeByte(OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
+            out.writeByte(OnDiskWriteNodeType.PREFIX_BITS | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
             ByteBuffer buffer = out.asNewBuffer();
             OnDiskCursor<Void> cursor = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
-                                                           Direction.FORWARD, false, true, buffer.limit());
+                                                           Direction.FORWARD, OnDiskCursor.ContentStyle.ALTERNATE_BRANCH, buffer.limit());
             assertThrows(UncheckedIOException.class, cursor::alternateBranch);
         }
     }
@@ -606,12 +621,12 @@ public class OnDiskCursorTest
     @Test
     public void testRootPastTheFileLengthIsRejected()
     {
-        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ (byte) OnDiskWriteNodeType.LEAF.bits, (byte) OnDiskWriteNodeType.LEAF.bits });
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ (byte) OnDiskWriteNodeType.LEAF_BITS, (byte) OnDiskWriteNodeType.LEAF_BITS });
         ByteBufferRebufferer rebufferer = rebuffererWithLength(buffer, 1);
-        new OnDiskCursor<Void>((rdr, length) -> null, rebufferer, VERSION, Direction.FORWARD, false, false, 1).close();
+        new OnDiskCursor<Void>((rdr, length) -> null, rebufferer, VERSION, Direction.FORWARD, OnDiskCursor.ContentStyle.UNORDERED, 1).close();
         assertThrows(UncheckedIOException.class,
                      () -> new OnDiskCursor<Void>((rdr, length) -> null, rebufferer, VERSION,
-                                                  Direction.FORWARD, false, false, 2));
+                                                  Direction.FORWARD, OnDiskCursor.ContentStyle.UNORDERED, 2));
     }
 
     /// The same for the deserializer's stream, which reads through the buffer the cursor holds: a deserializer that
@@ -620,14 +635,14 @@ public class OnDiskCursorTest
     public void testContentReadPastTheFileLengthIsRejected()
     {
         // A leaf with one byte of content; the bytes that follow the leaf are past the file's length.
-        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ 0, (byte) (OnDiskWriteNodeType.LEAF.bits | 1), 0, 0 });
+        ByteBuffer buffer = ByteBuffer.wrap(new byte[]{ 0, (byte) (OnDiskWriteNodeType.LEAF_BITS | 1), 0, 0 });
         ByteBufferRebufferer rebufferer = rebuffererWithLength(buffer, 2);
         assertThrows(UncheckedIOException.class,
                      () -> new OnDiskCursor<Void>((rdr, length) -> {
                                                       rdr.readFully(new byte[3]);
                                                       return null;
                                                   },
-                                                  rebufferer, VERSION, Direction.FORWARD, false, false, 2));
+                                                  rebufferer, VERSION, Direction.FORWARD, OnDiskCursor.ContentStyle.UNORDERED, 2));
     }
 
     private static ByteBufferRebufferer rebuffererWithLength(ByteBuffer buffer, long fileLength)
@@ -689,7 +704,7 @@ public class OnDiskCursorTest
             OnDiskTrieWriter.write(trie, false, TrieUtil.STRING_SERDE, out);
             ByteBuffer buffer = out.asNewBuffer();
             OnDiskCursor<String> cursor = new OnDiskCursor<>(TrieUtil.STRING_SERDE, new ByteBufferRebufferer(buffer), VERSION,
-                                                             Direction.FORWARD, false, false, buffer.limit());
+                                                             Direction.FORWARD, OnDiskCursor.ContentStyle.UNORDERED, buffer.limit());
             long position = cursor.advance();
             while (!Cursor.isExhausted(position) && cursor.content() == null)
                 position = cursor.advance();
@@ -769,14 +784,13 @@ public class OnDiskCursorTest
 
     private static OnDiskCursor<Void> cursorOver(DataOutputBuffer out, OnDiskCursor.DataDeserializer<Void> deserializer) throws IOException
     {
-        out.writeByte(OnDiskWriteNodeType.LEAF.bits);
+        out.writeByte(OnDiskWriteNodeType.LEAF_BITS);
         ByteBuffer buffer = out.asNewBuffer();
         return new OnDiskCursor<>(deserializer,
                                   new ByteBufferRebufferer(buffer),
                                   VERSION,
                                   Direction.FORWARD,
-                                  true,
-                                  false,
+                                  OnDiskCursor.ContentStyle.ORDERED,
                                   buffer.limit());
     }
 }

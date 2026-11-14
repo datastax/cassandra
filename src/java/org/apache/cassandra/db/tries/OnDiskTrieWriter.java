@@ -26,7 +26,8 @@ import org.apache.cassandra.io.util.SequentialWriter;
 
 /// Serializes a plain or range trie in the on-disk trie format; see [OnDiskBaseTrieWriter] and
 /// [OnDiskTrie.md](./OnDiskTrie.md). Content goes in the descent- or ascent-side slot of its node, according to the
-/// path the walk presents it on.
+/// path the walk presents it on. The layout of the result is determined by the [OnDiskNodeWriter] the nodes are
+/// given to.
 public class OnDiskTrieWriter<T> extends OnDiskBaseTrieWriter<T>
 {
     public interface DataSerializer<T>
@@ -35,9 +36,16 @@ public class OnDiskTrieWriter<T> extends OnDiskBaseTrieWriter<T>
         void serialize(DataOutputPlus out, T value) throws IOException;
     }
 
+    /// Create a writer that writes each node as soon as it is complete.
     public OnDiskTrieWriter(DataOutputPlus out, DataSerializer<T> dataSerializer, boolean swapAscentAndDescentSides)
     {
-        super(out, dataSerializer, swapAscentAndDescentSides);
+        this(new OnDiskNodeWriterImmediate<>(out, dataSerializer), swapAscentAndDescentSides);
+    }
+
+    /// Create a writer that gives the nodes of the trie to the given node writer.
+    public OnDiskTrieWriter(OnDiskNodeWriter<T> nodeWriter, boolean swapAscentAndDescentSides)
+    {
+        super(nodeWriter, swapAscentAndDescentSides);
     }
 
     private void content(T content, long position)
@@ -50,47 +58,57 @@ public class OnDiskTrieWriter<T> extends OnDiskBaseTrieWriter<T>
 
     /// Write the trie the given fresh cursor walks, which must be in [Direction#REVERSE]. A writer can write several
     /// tries this way, one after the other.
-    void writeFrom(Cursor<T> c) throws IOException
+    ///
+    /// Returns the position of the root of the trie, which is where the output is left, or 0 if the trie is empty.
+    /// A writer of nested tries (see [OnDiskNodeWriter#nested]) also returns 0 for a trie whose root is not placed
+    /// yet; [#hasRoot] tells the two apart.
+    long writeFrom(Cursor<T> c) throws IOException
     {
-        // A finished walk has written every node on its path, but leaves the path's length as it ended.
-        assert lastNodeOnPath == -1 : "Previous walk did not finish";
-        resetPathLength(0);
+        start();
 
         long position = c.encodedPosition();
-        T content = c.content();   // handle content on the root node
-        if (content != null)
-            content(content, position);
-
-        while (!Cursor.isExhausted(position = step(c, position)))
+        do
         {
-            content = c.content();
+            T content = Cursor.content(c, position);
             if (content != null)
                 content(content, position);
+            position = step(c, position);
         }
+        while (!Cursor.isExhausted(position));
+        return rootPosition;
     }
 
-    /// Serialize a trie into `out`. Returns the position of the root, which is the position of `out` when this
-    /// returns, or 0 if the trie is empty; a non-empty trie always writes at least one byte, so its root is never 0.
-    /// The value can be given to the readers as is: they take a root of 0 as the empty trie.
+    /// Serialize a trie into `out`, writing each node as soon as it is complete. Returns the position of the root,
+    /// which is the position of `out` when this returns, or 0 if the trie is empty; a non-empty trie always writes at
+    /// least one byte, so its root is never 0. The value can be given to the readers as is: they take a root of 0 as
+    /// the empty trie.
     public static <T> long write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, DataOutputPlus out) throws IOException
     {
-        OnDiskTrieWriter<T> fw = new OnDiskTrieWriter<>(out, serializer, isOrdered);
-        long startPosition = out.position();
+        return write(trie, isOrdered, serializer, out, OnDiskNodeWriter.Type.IMMEDIATE);
+    }
 
+    /// Serialize a trie into `out` with the layout the given type of node writer produces. Returns the position of
+    /// the root as above.
+    public static <T> long write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, DataOutputPlus out, OnDiskNodeWriter.Type nodeWriterType) throws IOException
+    {
+        OnDiskTrieWriter<T> fw = new OnDiskTrieWriter<>(nodeWriterType.create(out, serializer), isOrdered);
         try (Cursor<T> c = trie.cursor(Direction.REVERSE))
         {
-            fw.writeFrom(c);
+            // An empty trie leaves the stream untouched and has no root.
+            return fw.writeFrom(c);
         }
-        // An empty trie leaves the stream untouched, and the position there is not a node.
-        long position = out.position();
-        return position > startPosition ? position : 0;
     }
 
     public static <T> File write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, File file) throws IOException
     {
+        return write(trie, isOrdered, serializer, file, OnDiskNodeWriter.Type.IMMEDIATE);
+    }
+
+    public static <T> File write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, File file, OnDiskNodeWriter.Type nodeWriterType) throws IOException
+    {
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            write(trie, isOrdered, serializer, writer);
+            write(trie, isOrdered, serializer, writer, nodeWriterType);
             writer.finish();
             return file;
         }

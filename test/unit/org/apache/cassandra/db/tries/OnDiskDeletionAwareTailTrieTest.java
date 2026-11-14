@@ -21,8 +21,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.google.common.base.Predicates;
+import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -51,17 +54,33 @@ import static org.junit.Assert.assertTrue;
 /// The tests below therefore compare states as well as walks, and take tails at every prefix rather than only at the
 /// keys the data was built from -- including prefixes that fall in the middle of a chain node, which is the case
 /// [OnDiskDeletionAwareTrieTest#testTailsOfADeletionBranch] deliberately keeps out of its own data.
+@RunWith(Parameterized.class)
 public class OnDiskDeletionAwareTailTrieTest extends DeletionAwareTailTrieTest
 {
-    static OnDiskDeletionAwareTrie<String, TestRangeState> onDisk;
+    /// The node writer the trie is serialized with, and the kind of output it writes to.
+    @Parameterized.Parameter
+    public TrieUtil.OnDiskWriterKind kind = TrieUtil.IMMEDIATE;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static List<Object[]> kinds()
+    {
+        return TrieUtil.asParameters(TrieUtil.ON_DISK_WRITER_KINDS);
+    }
+
+    OnDiskDeletionAwareTrie<String, TestRangeState> onDisk;
 
     @BeforeClass
-    public static void writeAndRead() throws IOException
+    public static void setUpOnDisk()
     {
         // The on-disk readers pull in BufferPools, whose static initializer needs configuration.
         DatabaseDescriptor.toolInitialization();
-        DataOutputBuffer out = new DataOutputBuffer();
-        OnDiskDeletionAwareTrieWriter.write(trie, STRING_SERDE, RANGE_SERDE, out);
+    }
+
+    @Before
+    public void writeAndRead() throws IOException
+    {
+        DataOutputBuffer out = kind.newOutput();
+        OnDiskDeletionAwareTrieWriter.write(trie, STRING_SERDE, RANGE_SERDE, out, kind.nodeWriterType);
         onDisk = OnDiskDeletionAwareTrie.open(out.asNewBuffer(), STRING_SERDE, RANGE_SERDE, VERSION, -1);
     }
 

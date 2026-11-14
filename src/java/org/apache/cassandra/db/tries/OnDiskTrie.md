@@ -24,7 +24,10 @@ It implements the full trie/cursor functionality and relies on several features 
 - Node code bytes that include sizing and length for some node types and that are sometimes implicit.
 - Implicit pointer value for the first child of a node.
 - Bottom-to-top and back-to-front construction.
-<!-- to add page-packing and metadata storage -->
+- A choice of layouts: nodes can be written as soon as they are complete, which is the fastest way to serialize a 
+  trie, or be packed into the pages of the file, which minimizes the number of pages that reading a path through the 
+  trie has to touch.
+<!-- to add metadata storage -->
 
 The sections below will describe an on-disk trie's layout in detail, discuss the rationale behind the features above,
 and detail the process of constructing a trie from a cursor, as well as the implementation of range and deletion-aware
@@ -39,8 +42,10 @@ nothing, and its root is reported as 0, which the readers take as the empty trie
 
 `<node_0 data><node_0 code> <node_1 data><node_1 code> ... <root data><root code>`
 
+When nodes are packed into pages, runs of padding can separate them; no pointer leads into padding.
+
 The node code determines the type of node, and it also includes bits that specify length, features and/or bytes per
-pointer. The six node types we currently use are detailed below.
+pointer. The seven node types we currently use are detailed below.
 
 The trie is meant to be read in reverse; constructing on-disk tries in this way greatly simplifies the construction
 process. The position of a node is thus given by the file position immediately following it. For example, the
@@ -51,9 +56,11 @@ Children are always written before their parents, thus every pointer in the trie
 delta that is subtracted from the position at the start of the current node's data. This includes the deletion branch
 pointer of a deletion-aware trie (see the generic content nodes below). We use a variable number of bytes per pointer
 (encoded in the node code, or for a deletion branch pointer in the slot's length) to store this delta. The first child
-of a node is written last, thus it immediately precedes the parent's data -- in other words its delta is always 0 and
-does not need to be stored.
-<!-- to change for page-packed-->
+of a node is normally written last, thus it immediately precedes the parent's data -- in other words its delta is
+always 0 and does not need to be stored.
+
+When the nodes are packed into pages, a parent can end up being placed away from its first child. In this case the
+parent is immediately preceded by a relay node, which takes the first child's place and supplies its position.
 
 ### Leaf nodes (code `00nnnnnn`)
 
@@ -141,7 +148,8 @@ this definition always corresponds to the 00 transition, and a dense node may be
 
 A bitmap node is used when it is smaller than a dense node for the same children, i.e. when
 `32 + (childCount - 1) * (b+1)` is less than the size of the dense node's 256 pointers, whose width can be a byte more
-than the bitmap's.
+than the bitmap's. This can be the case even when there is a child for every transition, so a bitmap node can have
+up to 256 children.
 
 Example: `... 00 00 00 00 FF FF FF FF EB`
 encodes a dense node that has 4 bytes per pointer, that has no child for 00 and whose 01 child immediately precedes the
@@ -165,7 +173,9 @@ The generic content node has three flags specifying:
 - ***a***scent-side content: if the flag is set, the descent-side content (or the node code, if this is not present) is
   preceded by content which is to be presented on the ascent path, with its length.
 - ***p***refix: if the flag is not set, the node has no children. If it is set, the node immediately preceding this node
-  specifies its children.
+  specifies its children. That node is of one of the types that list children (chain, sparse, bitmap or dense), or a
+  relay to one (see below). It cannot be a leaf or another generic content node, which would give the node a second
+  set of content; readers reject these as corrupt.
 
 The exact meaning of descent and ascent path is determined by the specific trie type:
 - Plain tries do not contain ascent-side data (unordered ones always present content on the descent path, and ordered
@@ -175,7 +185,7 @@ The exact meaning of descent and ascent path is determined by the specific trie 
 - Deletion-aware tries do not have ascent-side data in their live path, but instead store pointers to deletion branches
   in the ascent-side slot. Like a child pointer, the pointer specifies the distance between the start of this node,
   which is where the ascent-side slot begins, and the root of the deletion branch. It is stored reversed in as few
-  bytes as it needs, and the slot's length gives their number. A node with no children has its deletion branch
+  bytes as it needs, and the slot's length gives their number. A node with no children can have its deletion branch
   immediately before it; the delta is then 0 and takes no bytes, i.e. the slot is empty, with length 0. Deletion
   branches in turn are range tries and follow the range trie behaviour. Because the ascent-side slot is taken, the live
   data of a deletion-aware trie can only have descent-side content; the writer rejects a trie that presents live
@@ -194,17 +204,33 @@ Example: `34 12 02 07 01 F7` encodes a node of a deletion-aware trie with the li
 the node immediately preceding it), whose deletion branch's root is `0x1234` bytes before the start of this node.
 Without children, the deletion branch would immediately precede the node, which would be encoded as `00 07 01 F6`.
 
-### Reserved (code `11111xxx`)
+### Relay nodes (code `11111bbb`)
 
-This node code is currently unused. It is kept for a page-packed layout, and readers reject it as corruption, so that
-a trie written with a future layout fails to read rather than being misread.
+`<pointer> 11111bbb`
+
+A relay node stands in for a node that is placed elsewhere in the file. It holds only a pointer, encoded as an unsigned
+integer of `b+1` bytes (stored reversed like all other pointers) which specifies the distance between the start of the
+relay node and the node it stands for. A relay is not a node of the trie: it does not take part in any transition and 
+is fully equivalent to its target, and readers follow it as soon as they see its code. The target is a node, not
+another relay: nothing is gained by one relay leading to another, and readers reject it as corrupt.
+
+Relays make it possible to rely on the implicit position of a node, i.e. on the first child of a chain, sparse or 
+bitmap node and on the node augmented by a prefix node being placed immediately before it, even when a different 
+placement is better or necessary. The page-aware construction below uses them to put a parent in a different page 
+than its first child. Dense nodes store an explicit pointer for every child and never need one.
+
+Example: `... 11 01 F9 03 62 61 80` ending at position `0x1235` is a sparse node with two children preceded by a 
+relay with a two-byte pointer. The sparse node starts at `0x1231`, where it expects to find its first child `a`. This
+is the position of the relay, which starts at `0x122E` and gives the child's actual position as 
+`0x122E - 0x0111 = 0x111D`. The second child `b` is at `0x1231 - 0x03 = 0x122E`, immediately before the relay.
 
 ### Versioning
 
 The format carries no in-band version. The format that contains a trie -- the messaging version of a message, the
 commit-log version of a record -- determines how it is written, and every change to this format must be gated by a
-change of that containing version. The reserved node codes `11111xxx` are what lets a reader built for this layout
-reject, rather than misread, a future page-packed one.
+change of that containing version. Relay nodes are only written by the page-aware construction; the node code 
+`11111xxx` was reserved before they were introduced, so a reader built for the earlier layout rejects a trie that 
+contains them as corrupt rather than misreading it.
 
 ### Example
 
@@ -296,10 +322,32 @@ tries and `OnDiskDeletionAwareTrieWriter` for deletion-aware ones. The procedure
 construction mechanism, with a couple of quirks.
 
 The trie is walked depth-first in reverse order, maintaining the path we took, as well as a write-time representations
-of the information we have collected for nodes on the current path. Once we enter a node, we save its content in 
-this representation. We then walk its deletion branch (if this is a deletion-aware trie and there is one) and its 
-children recursively. This gives us a pointer for each child. If the recursion stops on the ascent path, we store 
-the ascent-side content as well. When we ascend back to a smaller depth, the node's information is fully collected.
+of the information we have collected for nodes on the current path. Once we enter a node, we walk its deletion branch 
+(if this is a deletion-aware trie and there is one) and save it in this representation together with the node's
+content. We then walk its children recursively. This gives us a reference for each child. If the recursion stops on 
+the ascent path, we store the ascent-side content as well. When we ascend back to a smaller depth, the node's 
+information is fully collected.
+
+What happens to a node whose information is complete is decided by an `OnDiskNodeWriter`, which the trie writer is 
+given when it is created. The trie writer hands every completed node to the node writer together with the chain of 
+single-child transitions that leads to it from its parent, i.e. from the closest shallower node on the path or from 
+the depth the walk has ascended to, whichever is deeper (the trie writer creates the parent if the path has no node at 
+that depth). It then asks the node writer to attach the completed node to that parent as a child, giving it the 
+transition that leaves the parent. The node writer is the only component that writes to the file, and it alone 
+determines the order and placement of the nodes; the encoding of the nodes is the same regardless of the node writer 
+in use, and all resulting files are read by the same code. There are two implementations, selected by 
+`OnDiskNodeWriter.Type`:
+- `OnDiskNodeWriterImmediate` writes each node at the time it is completed. This is described first below.
+- `OnDiskNodeWriterPageAware` holds on to completed nodes to arrange them in the pages of the file. This is described 
+  in the next section.
+
+A deletion branch is a trie of its own, with a different type of content, and is walked by a trie writer of its own 
+when the walk of the main trie reaches the node it belongs to. Its placement in the file, however, is part of the 
+layout of the main trie. The node writer for the deletion branches is thus created by the main node writer as a 
+_nested_ one, and a deletion branch whose walk has completed is attached to its node in the main trie in the same way 
+as a completed child. The pointer to its root is stored in the node when the node is written.
+
+### Immediate construction
 
 If the collected node has no children, but has content, we write a leaf or non-prefix generic content node (using the
 configured serializer for the content). Otherwise, we use the number of children, as well as their pointers (for 
@@ -353,6 +401,92 @@ For the example above, the construction proceeds like this:
       write the two character chain `72 74 41` and return the file position 24.
 - The root of the trie is at the end of the file, at position 24.
 
+### Page-aware construction
+
+Files are read in pages, and the cost of a lookup in a trie that is not fully cached is determined by the number of
+different pages that need to be fetched to follow a path from the root. The immediate construction pays no attention 
+to this; while it keeps the lowest levels of the trie close together, it lets nodes and branches straddle page 
+boundaries wherever they happen to fall. `OnDiskNodeWriterPageAware` produces a layout where a branch of the trie, 
+i.e. a node together with everything below it, sits within a single page whenever it is small enough to fit in one. 
+This is the same method as the one used for the trie indexes of the BTI sstable format (see `BtiFormat.md`), adapted 
+to the features of this format.
+
+To do this, the page-aware node writer does not write nodes when they are completed, but keeps them in memory, 
+attached to their parents, for as long as the branch that they form is no bigger than a page. When a node is 
+completed whose branch is larger than a page, the node writer _lays out_ its children:
+- It takes the child with the largest branch that still fits in the remainder of the current page, and writes that 
+  branch as the immediate construction would: all buffered descendants first, in order, then the child itself.
+- If none of the children fits, it pads the file to the next page boundary and continues with the largest child.
+- This is repeated until all children are written.
+
+The node itself remains in memory, now with the positions of its children, and will be written when its own parent 
+is laid out, or as part of a branch which has become small enough to fit a page with it. In the resulting file the 
+pages typically hold collections of sibling branches, and the upper levels of the trie end up in pages of their own.
+
+A node whose children were laid out is no longer written immediately after its first child. When such a node is 
+written, the node that lists its children is preceded by a relay with the position of the first child. (The decision 
+is made by position: a relay is written whenever the first child does not end exactly where the node begins, which 
+also covers the case of padding between the two.)
+
+A node with only one child is normally written as a single-transition chain node, augmented by a prefix node if it 
+has content or a deletion branch. If the child is still in memory when the parent is completed and itself begins with 
+a chain, the page-aware node writer adds the transition to the child's chain instead, saving a byte and a step for the
+readers. 
+
+Note that the immediate construction does not do this _chain folding_. By the time it finds out that a node has no 
+other children, the chain of the child is already written, including the node code that carries its length. It would
+be possible if a child left the code of its leading chain for the parent to write, which would then be able to extend
+the chain, but this is not worth the complication.
+
+A node can also end up with a single child and nothing else, i.e. neither content nor a deletion branch. The writer of
+the trie creates one when the source walks into a branch that turns out to hold no content (as an intersection does
+along the boundaries of its set) after it has completed a sibling of that branch. Such a node is only a stretch of the
+path to its child. If the child is still in memory, the page-aware node writer does not keep the node at all: it adds
+the transitions that lead to the node and the one from the node to the child to the front of the child's chain, which
+then takes the node's place. The result is what would be written if the empty branch were not there. Besides saving
+space, this is necessary: if the transition were folded as above, the node would have nothing to write but a relay
+whenever the child is written away from it, and a relay in front of the node's parent would then lead to that relay.
+(When the child is already written, the node is a chain node for its transition, like in the immediate construction.)
+
+A deletion branch is handled as one more child of the node it belongs to. It is kept in memory with the node for as 
+long as the branch of the node, deletion branch included, fits a page, in which case it is written just before the 
+node's other children; otherwise it is laid out together with them. As a result a deletion branch is placed in the 
+same page as its node whenever the branch of the node, deletion branch included, fits in one, in which case reading a 
+path through the node does not have to fetch another page for the deletions that apply to it. While a deletion branch 
+is being walked it is treated like any other trie, i.e. its nodes are held in memory unless it grows bigger than a 
+page, when its children are laid out as described above.
+
+#### Sizes
+
+To know whether a branch fits in a page, the node writer needs to know its size before writing it. This takes some 
+care because the size of a pointer depends on the distance it needs to cover: while all distances inside a branch that 
+is fully in memory are known in advance, the pointers to children and deletion branches that have already been written
+grow as the file position advances. The size of a branch that has either is thus a function of the position at which 
+it would be placed.
+
+The node writer calculates sizes by performing the same steps as it would do to write, and stores them in the nodes 
+together with the range of positions for which they remain valid, i.e. up to the closest position at which some pointer
+in the branch would need an extra byte. The node type, pointer size and need for a relay are decided by the same 
+code for both sizing and writing, which makes the calculated sizes exact. To know the size of a node's content, the
+node writer serializes it at the time the node is completed, and keeps the serialized form until the node is written.
+
+#### Exceptions
+
+Some nodes cannot be placed inside a page, because they are bigger than one. This can be due to content that is 
+larger than the page size, or (when pages are small) due to the number and size of pointers in the node. Such nodes 
+are written as soon as their children are laid out, starting a new page if this reduces the number of page boundaries 
+that the node crosses. Because a node is read by stepping backwards from its position, this requires file positions 
+to be continuous across page boundaries, which is not the case for all types of file (e.g. encrypted ones); writing a 
+node that is larger than a page to such a file fails.
+
+When the walk of the trie completes, the part of the trie that remains in memory is the root node with the top of the 
+trie, which must be written out for the root position to be known. To keep it in a single page, the file is padded if
+necessary.
+
+The writing and sizing of a branch are recursive, and the depth of a branch that fits in a page is only limited by
+the page size. To make sure the recursion cannot exceed the stack, a branch whose depth of in-memory nodes exceeds a
+fixed limit is also laid out, in the same way as if it had become bigger than a page.
+
 ## Consuming
 
 Consuming a trie is by creating an `OnDiskTrie` over a given file, which in turn will create an `OnDiskCursor` to 
@@ -367,6 +501,13 @@ is more efficient for the node type).
 Content that is to be presented on the return path is recorded as a backtracking entry as well, and, as in
 `InMemoryTrie`, at the depth of the parent: on the parent's level the return path of a child comes after the descent
 into it and before the next sibling, which is where a skip to that return-path position must find it.
+
+A relay is a node type of its own for the reader, whose only action is to move on to its target as soon as it is
+loaded, be it as a node the cursor descends into or as the node that follows a prefix node. A cursor is thus never
+left on a relay: neither the node it is positioned on (which is what a tail trie is rooted at, and where the pointer
+to a deletion branch is looked for), nor the node whose children it is iterating, nor any backtracking entry is one.
+In the first case the relay's target also becomes the node the cursor is positioned on; in the second that remains
+the prefix node.
 
 Also like `InMemoryTrie`, on-disk range tries track the currently applicable range and handle skips by descending 
 into the branch.
@@ -386,7 +527,7 @@ inside a range, works it out from the nearest content below the position it land
 at its root, as boundaries, the ranges that are open there.
 
 A deletion-aware trie is a data trie written unordered, with live content on the descent side only, whose nodes can
-point to a deletion branch: a range trie written in the same stream just before the node, whose root the node's
+point to a deletion branch: a range trie written in the same stream before the node, whose root the node's
 ascent-side slot gives as a delta from the start of the node (see the generic content nodes above). The reader flags
 such a node with `MAY_HAVE_DELETION_BRANCH_BIT` from the node code alone, and only reads the slot when the cursor is
 asked for the branch.

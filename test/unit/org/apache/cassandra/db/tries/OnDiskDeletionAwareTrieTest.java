@@ -30,6 +30,8 @@ import java.util.Random;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -56,8 +58,20 @@ import static org.junit.Assert.fail;
 /// [OnDiskDeletionAwareTrie], which is the only real check that the deletion-branch pointer
 /// written into a node's ascent-side slot is recovered and that the branch bytes land where the
 /// pointer says.
+@RunWith(Parameterized.class)
 public class OnDiskDeletionAwareTrieTest
 {
+    /// The node writer the tries are serialized with, and the kind of output it writes to. Tests that write to a
+    /// file get the pages of the file whatever the kind says.
+    @Parameterized.Parameter
+    public TrieUtil.OnDiskWriterKind kind = TrieUtil.IMMEDIATE;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static List<Object[]> kinds()
+    {
+        return TrieUtil.asParameters(TrieUtil.ON_DISK_WRITER_KINDS);
+    }
+
     @BeforeClass
     public static void setUp()
     {
@@ -127,7 +141,7 @@ public class OnDiskDeletionAwareTrieTest
         File file = new File(java.io.File.createTempFile("deletionaware", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer, kind.nodeWriterType);
             writer.finish();
         }
 
@@ -148,9 +162,9 @@ public class OnDiskDeletionAwareTrieTest
     /// serialize into a buffer, then read the trie straight back out of that buffer.
     private void assertRoundTripsInMemory(InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source) throws IOException
     {
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
             ByteBuffer buffer = out.asNewBuffer();
 
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
@@ -196,9 +210,9 @@ public class OnDiskDeletionAwareTrieTest
     {
         List<DataPoint> points = points(marker("abc", -1, 5), marker("abd", 5, -1), live("xyz", 3));
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points, false, true);
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             assertTriesEqual(source, read);
@@ -223,15 +237,15 @@ public class OnDiskDeletionAwareTrieTest
                 plain.putRecursive(point.position, point, (x, y) -> y);
             }
             DeletionAwareTrie<LivePoint, DeletionMarker> wrapped = DeletionAwareTrie.wrap(plain);
-            try (DataOutputBuffer out = new DataOutputBuffer())
+            try (DataOutputBuffer out = kind.newOutput())
             {
                 if (ordered)
                 {
-                    assertThrows(IllegalArgumentException.class, () -> OnDiskDeletionAwareTrieWriter.write(wrapped, LIVE, MARKER, out));
+                    assertThrows(IllegalArgumentException.class, () -> OnDiskDeletionAwareTrieWriter.write(wrapped, LIVE, MARKER, out, kind.nodeWriterType));
                 }
                 else
                 {
-                    OnDiskDeletionAwareTrieWriter.write(wrapped, LIVE, MARKER, out);
+                    OnDiskDeletionAwareTrieWriter.write(wrapped, LIVE, MARKER, out, kind.nodeWriterType);
                     assertTriesEqual(wrapped, OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1));
                 }
             }
@@ -245,14 +259,14 @@ public class OnDiskDeletionAwareTrieTest
     {
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source =
             DataPoint.fromList(points(live("aa", 1), marker("abc", -1, 5), marker("abd", 5, -1), live("xyz", 3)));
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
             out.writeLong(0);
-            long emptyRoot = OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(new ArrayList<>()), LIVE, MARKER, out);
+            long emptyRoot = OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(new ArrayList<>()), LIVE, MARKER, out, kind.nodeWriterType);
             assertEquals(0, emptyRoot);
             assertEquals(8, out.getLength());
 
-            long root = OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            long root = OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
             assertEquals(out.getLength(), root);
 
             ByteBuffer buffer = out.asNewBuffer();
@@ -269,9 +283,9 @@ public class OnDiskDeletionAwareTrieTest
     public void testMergedTrieOverChildlessBranchNode() throws IOException
     {
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(partitionDeletionPoints());
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             for (Direction direction : Direction.values())
@@ -284,9 +298,9 @@ public class OnDiskDeletionAwareTrieTest
     public void testApplyChildlessBranchNode() throws IOException, TrieSpaceExhaustedException
     {
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(partitionDeletionPoints());
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
 
@@ -333,9 +347,9 @@ public class OnDiskDeletionAwareTrieTest
 
         for (InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source : sources)
         {
-            try (DataOutputBuffer out = new DataOutputBuffer())
+            try (DataOutputBuffer out = kind.newOutput())
             {
-                OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+                OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
                 OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                     OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
                 assertTriesEqual(source, read);
@@ -436,9 +450,9 @@ public class OnDiskDeletionAwareTrieTest
                                     .union(TrieSet.branch(VERSION, TrieUtil.directComparable("zzz"))));
         assertHasEmptyDeletionBranch(intersected);
 
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(intersected, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(intersected, LIVE, MARKER, out, kind.nodeWriterType);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             assertNoDeletionBranchRecorded(read);
@@ -540,12 +554,12 @@ public class OnDiskDeletionAwareTrieTest
         File deletionAwareFile = new File(java.io.File.createTempFile("deletionawarelive", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(deletionAwareFile))
         {
-            OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(points), LIVE, MARKER, writer);
+            OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(points), LIVE, MARKER, writer, kind.nodeWriterType);
             writer.finish();
         }
 
         File plainFile = new File(java.io.File.createTempFile("plainlive", ".trie"));
-        OnDiskTrieWriter.write(plain, false, LIVE, plainFile);
+        OnDiskTrieWriter.write(plain, false, LIVE, plainFile, kind.nodeWriterType);
 
         assertArrayEquals("Live-only data must serialize identically with and without deletion awareness",
                           Files.readAllBytes(plainFile.toPath()),
@@ -633,9 +647,9 @@ public class OnDiskDeletionAwareTrieTest
         assertRoundTrips(points);
 
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             for (int transition = 0; transition <= 0xFF; ++transition)
@@ -665,9 +679,9 @@ public class OnDiskDeletionAwareTrieTest
 
         for (InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source : sources)
         {
-            try (DataOutputBuffer out = new DataOutputBuffer())
+            try (DataOutputBuffer out = kind.newOutput())
             {
-                OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+                OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
                 ByteBuffer serialized = out.asNewBuffer();
                 for (int shift : new int[]{ 7, 300 })
                 {
@@ -700,13 +714,13 @@ public class OnDiskDeletionAwareTrieTest
     {
         List<DataPoint> points = points(marker("abc", -1, 5), marker("abd", 5, -1), live("xyz", 3));
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points, false, true);
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
             ByteBuffer buffer = out.asNewBuffer();
             int codePos = buffer.limit() - 1;
             int code = buffer.get(codePos) & 0xFF;
-            assertEquals("root is a prefix node", OnDiskWriteNodeType.PREFIX.bits, code & ~0x7);
+            assertEquals("root is a prefix node", OnDiskWriteNodeType.PREFIX_BITS, code & ~0x7);
             assertEquals("root has an ascent-side slot", OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT,
                          code & OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT);
             assertEquals("root has no descent-side slot", 0, code & OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT);
@@ -738,13 +752,13 @@ public class OnDiskDeletionAwareTrieTest
     {
         List<DataPoint> points = points(marker("abc", -1, 5), marker("abd", 5, -1));
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points, false, true);
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
             ByteBuffer buffer = out.asNewBuffer();
             int codePos = buffer.limit() - 1;
             assertEquals("root is a prefix node with only an ascent-side slot",
-                         OnDiskWriteNodeType.PREFIX.bits | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT,
+                         OnDiskWriteNodeType.PREFIX_BITS | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT,
                          buffer.get(codePos) & 0xFF);
             assertEquals("slot is empty", 0, buffer.get(codePos - 1));
 
@@ -767,9 +781,9 @@ public class OnDiskDeletionAwareTrieTest
         // middle of a chain node; a tail taken there is a separate, open question.
         List<DataPoint> points = wideBranchPoints(WIDE_TRANSITIONS, 4);
         InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> source = DataPoint.fromList(points);
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, out, kind.nodeWriterType);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             for (Direction direction : Direction.values())
@@ -790,7 +804,7 @@ public class OnDiskDeletionAwareTrieTest
         File file = new File(java.io.File.createTempFile("deletionawarelarge", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer, kind.nodeWriterType);
             writer.finish();
         }
         assertTrue("The trie must not fit in one buffer, was " + file.length() + " bytes",
@@ -821,7 +835,7 @@ public class OnDiskDeletionAwareTrieTest
         File file = new File(java.io.File.createTempFile("deletionawaretails", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer, kind.nodeWriterType);
             writer.finish();
         }
 
@@ -859,7 +873,7 @@ public class OnDiskDeletionAwareTrieTest
         File file = new File(java.io.File.createTempFile("deletionawarerelease", ".trie"));
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer);
+            OnDiskDeletionAwareTrieWriter.write(source, LIVE, MARKER, writer, kind.nodeWriterType);
             writer.finish();
         }
 
@@ -891,9 +905,9 @@ public class OnDiskDeletionAwareTrieTest
             reads.put("mergeWithDeletion from file", () -> mergedValues(source.mergeWithDeletion(read.deletionOnlyTrie(), DataPoint::deleteLive, DataPoint::combineDeletion, false),
                                                                         Direction.FORWARD));
             reads.put("write", () -> {
-                try (DataOutputBuffer out = new DataOutputBuffer())
+                try (DataOutputBuffer out = kind.newOutput())
                 {
-                    OnDiskDeletionAwareTrieWriter.write(read, LIVE, MARKER, out);
+                    OnDiskDeletionAwareTrieWriter.write(read, LIVE, MARKER, out, kind.nodeWriterType);
                 }
                 catch (IOException e)
                 {
@@ -931,9 +945,9 @@ public class OnDiskDeletionAwareTrieTest
     {
         List<DataPoint> points = points(live("aa", 1), marker("abc", -1, 5), marker("abd", 5, -1), live("abz", 3),
                                         marker("xbc", -1, 6), marker("xbd", 6, -1), live("xyz", 3));
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(points), LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(points), LIVE, MARKER, out, kind.nodeWriterType);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
 
@@ -965,9 +979,9 @@ public class OnDiskDeletionAwareTrieTest
         for (int iteration = 0; iteration < 500; ++iteration)
         {
             byte[] bytes;
-            try (DataOutputBuffer out = new DataOutputBuffer())
+            try (DataOutputBuffer out = kind.newOutput())
             {
-                OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(mixedPoints(rand, 1 + rand.nextInt(30))), LIVE_UNTRUSTED, MARKER_UNTRUSTED, out);
+                OnDiskDeletionAwareTrieWriter.write(DataPoint.fromList(mixedPoints(rand, 1 + rand.nextInt(30))), LIVE_UNTRUSTED, MARKER_UNTRUSTED, out, kind.nodeWriterType);
                 bytes = out.toByteArray();
             }
             // Over the bytes as written the walk must go through, which also shows that the skips it makes are valid.

@@ -64,12 +64,18 @@ public class OnDiskTrieTest
     @Parameterized.Parameter(0)
     public boolean isOrdered = true;
 
-    @Parameterized.Parameters(name = "ordered {0}")
+    /// The node writer the tries are serialized with, and the kind of output it writes to. Tests that write to a
+    /// file directly get the pages of the file whatever the kind says.
+    @Parameterized.Parameter(1)
+    public TrieUtil.OnDiskWriterKind kind = TrieUtil.IMMEDIATE;
+
+    @Parameterized.Parameters(name = "ordered {0} {1}")
     public static List<Object[]> data()
     {
         List<Object[]> list = new ArrayList<>();
         for (Boolean ordered : List.of(Boolean.FALSE, Boolean.TRUE))
-            list.add(new Object[]{ ordered });
+            for (TrieUtil.OnDiskWriterKind kind : TrieUtil.MAIN_ON_DISK_WRITER_KINDS)
+                list.add(new Object[]{ ordered, kind });
 
         return list;
     }
@@ -158,7 +164,7 @@ public class OnDiskTrieTest
     @Test
     public void testBitmap() throws TrieSpaceExhaustedException
     {
-        testNodesWithChildren(26);//, 50, 75, 100, 125, 150, 200, 220, 235);
+        testNodesWithChildren(26, 50, 75, 100, 125, 150, 200, 220, 235);
     }
 
     @Test
@@ -239,7 +245,7 @@ public class OnDiskTrieTest
         for (String key : keys)
             inMemTrie.putRecursive(TrieUtil.directComparable(key), key, (x, y) -> y);
 
-        try (FileTries.Plain<String> trie = TrieUtil.onDiskRoundtripStrings(inMemTrie, isOrdered))
+        try (FileTries.Plain<String> trie = TrieUtil.onDiskFileRoundtrip(inMemTrie, isOrdered, TrieUtil.STRING_SERDE, TrieUtil.STRING_SERDE, kind))
         {
             String[] bounds = { null, "", "a", "aa", "ab", "abb", "abc", "abcd", "abd", "b", "ba", "bb", "bbc", "c" };
             for (String left : bounds)
@@ -308,7 +314,7 @@ public class OnDiskTrieTest
                 inMemTrie.putRecursive(TrieUtil.directComparable(key), key, (x, y) -> y);
             }
 
-            try (FileTries.Plain<String> trie = TrieUtil.onDiskRoundtripStrings(inMemTrie, isOrdered))
+            try (FileTries.Plain<String> trie = TrieUtil.onDiskFileRoundtrip(inMemTrie, isOrdered, TrieUtil.STRING_SERDE, TrieUtil.STRING_SERDE, kind))
             {
                 for (Direction direction : Direction.values())
                 {
@@ -404,9 +410,9 @@ public class OnDiskTrieTest
             }
 
             byte[] bytes;
-            try (DataOutputBuffer out = new DataOutputBuffer())
+            try (DataOutputBuffer out = kind.newOutput())
             {
-                OnDiskTrieWriter.write(source, isOrdered, TrieUtil.STRING_SERDE, out);
+                OnDiskTrieWriter.write(source, isOrdered, TrieUtil.STRING_SERDE, out, kind.nodeWriterType);
                 bytes = out.toByteArray();
             }
             int flips = 1 + rand.nextInt(3);
@@ -447,7 +453,7 @@ public class OnDiskTrieTest
         InMemoryTrie<String> source = isOrdered ? InMemoryTrie.shortLivedOrdered(VERSION) : InMemoryTrie.shortLived(VERSION);
         for (String key : new String[]{ "a", "ab", "abc", "abd", "b", "bb", "bbc", "c" })
             source.putRecursive(TrieUtil.directComparable(key), key, (x, y) -> y);
-        File file = OnDiskTrieWriter.write(source, isOrdered, TrieUtil.STRING_SERDE, new File(java.io.File.createTempFile("release", ".trie")));
+        File file = OnDiskTrieWriter.write(source, isOrdered, TrieUtil.STRING_SERDE, new File(java.io.File.createTempFile("release", ".trie")), kind.nodeWriterType);
 
         ChannelProxy channel = new ChannelProxy(file);
         TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(FileTries.openChunkReader(channel));
@@ -477,9 +483,9 @@ public class OnDiskTrieTest
             reads.put("dump", trie::dump);
             reads.put("process", () -> trie.process(Direction.FORWARD, new TrieDumper.Plain<>(Object::toString)));
             reads.put("write", () -> {
-                try (DataOutputBuffer out = new DataOutputBuffer())
+                try (DataOutputBuffer out = kind.newOutput())
                 {
-                    OnDiskTrieWriter.write(trie, isOrdered, TrieUtil.STRING_SERDE, out);
+                    OnDiskTrieWriter.write(trie, isOrdered, TrieUtil.STRING_SERDE, out, kind.nodeWriterType);
                 }
                 catch (IOException e)
                 {
@@ -542,7 +548,7 @@ public class OnDiskTrieTest
             inMemTrie.putRecursive(e, test, afterBranch, (x, y) -> y);
         }
 
-        try (FileTries.Plain<String> trie = TrieUtil.onDiskRoundtripStrings(inMemTrie, isOrdered))
+        try (FileTries.Plain<String> trie = TrieUtil.onDiskFileRoundtrip(inMemTrie, isOrdered, TrieUtil.STRING_SERDE, TrieUtil.STRING_SERDE, kind))
         {
             TrieUtil.assertTriesEqual(inMemTrie, trie);
 

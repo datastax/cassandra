@@ -53,18 +53,23 @@ import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 @RunWith(Parameterized.class)
 public class OnDiskDeletionAwareMergeTest extends DeletionAwareTestBase
 {
-    @Parameterized.Parameters(name = "bits per transition {0} deletions at root {1}")
+    @Parameterized.Parameters(name = "bits per transition {0} deletions at root {1} {2}")
     public static List<Object[]> mergeData()
     {
         List<Object[]> list = new ArrayList<>();
         for (int bits : IntStream.rangeClosed(1, bitsNeeded).toArray())
             for (boolean deletionsAtRoot : new boolean[]{ false, true })
-                list.add(new Object[]{ bits, deletionsAtRoot });
+                for (TrieUtil.OnDiskWriterKind kind : TrieUtil.MAIN_ON_DISK_WRITER_KINDS)
+                    list.add(new Object[]{ bits, deletionsAtRoot, kind });
         return list;
     }
 
     @Parameterized.Parameter(1)
     public boolean deletionsAtRoot = false;
+
+    /// The node writer the tries are serialized with, and the kind of output it writes to.
+    @Parameterized.Parameter(2)
+    public TrieUtil.OnDiskWriterKind kind = TrieUtil.IMMEDIATE;
 
     @BeforeClass
     public static void setUpOnDisk()
@@ -220,9 +225,9 @@ public class OnDiskDeletionAwareMergeTest extends DeletionAwareTestBase
 
     private OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> onDisk(List<DataPoint> points)
     {
-        try (DataOutputBuffer out = new DataOutputBuffer())
+        try (DataOutputBuffer out = kind.newOutput())
         {
-            OnDiskDeletionAwareTrieWriter.write(inMemory(points), LIVE, MARKER, out);
+            OnDiskDeletionAwareTrieWriter.write(inMemory(points), LIVE, MARKER, out, kind.nodeWriterType);
             OnDiskDeletionAwareTrie<LivePoint, DeletionMarker> read =
                 OnDiskDeletionAwareTrie.open(out.asNewBuffer(), LIVE, MARKER, VERSION, -1);
             return read;

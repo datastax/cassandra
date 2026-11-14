@@ -50,6 +50,7 @@ import org.junit.Assert;
 
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.Rebufferer;
@@ -963,6 +964,185 @@ public class TrieUtil
         }
     }
     public static final RangeSerDe RANGE_SERDE = new RangeSerDe();
+
+    /// An in-memory output divided in pages of the given size, to exercise page-aware writers with pages much smaller
+    /// than the ones of real files. Like a plain file, positions are continuous and padding is made of real bytes.
+    ///
+    /// The padding is not made of zeroes by default: a zero byte is a valid node (a leaf with empty content), so a
+    /// reader that strays into zero padding would not notice. The byte `0xFF` reads as a relay whose pointer cannot be
+    /// followed.
+    public static class PagedDataOutputBuffer extends DataOutputBuffer
+    {
+        public static final byte PADDING = (byte) 0xFF;
+
+        final int pageSize;
+        final byte padding;
+
+        public PagedDataOutputBuffer(int pageSize)
+        {
+            this(pageSize, PADDING);
+        }
+
+        public PagedDataOutputBuffer(int pageSize, byte padding)
+        {
+            this.pageSize = pageSize;
+            this.padding = padding;
+        }
+
+        @Override
+        public int maxBytesInPage()
+        {
+            return pageSize;
+        }
+
+        @Override
+        public int bytesLeftInPage()
+        {
+            return pageSize - (int) (position() % pageSize);
+        }
+
+        @Override
+        public long paddedPosition()
+        {
+            long position = position();
+            return position + (pageSize - position % pageSize) % pageSize;
+        }
+
+        @Override
+        public void padToPageBoundary() throws IOException
+        {
+            byte[] pad = new byte[(int) (paddedPosition() - position())];
+            Arrays.fill(pad, padding);
+            write(pad);
+        }
+    }
+
+    /// A way of serializing tries that the on-disk trie tests are run with: a node writer and the kind of output it
+    /// is to write to.
+    public static class OnDiskWriterKind
+    {
+        public final String name;
+        public final OnDiskNodeWriter.Type nodeWriterType;
+        /// The size of the pages of the output; 0 if it has no pages.
+        public final int pageSize;
+
+        OnDiskWriterKind(String name, OnDiskNodeWriter.Type nodeWriterType, int pageSize)
+        {
+            this.name = name;
+            this.nodeWriterType = nodeWriterType;
+            this.pageSize = pageSize;
+        }
+
+        public DataOutputBuffer newOutput()
+        {
+            return pageSize > 0 ? new PagedDataOutputBuffer(pageSize) : new DataOutputBuffer();
+        }
+
+        public boolean isPageAware()
+        {
+            return pageSize > 0;
+        }
+
+        @Override
+        public String toString()
+        {
+            return name;
+        }
+    }
+
+    public static final OnDiskWriterKind IMMEDIATE = new OnDiskWriterKind("IMMEDIATE", OnDiskNodeWriter.Type.IMMEDIATE, 0);
+
+    public static OnDiskWriterKind pageAware(int pageSize)
+    {
+        return new OnDiskWriterKind("PAGE_AWARE_" + pageSize, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize);
+    }
+
+    /// The writer kinds to run on-disk trie tests with. The small page sizes make even small tries span many pages;
+    /// the smallest is below the size of many single nodes.
+    public static final List<OnDiskWriterKind> ON_DISK_WRITER_KINDS = List.of(IMMEDIATE,
+                                                                              pageAware(4096),
+                                                                              pageAware(256),
+                                                                              pageAware(64),
+                                                                              pageAware(32));
+
+    /// Serializes the trie in memory with the given kind of writer and returns a trie that reads it back.
+    public static <T> OnDiskTrie<T> onDiskRoundtrip(Trie<T> trie, boolean isOrdered, OnDiskTrieWriter.DataSerializer<T> serializer, OnDiskCursor.DataDeserializer<T> deserializer, OnDiskWriterKind kind)
+    {
+        try
+        {
+            DataOutputBuffer out = kind.newOutput();
+            long root = OnDiskTrieWriter.write(trie, isOrdered, serializer, out, kind.nodeWriterType);
+            return OnDiskTrie.open(out.asNewBuffer(), deserializer, VERSION, isOrdered, root);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /// Serializes the range trie in memory with the given kind of writer and returns a trie that reads it back.
+    public static <S extends RangeState<S>> OnDiskRangeTrie<S> onDiskRoundtrip(RangeTrie<S> trie, OnDiskTrieWriter.DataSerializer<S> serializer, OnDiskCursor.DataDeserializer<S> deserializer, OnDiskWriterKind kind)
+    {
+        try
+        {
+            DataOutputBuffer out = kind.newOutput();
+            long root = OnDiskTrieWriter.write(trie, true, serializer, out, kind.nodeWriterType);
+            return OnDiskRangeTrie.open(out.asNewBuffer(), deserializer, VERSION, root);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /// A smaller set of writer kinds for the heavier tests: the immediate writer, and the page-aware one with the
+    /// pages of a file and with ones small enough for every test trie to span several.
+    public static final List<OnDiskWriterKind> MAIN_ON_DISK_WRITER_KINDS = List.of(IMMEDIATE, pageAware(4096), pageAware(64));
+
+    /// The writer kinds as the parameters of a parameterized test.
+    public static List<Object[]> asParameters(List<OnDiskWriterKind> kinds)
+    {
+        return kinds.stream().map(kind -> new Object[]{ kind }).collect(Collectors.toList());
+    }
+
+    /// Puts what was written to the given output in a new temporary file.
+    public static File toFile(DataOutputBuffer out) throws IOException
+    {
+        File file = new File(java.io.File.createTempFile("ondisk", ".trie"));
+        java.nio.file.Files.write(file.toPath(), out.toByteArray());
+        return file;
+    }
+
+    /// Serializes the trie with the given kind of writer and returns a trie that reads it back from a file. The file
+    /// holds what the writer produced for the kind's output, whatever the size of its pages.
+    public static <T> FileTries.Plain<T> onDiskFileRoundtrip(Trie<T> trie, boolean isOrdered, OnDiskTrieWriter.DataSerializer<T> serializer, OnDiskCursor.DataDeserializer<T> deserializer, OnDiskWriterKind kind)
+    {
+        try
+        {
+            DataOutputBuffer out = kind.newOutput();
+            OnDiskTrieWriter.write(trie, isOrdered, serializer, out, kind.nodeWriterType);
+            return FileTries.open(toFile(out), deserializer, isOrdered);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /// Serializes the range trie with the given kind of writer and returns a trie that reads it back from a file.
+    public static <S extends RangeState<S>> FileTries.Range<S> onDiskFileRoundtrip(RangeTrie<S> trie, OnDiskTrieWriter.DataSerializer<S> serializer, OnDiskCursor.DataDeserializer<S> deserializer, OnDiskWriterKind kind)
+    {
+        try
+        {
+            DataOutputBuffer out = kind.newOutput();
+            OnDiskTrieWriter.write(trie, true, serializer, out, kind.nodeWriterType);
+            return FileTries.openRange(toFile(out), deserializer);
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException(e);
+        }
+    }
 
     public static FileTries.Plain<Integer> onDiskRoundtripIntegers(Trie<Integer> trie, boolean isOrdered)
     {

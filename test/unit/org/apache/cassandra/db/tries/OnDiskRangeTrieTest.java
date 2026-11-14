@@ -29,6 +29,8 @@ import java.util.TreeSet;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.junit.runners.Parameterized;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -53,8 +55,20 @@ import static org.junit.Assert.assertTrue;
 /// implementations of it needs a wider alphabet than the other tests use, transitions at or above
 /// 0xE0 to tell a full bitmap cardinality from a truncated one, and keys long enough that the child
 /// pointers take more than one byte.
+@RunWith(Parameterized.class)
 public class OnDiskRangeTrieTest
 {
+    /// The node writer the tries are serialized with, and the kind of output it writes to. Tests that write to a
+    /// file directly get the pages of the file whatever the kind says.
+    @Parameterized.Parameter
+    public TrieUtil.OnDiskWriterKind kind = TrieUtil.IMMEDIATE;
+
+    @Parameterized.Parameters(name = "{0}")
+    public static List<Object[]> kinds()
+    {
+        return TrieUtil.asParameters(TrieUtil.ON_DISK_WRITER_KINDS);
+    }
+
     @BeforeClass
     public static void setUp()
     {
@@ -116,7 +130,7 @@ public class OnDiskRangeTrieTest
     private void testWideNode(int prefixLength, int[] transitions, int suffixLength) throws IOException
     {
         InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(prefixLength, transitions, suffixLength));
-        File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
+        File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")), kind.nodeWriterType);
 
         try (FileTries.Range<TestRangeState> actual = FileTries.openRange(file, RANGE_SERDE))
         {
@@ -177,7 +191,7 @@ public class OnDiskRangeTrieTest
     private void assertTailsEqual(Direction walkDirection) throws IOException
     {
         InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(0, BITMAP_TRANSITIONS, 1));
-        try (FileTries.Range<TestRangeState> actual = TrieUtil.onDiskRoundtrip(expected))
+        try (FileTries.Range<TestRangeState> actual = TrieUtil.onDiskFileRoundtrip(expected, RANGE_SERDE, RANGE_SERDE, kind))
         {
             RangeCursor<TestRangeState> expectedCursor = expected.cursor(walkDirection);
             RangeCursor<TestRangeState> actualCursor = actual.cursor(walkDirection);
@@ -220,7 +234,7 @@ public class OnDiskRangeTrieTest
         final int prefixLength = 2;
         final int suffixLength = 4;
         InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(prefixLength, BITMAP_TRANSITIONS, suffixLength));
-        File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")));
+        File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")), kind.nodeWriterType);
 
         ChannelProxy channel = new ChannelProxy(file);
         TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(FileTries.openChunkReader(channel));
@@ -259,7 +273,7 @@ public class OnDiskRangeTrieTest
         TestRangeState covering = new TestRangeState(branchKey, false, 1, 1);
         RangeTrie<TestRangeState> expected = RangeTrie.branch(branchKey, VERSION, covering);
 
-        try (FileTries.Range<TestRangeState> actual = TrieUtil.onDiskRoundtrip(expected))
+        try (FileTries.Range<TestRangeState> actual = TrieUtil.onDiskFileRoundtrip(expected, RANGE_SERDE, RANGE_SERDE, kind))
         {
             TrieUtil.assertTriesEqual(expected, actual);
         }
@@ -310,9 +324,9 @@ public class OnDiskRangeTrieTest
             }
 
             byte[] bytes;
-            try (DataOutputBuffer out = new DataOutputBuffer())
+            try (DataOutputBuffer out = kind.newOutput())
             {
-                OnDiskTrieWriter.write(TestRangeState.fromList(TestRangeState.verify(markers)), true, RANGE_SERDE, out);
+                OnDiskTrieWriter.write(TestRangeState.fromList(TestRangeState.verify(markers)), true, RANGE_SERDE, out, kind.nodeWriterType);
                 bytes = out.toByteArray();
             }
             // Over the bytes as written the walk must go through, which also shows that the skips it makes are valid.

@@ -39,13 +39,13 @@ abstract class OnDiskBaseRangeCursor<S extends RangeState<S>> extends OnDiskCurs
     /// A cursor positioned at `root`, the root of a range trie.
     OnDiskBaseRangeCursor(DataDeserializer<S> deserializer, RebuffererFactory rebuffererFactory, ByteComparable.Version byteComparableVersion, Direction direction, long root)
     {
-        super(deserializer, rebuffererFactory, byteComparableVersion, direction, true, false, root);
+        super(deserializer, rebuffererFactory, byteComparableVersion, direction, ContentStyle.ORDERED, root);
     }
 
     /// A cursor that is not yet positioned; the subclass descends into its root itself.
     OnDiskBaseRangeCursor(DataDeserializer<S> deserializer, RebuffererFactory rebuffererFactory, ByteComparable.Version byteComparableVersion, Direction direction)
     {
-        super(deserializer, rebuffererFactory, byteComparableVersion, direction, true, false);
+        super(deserializer, rebuffererFactory, byteComparableVersion, direction, ContentStyle.ORDERED);
     }
 
     /// Set the active state from the content at the cursor's root, which the cursor must be positioned on.
@@ -187,7 +187,7 @@ abstract class OnDiskBaseRangeCursor<S extends RangeState<S>> extends OnDiskCurs
             return readNearestContent(this, direction);
 
         try (OnDiskCursor<S> reader = new OnDiskCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion,
-                                                         direction, isOrdered, alternateInAscentSlot))
+                                                         direction, contentStyle))
         {
             return readNearestContent(reader, direction);
         }
@@ -206,7 +206,7 @@ abstract class OnDiskBaseRangeCursor<S extends RangeState<S>> extends OnDiskCurs
             if (content != null)
                 return content;
             long node = type.getFirstChild(reader, direction, code, postCodePos);
-            if (node <= 0)
+            if (node == OnDiskCursor.NO_CHILD)
                 throw corrupt("node at " + postCodePos + " has neither content nor children");
             postCodePos = node - 1;
             code = reader.readByteBefore(node);

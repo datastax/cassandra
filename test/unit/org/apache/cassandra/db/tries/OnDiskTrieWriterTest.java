@@ -38,6 +38,7 @@ import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 /// Pins the bytes [OnDiskTrieWriter] produces against the worked examples in `OnDiskTrie.md`. The round-trip suites
 /// only check that the reader agrees with the writer; this is what catches a change to the layout itself. The dense
@@ -458,7 +459,7 @@ public class OnDiskTrieWriterTest
             OnDiskTrieWriter.write(trie, false, BYTES_SERDE, out);
             // 240 children (239 * 273 + 561) + bitmap node with two-byte pointers (32 + 239 * 2 + 1)
             assertEquals(65808 + 511, out.getLength());
-            assertEquals(OnDiskWriteNodeType.BITMAP.bits | 1, out.toByteArray()[out.getLength() - 1] & 0xFF);
+            assertEquals(OnDiskWriteNodeType.BITMAP[1].bits, out.toByteArray()[out.getLength() - 1] & 0xFF);
         }
 
         try (FileTries.Plain<byte[]> read = TrieUtil.onDiskRoundtrip(trie, false, BYTES_SERDE, BYTES_SERDE))
@@ -490,7 +491,7 @@ public class OnDiskTrieWriterTest
             OnDiskTrieWriter.write(trie, false, BYTES_SERDE, out);
             // 256 children (255 * 257 + 256) + dense node with two-byte pointers (256 * 2 + 1)
             assertEquals(65791 + 513, out.getLength());
-            assertEquals(OnDiskWriteNodeType.DENSE.bits | 1, out.toByteArray()[out.getLength() - 1] & 0xFF);
+            assertEquals(OnDiskWriteNodeType.DENSE[1].bits, out.toByteArray()[out.getLength() - 1] & 0xFF);
         }
 
         try (FileTries.Plain<byte[]> read = TrieUtil.onDiskRoundtrip(trie, false, BYTES_SERDE, BYTES_SERDE))
@@ -526,8 +527,8 @@ public class OnDiskTrieWriterTest
     public void testBitmapWhenOneByteSmaller() throws Exception
     {
         int[] sizes = new int[224];
-        assertEquals(OnDiskWriteNodeType.BITMAP.bits, rootCode(sizes));
-        assertEquals(OnDiskWriteNodeType.DENSE.bits, rootCode(new int[225]));    // 32 + 224 = 256, no saving
+        assertEquals(OnDiskWriteNodeType.BITMAP[0].bits, rootCode(sizes));
+        assertEquals(OnDiskWriteNodeType.DENSE[0].bits, rootCode(new int[225]));    // 32 + 224 = 256, no saving
     }
 
     /// A dense node's pointers can be one byte wider than a bitmap's, when the furthest delta is all-ones in its width.
@@ -538,7 +539,54 @@ public class OnDiskTrieWriterTest
     {
         int[] sizes = new int[240];
         sizes[0] = 16;      // a 17-byte leaf; the other 238 after the furthest child take a byte each, 255 in all
-        assertEquals(OnDiskWriteNodeType.BITMAP.bits, rootCode(sizes));
+        assertEquals(OnDiskWriteNodeType.BITMAP[0].bits, rootCode(sizes));
+    }
+
+    /// The same with a child for every transition: the bitmap node is the smaller of the two even then, and has 256
+    /// children. With children of one byte the furthest delta is 255, and a bitmap with one-byte pointers takes
+    /// 32 + 255 = 287 bytes against the 512 of a dense node with two-byte pointers. With children of 257 bytes the
+    /// furthest delta is 65535, and the bitmap with two-byte pointers takes 32 + 510 = 542 bytes against 768.
+    ///
+    /// Any node with all 256 children of the same size `(2^8n - 1) / 255`, i.e. 1, 257, 65793..., is written this way.
+    @Test
+    public void testBitmapWithEveryTransition() throws Exception
+    {
+        // values of 254 bytes are written as prefix nodes of 257 bytes (two-byte vint length, code)
+        for (int valueSize : new int[]{ 0, 254 })
+        {
+            int childSize = valueSize == 0 ? 1 : 257;
+            int pointerBytes = valueSize == 0 ? 1 : 2;
+            InMemoryTrie<Integer> trie = InMemoryTrie.shortLived(VERSION);
+            for (int i = 0; i < 256; ++i)
+                trie.putRecursive(ByteComparable.preencoded(VERSION, new byte[]{ (byte) i }), valueSize, false, (x, y) -> y);
+
+            byte[] bytes = writeSized(trie);    // which also walks the result in both directions
+            assertEquals(256 * childSize + 255 * pointerBytes + 32 + 1, bytes.length);
+            assertEquals(OnDiskWriteNodeType.BITMAP[pointerBytes - 1].bits, bytes[bytes.length - 1] & 0xFF);
+
+            // lookups, which go through the node with skips, and tails
+            OnDiskTrie<Integer> read = OnDiskTrie.open(ByteBuffer.wrap(bytes), SIZE_DESERIALIZER, VERSION, false, bytes.length);
+            for (int i = 0; i < 256; ++i)
+            {
+                ByteComparable.Preencoded key = ByteComparable.preencoded(VERSION, new byte[]{ (byte) i });
+                assertEquals("key " + i, Integer.valueOf(valueSize), read.get(key));
+                TrieUtil.assertTriesEqual(trie.tailTrie(key), read.tailTrie(key));
+            }
+            for (Direction direction : Direction.values())
+                for (int i = 0; i < 256; ++i)
+                    try (Cursor<Integer> cursor = read.cursor(direction))
+                    {
+                        long position = cursor.skipTo(Cursor.positionForDescentWithByte(cursor.encodedPosition(), i));
+                        assertEquals(direction + " skip to " + i, i, Cursor.incomingTransition(position));
+                        // and on to the next child, to which the walk returns through the node
+                        position = cursor.advance();
+                        int next = i + direction.increase;
+                        if (direction.inLoop(next, 0, 255))
+                            assertEquals(direction + " advance from " + i, next, Cursor.incomingTransition(position));
+                        else
+                            assertTrue(direction + " advance from " + i, Cursor.isExhausted(position));
+                    }
+        }
     }
 
     /// The code of the root of a trie with a child for each transition from 0, whose leaf content is `sizes[i]` bytes,

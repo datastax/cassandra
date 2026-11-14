@@ -23,60 +23,114 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 /// Written bottom-to-top, i.e. children first, with negative deltas for every pointer. It also walks the trie in
-/// reverse order to write the first child closest to the parent.
+/// reverse order to write the first child closest to the parent. See [OnDiskTrie.md](./OnDiskTrie.md) for details.
 ///
-/// Every node is written as soon as the walk leaves it: the only state kept is the path to the current position and,
-/// for each node on it, the content seen so far and the positions of the children already written. Everything except
-/// value is written reversed. See [OnDiskTrie.md](./OnDiskTrie.md) for details.
+/// This is what the on-disk trie writers have in common, the walking half of the construction: the path, the nodes on
+/// it with the content seen so far, and [#step], one step of the walk. When the walk leaves a node it is handed over,
+/// together with the chain of transitions that leads to it, to an [OnDiskNodeWriter], which decides when and where
+/// the node is written. Which node writer is plugged in determines the layout of the file:
+/// [OnDiskNodeWriter.Type#IMMEDIATE] writes each node at once, [OnDiskNodeWriter.Type#PAGE_AWARE] packs them into the
+/// pages of the output.
 ///
-/// This is what the on-disk trie writers have in common: the path, the nodes on it and their writing, and [#step],
-/// one step of the walk. [OnDiskTrieWriter] writes plain and range tries, and [OnDiskDeletionAwareTrieWriter]
-/// deletion-aware ones; each drives its own walk, and decides which of a node's two content slots each item it is
-/// given goes in.
+/// [OnDiskTrieWriter] writes plain and range tries, and [OnDiskDeletionAwareTrieWriter] deletion-aware ones; each
+/// drives its own walk, and decides which of a node's two content slots each item it is given goes in.
 abstract class OnDiskBaseTrieWriter<T> extends TriePathReconstructor
 {
+    final OnDiskNodeWriter<T> nodeWriter;
     final DataOutputPlus out;
-    final OnDiskTrieWriter.DataSerializer<T> dataSerializer;
     final boolean swapAscentAndDescentSides;
 
-    Node<T>[] nodesOnPath = new Node[32];
+    OnDiskNodeWriter.Node<T>[] nodesOnPath = new OnDiskNodeWriter.Node[32];
     int lastNodeOnPath = -1;
 
-    OnDiskBaseTrieWriter(DataOutputPlus out, OnDiskTrieWriter.DataSerializer<T> dataSerializer, boolean swapAscentAndDescentSides)
+    /// True if the walk has completed and the trie was not empty. An empty trie writes nothing and has no root.
+    boolean hasRoot = false;
+    /// The position of the root of the trie whose walk has completed, 0 if there is none or it is not known yet. The
+    /// latter is the case for a trie written through a nested node writer, which is placed by the node writer of the
+    /// trie it is attached to, possibly some time after its walk completes.
+    long rootPosition = 0;
+
+    OnDiskBaseTrieWriter(OnDiskNodeWriter<T> nodeWriter, boolean swapAscentAndDescentSides)
     {
-        this.out = out;
-        this.dataSerializer = dataSerializer;
+        this.nodeWriter = nodeWriter;
+        this.out = nodeWriter.out;
         this.swapAscentAndDescentSides = swapAscentAndDescentSides;
     }
 
-    // On the way down we only collect the path, in TriePathReconstructor. A node is created when content is found or
-    // when a child completes, so a path that leads to nothing leaves nothing behind.
+    // On the way down we only collect the path, in TriePathReconstructor. A node is created when content or an
+    // alternate branch is found, or when a child completes, so a path that leads to nothing leaves nothing behind.
 
-    /// Attach a payload to the descent-side content slot of the node at the current position.
+    /// Prepare for the walk of a trie. A writer can write several tries, one after the other.
+    void start()
+    {
+        // A finished walk has given every node on its path to the node writer, but leaves the path's length as it
+        // ended.
+        assert lastNodeOnPath == -1 : "Previous walk did not finish";
+        resetPathLength(0);
+        hasRoot = false;
+        rootPosition = 0;
+        nodeWriter.reset();
+    }
+
+    /// Attach a payload presented on the descent path to the node at the current position. It goes in the node's
+    /// descent-side content slot, unless this writer swaps the sides.
     void descentContent(T content)
     {
-        Node<T> node = nodeAtCurrentPosition();
-        assert node.descentPathContent == null;
-        node.descentPathContent = content;
+        OnDiskNodeWriter.Node<T> node = nodeAtCurrentPosition();
+        if (swapAscentAndDescentSides)
+        {
+            assert node.ascentContent == null;
+            node.ascentContent = content;
+        }
+        else
+        {
+            assert node.descentContent == null;
+            node.descentContent = content;
+        }
     }
 
-    /// Attach a payload to the ascent-side content slot of the node at the current position, whatever path the walk
-    /// is on. [OnDiskTrieWriter] puts there the content a walk presents on the return path, and
-    /// [OnDiskDeletionAwareTrieWriter] the deletion-branch pointer: the slot a range trie fills with return-path
-    /// content is free in a trie whose content is descent-side only, which is the same reuse [InMemoryTrie] makes of a
-    /// prefix node's alternate branch pointer.
+    /// Attach a payload presented on the return path to the node at the current position. It goes in the node's
+    /// ascent-side content slot, unless this writer swaps the sides.
     void ascentContent(T content)
     {
-        Node<T> node = nodeAtCurrentPosition();
-        assert node.ascentPathContent == null;
-        node.ascentPathContent = content;
+        OnDiskNodeWriter.Node<T> node = nodeAtCurrentPosition();
+        if (swapAscentAndDescentSides)
+        {
+            assert node.descentContent == null;
+            node.descentContent = content;
+        }
+        else
+        {
+            assert node.ascentContent == null;
+            node.ascentContent = content;
+        }
     }
 
-    private Node<T> nodeAtCurrentPosition()
+    /// Make the trie that `branchWriter` has just completed the alternate branch of the node at the current position.
+    /// `branchWriter` must be writing through a node writer [nested][OnDiskNodeWriter#nested] in this writer's, and
+    /// the trie it wrote must not be empty (see [#hasRoot]).
+    ///
+    /// The pointer to the branch takes the ascent-side content slot of the node: the slot a range trie fills with
+    /// return-path content is free in a trie whose content is descent-side only, which is the same reuse
+    /// [InMemoryTrie] makes of a prefix node's alternate branch pointer. [OnDiskDeletionAwareTrieWriter] uses this for
+    /// the deletion branches.
+    ///
+    /// The node must thus not have, or later be given, content for its ascent-side slot. The branch must be walked
+    /// and attached when the walk first reaches the node, before any of the node's children is completed (see
+    /// [OnDiskNodeWriter#attachBranch]).
+    void alternateBranch(OnDiskBaseTrieWriter<?> branchWriter)
+    {
+        assert branchWriter.hasRoot;
+        OnDiskNodeWriter.Node<T> node = nodeAtCurrentPosition();
+        assert node.ascentContent == null;
+        nodeWriter.attachBranch(node, branchWriter.nodeWriter);
+    }
+
+    private OnDiskNodeWriter.Node<T> nodeAtCurrentPosition()
     {
         if (lastNodeOnPath >= 0)
         {
-            Node<T> lastNode = nodesOnPath[lastNodeOnPath];
+            OnDiskNodeWriter.Node<T> lastNode = nodesOnPath[lastNodeOnPath];
             if (lastNode.depth == keyPos)
                 return lastNode;
             assert lastNode.depth < keyPos;
@@ -84,131 +138,84 @@ abstract class OnDiskBaseTrieWriter<T> extends TriePathReconstructor
         return addNewNode(keyPos);
     }
 
-    private Node<T> addNewNode(int depth)
+    private OnDiskNodeWriter.Node<T> addNewNode(int depth)
     {
         if (++lastNodeOnPath >= nodesOnPath.length)
             nodesOnPath = Arrays.copyOf(nodesOnPath, lastNodeOnPath * 2);
 
-        Node<T> node = nodesOnPath[lastNodeOnPath];
+        OnDiskNodeWriter.Node<T> node = nodesOnPath[lastNodeOnPath];
         if (node == null)
-            nodesOnPath[lastNodeOnPath] = node = new Node<>();
+            nodesOnPath[lastNodeOnPath] = node = nodeWriter.newNode();
 
         node.depth = depth;
         return node;
     }
 
-    /// Write out every node the walk has finished with, i.e. every node on the path deeper than the position the
-    /// cursor ascended to, deepest first. Each node is written, then the chain of transitions between it and the
-    /// next shallower node on the path (or the ascent depth, whichever is deeper), and the resulting position is
-    /// recorded as a child of that parent, which is created if the path had no node at that depth.
+    /// Complete every node the walk has finished with, i.e. every node on the path deeper than the position the
+    /// cursor ascended to, deepest first. Each node is given to the node writer together with the chain of transitions
+    /// between it and the next shallower node on the path (or the ascent depth, whichever is deeper), and is then
+    /// attached as a child of that parent, which is created if the path had no node at that depth.
     private void ascendTo(long newEncodedPosition) throws IOException
     {
         if (lastNodeOnPath < 0)
         {
-            // fully empty trie; file is left empty, root is at 0
+            // fully empty trie; nothing is written and there is no root
             return;
         }
 
         // throw away any path that did not result in content
-        Node<T> node = nodesOnPath[lastNodeOnPath];
+        OnDiskNodeWriter.Node<T> node = nodesOnPath[lastNodeOnPath];
         assert node.depth <= keyPos;
         keyPos = node.depth;
 
         int newLength = Math.max(Cursor.depth(newEncodedPosition) - 1, -1);
         // If we are returning to an ascent-path position that doesn't advance, prepare to add content to the node at
         // this depth rather than add a new child to parent.
-        if (Cursor.isOnReturnPath(newEncodedPosition) && (newLength == -1 || (keyBytes[newLength] & 0xFF) == Cursor.incomingTransition(newEncodedPosition)))
+        if (Cursor.isOnReturnPath(newEncodedPosition)
+            && (newLength == -1 ||
+                (keyBytes[newLength] & 0xFF) == Cursor.incomingTransition(newEncodedPosition)))
             ++newLength;
 
         while (newLength < node.depth)
         {
-            writeAndRecycleNode(node);
             --lastNodeOnPath;
-            Node<T> next = lastNodeOnPath >= 0 ? nodesOnPath[lastNodeOnPath] : null;
-            // the path to reach this node includes the key bytes until there's a node on path or we reach ascent depth - 1
+            OnDiskNodeWriter.Node<T> next = lastNodeOnPath >= 0 ? nodesOnPath[lastNodeOnPath] : null;
+            // The path to reach this node includes the key bytes until there's a node on path or we reach ascent
+            // depth - 1: the transition out of that parent, followed by a chain of single-child transitions.
             int stopDepth = (next != null ? Math.max(next.depth, newLength) : newLength);
-            popAndWriteChain(stopDepth + 1);
+            nodeWriter.complete(node, keyBytes, stopDepth + 1, keyPos);
+            keyPos = stopDepth;
 
-            --keyPos;
-
-            // if reached exhausted, the node just written is the root
+            // if reached exhausted, the node just completed is the root
             if (keyPos < 0)
-                return; // the current file position is the root position
+            {
+                rootPosition = nodeWriter.finish();
+                hasRoot = true;
+                return;
+            }
 
-            // if reached ascend depth, add node on path, add child and exit
+            // if reached ascend depth, add node on path. Note that this reuses the node that was just completed.
             if (next == null || next.depth < keyPos)
                 next = addNewNode(keyPos);
 
             // add child with last byte and pointer to child
-            next.addChild(keyBytes[keyPos] & 0xFF, out.position());
+            nodeWriter.attachCompleted(next, keyBytes[keyPos] & 0xFF);
 
             node = next;
         }
     }
 
-    /// Write the transitions `keyBytes[stopDepth, keyPos)` as chain nodes, deepest transition first, in pieces of at
-    /// most [OnDiskWriteNodeType#MAX_CHAIN_LENGTH_INCLUSIVE] with the deepest piece the full one, and leave `keyPos`
-    /// at `stopDepth`.
-    private void popAndWriteChain(int stopDepth) throws IOException
-    {
-        while (keyPos > stopDepth)
-        {
-            int written = 0;
-            while (keyPos > stopDepth && written < OnDiskWriteNodeType.MAX_CHAIN_LENGTH_INCLUSIVE)
-            {
-                out.writeByte(keyBytes[--keyPos]);
-                ++written;
-            }
-            out.writeByte(OnDiskWriteNodeType.CHAIN.bits | (written - 1));
-        }
-    }
-
-    private void writeAndRecycleNode(Node<T> node) throws IOException
-    {
-        boolean hasChildren = node.childCount() > 0;
-        T descentContent = swapAscentAndDescentSides ? node.ascentPathContent : node.descentPathContent;
-        T ascentContent = swapAscentAndDescentSides ? node.descentPathContent : node.ascentPathContent;
-        boolean hasContent = descentContent != null || ascentContent != null;
-        assert hasChildren || hasContent;
-
-        if (hasChildren)
-            writeChildrenOfNode(node);
-
-        if (hasContent)
-            OnDiskWriteNodeType.writePayload(out, dataSerializer, descentContent, ascentContent, hasChildren);
-
-        node.reset();
-    }
-
-    private void writeChildrenOfNode(Node<T> node) throws IOException
-    {
-        int count = node.childCount();
-        long basePos = out.position();
-        // Children are recorded in the order they were written, so the first is the furthest away and the last is
-        // immediately before this node (delta 0, which the sparse, bitmap and chain types leave implicit).
-        if (node.child(count - 1) != basePos)
-            throw new IllegalStateException("Last written child at " + node.child(count - 1) +
-                                            " does not immediately precede its parent at " + basePos);
-        long furthestChild = node.child(0);
-        assert furthestChild >= 0 && furthestChild <= basePos;
-        int bytesPerPointer = bytesFor(basePos - furthestChild);
-        // A dense node marks absent children with all-ones, so its pointers are sized for one more than the delta.
-        int denseBytesPerPointer = bytesFor(basePos - furthestChild + 1);
-        OnDiskWriteNodeType type = OnDiskWriteNodeType.selectChildrenType(bytesPerPointer, denseBytesPerPointer, count);
-        type.writeChildren(out, node, basePos, type == OnDiskWriteNodeType.DENSE ? denseBytesPerPointer : bytesPerPointer);
-    }
-
-    /// Advance the cursor from `prevPosition` with this as the receiver of the transitions it takes, write out the
+    /// Advance the cursor from `prevPosition` with this as the receiver of the transitions it takes, complete the
     /// nodes it ascended out of, and bring the path up to the new position. Returns the new position.
     ///
-    /// [Cursor#process] cannot drive a writer: it never reports ascents, and nodes are only written on ascent.
+    /// [Cursor#process] cannot drive a writer: it never reports ascents, and nodes are only completed on ascent.
     long step(Cursor<?> c, long prevPosition) throws IOException
     {
         long currPosition = c.advanceMultiple(this);
 
         if (Cursor.ascended(currPosition, prevPosition))
         {
-            // write the nodes that have been completed
+            // hand over the nodes that have been completed
             ascendTo(currPosition);
 
             if (Cursor.isExhausted(currPosition))
@@ -263,75 +270,6 @@ abstract class OnDiskBaseTrieWriter<T> extends TriePathReconstructor
 
     static int bytesFor(long delta)
     {
-        return 8 - Long.numberOfLeadingZeros(delta | 1L) / 8; // at least 1
-    }
-
-    /// A node on the current path: its content, and the children that have been completed and written so far. One
-    /// instance per depth is reused for the whole write.
-    static class Node<T>
-    {
-        private static final long[] NO_POSITIONS = new long[0];
-        private static final byte[] NO_TRANSITIONS = new byte[0];
-
-        int depth;
-
-        T descentPathContent;
-        T ascentPathContent;
-        /// Positions (the end of each child's serialization) and transition bytes of the children written so far, in
-        /// the order they were written. Grown on demand: a node can have up to 256 children, but the vast majority
-        /// have very few.
-        private long[] childPositions = NO_POSITIONS;
-        private byte[] childTransitions = NO_TRANSITIONS;
-        private int childCount = 0;
-
-        int childCount()
-        {
-            return childCount;
-        }
-
-        int childTransition(int index)
-        {
-            return childTransitions[index] & 0xFF;
-        }
-
-        long child(int index)
-        {
-            return childPositions[index];
-        }
-
-        void addChild(int transition, long position)
-        {
-            if (childCount == childPositions.length)
-            {
-                int newLength = Math.max(4, childCount * 2);
-                childPositions = Arrays.copyOf(childPositions, newLength);
-                childTransitions = Arrays.copyOf(childTransitions, newLength);
-            }
-            childPositions[childCount] = position;
-            childTransitions[childCount] = (byte) transition;
-            ++childCount;
-        }
-
-        void reset()
-        {
-            childCount = 0;
-            descentPathContent = null;
-            ascentPathContent = null;
-        }
-
-        @Override
-        public String toString()
-        {
-            String res = "";
-            if (descentPathContent != null)
-                res += "D[" + descentPathContent + "] ";
-            if (ascentPathContent != null)
-                res += "A[" + ascentPathContent + "] ";
-
-            for (int i = 0; i < childCount; ++i)
-                res += String.format("%02x: %x ", childTransition(i), child(i));
-
-            return res;
-        }
+        return 8 - Integer.divideUnsigned(Long.numberOfLeadingZeros(delta | 1L) , 8); // at least 1
     }
 }
