@@ -122,9 +122,12 @@ import static java.util.concurrent.TimeUnit.SECONDS;
  * {@code rows/} grants ({@code rows/<target>/data/<ks>/<table>}, the target being the value of the tenant column the
  * grant opens) and the key {@value #RLAC_EXTENSION_KEY} refuse the start as in {@code DSE_6}, the key on a
  * materialized view too: DSE 5.1 writes it with {@code RESTRICT ROWS} on a view, on the node that runs the statement
- * only, so a view's key refuses the start of that node only, where the key of a table, which every node gets, refuses
- * them all. No remedy is given for a view: {@code UNRESTRICT ROWS} on a view fails on DSE 5.1.51 and leaves a row that
- * keeps the node from starting, which {@link #verifyDse51SchemaRowsAtStartup} refuses before the schema is loaded.
+ * only until that node restarts, after which the other nodes take it from that node's schema, so a view's key refuses
+ * the start of the nodes that hold it, where the key of a table, which every node gets, refuses them all. The remedy of
+ * a view, validated by a local trial on DSE 5.1.51 nodes, is its drop and creation without the restriction on DSE 5.1
+ * before any node runs this software, never {@code UNRESTRICT ROWS}, which fails on a view on DSE 5.1.51 and leaves a
+ * row that keeps the node from starting, which {@link #verifyDse51SchemaRowsAtStartup} refuses before the schema is
+ * loaded, with the repair of that row.
  * <p>
  * In {@code DSE_5_1} a cluster-wide read of the second pass that still fails on the request at the end of the wait does
  * not refuse the start: the node checks its own replica, as with {@code dse_restrictions_local_check_only}, and starts
@@ -843,7 +846,7 @@ public final class Dse6AccessControlCheck
      * has the name or the id of a materialized view of {@code system_schema.views}: the row DSE 5.1.51 leaves on the
      * node where {@code UNRESTRICT ROWS} on the view failed, with which neither DSE 5.1.51 nor this software starts
      * the node (this software's load of the schema would fail on the shared id with an error that does not say why).
-     * The rows are read as stored. No repair is attempted, none being validated. A no-op in the other modes.
+     * The rows are read as stored. No repair is attempted: the refusal gives the repair. A no-op in the other modes.
      *
      * @throws StartupException naming each such row and its view
      */
@@ -910,19 +913,28 @@ public final class Dse6AccessControlCheck
 
     /**
      * What a refusal or the periodic ERROR says of the materialized views restricted to rows, which only
-     * {@code DSE_5_1} reports: no remedy, since none has been validated on DSE 5.1 nodes; only the statement not to
-     * run.
+     * {@code DSE_5_1} reports: the remedy a local trial on DSE 5.1.51 nodes validated (the view's {@code rows/} grants
+     * revoked, the view dropped and created again without the restriction, on DSE 5.1), only before any node runs this
+     * software, since in the mixed phase the nodes of this software do not take DSE's schema changes; how the
+     * restriction spreads; and the statement not to run.
      */
     private static String restrictedViewsAdvice(List<TableMetadata> views)
     {
         List<String> names = new ArrayList<>(views.size());
         for (TableMetadata view : views)
             names.add(view.toString());
-        return "No remedy is validated yet for the materialized views restricted to rows " + names + ": " +
-               DseCompat.source() + " keeps a RESTRICT ROWS on a view on the node that ran it only, and an " +
-               "UNRESTRICT ROWS on a view fails on DSE 5.1.51 and leaves on that node a row of system_schema.tables " +
-               "named after the view, with which neither DSE 5.1.51 nor this software starts the node: do not run " +
-               "UNRESTRICT ROWS on a view";
+        return "For the materialized views restricted to rows " + names + ": roll this node back to " +
+               DseCompat.source() + "; if no other node runs this software, remove the restriction there before the " +
+               "upgrade starts again, once a row of system_schema.tables named after the view, which a failed " +
+               "UNRESTRICT ROWS on it leaves on a node, is repaired on that node (a DROP MATERIALIZED VIEW there " +
+               "fails and leaves the row without columns): REVOKE the rows/ grants on each view, drop it (DROP " +
+               "MATERIALIZED VIEW, which also removes the view's rows/ grants) and create it again without the " +
+               "restriction, which builds it again from its base table; otherwise, in the mixed phase, whose schema " +
+               "changes the nodes of this software do not take, upgrade no further node and report to the upgrade " +
+               "owner. " + DseCompat.source() + " keeps a RESTRICT ROWS on a view on the node that ran it only until " +
+               "that node restarts; after it, the other nodes take it from that node's schema. Never run UNRESTRICT " +
+               "ROWS on a view: on DSE 5.1.51 it fails and leaves on that node a row of system_schema.tables named " +
+               "after the view, with which neither DSE 5.1.51 nor this software starts the node";
     }
 
     /**

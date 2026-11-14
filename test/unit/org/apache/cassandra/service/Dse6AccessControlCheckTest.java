@@ -144,13 +144,48 @@ public class Dse6AccessControlCheckTest extends CQLTester
                                                                  "role 'reader' on rows/EU/data/test_ks/rlac_by_v: " +
                                                                  "[SELECT]");
     /** What a refusal of DSE_5_1 says of a materialized view restricted to rows. */
-    private static final String DSE51_VIEW_ADVICE = "No remedy is validated yet for the materialized views " +
-                                                    "restricted to rows [" + DSE51_VIEW + "]: DSE 5.1 keeps a " +
-                                                    "RESTRICT ROWS on a view on the node that ran it only, and an " +
-                                                    "UNRESTRICT ROWS on a view fails on DSE 5.1.51 and leaves on " +
-                                                    "that node a row of system_schema.tables named after the view, " +
-                                                    "with which neither DSE 5.1.51 nor this software starts the " +
-                                                    "node: do not run UNRESTRICT ROWS on a view";
+    private static final String DSE51_VIEW_ADVICE = "For the materialized views restricted to rows [" + DSE51_VIEW +
+                                                    "]: roll this node back to DSE 5.1; if no other node runs this " +
+                                                    "software, remove the restriction there before the upgrade " +
+                                                    "starts again, once a row of system_schema.tables named after " +
+                                                    "the view, which a failed UNRESTRICT ROWS on it leaves on a " +
+                                                    "node, is repaired on that node (a DROP MATERIALIZED VIEW there " +
+                                                    "fails and leaves the row without columns): REVOKE the rows/ " +
+                                                    "grants on each view, drop it (DROP MATERIALIZED VIEW, which " +
+                                                    "also removes the view's rows/ grants) and create it again " +
+                                                    "without the restriction, which builds it again from its base " +
+                                                    "table; otherwise, in the mixed phase, whose schema changes the " +
+                                                    "nodes of this software do not take, upgrade no further node and " +
+                                                    "report to the upgrade owner. " +
+                                                    "DSE 5.1 keeps a RESTRICT ROWS on a view on the node that ran it " +
+                                                    "only until that node restarts; after it, the other nodes take " +
+                                                    "it from that node's schema. Never run UNRESTRICT ROWS on a " +
+                                                    "view: on DSE 5.1.51 it fails and leaves on that node a row of " +
+                                                    "system_schema.tables named after the view, with which neither " +
+                                                    "DSE 5.1.51 nor this software starts the node";
+    /** The repair of the row a failed UNRESTRICT ROWS on a view leaves, on a DSE 5.1 node that still runs. */
+    private static final String DSE51_TABLE_ROW_REPAIR = "as a superuser on the node that holds the row, DELETE FROM " +
+                                                         "system_schema.tables WHERE keyspace_name = '<keyspace>' " +
+                                                         "AND table_name = '<table>', the table row named, which has " +
+                                                         "the view's name where a failed UNRESTRICT ROWS left it " +
+                                                         "(and the view's rows of system_schema.columns only if a " +
+                                                         "DROP MATERIALIZED VIEW already ran on it), drain and " +
+                                                         "restart it, check the schema agreement with nodetool " +
+                                                         "describecluster, then remove the view's restriction, which " +
+                                                         "that restart spreads to every node: REVOKE the view's " +
+                                                         "rows/ grants, drop the view, unless a DROP MATERIALIZED " +
+                                                         "VIEW already ran, and create it again without the " +
+                                                         "restriction";
+    /** What the refusal of such a row says of its repair: only while no other node runs this software. */
+    private static final String DSE51_TABLE_ROW_ADVICE = "If no other node runs this software, on a DSE 5.1 node " +
+                                                         "that still runs, repair such a row there: " +
+                                                         DSE51_TABLE_ROW_REPAIR + "; otherwise, in the mixed phase, " +
+                                                         "whose schema changes the nodes of this software do not " +
+                                                         "take, upgrade no further node and report to the upgrade " +
+                                                         "owner. This node, which DSE 5.1.51 does not start either, " +
+                                                         "is repaired as the upgrade documentation describes for a " +
+                                                         "node already down, then upgraded again. Never run " +
+                                                         "UNRESTRICT ROWS on a view";
     private static final String DSE51_REFUSED = "internode_compatibility_mode DSE_5_1 refused: DSE access controls " +
                                                 "that this software does not enforce would grant access if ignored " +
                                                 "(found by this node's replica): ";
@@ -1566,6 +1601,26 @@ public class Dse6AccessControlCheckTest extends CQLTester
     }
 
     /**
+     * The refusal of the rows of {@code system_schema.tables} named after a view: every row as listed, in its order,
+     * the repair of a DSE 5.1 node that still runs (the row deleted, a drain and a restart, the schema agreement
+     * checked, then the view's restriction removed), the procedures for a node already down named, and never
+     * {@code UNRESTRICT ROWS} on a view.
+     */
+    @Test
+    public void dse51TheRefusalOfTheRowsOfViewsGivesTheRepair()
+    {
+        String first = SchemaKeyspace.dse51TableRowOfView("ks.v1", "id1", "ks.v1", "id1");
+        String second = SchemaKeyspace.dse51TableRowOfView("ks.t2", "id2", "ks.\"V2\"", "id2");
+        assertThat(first).isEqualTo("the table row ks.v1 (id id1) beside the materialized view ks.v1 (id id1)");
+        assertThat(SchemaKeyspace.dse51TableRowsOfViewsRefusal(List.of(first, second)))
+        .isEqualTo("internode_compatibility_mode DSE_5_1 refused: system_schema.tables holds rows of materialized " +
+                   "views of system_schema.views: " + first + ", " + second + ". DSE 5.1.51 leaves such a row on " +
+                   "the node where UNRESTRICT ROWS on a view failed, after which neither DSE 5.1.51 nor this " +
+                   "software can start the node; this software does not repair it. " + DSE51_TABLE_ROW_ADVICE);
+        assertThat(SchemaKeyspace.DSE51_TABLE_ROW_REPAIR).isEqualTo(DSE51_TABLE_ROW_REPAIR);
+    }
+
+    /**
      * Node 1 of the DSE 5.1.51 schema fixture, as DSE 5.1.51 left it after the failed {@code UNRESTRICT ROWS} on the
      * view: a row of {@code system_schema.tables} named after the view, with its id, beside the view. Without the mode
      * (as in {@code DSE_6}) the build of the schema fails on the shared id, with an error that does not say why; in
@@ -1597,9 +1652,8 @@ public class Dse6AccessControlCheckTest extends CQLTester
                              "materialized views of system_schema.views: the table row " + DSE51_VIEW + " (id " + id +
                              ") beside the materialized view " + DSE51_VIEW + " (id " + id + "). DSE 5.1.51 leaves " +
                              "such a row on the node where UNRESTRICT ROWS on a view failed, after which neither DSE " +
-                             "5.1.51 nor this software can start the node; this software does not repair it, and no " +
-                             "repair is validated yet: the node cannot be upgraded while the row is there. Do not " +
-                             "run UNRESTRICT ROWS on a view";
+                             "5.1.51 nor this software can start the node; this software does not repair it. " +
+                             DSE51_TABLE_ROW_ADVICE;
             assertThatThrownBy(Dse6AccessControlCheck::verifyDse51SchemaRowsAtStartup)
             .isInstanceOfSatisfying(StartupException.class,
                                     e -> assertThat(e.returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG))
