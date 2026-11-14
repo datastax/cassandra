@@ -92,10 +92,11 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.rootCause;
  * (DSE 5.1.51 dispatches a file only to a peer that gossips its own schema version, which a node of HCD 2.0 does not;
  * a peer with no release recorded is counted with them), and one for a target in neither {@code system.local} nor
  * {@code system.peers}. It warns about the SAI component files left (DSE 5.1.51 ignores them and removes them with
- * their sstable), and about a commit log or hints directory that does not exist (it may not be HCD 2.0's), and lists
- * what the rollback removes before DSE 5.1 starts (the commit log segments, the saved caches, the record and its
- * temporary file) and what it keeps (the marker, the record of DSE 5.1 peers, the copies of unreadable records, the
- * hints files of version 1 with their companions, the snapshot).
+ * their sstable), and about a commit log, hints or given saved caches directory that does not exist (it may not be
+ * HCD 2.0's), and lists what the rollback removes before DSE 5.1 starts (the commit log segments, the saved caches of
+ * {@code --saved-caches-dir}, else of DSE's {@code saved_caches_directory}, the record and its temporary file) and
+ * what it keeps (the marker, the record of DSE 5.1 peers, the copies of unreadable records, the hints files of
+ * version 1 with their companions, the snapshot).
  */
 final class Dse51RollbackInspection
 {
@@ -245,9 +246,9 @@ final class Dse51RollbackInspection
                                   "of the node are DSE's defaults or those given, which may not be this node's",
                                   "run the tool as the user DSE runs as (or as root), or point it at the file " +
                                   "(--cassandra-yaml, --conf-dir, --dse-home), or give every directory (--data-dir, " +
-                                  "--commitlog-dir, --hints-dir, --metadata-dir)"));
+                                  "--commitlog-dir, --hints-dir, --metadata-dir, --saved-caches-dir)"));
         List<String> assumed = new ArrayList<>(layout.defaultsAssumed);
-        if (layout.cassandraConf.get("saved_caches_directory") == null)
+        if (layout.savedCachesDirectory == null && layout.cassandraConf.get("saved_caches_directory") == null)
             assumed.add("saved_caches_directory: " + DEFAULT_SAVED_CACHES);
         if (!assumed.isEmpty())
             findings.add(info("DEFAULTS_ASSUMED",
@@ -255,9 +256,11 @@ final class Dse51RollbackInspection
                               list(assumed)));
     }
 
-    /** DSE's {@code saved_caches_directory}, else its default. */
+    /** The directory of {@code --saved-caches-dir}, else DSE's {@code saved_caches_directory}, else its default. */
     private File savedCachesDirectory()
     {
+        if (layout.savedCachesDirectory != null)
+            return layout.savedCachesDirectory;
         Object configured = layout.cassandraConf.get("saved_caches_directory");
         return new File(configured == null || configured.toString().isEmpty() ? DEFAULT_SAVED_CACHES
                                                                                 : Path.of(configured.toString()));
@@ -700,17 +703,17 @@ final class Dse51RollbackInspection
                                   list(unreadableDescriptors) + "; their hints cannot be delivered: HCD 2.0 deletes " +
                                   "an empty one and sets a damaged one aside, or does not start on it, and what DSE " +
                                   "5.1.51 does with such a file is not known",
-                                  "move them out of the hints directory before DSE 5.1 starts, and repair the tables " +
-                                  "they may hold once the cluster runs one release"));
+                                  "move them, with their companions, out of the hints directory before DSE 5.1 " +
+                                  "starts, and repair the tables they may hold once the cluster runs one release"));
         if (!otherVersions.isEmpty())
             findings.add(blocking("HINTS_VERSION",
                                   "hints files that are not of version " + HINTS_VERSION + ", the only one DSE " +
                                   "5.1.51 delivers: " + list(otherVersions) + "; DSE 5.1.51 loads them and never " +
                                   "delivers them",
                                   "start HCD 2.0 again on this node and let it deliver them (nodetool " +
-                                  "listpendinghints, the targets up), or remove them and repair the tables they " +
-                                  "hold once the cluster runs one release; then drain the node and run this check " +
-                                  "again"));
+                                  "listpendinghints, the targets up), or remove them, with their companions, and " +
+                                  "repair the tables they hold once the cluster runs one release; then drain the " +
+                                  "node and run this check again"));
         if (byHostId.isEmpty())
             return;
         Map<String, Target> targets = targets();
@@ -750,14 +753,16 @@ final class Dse51RollbackInspection
                                  "own rollback to DSE 5.1, or for this node's next upgrade",
                                  "before the drain, let HCD 2.0 deliver them (nodetool listpendinghints, the target " +
                                  "up); otherwise the rollback goes on, and they wait, or remove them and repair the " +
-                                 "tables they hold once the cluster runs one release"));
+                                 "tables they hold once the cluster runs one release; DSE 5.1.51 drops at delivery, " +
+                                 "with no log, a hint older than the smallest gc_grace_seconds of its tables, so " +
+                                 "repair the tables they hold if they wait longer than that"));
         if (!unknown.isEmpty())
             findings.add(warning("HINTS_FOR_UNKNOWN_TARGET",
                                  "hints files of version " + HINTS_VERSION + " for host ids in neither system.local " +
                                  "nor system.peers (a host that left the cluster, or one never saved): " +
-                                 list(unknown) + "; DSE 5.1.51 deletes the files of a host removed from the ring, " +
-                                 "and writes again for the current replicas a file whose host id it cannot map to " +
-                                 "an address, so these hints may reach other replicas or none",
+                                 list(unknown) + "; DSE 5.1.51 neither delivers nor removes these hints: it " +
+                                 "offers a target's files only once its host id maps to an address, and deletes " +
+                                 "only those of a host removed from the ring while it runs",
                                  "find out which node each host id was (nodetool status on another node); remove " +
                                  "the files of a node that left for good, and repair the tables they hold"));
     }
@@ -814,7 +819,17 @@ final class Dse51RollbackInspection
     {
         File directory = savedCachesDirectory();
         if (!directory.isDirectory())
+        {
+            // DSE's own directory may never have been created; one given on the command line is said, as the commit
+            // log and hints directories are
+            if (layout.savedCachesDirectory != null)
+                findings.add(warning("SAVED_CACHES_DIRECTORY_MISSING",
+                                     "no saved caches directory at " + directory + ", given with --saved-caches-dir, " +
+                                     "so no saved cache is listed for removal",
+                                     "pass --saved-caches-dir with the saved_caches_directory of HCD 2.0's " +
+                                     "cassandra.yaml; if it is that directory, the rollback goes on"));
             return;
+        }
         File[] files = directory.tryList(File::isFile);
         if (files == null)
         {

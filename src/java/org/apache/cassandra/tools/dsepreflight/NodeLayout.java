@@ -77,6 +77,8 @@ final class NodeLayout
         Path metadataDirectory;
         Path commitLogDirectory;
         Path hintsDirectory;
+        /** the saved caches directory, read by the rollback check of a DSE 5.1 node only */
+        Path savedCachesDirectory;
         /** the environment variable {@code DSE_HOME}, read by the caller */
         String dseHomeFromEnvironment;
     }
@@ -98,6 +100,12 @@ final class NodeLayout
     final File metadataDirectory;
     final File commitLogDirectory;
     final File hintsDirectory;
+    /**
+     * the saved caches directory given on the command line, which only the rollback check of a DSE 5.1 node reads;
+     * null when none was given
+     */
+    @Nullable
+    final File savedCachesDirectory;
     /** the inputs that could not be read, with why */
     final Map<String, String> unreadable = new LinkedHashMap<>();
     /** the directories taken from DSE's defaults because {@code cassandra.yaml} does not set them */
@@ -138,6 +146,7 @@ final class NodeLayout
         metadataDirectory = directory(options.metadataDirectory, "metadata_directory", "metadata");
         commitLogDirectory = directory(options.commitLogDirectory, "commitlog_directory", "commitlog");
         hintsDirectory = directory(options.hintsDirectory, "hints_directory", "hints");
+        savedCachesDirectory = options.savedCachesDirectory == null ? null : new File(options.savedCachesDirectory);
     }
 
     @Nullable

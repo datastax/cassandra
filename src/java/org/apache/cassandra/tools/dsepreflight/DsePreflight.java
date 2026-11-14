@@ -90,13 +90,13 @@ public final class DsePreflight
     static final List<String> PAXOS_ROLLBACK_EXCLUDED = List.of("aggregate", "nodetool", "nodetool-arg",
                                                                 "nodetool-timeout", "nodetool-java-home",
                                                                 "commitlog-dir", "hints-dir", "jvm-options",
-                                                                "rollback-check");
+                                                                "rollback-check", "saved-caches-dir");
     /** The options the aggregate mode takes; it refuses every other, so that none is silently ignored. */
     static final Set<String> AGGREGATE_OPTIONS = Set.of("aggregate", "json", "help");
     /** The options the rollback check takes; it refuses every other, so that none is silently ignored. */
     static final Set<String> ROLLBACK_CHECK_OPTIONS = Set.of("rollback-check", "dse-home", "conf-dir", "cassandra-yaml",
                                                              "data-dir", "metadata-dir", "commitlog-dir", "hints-dir",
-                                                             "snapshot", "json", "help");
+                                                             "saved-caches-dir", "snapshot", "json", "help");
 
     private DsePreflight()
     {
@@ -217,6 +217,7 @@ public final class DsePreflight
         layoutOptions.metadataDirectory = path(cmd, "metadata-dir");
         layoutOptions.commitLogDirectory = path(cmd, "commitlog-dir");
         layoutOptions.hintsDirectory = path(cmd, "hints-dir");
+        layoutOptions.savedCachesDirectory = path(cmd, "saved-caches-dir");
         layoutOptions.dseHomeFromEnvironment = CassandraRelevantEnv.DSE_HOME.getString();
         return new NodeLayout(layoutOptions);
     }
@@ -382,6 +383,9 @@ public final class DsePreflight
             for (Option option : options.getOptions())
                 if (!ROLLBACK_CHECK_OPTIONS.contains(option.getLongOpt()) && cmd.hasOption(option.getLongOpt()))
                     return "--" + option.getLongOpt() + " does not apply to --rollback-check";
+        // read by the rollback check only
+        if (cmd.hasOption("saved-caches-dir") && !cmd.hasOption("rollback-check"))
+            return "--saved-caches-dir applies only to --rollback-check";
         for (String option : PAXOS_ROLLBACK_ONLY)
             if (cmd.hasOption(option) && !(cmd.hasOption("rollback-check") && ROLLBACK_CHECK_OPTIONS.contains(option)))
                 return "--" + option + (option.equals("snapshot") ? " applies only to --paxos-rollback and " +
@@ -396,7 +400,7 @@ public final class DsePreflight
         NodeLayout layout = layout(cmd);
         PaxosRollback.Options options = new PaxosRollback.Options();
         // a node rolled back to DSE 5.1 has neither nodes files nor trie sstables; a node rolled back to DSE 6 has its
-        // nodes/local back (the runbook puts it back before this mode runs), which isDse51Node looks at first
+        // nodes/local back (its rollback puts it back before this mode runs), which isDse51Node looks at first
         options.dse51 = isDse51Node(layout);
         options.dataDirectories.addAll(layout.dataDirectories);
         options.metadataDirectory = layout.metadataDirectory;
@@ -795,6 +799,9 @@ public final class DsePreflight
         options.addOption(Option.builder().longOpt("metadata-dir").hasArg().argName("dir").desc("instead of metadata_directory of cassandra.yaml").build());
         options.addOption(Option.builder().longOpt("commitlog-dir").hasArg().argName("dir").desc("instead of commitlog_directory of cassandra.yaml").build());
         options.addOption(Option.builder().longOpt("hints-dir").hasArg().argName("dir").desc("instead of hints_directory of cassandra.yaml").build());
+        options.addOption(Option.builder().longOpt("saved-caches-dir").hasArg().argName("dir")
+                                .desc("with --rollback-check: instead of saved_caches_directory of cassandra.yaml")
+                                .build());
         options.addOption(Option.builder().longOpt("nodetool").hasArg().argName("path")
                                 .desc("DSE's nodetool, to collect the live state of the running node (read-only commands)").build());
         options.addOption(Option.builder().longOpt("nodetool-arg").hasArg().argName("arg")
@@ -843,8 +850,9 @@ public final class DsePreflight
                                       "HCD 2.0 stopped after its drain, system and system_schema not restored yet " +
                                       "and DSE 5.1 not started, check that DSE 5.1 can start on the files HCD 2.0 " +
                                       "left, and list those the rollback removes and keeps; the directories are " +
-                                      "taken from DSE's cassandra.yaml, so pass --commitlog-dir, --hints-dir and " +
-                                      "--metadata-dir where HCD 2.0's cassandra.yaml sets others").build());
+                                      "taken from DSE's cassandra.yaml, so pass --commitlog-dir, --hints-dir, " +
+                                      "--metadata-dir and --saved-caches-dir where HCD 2.0's cassandra.yaml sets " +
+                                      "others").build());
         options.addOption(Option.builder("h").longOpt("help").desc("print this help").build());
         return options;
     }
