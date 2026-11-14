@@ -483,6 +483,10 @@ public class Dse51RollbackInspectionTest
         assertThat(run.finding("HINTS_VERSION").message)
         .isEqualTo("hints files that are not of version 1, the only one DSE 5.1.51 delivers: " + byName.getFileName() +
                    " (version 2 by its name); DSE 5.1.51 loads them and never delivers them");
+        assertThat(run.finding("HINTS_VERSION").remedy)
+        .isEqualTo("start HCD 2.0 again on this node and let it deliver them (nodetool listpendinghints, the targets " +
+                   "up), or remove them, with their companions, and repair the tables they hold once the cluster " +
+                   "runs one release; then drain the node and run this check again");
         Files.delete(byName);
         Path dse6 = node.hints.resolve(NODE_2 + "-1793990000000-v1.hints");
         hintsFile(dse6, 1, NODE_2);
@@ -502,8 +506,8 @@ public class Dse51RollbackInspectionTest
                    " (empty); their hints cannot be delivered: HCD 2.0 deletes an empty one and sets a damaged one " +
                    "aside, or does not start on it, and what DSE 5.1.51 does with such a file is not known");
         assertThat(empty.finding("HINTS_DESCRIPTOR_UNREADABLE").remedy)
-        .isEqualTo("move them out of the hints directory before DSE 5.1 starts, and repair the tables they may hold " +
-                   "once the cluster runs one release");
+        .isEqualTo("move them, with their companions, out of the hints directory before DSE 5.1 starts, and repair " +
+                   "the tables they may hold once the cluster runs one release");
         hintsFile(byDescriptor, 1, NODE_2);
         byte[] damaged = Files.readAllBytes(byDescriptor);
         damaged[30] ^= 1;
@@ -792,6 +796,84 @@ public class Dse51RollbackInspectionTest
         });
     }
 
+    /**
+     * The saved caches directory of --saved-caches-dir, where HCD 2.0's cassandra.yaml sets another one than DSE's: its
+     * files listed for removal, DSE's left out; the option applies to the rollback check only.
+     */
+    @Test
+    public void takesTheSavedCachesDirectoryOfTheOption() throws IOException
+    {
+        Dse51NodeFixture node = node();
+        Path hcdCaches = Files.createDirectories(node.root.resolve("hcd-saved-caches"));
+        Path cache = Files.write(hcdCaches.resolve("RowCache-h.db"), new byte[]{ 4, 5, 6 });
+        Run run = run(node, "--saved-caches-dir", hcdCaches.toString());
+        assertThat(run.exitCode).as("%s%s", run.out, run.err).isEqualTo(DsePreflight.EXIT_READY);
+        assertThat(run.report.inputs).containsEntry("saved_caches_directory", hcdCaches.toString());
+        assertThat(run.report.toRemove).contains(cache.toString())
+                                       .doesNotContain(savedCaches(node).resolve("KeyCache-g.db").toString());
+
+        // without saved_caches_directory in DSE's cassandra.yaml, the option is no default assumed
+        node.replace(NodeLayout.CASSANDRA_YAML, "saved_caches_directory: ", "# saved_caches_directory: ");
+        Run noDefault = run(node, "--saved-caches-dir", hcdCaches.toString());
+        assertThat(noDefault.exitCode).as("%s%s", noDefault.out, noDefault.err).isEqualTo(DsePreflight.EXIT_READY);
+        assertThat(noDefault.report.toRemove).contains(cache.toString());
+        assertThat(noDefault.report.findings).noneMatch(f -> f.code.equals("DEFAULTS_ASSUMED") &&
+                                                             f.message.contains("saved_caches_directory"));
+
+        // a directory given that does not exist is said, the rollback going on
+        Path missing = node.root.resolve("no-saved-caches");
+        Run noDirectory = run(node, "--saved-caches-dir", missing.toString());
+        assertThat(noDirectory.exitCode).as("%s%s", noDirectory.out, noDirectory.err)
+                                        .isEqualTo(DsePreflight.EXIT_READY);
+        assertThat(noDirectory.codes(Finding.Severity.WARNING)).containsExactly("SAVED_CACHES_DIRECTORY_MISSING");
+        assertThat(noDirectory.finding("SAVED_CACHES_DIRECTORY_MISSING").message)
+        .isEqualTo("no saved caches directory at " + missing + ", given with --saved-caches-dir, so no saved cache " +
+                   "is listed for removal");
+        assertThat(noDirectory.finding("SAVED_CACHES_DIRECTORY_MISSING").remedy)
+        .isEqualTo("pass --saved-caches-dir with the saved_caches_directory of HCD 2.0's cassandra.yaml; if it is " +
+                   "that directory, the rollback goes on");
+
+        Path misuse = temporaryFolder.getRoot().toPath().resolve("misuse.json");
+        DsePreflightTest.Run inspection = DsePreflightTest.run(misuse, node.args("--saved-caches-dir",
+                                                                                 hcdCaches.toString()));
+        assertThat(inspection.exitCode).isEqualTo(DsePreflight.EXIT_ERROR);
+        assertThat(inspection.err).startsWith("--saved-caches-dir applies only to --rollback-check");
+        DsePreflightTest.Run paxos = DsePreflightTest.run(misuse, node.args("--paxos-rollback", "--saved-caches-dir",
+                                                                            hcdCaches.toString()));
+        assertThat(paxos.exitCode).isEqualTo(DsePreflight.EXIT_ERROR);
+        assertThat(paxos.err).startsWith("--saved-caches-dir does not apply to --paxos-rollback");
+    }
+
+    /**
+     * The check's own SSTABLE_WITHOUT_TOC, a warning worded for the sstables of HCD 2.0, and the text of
+     * ROLLBACK_KEEPS, which lists what the rollback keeps.
+     */
+    @Test
+    public void warnsAboutAnSSTableWithoutTocAndListsWhatItKeeps() throws IOException
+    {
+        Dse51NodeFixture node = node();
+        Path table = tableDirectory(node, "system_auth", "role_permissions");
+        Path toc;
+        try (Stream<Path> files = Files.list(table))
+        {
+            toc = files.filter(p -> p.getFileName().toString().endsWith("-TOC.txt")).findFirst()
+                       .orElseThrow(AssertionError::new);
+        }
+        Files.delete(toc);
+        Run run = assertReady(node);
+        assertThat(run.codes(Finding.Severity.WARNING)).containsExactly("SSTABLE_WITHOUT_TOC");
+        assertThat(run.finding("SSTABLE_WITHOUT_TOC").message)
+        .startsWith(Dse51NodeInspector.SSTABLE_WITHOUT_TOC + ": system_auth.role_permissions: 1 (");
+        assertThat(run.finding("SSTABLE_WITHOUT_TOC").remedy)
+        .isEqualTo("find out why they have none (HCD 2.0 writes it for every sstable): an incomplete copy or " +
+                   "restore, a damaged disk");
+        Path hints = node.hints.resolve(DseFixtures.dse51().hintsFile().getFileName());
+        assertThat(run.finding("ROLLBACK_KEEPS").message)
+        .isEqualTo("kept by the rollback: the snapshot " + Dse51PaxosRollbackTest.TAG + " of system and " +
+                   "system_schema, " + hints + ", " + node.metadata.resolve(DsePeersRecord.DSE_51_FILE_NAME) + ", " +
+                   node.metadata.resolve(DseUpgradeMarker.DSE_51_FILE_NAME));
+    }
+
     /** A saved caches directory that cannot be listed is said, not refused: the rollback empties it anyway. */
     @Test
     public void warnsAboutASavedCachesDirectoryItCannotList() throws IOException
@@ -835,6 +917,23 @@ public class Dse51RollbackInspectionTest
                    "file(s); DSE 5.1.51 delivers a hints file only to a peer that gossips its own schema version, " +
                    "which a node of HCD 2.0 does not, so these hints wait for the target's own rollback to DSE 5.1, " +
                    "or for this node's next upgrade");
+        // the tables are repaired when the wait passes their smallest gc_grace_seconds
+        assertThat(forHcd.finding("HINTS_FOR_HCD").remedy)
+        .isEqualTo("before the drain, let HCD 2.0 deliver them (nodetool listpendinghints, the target up); otherwise " +
+                   "the rollback goes on, and they wait, or remove them and repair the tables they hold once the " +
+                   "cluster runs one release; DSE 5.1.51 drops at delivery, with no log, a hint older than the " +
+                   "smallest gc_grace_seconds of its tables, so repair the tables they hold if they wait longer than " +
+                   "that");
+
+        // node 3 recorded with no release: counted with HCD 2.0, DSE 5.1.51 delivering to it only once it gossips
+        // the same schema version
+        node.writeRows("system", "peers", List.of("peer"), List.of(),
+                       row(InetAddress.getByName(node3Address)).with("release_version", null));
+        Run noRelease = assertReady(node);
+        assertThat(noRelease.codes(Finding.Severity.WARNING)).containsExactly("HINTS_FOR_HCD");
+        assertThat(noRelease.finding("HINTS_FOR_HCD").message)
+        .startsWith("hints files of version 1 for targets that system.peers does not show running DSE 5.1 (HCD 2.0, " +
+                    "or no release recorded): " + NODE_3 + " (" + node3Address + ", no release recorded): 1 file(s); ");
 
         // node 3 left: no row of it
         node.deleteRows("system", "peers", List.of("peer"), List.of(), row(InetAddress.getByName(node3Address)));
@@ -842,9 +941,12 @@ public class Dse51RollbackInspectionTest
         assertThat(unknown.codes(Finding.Severity.WARNING)).containsExactly("HINTS_FOR_UNKNOWN_TARGET");
         assertThat(unknown.finding("HINTS_FOR_UNKNOWN_TARGET").message)
         .isEqualTo("hints files of version 1 for host ids in neither system.local nor system.peers (a host that " +
-                   "left the cluster, or one never saved): " + NODE_3 + " (unknown): 1 file(s); DSE 5.1.51 deletes " +
-                   "the files of a host removed from the ring, and writes again for the current replicas a file " +
-                   "whose host id it cannot map to an address, so these hints may reach other replicas or none");
+                   "left the cluster, or one never saved): " + NODE_3 + " (unknown): 1 file(s); DSE 5.1.51 neither " +
+                   "delivers nor removes these hints: it offers a target's files only once its host id maps to an " +
+                   "address, and deletes only those of a host removed from the ring while it runs");
+        assertThat(unknown.finding("HINTS_FOR_UNKNOWN_TARGET").remedy)
+        .isEqualTo("find out which node each host id was (nodetool status on another node); remove the files of a " +
+                   "node that left for good, and repair the tables they hold");
 
         // system.peers cannot be read: the targets are not checked
         try (Stream<Path> files = Files.list(tableDirectory(node, "system", "peers")))
@@ -870,6 +972,10 @@ public class Dse51RollbackInspectionTest
         assertThat(DsePreflight.run(args, new PrintStream(new ByteArrayOutputStream()),
                                     new PrintStream(new ByteArrayOutputStream())))
         .isEqualTo(DsePreflight.EXIT_READY);
+        // two more reports of the check, written in an order neither their names nor its reverse follow: the names are
+        // listed in their order, not the order of the directory
+        Files.copy(reports.resolve("rollback.json"), reports.resolve("z-rollback.json"));
+        Files.copy(reports.resolve("rollback.json"), reports.resolve("m-rollback.json"));
         ClusterAggregate.AggregateReport aggregate = ClusterAggregate.aggregate(reports);
         assertThat(aggregate.findings).filteredOn(f -> f.code.equals("ROLLBACK_CHECK_REPORT_SKIPPED"))
                                       .singleElement()
@@ -877,7 +983,8 @@ public class Dse51RollbackInspectionTest
                                           assertThat(f.severity).isEqualTo(Finding.Severity.INFO);
                                           assertThat(f.message).isEqualTo("reports of the rollback check " +
                                                                           "(--rollback-check) in the directory, " +
-                                                                          "skipped: rollback.json");
+                                                                          "skipped: m-rollback.json, " +
+                                                                          "rollback.json, z-rollback.json");
                                       });
         assertThat(aggregate.findings).noneMatch(f -> f.code.equals("UNREADABLE_REPORT"));
         assertThat(aggregate.reportsRead).isZero();
