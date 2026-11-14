@@ -365,8 +365,9 @@ public class V11SerializationAuditTest extends CQLTester
     /**
      * In DSE 5.1 compatibility mode the same verbs and payloads round trip at version 11, the pre-4.0 layout DSE 5.1
      * speaks (Apache Cassandra 3.11's), and the same verbs are refused; the params, the read commands, responses and
-     * filters, the optimizer options, the response expiry, the hint acknowledgements and the refusal of deletion times
-     * past 2038 (naming DSE 5.1) are those of the DSE 6 compatibility mode.
+     * filters, the optimizer options, the response expiry, the hint acknowledgements, the refusal of deletion times
+     * past 2038 (naming DSE 5.1) and the encoding of a LIVE complex deletion, LIVE for DSE 5.1's 32-bit reader too, are
+     * those of the DSE 6 compatibility mode.
      */
     @Test
     public void everyPayloadRoundTripsAtVersion11InDse51Mode() throws Throwable
@@ -387,7 +388,9 @@ public class V11SerializationAuditTest extends CQLTester
                            this::pre40PayloadWithoutCallbackIsSkipped,
                            this::hintAcknowledgementAtVersion11,
                            this::headerParamsRoundTripAtVersion11,
-                           this::extendedDeletionTimesAreNeverSentAtVersion11 };
+                           this::extendedDeletionTimesAreNeverSentAtVersion11,
+                           // a LIVE complex deletion sent to a DSE 5.1 node is LIVE for it, as for a DSE 6 node
+                           this::liveComplexDeletionIsLiveForA32BitReader };
         for (Audit audit : audits)
         {
             // each in the mode: some end with the mode off
@@ -1039,8 +1042,10 @@ public class V11SerializationAuditTest extends CQLTester
      * deletion for the first and none (LIVE) for the second, and the row layout then writes a deletion time for every
      * collection of the row. DSE 6 reads a deletion time as a timestamp and a 32-bit local deletion time, and takes it
      * for LIVE only when that time is {@code Integer.MAX_VALUE}: at 10 and 11 the LIVE one is encoded as Cassandra 3.0
-     * encodes it, so that a DSE 6 replica stores no deletion for the appended collection. From 4.0 on, in sstables and
-     * with the mode off the bytes are unchanged: the local deletion time of LIVE is written as the header's minimum.
+     * encodes it, so that a DSE 6 replica stores no deletion for the appended collection. From 4.0 on, in sstables
+     * (those of this test; the big me sstables of the DSE 5.1 mode are the exception) and with the mode off the bytes
+     * are unchanged: the local deletion time of LIVE is written as the header's minimum. DSE 5.1 (Cassandra 3.11's
+     * layout) reads it the same way: the audit of the DSE 5.1 mode runs this one too.
      */
     @Test
     public void liveComplexDeletionIsLiveForA32BitReader() throws Throwable
@@ -1069,19 +1074,20 @@ public class V11SerializationAuditTest extends CQLTester
 
         for (int version : new int[]{ MessagingService.VERSION_30, VERSION_3014 })
         {
-            Dse6DeletionTimeReader dse6 = new Dse6DeletionTimeReader(forMessaging, metadata);
-            Row read = writeAndRead(row, forMessaging, dse6, metadata, version);
+            Dse6DeletionTimeReader reader32 = new Dse6DeletionTimeReader(forMessaging, metadata);
+            Row read = writeAndRead(row, forMessaging, reader32, metadata, version);
             // the deletion times in column order: l1's, then l2's
-            assertEquals(version + ": " + dse6.localDeletionTimes,
-                         Arrays.asList((int) nowInSec, Integer.MAX_VALUE), dse6.localDeletionTimes);
-            assertEquals(Integer.MAX_VALUE - minLocalDeletionTime, (long) dse6.deltas.get(1));
+            assertEquals(version + ": " + reader32.localDeletionTimes,
+                         Arrays.asList((int) nowInSec, Integer.MAX_VALUE), reader32.localDeletionTimes);
+            assertEquals(Integer.MAX_VALUE - minLocalDeletionTime, (long) reader32.deltas.get(1));
             assertEquals(assigned, read.getComplexColumnData(l1).complexDeletion());
-            assertTrue(version + ": LIVE for DSE 6", read.getComplexColumnData(l2).complexDeletion().isLive());
+            assertTrue(version + ": LIVE for " + expectedSource(),
+                       read.getComplexColumnData(l2).complexDeletion().isLive());
             // and this software reads it back as it was
             assertEquals(row, writeAndRead(row, forMessaging, forMessaging, metadata, version));
         }
 
-        // a mutation carries the same row: sized as written, and LIVE for DSE 6 too
+        // a mutation carries the same row: sized as written, and LIVE for the 32-bit reader too
         Mutation mutation = new Mutation(update);
         for (int version : new int[]{ MessagingService.VERSION_30, VERSION_3014 })
         {
@@ -1107,13 +1113,14 @@ public class V11SerializationAuditTest extends CQLTester
                     DeserializationHelper.Flag flag = DeserializationHelper.Flag.FROM_REMOTE;
                     UnfilteredRowIteratorSerializer.Header partition =
                         UnfilteredRowIteratorSerializer.serializer.deserializeHeader(metadata, null, in, version, flag);
-                    Dse6DeletionTimeReader dse6 = new Dse6DeletionTimeReader(partition.sHeader, metadata);
+                    Dse6DeletionTimeReader reader32 = new Dse6DeletionTimeReader(partition.sHeader, metadata);
                     DeserializationHelper helper = new DeserializationHelper(metadata, version, flag);
-                    Row read = (Row) UnfilteredSerializer.serializer.deserialize(in, dse6, helper,
+                    Row read = (Row) UnfilteredSerializer.serializer.deserialize(in, reader32, helper,
                                                                                  BTreeRow.sortedBuilder());
-                    assertEquals(version + ": " + dse6.localDeletionTimes,
-                                 Arrays.asList((int) nowInSec, Integer.MAX_VALUE), dse6.localDeletionTimes);
-                    assertTrue(version + ": LIVE for DSE 6", read.getComplexColumnData(l2).complexDeletion().isLive());
+                    assertEquals(version + ": " + reader32.localDeletionTimes,
+                                 Arrays.asList((int) nowInSec, Integer.MAX_VALUE), reader32.localDeletionTimes);
+                    assertTrue(version + ": LIVE for " + expectedSource(),
+                               read.getComplexColumnData(l2).complexDeletion().isLive());
                 }
             }
         }
@@ -1124,17 +1131,17 @@ public class V11SerializationAuditTest extends CQLTester
         {
             if (version.value < MessagingService.VERSION_40)
                 continue;
-            Dse6DeletionTimeReader dse6 = new Dse6DeletionTimeReader(forMessaging, metadata);
-            assertEquals(row, writeAndRead(row, forMessaging, dse6, metadata, version.value));
-            assertEquals(version + ": " + dse6.deltas, Arrays.asList(0L, 0L), dse6.deltas);
+            Dse6DeletionTimeReader reader32 = new Dse6DeletionTimeReader(forMessaging, metadata);
+            assertEquals(row, writeAndRead(row, forMessaging, reader32, metadata, version.value));
+            assertEquals(version + ": " + reader32.deltas, Arrays.asList(0L, 0L), reader32.deltas);
         }
         // in sstables too, at the versions of the nb (VERSION_30) and oa/bti (VERSION_50) formats
         SerializationHeader forSSTable = new SerializationHeader(true, metadata, update.columns(), update.stats());
         for (int version : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_50 })
         {
-            Dse6DeletionTimeReader dse6 = new Dse6DeletionTimeReader(forSSTable, metadata);
-            assertEquals(row, writeAndRead(row, forSSTable, dse6, metadata, version));
-            assertEquals(version + ": " + dse6.deltas, Arrays.asList(0L, 0L), dse6.deltas);
+            Dse6DeletionTimeReader reader32 = new Dse6DeletionTimeReader(forSSTable, metadata);
+            assertEquals(row, writeAndRead(row, forSSTable, reader32, metadata, version));
+            assertEquals(version + ": " + reader32.deltas, Arrays.asList(0L, 0L), reader32.deltas);
         }
 
         // a read response carries the data at 10 and 11 as serialized at that version, and from 4.0 on as built
@@ -1191,9 +1198,9 @@ public class V11SerializationAuditTest extends CQLTester
                                                                            RepairedDataInfo.NO_OP_REPAIRED_DATA_INFO);
         for (int version : new int[]{ MessagingService.VERSION_30, VERSION_3014 })
         {
-            Dse6DeletionTimeReader dse6 = new Dse6DeletionTimeReader(forMessaging, metadata);
-            writeAndRead(row, forMessaging, dse6, metadata, version);
-            assertEquals(version + ": " + dse6.deltas, Arrays.asList(0L, 0L), dse6.deltas);
+            Dse6DeletionTimeReader reader32 = new Dse6DeletionTimeReader(forMessaging, metadata);
+            writeAndRead(row, forMessaging, reader32, metadata, version);
+            assertEquals(version + ": " + reader32.deltas, Arrays.asList(0L, 0L), reader32.deltas);
             try (DataOutputBuffer out = new DataOutputBuffer())
             {
                 assertThrows(AssertionError.class,

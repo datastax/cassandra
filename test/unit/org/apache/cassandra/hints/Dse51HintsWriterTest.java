@@ -55,7 +55,9 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RangeTombstone;
+import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.Slice;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.context.CounterContext;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -65,17 +67,21 @@ import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.BTreeRow;
 import org.apache.cassandra.db.rows.BufferCell;
 import org.apache.cassandra.db.rows.CellData;
+import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.UnfilteredRowIteratorSerializer;
 import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tools.dsepreflight.Dse51HintsFileCheck;
 import org.apache.cassandra.utils.Clock;
@@ -95,8 +101,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * nothing after the last one, and comes with the two companions DSE 5.1.51's writer leaves; its hints round-trip at 11,
  * and the hints of the file DSE 5.1.51 wrote decode and encode again at 11, and at 10, byte for byte. A hint the mode's
  * files cannot hold (a deletion or expiration time past 2038, a size above what the buffer takes) is refused before it
- * is buffered, counted and logged; the other hints of the buffer are written as they are. In the other storage modes
- * nothing changes, and after the flag drop the files the mode wrote are read at 10 and their hints delivered.
+ * is buffered, counted and logged; the other hints of the buffer are written as they are. A LIVE complex deletion is
+ * written as DSE 5.1 reads LIVE. In the other storage modes nothing changes, and after the flag drop the files the mode
+ * wrote are read at 10 and their hints delivered.
  */
 public class Dse51HintsWriterTest extends CQLTester
 {
@@ -733,5 +740,104 @@ public class Dse51HintsWriterTest extends CQLTester
             assertThat(DseFixtures.hintsRecords(hintsFileOf(host))).hasSize(1);
         }
         assertThat(DseCompatRefusals.count(Dse51Hints.REFUSED_HINT)).isZero();
+    }
+
+    /**
+     * A row with a complex deletion writes the deletion of every complex column; in the hints of the mode a LIVE one
+     * is written at 11 as the delta a 32-bit reader, DSE 5.1, adds to the header's minimum to get
+     * {@code Integer.MAX_VALUE}, its local deletion time of LIVE, so DSE 5.1 stores no deletion for an appended
+     * collection. The delta takes up to five bytes, for a minimum in [0, {@code Integer.MAX_VALUE}], where 12 writes
+     * one: with the buffer's limit at the hint's size at 12, the hint is refused. After the flag drop the hint is read
+     * at 10, the LIVE complex deletion LIVE, and sent at 12 as it would have been written there.
+     */
+    @Test
+    public void aLiveComplexDeletionIsLiveForDse51AndAfterTheFlagDropAndAHintFittingAt12NotAt11IsRefused()
+    throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, s set<text>, l list<int>, PRIMARY KEY (k, c))");
+        TableMetadata metadata = currentTableMetadata();
+        ColumnMetadata set = metadata.getColumn(ByteBuffer.wrap("s".getBytes(StandardCharsets.UTF_8)));
+        ColumnMetadata list = metadata.getColumn(ByteBuffer.wrap("l".getBytes(StandardCharsets.UTF_8)));
+        long nowInSec = FBUtilities.nowInSeconds();
+        PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, 1)
+                                                               .timestamp(FBUtilities.timestampMicros())
+                                                               .nowInSec(nowInSec);
+        // the set replaced, a complex deletion; the list appended to, its complex deletion LIVE
+        builder.row(1).noPrimaryKeyLivenessInfo().add("s", Collections.singleton("a")).appendAll("l", List.of(1));
+        Mutation mutation = builder.buildAsMutation();
+        dse51Mode();
+        UUID host = newHost();
+        HintsService service = newService();
+        Hint hint = Hint.create(mutation, FBUtilities.now().toEpochMilli());
+        assertThat(service.tryWrite(List.of(host), hint)).isTrue();
+        service.shutdownBlocking();
+
+        // the entry of the file read as DSE 5.1 reads it: the creation time, the gc grace seconds, the mutation (the
+        // count of its partition updates, the table id, the partition header, the row)
+        byte[] record = DseFixtures.hintsRecords(hintsFileOf(host)).get(0);
+        try (DataInputBuffer in = new DataInputBuffer(record))
+        {
+            in.readLong();
+            in.readUnsignedVInt32();
+            assertThat(in.readUnsignedVInt32()).isEqualTo(1);
+            TableId.deserialize(in);
+            int version = MessagingService.VERSION_3014;
+            DeserializationHelper.Flag flag = DeserializationHelper.Flag.FROM_REMOTE;
+            UnfilteredRowIteratorSerializer.Header partition =
+            UnfilteredRowIteratorSerializer.serializer.deserializeHeader(metadata, null, in, version, flag);
+            Dse51DeletionTimeReader dse51 = new Dse51DeletionTimeReader(partition.sHeader, metadata);
+            Row read = (Row) UnfilteredSerializer.serializer.deserialize(in, dse51,
+                                                                         new DeserializationHelper(metadata, version,
+                                                                                                   flag),
+                                                                         BTreeRow.sortedBuilder());
+            // the deletion times in column order: the list's, then the set's
+            assertThat(dse51.localDeletionTimes).containsExactly(Integer.MAX_VALUE, (int) nowInSec);
+            assertThat(read.getComplexColumnData(list).complexDeletion().isLive()).isTrue();
+        }
+
+        long at11 = Hint.serializer.serializedSize(hint, MessagingService.VERSION_3014);
+        long at12 = Hint.serializer.serializedSize(hint, MessagingService.VERSION_40);
+        // one LIVE complex deletion, its delta from the header's minimum, nowInSec, where 12 writes a zero delta
+        assertThat(at11 - at12).isEqualTo(TypeSizes.sizeofUnsignedVInt(Integer.MAX_VALUE - (int) nowInSec) - 1);
+        Dse51Hints.Refusal refusal = Dse51Hints.refusal(hint, (int) at12);
+        assertThat(refusal.counted).isEqualTo(Dse51Hints.REFUSED_LARGE_HINT);
+        assertThat(Dse51Hints.refusal(hint, (int) at11)).isNull();
+
+        // after the flag drop: read at 10, LIVE, and at 12 the bytes of 12
+        byte[] at12Bytes = serializedAt(hint, MessagingService.VERSION_40);
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        Hint afterTheFlagDrop = deserializedAt(record, MessagingService.VERSION_30);
+        Row row = afterTheFlagDrop.mutation().getPartitionUpdates().iterator().next().getRow(
+            Clustering.make(Int32Type.instance.decompose(1)));
+        assertThat(row.getComplexColumnData(list).complexDeletion().isLive()).isTrue();
+        assertThat(row.getComplexColumnData(set).complexDeletion().isLive()).isFalse();
+        assertThat(serializedAt(afterTheFlagDrop, MessagingService.VERSION_40)).isEqualTo(at12Bytes);
+    }
+
+    /**
+     * Reads deletion times as DSE 5.1 and Cassandra 3.x do: the local deletion time is 32-bit, its delta added to the
+     * 32-bit minimum of the header, and a deletion time is LIVE only with the timestamp {@code Long.MIN_VALUE} and the
+     * local deletion time {@code Integer.MAX_VALUE}. Records the local deletion times it reads.
+     */
+    private static class Dse51DeletionTimeReader extends SerializationHeader
+    {
+        final List<Integer> localDeletionTimes = new ArrayList<>();
+
+        Dse51DeletionTimeReader(SerializationHeader header, TableMetadata metadata)
+        {
+            super(header.isForSSTable(), metadata, header.columns(), header.stats());
+        }
+
+        @Override
+        public DeletionTime readDeletionTime(DataInputPlus in) throws IOException
+        {
+            long markedForDeleteAt = readTimestamp(in);
+            int localDeletionTime = (int) in.readUnsignedVInt() + (int) stats().minLocalDeletionTime;
+            localDeletionTimes.add(localDeletionTime);
+            return markedForDeleteAt == Long.MIN_VALUE && localDeletionTime == Integer.MAX_VALUE
+                   ? DeletionTime.LIVE
+                   : DeletionTime.build(markedForDeleteAt, localDeletionTime);
+        }
     }
 }

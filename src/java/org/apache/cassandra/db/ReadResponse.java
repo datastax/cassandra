@@ -201,7 +201,7 @@ public abstract class ReadResponse
     // built on the owning node responding to a query
     private static class LocalDataResponse extends DataResponse
     {
-        /** In DSE 6 compatibility mode only, null without it: serializes the data again for a pre-4.0 peer. */
+        /** In a DSE compatibility mode only, null without it: serializes the data again for a pre-4.0 peer. */
         private final Pre40Data pre40;
 
         private LocalDataResponse(UnfilteredPartitionIterator iter, ReadCommand command, RepairedDataInfo rdi)
@@ -262,16 +262,16 @@ public abstract class ReadResponse
     }
 
     /**
-     * The data of a local response serialized again at a pre-4.0 version, for a DSE 6 peer. It is built at the current
-     * version, whose layout of the partitions is that of 3.0 but for the encoding of a LIVE deletion time, which a
-     * 32-bit reader takes for a deletion
+     * The data of a local response serialized again at a pre-4.0 version, for a DSE 6 or DSE 5.1 peer. It is built at
+     * the current version, whose layout of the partitions is that of 3.0 but for the encoding of a LIVE deletion time,
+     * which a 32-bit reader takes for a deletion
      * ({@link SerializationHeader#writeDeletionTime(DeletionTime, DataOutputPlus, int)}). The message is sized, then
      * written: the last serialization is kept for the second call. The data is read again with the column filter it
      * was built with, so that it is serialized again as built: for a read of a materialized view by a DSE 6
      * coordinator the data is already in DSE's encoding, with DSE's hidden cells, and the filter is the one that
      * coordinator sent ({@link DseViewWireFormat#responseColumnFilter}), which fetches the hidden column, so the
-     * hidden cells are read as cells of a fetched column and kept. The cost, in DSE 6 compatibility mode only: one more
-     * small object per local data response, and for a response to a DSE 6 peer one more deserialization and
+     * hidden cells are read as cells of a fetched column and kept. The cost, in a DSE compatibility mode only: one
+     * more small object per local data response, and for a response to a DSE peer one more deserialization and
      * serialization of its data, and a second copy of it, kept as long as the response.
      */
     private static final class Pre40Data
@@ -389,7 +389,7 @@ public abstract class ReadResponse
         }
 
         /**
-         * The data as sent at {@code version}, a pre-4.0 version (DSE 6 compatibility mode): that of a local response
+         * The data as sent at {@code version}, a pre-4.0 version (a DSE compatibility mode): that of a local response
          * serialized again at that version, as built otherwise.
          */
         ByteBuffer pre40Data(int version)

@@ -123,7 +123,17 @@ public final class Dse51Hints
         String deletionTime = pre40DeletionTimeRefusal(hint.mutation(), version);
         if (deletionTime != null)
             return new Refusal(REFUSED_HINT, deletionTime);
-        long size = Hint.serializer.serializedSize(hint, version);
+        long size;
+        try
+        {
+            size = Hint.serializer.serializedSize(hint, version);
+        }
+        catch (UnfilteredSerializer.Pre40DeletionTimeException e)
+        {
+            // the codec also refuses, while it sizes a LIVE complex deletion, a header minimum past 2038: one of the
+            // times walked above, so not reached, but counted as the others if it ever is
+            return new Refusal(REFUSED_HINT, pastDeletionTime(e.localDeletionTime, version));
+        }
         if (size > maxHintSize)
             return new Refusal(REFUSED_LARGE_HINT,
                                "its size at messaging version " + version + ", the version of the hints files DSE " +
@@ -160,11 +170,17 @@ public final class Dse51Hints
             }
             catch (UnfilteredSerializer.Pre40DeletionTimeException e)
             {
-                return "a local deletion or expiration time, " + e.localDeletionTime + ", is past 2038, and the " +
-                       "hints files DSE 5.1 reads hold 32-bit times (messaging version " + version + ')';
+                return pastDeletionTime(e.localDeletionTime, version);
             }
         }
         return null;
+    }
+
+    /** The reason of a refusal for a time past 2038. */
+    private static String pastDeletionTime(long localDeletionTime, int version)
+    {
+        return "a local deletion or expiration time, " + localDeletionTime + ", is past 2038, and the hints files " +
+               "DSE 5.1 reads hold 32-bit times (messaging version " + version + ')';
     }
 
     private static String tables(Mutation mutation)
