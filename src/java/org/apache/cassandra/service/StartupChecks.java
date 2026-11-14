@@ -730,6 +730,12 @@ public class StartupChecks
     private static final String DSE_51_MODE_MAX_BIG_VERSION = InternodeCompatibilityMode.DSE_51_BIG_VERSION;
 
     /**
+     * The newest big-format sstable version this software writes, which a node in {@code DSE_5_1} mode still reads. A
+     * constant, not {@code BigFormat}'s newest readable version, which depends on the storage mode of the JVM.
+     */
+    private static final String NEWEST_BIG_VERSION = "oa";
+
+    /**
      * With {@code internode_compatibility_mode: DSE_6}, refuses to start if the data directories or the commit log
      * directory hold a file that shows the node already ran without the mode:
      * <ul>
@@ -765,8 +771,11 @@ public class StartupChecks
      * (the version the node and the offline tools write in the mode, the newest DSE 5.1 reads), or with a non-numeric
      * identifier; commit log segments of a version above the 4.0 line, DSE's {@code 680} included
      * (DSE 5.1 writes version 6, the node in the mode version 7). Every file listed is one DSE 5.1 could not read after
-     * a rollback. Once every check has passed, the post action writes the marker of the upgrade from DSE 5.1, which a
-     * later start in {@code NONE} or {@code DSE_6} is refused by. When that marker does not exist yet (a new upgrade),
+     * a rollback. When the list holds big {@code na}, {@code nb} or {@code oa} sstables, the refusal names their
+     * rewrite at {@code me} by {@code sstableupgrade}, run with the node's configuration, as the first remedy
+     * ({@link #DSE51_REWRITE_AT_ME}), the snapshot restore the fallback; otherwise the text is unchanged. Once every
+     * check has passed, the post action writes the marker of the upgrade from DSE 5.1, which a later start in
+     * {@code NONE} or {@code DSE_6} is refused by. When that marker does not exist yet (a new upgrade),
      * the post action first deletes the record of the values of DSE 5.1's columns of {@code system.local} and
      * {@code system.peers} an earlier upgrade left ({@link Dse51SystemTables#deleteRecordOfAnEarlierUpgrade}); when
      * that record cannot be deleted, the marker is not written, and the start is refused
@@ -782,11 +791,19 @@ public class StartupChecks
                 return;
 
             List<String> unreadableByDse = new ArrayList<>();
+            // in DSE_5_1, the files of the sstables among them that sstableupgrade rewrites at me
+            List<String> rewritableAtMe = new ArrayList<>();
             // an unknown system table directory holds what DSE itself wrote; checkSSTablesFormat logs it
             walkSSTableFiles(dir -> staleSystemTableName(dir) != null, file -> {
                 if (mode.isDse6() ? isSSTableUnreadableByDse6(file.name())
                                   : isSSTableWrittenWithoutDse51Mode(file.name()))
+                {
                     unreadableByDse.add(file.toString());
+                    // sstableupgrade <keyspace> <table> lists the table's own directory, not those of its indexes
+                    if (mode.isDse51() && isBigSSTableRewrittenAtMe(file.name()) &&
+                        !file.parent().name().startsWith(Directories.SECONDARY_INDEX_NAME_SEPARATOR))
+                        rewritableAtMe.add(file.toString());
+                }
             });
 
             File commitLogDirectory = DatabaseDescriptor.getCommitLogLocation();
@@ -809,7 +826,13 @@ public class StartupChecks
                                            "without it, these files could not be read correctly, or at all, by " +
                                            mode.source() + " after a rollback: " +
                                            Joiner.on(", ").join(unreadableByDse) +
-                                           ". Restore the node from its pre-upgrade snapshot. Deleting these files instead " +
+                                           (rewritableAtMe.isEmpty()
+                                            ? ". Restore"
+                                            : DSE51_REWRITE_AT_ME +
+                                              (rewritableAtMe.size() == unreadableByDse.size()
+                                               ? " Otherwise, restore"
+                                               : " Otherwise, and for the other files, restore")) +
+                                           " the node from its pre-upgrade snapshot. Deleting these files instead " +
                                            "loses this node's copy of their data: do it only if that data is replicated on " +
                                            "other nodes, and repair the node once the compatibility mode is dropped");
         }
@@ -827,6 +850,36 @@ public class StartupChecks
                 writeUpgradeMarker(mode, () -> DseUpgradeMarker.writeIfAbsent(mode));
         }
     };
+
+    /**
+     * The first remedy of the refusal of {@link #checkDse6Artefacts} in {@code DSE_5_1} when it lists big sstables that
+     * {@code sstableupgrade}, run with the node's configuration, rewrites at {@code me}
+     * ({@link #isBigSSTableRewrittenAtMe}), the one remedy that keeps the node's data without a snapshot restore. The
+     * writer of {@code me} holds no pending repair session, which {@code Upgrader} copies from each sstable: one still
+     * pending repair (a node run without the mode and repaired incrementally) is not rewritten until
+     * {@code sstablerepairedset} clears it; {@code sstableupgrade} prints "Error upgrading" for an sstable it fails to
+     * rewrite and still exits 0. Left to the snapshot restore: the sstables of a secondary index, which
+     * {@code sstableupgrade <keyspace> <table>} does not list, and a table with an {@code oa} sstable with a deletion
+     * or expiration time after 2038, which {@code me} cannot hold: the writer of {@code me} does not check the times
+     * of an sstable, so the text asks for the check before the tool, on the estimated tombstone drop times of
+     * {@code sstablemetadata}, where those times are recorded (its maximum local deletion time is that of a live cell,
+     * no deletion, as soon as the sstable holds one), with a margin of a year: the histogram holds at most 100 points
+     * and replaces the two nearest with their weighted mean, so a time after 2038 can show earlier; with times spread
+     * over at most the 20 years of the longest TTL, a merge moves a point by about a hundredth of that span, a few
+     * months. A rule of thumb, not a bound.
+     */
+    private static final String DSE51_REWRITE_AT_ME =
+        ". Rewrite the big sstables of a version newer than " + DSE_51_MODE_MAX_BIG_VERSION + " among them at " +
+        DSE_51_MODE_MAX_BIG_VERSION + ", the node stopped: sstableupgrade <keyspace> <table>, run with this node's " +
+        "cassandra.yaml, for each of their tables, then start the node again. Before it, the node stopped: " +
+        "sstablemetadata on each oa sstable listed, and no sstableupgrade of a table with one whose estimated " +
+        "tombstone drop times (those of its tombstones and expiring cells) reach 2037-01-19 or later: " +
+        DSE_51_MODE_MAX_BIG_VERSION + " cannot hold a time after 2038-01-19, which sstableupgrade would write wrong, " +
+        "and the histogram can show such a time up to about a year earlier, merging close times into their mean; " +
+        "and sstablerepairedset --really-set --is-unrepaired <its Data.db file> on an sstable still pending repair " +
+        "(incrementally repaired while the node ran without the mode), which sstableupgrade does not rewrite " +
+        "otherwise (it prints \"Error upgrading\" for an sstable it fails to rewrite and still exits 0). The " +
+        "sstables of a secondary index (the .<index> directories of a table) are not rewritten so either.";
 
     /** Creates the upgrade marker if it is absent; returns true if this call created it. */
     @VisibleForTesting
@@ -970,6 +1023,26 @@ public class StartupChecks
         if (BigFormat.NAME.equals(tokens.get(2)))
             return version.compareTo(DSE_51_MODE_MAX_BIG_VERSION) > 0;
         return true;
+    }
+
+    /**
+     * Whether {@code fileName}, an sstable component name {@code <version>-<id>-<format>-<component>} that
+     * {@link #isSSTableWrittenWithoutDse51Mode} lists, is of a big sstable {@code sstableupgrade}, run with the node's
+     * configuration, rewrites at {@code me}: of a big version newer than {@code me} and not newer than
+     * {@link #NEWEST_BIG_VERSION}, which a node in the mode reads ({@code na}, {@code nb}, {@code oa}), whatever its
+     * identifier (the tool, with the node's configuration, writes numeric ones). The others (another format, a version
+     * the tool does not rewrite or this software does not read) take the snapshot restore. Decided by the names alone,
+     * as the node in the mode reads them, whatever the storage mode of the JVM that runs the check.
+     */
+    @VisibleForTesting
+    static boolean isBigSSTableRewrittenAtMe(String fileName)
+    {
+        if (!isSSTableWrittenWithoutDse51Mode(fileName))
+            return false;
+        List<String> tokens = Splitter.on(Descriptor.FILENAME_SEPARATOR).splitToList(fileName);
+        String version = tokens.get(0);
+        return BigFormat.NAME.equals(tokens.get(2)) && version.compareTo(DSE_51_MODE_MAX_BIG_VERSION) > 0 &&
+               version.compareTo(NEWEST_BIG_VERSION) <= 0;
     }
 
     /**
