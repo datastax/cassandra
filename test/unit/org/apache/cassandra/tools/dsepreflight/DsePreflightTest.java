@@ -4223,6 +4223,18 @@ public class DsePreflightTest
         assertThat(run.messages("UNLOADABLE_TABLE")).contains("lab.no_columns: no column in system_schema.columns")
                                                     .contains("lab.orphan: its base table lab.gone cannot be loaded");
         assertThat(run.report.upgradePath.upgradeSteps).contains("Materialized views: drop lab.no_columns, lab.orphan before the upgrade");
+        String remedy = "drop these views on DSE before the upgrade and create them again once no node runs DSE";
+        assertThat(run.findings("UNLOADABLE_TABLE")).singleElement()
+                                                    .satisfies(f -> assertThat(f.remedy).isEqualTo(remedy));
+
+        // in the mixed phase too: what a DSE 5.1 inspection says then is not a DSE 6 text
+        node.editPeers(peers -> peers.get(0).put("release_version", FBUtilities.getReleaseVersionString()));
+        Run mixed = assertBlocked(run(node), "UNLOADABLE_TABLE");
+        assertThat(mixed.report.peers).anyMatch(p -> p.upgraded);
+        assertThat(mixed.findings("UNLOADABLE_TABLE")).singleElement()
+                                                      .satisfies(f -> assertThat(f.remedy).isEqualTo(remedy));
+        assertThat(mixed.report.upgradePath.upgradeSteps)
+        .contains("Materialized views: drop lab.no_columns, lab.orphan before the upgrade");
     }
 
     @Test
