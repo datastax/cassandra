@@ -82,6 +82,28 @@ public class Dse51StartupChecksTest
     private static final String REFUSAL = "cannot enter DSE_5_1 compatibility mode: the node already ran without it, " +
                                           "these files could not be read correctly, or at all, by DSE 5.1 after a " +
                                           "rollback: ";
+    /** The first remedy of that refusal for the big sstables sstableupgrade rewrites at me. */
+    private static final String REWRITE_AT_ME = ". Rewrite the big sstables of a version newer than me among them at " +
+                                                "me, the node stopped: sstableupgrade <keyspace> <table>, run with " +
+                                                "this node's cassandra.yaml, for each of their tables, then start " +
+                                                "the node again. Before it, the node stopped: sstablemetadata on " +
+                                                "each oa sstable listed, and no sstableupgrade of a table with one " +
+                                                "whose estimated tombstone drop times (those of its tombstones and " +
+                                                "expiring cells) reach 2037-01-19 or later: me cannot hold a time " +
+                                                "after 2038-01-19, which sstableupgrade would write wrong, and the " +
+                                                "histogram can show such a time up to about a year earlier, merging " +
+                                                "close times into their mean; and sstablerepairedset --really-set " +
+                                                "--is-unrepaired <its Data.db file> on an sstable still pending " +
+                                                "repair (incrementally repaired while the node ran without the " +
+                                                "mode), which sstableupgrade does not rewrite otherwise (it prints " +
+                                                "\"Error upgrading\" for an sstable it fails to rewrite and still " +
+                                                "exits 0). The sstables of a secondary index (the .<index> " +
+                                                "directories of a table) are not rewritten so either.";
+    /** The end of that refusal: the snapshot restore, and the deletion of the files. */
+    private static final String RESTORE = " the node from its pre-upgrade snapshot. Deleting these files instead " +
+                                          "loses this node's copy of their data: do it only if that data is " +
+                                          "replicated on other nodes, and repair the node once the compatibility " +
+                                          "mode is dropped";
     /**
      * The end of a refusal of {@code DSE_6} on the DSE 5.1 files: the remedy of a node of the upgrade from DSE 6 that
      * kept them from an earlier upgrade from DSE 5.1, then the override.
@@ -250,11 +272,64 @@ public class Dse51StartupChecksTest
         .hasMessageNotContaining("me-1-big-Data.db")
         .hasMessageNotContaining("CommitLog-6-1.log")
         .hasMessageNotContaining("CommitLog-7-2.log")
-        .hasMessageEndingWith(". Restore the node from its pre-upgrade snapshot. Deleting these files instead loses " +
-                              "this node's copy of their data: do it only if that data is replicated on other nodes, " +
-                              "and repair the node once the compatibility mode is dropped")
+        .hasMessageEndingWith(REWRITE_AT_ME + " Otherwise, and for the other files, restore" + RESTORE)
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_DISK_STATE));
         assertThat(DseUpgradeMarker.exists(InternodeCompatibilityMode.DSE_5_1)).isFalse();
+    }
+
+    /**
+     * The first remedy of the refusal in {@code DSE_5_1}, the rewrite at me by sstableupgrade, is named for the big
+     * sstables of a version newer than me that this software reads, whatever their identifier, and only then: with
+     * those sstables alone the snapshot restore is the fallback for them; without them the text is as before. Those of
+     * a secondary index, which the tool does not list, are other files: alone, they get the text of before.
+     */
+    @Test
+    public void dse51NamesSstableupgradeForTheBigSSTablesItRewritesAtMe() throws Exception
+    {
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("nb-2-big-Data.db")).isTrue();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("oa-7-big-Index.db")).isTrue();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("na-1-big-Data.db")).isTrue();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("me-1-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("pa-3-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("bb-5-bti-Data.db")).isFalse();
+        // a non-numeric identifier too: the tool, with the node's configuration, rewrites it with a numeric one
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("nb-3h43_18di_43ocw25niiw1m23p1r-big-Data.db")).isTrue();
+        // a me sstable, which the tool does not rewrite
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("me-3h43_18di_43ocw25niiw1m23p1r-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("CommitLog-8-3.log")).isFalse();
+
+        mode(InternodeCompatibilityMode.DSE_5_1);
+        touch(sstableDir, "nb-2-big-Data.db", "oa-7-big-Data.db");
+        assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessageStartingWith(REFUSAL)
+        .hasMessageContaining(sstableDir.resolve("nb-2-big-Data.db").toString())
+        .hasMessageContaining(sstableDir.resolve("oa-7-big-Data.db").toString())
+        .hasMessageEndingWith(REWRITE_AT_ME + " Otherwise, restore" + RESTORE);
+
+        // the same sstable in the directory of a secondary index is not for the tool
+        Path index = Files.createDirectories(sstableDir.resolve(".t_idx"));
+        touch(index, "nb-4-big-Data.db");
+        assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessageContaining(index.resolve("nb-4-big-Data.db").toString())
+        .hasMessageEndingWith(REWRITE_AT_ME + " Otherwise, and for the other files, restore" + RESTORE);
+
+        // the sstables of a secondary index alone: no rewrite at me named
+        Files.delete(sstableDir.resolve("nb-2-big-Data.db"));
+        Files.delete(sstableDir.resolve("oa-7-big-Data.db"));
+        assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessage(REFUSAL + index.resolve("nb-4-big-Data.db") + ". Restore" + RESTORE);
+        Files.delete(index.resolve("nb-4-big-Data.db"));
+        Files.delete(index);
+
+        touch(sstableDir, "bb-5-bti-Data.db");
+        touch(commitLogDir, "CommitLog-8-3.log");
+        assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessage(REFUSAL + sstableDir.resolve("bb-5-bti-Data.db") + ", " +
+                    commitLogDir.resolve("CommitLog-8-3.log") + ". Restore" + RESTORE);
     }
 
     @Test

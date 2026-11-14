@@ -24,7 +24,9 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 
+import com.google.common.collect.Iterables;
 import net.jpountz.lz4.LZ4Factory;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -35,13 +37,16 @@ import org.junit.rules.TemporaryFolder;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.compaction.Upgrader;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.marshal.Int32Type;
@@ -50,6 +55,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.DseFixtures;
+import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
@@ -66,7 +72,9 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
+import org.apache.cassandra.service.StartupChecks;
 import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
@@ -362,6 +370,95 @@ public class BigMeWriterTest extends CQLTester
         }
         // no version newer than oa is read
         assertThat(BigFormat.getInstance().getVersion("pa").isCompatible()).isFalse();
+    }
+
+    /**
+     * The first remedy of the start refusal of an {@code nb} sstable in the mode: sstableupgrade, run with the node's
+     * configuration, rewrites it at me, after which the start check accepts the node. The steps are the tools' own
+     * code, run in this JVM, which has the node's configuration: {@code Upgrader} as sstableupgrade runs it, on an
+     * sstable it selects (its version is not the latest of the selected format, me), and the metadata change of
+     * {@code sstablerepairedset --really-set --is-unrepaired}. Not their entry points: this JVM is initialised as a
+     * daemon, which {@code sstablerepairedset}'s tool initialisation refuses, and {@code sstableupgrade}'s reloads the
+     * schema from disk and shuts the compaction manager down, which the other tests of this class need. An nb sstable
+     * still pending repair is not rewritten, me holding no pending repair session, until that change clears it.
+     */
+    @Test
+    public void anNbSSTableRewrittenAtMeBySstableupgradeLetsTheNodeStart() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, v text, PRIMARY KEY (pk, ck))");
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.disableAutoCompaction();
+        for (int pk = 0; pk < 4; pk++)
+            for (int ck = 0; ck < 2; ck++)
+                execute("INSERT INTO %s (pk, ck, v) VALUES (?, ?, ?)", pk, ck, "v" + ck);
+        flush();
+        SSTableReader flushed = cfs.getLiveSSTables().iterator().next();
+        assertWrittenForDse51(flushed);
+        List<Object> rows = contentOf(flushed);
+        // what a run without the mode leaves: the same rows in an nb sstable of the table's directory
+        Descriptor nb = cfs.newSSTableDescriptor(cfs.getDirectories().getDirectoryForNewSSTables(),
+                                                 BigFormat.getInstance().getVersion("nb"));
+        rewrite(cfs, flushed, nb, 4);
+        // sstableupgrade selects the sstables whose version is not the latest of the selected format, me here
+        Version latest = DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion();
+        assertThat(latest.version).isEqualTo("me");
+        assertThat(nb.version).isNotEqualTo(latest);
+        StartupChecksOptions options = new StartupChecksOptions();
+        assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(options))
+        .isInstanceOf(StartupException.class)
+        .hasMessageContaining(nb.fileFor(Components.DATA).name())
+        .hasMessageContaining(". Rewrite the big sstables of a version newer than me among them at me, the node " +
+                              "stopped: sstableupgrade <keyspace> <table>, run with this node's cassandra.yaml")
+        .hasMessageContaining("Otherwise, restore the node from its pre-upgrade snapshot.");
+
+        // still pending repair: not rewritten
+        nb.getMetadataSerializer().mutateRepairMetadata(nb, 0, TimeUUID.Generator.nextTimeUUID(), false);
+        assertThatThrownBy(() -> upgradeAsSstableupgrade(cfs, nb))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageStartingWith("sstable version me cannot hold the pending repair session ");
+        assertThat(nb.fileFor(Components.DATA).exists()).isTrue();
+        assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(options))
+        .isInstanceOf(StartupException.class)
+        .hasMessageContaining(nb.fileFor(Components.DATA).name());
+
+        // cleared as sstablerepairedset --really-set --is-unrepaired clears it, then rewritten at me
+        nb.getMetadataSerializer().mutateRepairMetadata(nb, ActiveRepairService.UNREPAIRED_SSTABLE, null, false);
+        upgradeAsSstableupgrade(cfs, nb);
+        assertThat(nb.fileFor(Components.DATA).exists()).isFalse();
+        Descriptor rewritten = Iterables.getOnlyElement(
+            cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().keySet().stream()
+               .filter(d -> !d.id.equals(flushed.descriptor.id))
+               .collect(Collectors.toList()));
+        SSTableReader me = SSTableReader.open(cfs, rewritten, cfs.metadata);
+        try
+        {
+            assertWrittenForDse51(me);
+            assertThat(contentOf(me)).isEqualTo(rows);
+        }
+        finally
+        {
+            me.selfRef().release();
+        }
+        StartupChecks.checkDse6Artefacts.execute(options);
+    }
+
+    /**
+     * Rewrites the sstable of {@code descriptor} as sstableupgrade does: opened without validation, then
+     * {@code Upgrader} in an offline transaction of {@code UPGRADE_SSTABLES}, the source removed.
+     */
+    private static void upgradeAsSstableupgrade(ColumnFamilyStore cfs, Descriptor descriptor)
+    {
+        SSTableReader sstable = SSTableReader.openNoValidation(descriptor, descriptor.discoverComponents(), cfs);
+        try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.UPGRADE_SSTABLES, sstable))
+        {
+            new Upgrader(cfs, txn, new OutputHandler.LogOutput()).upgrade(false);
+        }
+        finally
+        {
+            sstable.selfRef().ensureReleased();
+            // the source is removed once released, as sstableupgrade waits for it
+            LifecycleTransaction.waitForDeletions();
+        }
     }
 
     /**
