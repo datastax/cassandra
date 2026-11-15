@@ -190,7 +190,9 @@ public abstract class Version
      * ratio leaves the chunk checksums out ({@code DataComponent}, {@code CompressedSequentialWriter}); an sstable of
      * it cannot hold a pending repair ({@code SSTableWriter}); in that mode, the serialization header names the types
      * as 3.x does, the tombstone histogram carries the maximum bin size 3.x writes, and an entire-sstable stream is
-     * taken only for it. False for every other version.
+     * taken only for it; {@code Upgrader} ({@code sstableupgrade}) refuses to rewrite at it an sstable whose deletion
+     * or expiration times go past 2038 ({@link #hasUIntDeletionTime()}) when it holds such a time. False for every
+     * other version.
      */
     public boolean hasPre40Encoding()
     {
