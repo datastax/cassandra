@@ -180,8 +180,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // Assume true until we observe otherwise.
         allVectorsAreUnitLength = true;
 
-        // NVQ is only written during compaction to save on compute costs
-        writeNvq = JVectorVersionUtil.shouldWriteNVQ(dimension, context.version()) && !forSearching;
+        // NVQ is only written during compaction to save on compute costs, except for ASH indexes, whose streaming mean
+        // lets a memtable flush encode NVQ without another pass over the vectors
+        writeNvq = JVectorVersionUtil.shouldWriteNVQ(dimension, context.version()) && (!forSearching || indexConfig.isAshEnabled());
 
         // This is only a warning since it's not a fatal error to write without hierarchy
         if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
