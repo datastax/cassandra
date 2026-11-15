@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.junit.Test;
 
-/** Experiment-only benchmark driver, not for production: loads real vectors, builds the index per sstable, times one compaction. */
+/** Temporary timing driver (not for commit): loads real vectors, builds the index per sstable, times one compaction. */
 public class CompactionTimingTest extends VectorTester
 {
     @Test
@@ -40,8 +40,11 @@ public class CompactionTimingTest extends VectorTester
             probe.readFully(h);
             dim = ByteBuffer.wrap(h).order(ByteOrder.LITTLE_ENDIAN).getInt();
         }
+        // bench.gtFile supplies exact neighbors for the first bench.n base vectors instead of computing them
         if (System.getProperty("bench.sweepLimits") != null)
-            sweepGt = computeGroundTruth(file, n, dim, out);
+            sweepGt = System.getProperty("bench.gtFile") != null
+                      ? readIvecs(System.getProperty("bench.gtFile"), Integer.getInteger("bench.nq", 1000))
+                      : computeGroundTruth(file, n, dim, out);
         // bench.tableCompression=false creates the table without SSTable compression
         String tableOptions = Boolean.parseBoolean(System.getProperty("bench.tableCompression", "true")) ? "" : " WITH compression = {'enabled': 'false'}";
         createTable("CREATE TABLE %s (pk int, vec vector<float, " + dim + ">, PRIMARY KEY(pk))" + tableOptions);
@@ -49,6 +52,8 @@ public class CompactionTimingTest extends VectorTester
 
         long t0 = System.nanoTime();
         int per = (n + sstables - 1) / sstables;
+        String importDir = System.getProperty("bench.importDir");
+        if (importDir == null)
         try (var in = new DataInputStream(new BufferedInputStream(new FileInputStream(file), 1 << 22)))
         {
             byte[] record = new byte[4 + dim * 4];
@@ -86,13 +91,27 @@ public class CompactionTimingTest extends VectorTester
         long t1 = System.nanoTime();
 
         String index = createIndexAsync("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' WITH OPTIONS = {" + options + "}");
-        waitForIndexQueryable(KEYSPACE, index, 2, TimeUnit.HOURS);
+        waitForIndexQueryable(KEYSPACE, index, Integer.getInteger("bench.indexWaitHours", 2), TimeUnit.HOURS);
+        if (importDir != null)
+        {
+            // bench.importDir: SSTables written (and indexed, with the same index name and options) by an earlier run;
+            // they are moved in, and SAI attaches their complete index files instead of rebuilding them
+            long ti = System.nanoTime();
+            var failed = getCurrentColumnFamilyStore().importNewSSTables(java.util.Set.of(importDir), false, false, false, false, false, false, false);
+            waitForIndexQueryable(KEYSPACE, index, Integer.getInteger("bench.indexWaitHours", 2), TimeUnit.HOURS);
+            Files.writeString(out, String.format("CTIMING imported %d sstables (failed %s) in %.1fs segments=%s%n",
+                                                 getCurrentColumnFamilyStore().getLiveSSTables().size(), failed, (System.nanoTime() - ti) / 1e9, segments()),
+                              StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        }
         long t2 = System.nanoTime();
         String built = recall("built");
         sweep("built", out);
 
-        compact();
+        Files.writeString(out, String.format("CTIMING index built in %.1fs%n", (t2 - t1) / 1e9), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+        if (!Boolean.getBoolean("bench.skipCompaction"))
+            compact();
         long t3 = System.nanoTime();
+        Files.writeString(out, String.format("CTIMING compacted in %.1fs%n", (t3 - t2) / 1e9), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         String compacted = recall("compacted");
         sweep("compacted", out);
         for (String k : System.getProperty("bench.rerank", "").split(","))
@@ -216,7 +235,7 @@ public class CompactionTimingTest extends VectorTester
      */
     private void sweep(String state, Path out) throws Throwable
     {
-        if (sweepGt == null)
+        if (sweepGt == null || !java.util.Arrays.asList(System.getProperty("bench.sweepStates", "built,compacted").split(",")).contains(state))
             return;
         int nq = sweepGt.length;
         float[][] q = read(System.getProperty("bench.queries"), nq);
@@ -226,6 +245,15 @@ public class CompactionTimingTest extends VectorTester
         {
             int limit = Integer.parseInt(ls);
             var depths = new java.util.TreeSet<Integer>();
+            String explicit = System.getProperty("bench.sweepDepths");
+            if (explicit != null)
+            {
+                for (String ks : explicit.split(","))
+                    if (Integer.parseInt(ks) >= limit)
+                        depths.add(Integer.parseInt(ks));
+            }
+            else
+            {
             // absolute depths as well as multiples, so small LIMITs reach their plateau
             for (int k : new int[]{ 10, 16, 20, 32, 48, 64, 80, 100, 128, 160, 200, 256, 320, 400, 512, 640, 800, 1000 })
                 if (k >= limit)
@@ -236,12 +264,23 @@ public class CompactionTimingTest extends VectorTester
                 if (k <= 4000)
                     depths.add(k);
             }
+            }
             var ordered = new java.util.ArrayList<Integer>();
             ordered.add(-1);
             ordered.addAll(depths);
             for (int k : ordered)
             {
                 String cql = "SELECT pk FROM %s ORDER BY vec ANN OF ? LIMIT " + limit + (k < 0 ? "" : " WITH ann_options = {'rerank_k': " + k + "}");
+                // bench.cold: empty Cassandra's chunk cache and the OS page cache, then time single-thread queries
+                // from cold, and evict again before the concurrent pass
+                boolean cold = Boolean.getBoolean("bench.cold");
+                String coldLatency = "";
+                if (cold)
+                {
+                    String resident = evictCaches();
+                    coldLatency = " cold" + latency(cql, q, Math.min(nq, Integer.getInteger("bench.latencyQueries", 1000))).trim().replace(" ", " cold") + " pageCacheAfterEvict=" + resident;
+                    evictCaches();
+                }
                 var hits = new java.util.concurrent.atomic.AtomicLong();
                 var next = new java.util.concurrent.atomic.AtomicInteger();
                 ExecutorService pool = Executors.newFixedThreadPool(threads);
@@ -267,12 +306,70 @@ public class CompactionTimingTest extends VectorTester
                     f.get();
                 pool.shutdown();
                 double seconds = (System.nanoTime() - start) / 1e9;
-                Files.writeString(out, String.format("CSWEEP state=%s segments=[%s] limit=%d rerank_k=%s recall=%.4f qps=%.0f%n",
+                // warm single-thread latency over the first bench.latencyQueries queries, after the concurrent pass
+                int lq = Math.min(nq, Integer.getInteger("bench.latencyQueries", 0));
+                String latency = lq > 0 ? latency(cql, q, lq) : "";
+                Files.writeString(out, String.format("CSWEEP state=%s segments=[%s] limit=%d rerank_k=%s recall=%.4f qps=%.0f threads=%d%s%n",
                                                      state, segs, limit, k < 0 ? "default" : String.valueOf(k),
-                                                     hits.get() / ((double) limit * nq), nq / seconds),
+                                                     hits.get() / ((double) limit * nq), nq / seconds, threads, latency + (cold ? " coldQps=" + String.format("%.0f", nq / seconds) + coldLatency : "")),
                                   StandardOpenOption.CREATE, StandardOpenOption.APPEND);
             }
         }
+    }
+
+
+    /** Mean, p50 and p99 single-thread latency over the first n queries, as " meanMs=.. p50Ms=.. p99Ms=..". */
+    private String latency(String cql, float[][] q, int n) throws Throwable
+    {
+        long[] nanos = new long[n];
+        for (int i = 0; i < n; i++)
+        {
+            long t = System.nanoTime();
+            execute(cql, vector(q[i]));
+            nanos[i] = System.nanoTime() - t;
+        }
+        java.util.Arrays.sort(nanos);
+        double mean = java.util.Arrays.stream(nanos).average().orElse(0) / 1e6;
+        return String.format(" meanMs=%.3f p50Ms=%.3f p99Ms=%.3f", mean, nanos[n / 2] / 1e6, nanos[(int) (n * 0.99)] / 1e6);
+    }
+
+    /**
+     * Empties Cassandra's chunk cache and drops the OS page cache (needs passwordless sudo), and returns the page cache
+     * left afterwards and how many of the table's mappings were unmapped first.
+     */
+    private String evictCaches() throws Throwable
+    {
+        if (org.apache.cassandra.cache.ChunkCache.instance != null)
+            org.apache.cassandra.cache.ChunkCache.instance.clear();
+        // SAI memory-maps its index files whatever disk_access_mode says, and drop_caches keeps mapped pages, so
+        // unmap this process's pages of the table's files first (MADV_DONTNEED; the mappings stay valid and refault)
+        String dir = getCurrentColumnFamilyStore().getDirectories().getDirectoryForNewSSTables().toString();
+        var linker = java.lang.foreign.Linker.nativeLinker();
+        var madvise = linker.downcallHandle(linker.defaultLookup().find("madvise").orElseThrow(),
+                                            java.lang.foreign.FunctionDescriptor.of(java.lang.foreign.ValueLayout.JAVA_INT,
+                                                                                    java.lang.foreign.ValueLayout.ADDRESS,
+                                                                                    java.lang.foreign.ValueLayout.JAVA_LONG,
+                                                                                    java.lang.foreign.ValueLayout.JAVA_INT));
+        int unmapped = 0;
+        for (String line : Files.readAllLines(Path.of("/proc/self/maps")))
+        {
+            String[] f = line.trim().split("\\s+");
+            if (f.length < 6 || !f[5].startsWith(dir))
+                continue;
+            String[] range = f[0].split("-");
+            long start = Long.parseUnsignedLong(range[0], 16), end = Long.parseUnsignedLong(range[1], 16);
+            int rc = (int) madvise.invokeExact(java.lang.foreign.MemorySegment.ofAddress(start), end - start, 4 /* MADV_DONTNEED */);
+            if (rc == 0)
+                unmapped++;
+        }
+        var drop = new ProcessBuilder("sudo", "-n", "sh", "-c", "sync; echo 3 > /proc/sys/vm/drop_caches").inheritIO().start();
+        if (drop.waitFor() != 0)
+            throw new IllegalStateException("dropping the page cache failed; cold runs need passwordless sudo");
+        // the page cache left after eviction, system-wide, from /proc/meminfo
+        for (String line : Files.readAllLines(Path.of("/proc/meminfo")))
+            if (line.startsWith("Cached:"))
+                return String.format("%.0fMB(unmapped %d)", Long.parseLong(line.replaceAll("[^0-9]", "")) / 1024.0, unmapped);
+        return "na";
     }
 
     /** Recall@10 over the first bench.nq queries, by CQL ANN queries with LIMIT 10, or "" without bench.queries. */
@@ -337,8 +434,12 @@ public class CompactionTimingTest extends VectorTester
         for (var index : getCurrentColumnFamilyStore().indexManager.listIndexes())
             for (var sstableIndex : ((org.apache.cassandra.index.sai.StorageAttachedIndex) index).getIndexContext().getView().getIndexes())
                 for (var segment : sstableIndex.getSegments())
-                    sb.append(segment.metadata.numRows).append('/')
-                      .append(((org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher) segment.getIndexSearcher()).getCompression().type).append(' ');
+                {
+                    var searcher = (org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher) segment.getIndexSearcher();
+                    // the rerank source: NVQ, or the full vectors stored in the index
+                    sb.append(segment.metadata.numRows).append('/').append(searcher.getCompression().type)
+                      .append(searcher.graph.usesNVQ() ? "+NVQ" : "+FP").append(' ');
+                }
         return sb.toString().trim();
     }
 
