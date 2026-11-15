@@ -82,6 +82,9 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.list;
  * port), which the remedies of {@code MIXED_STORAGE_PORTS} and {@code INTERNODE_TLS}, and the node report's
  * {@code INTERNODE_TLS}, say. Every check is cluster-wide, whatever the number of data centers; the nodes are listed by
  * data center, with the rack of each (the JSON groups them by rack too).
+ * <p>
+ * The files of the directory are read, and named in the texts, in the order of their paths, not in the order the file
+ * system lists the directory in, which differs from one file system to another: the same reports give the same texts.
  */
 final class ClusterAggregate
 {
@@ -143,6 +146,20 @@ final class ClusterAggregate
     {
     }
 
+    /**
+     * The entries of a directory in the order of their paths, the order {@code aggregate} reads the reports in and so
+     * the order of every list of file names it prints (and which names a long list shows): the order in which a file
+     * system lists a directory differs from one file system to another, so that the same reports would otherwise give
+     * different texts on different machines.
+     */
+    static List<Path> inTheOrderOfTheirPaths(Iterable<Path> entries)
+    {
+        List<Path> sorted = new ArrayList<>();
+        entries.forEach(sorted::add);
+        Collections.sort(sorted);
+        return sorted;
+    }
+
     static AggregateReport aggregate(Path directory) throws IOException
     {
         return aggregate(directory, FBUtilities.getReleaseVersionString(), FBUtilities.now());
@@ -163,7 +180,7 @@ final class ClusterAggregate
         List<String> stale = new ArrayList<>();
         try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "*.json"))
         {
-            for (Path file : files)
+            for (Path file : inTheOrderOfTheirPaths(files))
             {
                 String name = file.getFileName().toString();
                 try

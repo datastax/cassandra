@@ -1139,12 +1139,41 @@ public class ClusterAggregateTest
         }
         Aggregate unusable = aggregate(reports);
         assertThat(unusable.exitCode).isEqualTo(DsePreflight.EXIT_BLOCKED);
-        assertThat(unusable.messages("UNREADABLE_REPORT")).contains("null.json (not a JSON object)")
-                                                         .contains("array.json (not a JSON object)")
-                                                         .contains("empty.json (not a JSON object)")
-                                                         .contains("big.json (" + (ClusterAggregate.MAX_REPORT_BYTES + 1) + " bytes, more than the " +
-                                                                   ClusterAggregate.MAX_REPORT_BYTES + " a report may have)");
+        // in the order of their names, whatever the order the file system lists the directory in
+        assertThat(unusable.messages("UNREADABLE_REPORT"))
+            .isEqualTo("reports that cannot be read: array.json (not a JSON object), big.json (" +
+                       (ClusterAggregate.MAX_REPORT_BYTES + 1) + " bytes, more than the " +
+                       ClusterAggregate.MAX_REPORT_BYTES + " a report may have), empty.json (not a JSON object), " +
+                       "null.json (not a JSON object)");
         assertThat(unusable.json).containsEntry("reports_read", 2);
+    }
+
+    /**
+     * The entries of the directory are taken in the order of their paths, whatever the order the file system lists
+     * them in (on tmpfs, for one, not the order ext4 gives), so that the lists of file names the aggregate prints are
+     * the same on every machine: the helper on entries out of order, and eight aggregate reports written in an order
+     * that is neither theirs nor its reverse, which the aggregate names in the order of their names (on a file system
+     * that lists names sorted, or by chance, 1 in 40 320 for a random order, that half shows nothing; the check of
+     * the helper holds on every one).
+     */
+    @Test
+    public void theEntriesOfTheDirectoryAreTakenInTheOrderOfTheirPaths() throws IOException
+    {
+        Path directory = Path.of("reports");
+        List<Path> listed = List.of(directory.resolve("node3.json"), directory.resolve("aggregate.json"),
+                                    directory.resolve("node10.json"), directory.resolve("node1.json"));
+        assertThat(ClusterAggregate.inTheOrderOfTheirPaths(listed)).containsExactly(directory.resolve("aggregate.json"),
+                                                                                    directory.resolve("node1.json"),
+                                                                                    directory.resolve("node10.json"),
+                                                                                    directory.resolve("node3.json"));
+
+        Path reports = cluster(1);
+        aggregate(reports, reports.resolve("e.json"));
+        for (String name : List.of("c", "h", "a", "f", "b", "g", "d"))
+            Files.copy(reports.resolve("e.json"), reports.resolve(name + ".json"));
+        assertThat(aggregate(reports).messages("AGGREGATE_REPORT_SKIPPED"))
+            .isEqualTo("aggregate reports in the directory, skipped: a.json, b.json, c.json, d.json, e.json, f.json, " +
+                       "g.json, h.json");
     }
 
     /** A directory holding only aggregate reports holds no report. */
@@ -1173,10 +1202,12 @@ public class ClusterAggregateTest
         assertThat(aggregate.reportsRead).isEqualTo(3);
         Finding stale = aggregate.findings.stream().filter(f -> f.code.equals("STALE_REPORT")).findFirst().orElseThrow(AssertionError::new);
         assertThat(stale.severity).isEqualTo(Finding.Severity.BLOCKING);
-        assertThat(stale.message).startsWith("reports written more than 24 hours before this aggregate, or later than its time: node1.json (written at ")
-                                 .contains("node2.json (written at ")
-                                 .doesNotContain("node3.json")
-                                 .endsWith("; this aggregate runs at " + now);
+        // in the order of their names, whatever the order the file system lists the directory in
+        Instant tooOld = now.minus(ClusterAggregate.MAX_REPORT_AGE).minusSeconds(1);
+        Instant tooLate = now.plus(ClusterAggregate.MAX_CLOCK_SKEW).plusSeconds(1);
+        assertThat(stale.message).isEqualTo("reports written more than 24 hours before this aggregate, or later " +
+                                            "than its time: node1.json (written at " + tooOld + "), node2.json " +
+                                            "(written at " + tooLate + "); this aggregate runs at " + now);
         assertThat(aggregate.findings).noneMatch(f -> f.severity == Finding.Severity.BLOCKING && !f.code.equals("STALE_REPORT"));
     }
 
