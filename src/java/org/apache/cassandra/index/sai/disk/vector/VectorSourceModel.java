@@ -28,6 +28,7 @@ import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.COSINE;
 import static io.github.jbellis.jvector.vector.VectorSimilarityFunction.DOT_PRODUCT;
 import static java.lang.Math.max;
 import static java.lang.Math.pow;
+import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.ASH;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.NONE;
 import static org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
 public enum VectorSourceModel
@@ -165,6 +166,10 @@ public enum VectorSourceModel
             return (int) (n * limit);
         }
 
+        // ASH codes use a linear rule rather than the tapered overquery below; see ashRerankKFor
+        if (vc.type == ASH)
+            return ashRerankKFor(limit);
+
         // Most compressed vectors should be queried at ~2x as much as uncompressed vectors.  (Our compression
         // is tuned so that this should give us approximately the same recall as using uncompressed.)
         // Again, we do want this to decay as we go to very large limits.
@@ -184,6 +189,16 @@ public enum VectorSourceModel
         }
 
         return (int) (n * limit);
+    }
+
+    /**
+     * The number of candidates to rerank for ASH codes: a fixed 24 plus 2 per result, so each step of LIMIT adds
+     * the same number of candidates. ann_options rerank_k overrides it per query.
+     */
+    @VisibleForTesting
+    public static int ashRerankKFor(int limit)
+    {
+        return 24 + 2 * limit;
     }
 
     @VisibleForTesting

@@ -31,6 +31,7 @@ import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
+import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
@@ -181,6 +182,16 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
             for (var segment : index.getSegments())
                 assertEquals(48, ((ASHVectors) ((V2VectorIndexSearcher) segment.getIndexSearcher()).graph.getCompressedVectors()).getCompressor().quantizedDim);
         assertThat(fractionFindingThemselves(vectors)).isGreaterThanOrEqualTo(0.9);
+    }
+
+    @Test
+    public void ashRerankKIsLinearInLimit()
+    {
+        // ASH reranks a fixed 24 candidates plus 2 per result, whatever the source model or code size.
+        var ash = new VectorCompression(VectorCompression.CompressionType.ASH, 384 * Float.BYTES, 96);
+        for (int limit : new int[]{ 1, 10, 100, 1000 })
+            for (var model : VectorSourceModel.values())
+                assertEquals(24 + 2 * limit, model.rerankKFor(limit, ash));
     }
 
     private double fractionFindingThemselves(List<float[]> vectors)
