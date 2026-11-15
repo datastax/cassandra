@@ -176,16 +176,47 @@ final class SchemaInspector
                                                           "repaired on DSE first";
     /** How a remedy on DSE 5.1 starts. */
     private static final String DSE51_BEFORE = "on DSE 5.1, before the first node is upgraded: ";
+    /** How the texts of a DSE 5.1 inspection on a schema change in the mixed phase start. */
+    private static final String MIXED_PHASE_STARTED = "the upgrade has started (UPGRADED_PEERS): ";
+    /** How they end, after what is not changed. */
+    private static final String MIXED_PHASE_CHANGES_NOT_TAKEN = " in the mixed phase, whose DSE schema changes the " +
+                                                                "upgraded nodes do not take: upgrade no further " +
+                                                                "node and report to the upgrade owner";
     /**
      * What a DSE 5.1 inspection says in the mixed phase where its remedies drop and create a view, a schema change the
      * upgraded nodes do not take from DSE: the remedies of {@code RESTRICTED_VIEW}, {@code VIEW_TABLE_ROW} and the
      * {@code UNLOADABLE_TABLE} of views, and the {@code Materialized views} step.
      */
     static final String NO_VIEW_CHANGE_IN_MIXED_PHASE =
-        "the upgrade has started (UPGRADED_PEERS): no view is dropped or created in the mixed phase, whose DSE " +
-        "schema changes the upgraded nodes do not take: upgrade no further node and report to the upgrade owner";
+        MIXED_PHASE_STARTED + "no view is dropped or created" + MIXED_PHASE_CHANGES_NOT_TAKEN;
+    /**
+     * What a DSE 5.1 inspection says in the mixed phase where the remedies of its other schema findings change the
+     * schema on DSE 5.1, as {@link #NO_VIEW_CHANGE_IN_MIXED_PHASE} says it of the views: the remedies of the findings
+     * the Schema step names ({@code COMPACT_STORAGE}, {@code SASI_INDEX}, the {@code UNLOADABLE_*} of keyspaces, types,
+     * tables and classes, {@code LEGACY_AUTH_TABLES}, the functions and the {@code TDE_TABLE} of the schema), the
+     * Schema step, the {@code ROW_LEVEL_ACCESS} of the tables restricted to rows and the Security step.
+     */
+    static final String NO_SCHEMA_CHANGE_IN_MIXED_PHASE =
+        MIXED_PHASE_STARTED + "no schema change is made" + MIXED_PHASE_CHANGES_NOT_TAKEN;
     /** The remedy of {@code RESTRICTED_VIEW} and {@code VIEW_TABLE_ROW} in the mixed phase, before their end. */
     static final String MIXED_PHASE_NO_VIEW_CHANGE_PREFIX = NO_VIEW_CHANGE_IN_MIXED_PHASE + "; ";
+    /**
+     * What the remedies of a view restricted to rows say in the mixed phase, after
+     * {@link #MIXED_PHASE_NO_VIEW_CHANGE_PREFIX}: the view is neither dropped nor created then, so the grants on it
+     * stay.
+     */
+    static final String KEEP_VIEW_GRANTS_IN_MIXED_PHASE = "keep the rows/ grants on these views (no REVOKE: their " +
+                                                          "roles would lose their rows on the DSE 5.1 nodes); ";
+    /**
+     * The end of the remedy of the rows/ grants of a DSE 5.1 node in the mixed phase: no table or view still restricted
+     * to rows loses its grants. Said whatever this node's schema holds: a view's {@code RESTRICT ROWS} can be in the
+     * schema of another node only, and a schema not read tells nothing.
+     */
+    static final String NOT_THE_GRANTS_OF_RESTRICTED = "; not those of a table or view still restricted to rows, in " +
+                                                       "the schema of this node or of another (see ROW_LEVEL_ACCESS " +
+                                                       "of the tables, RESTRICTED_VIEW and the aggregate's " +
+                                                       "RESTRICTED_VIEW), whose roles would lose their rows on the " +
+                                                       "DSE 5.1 nodes";
     /** What the remedies of a view restricted to rows say of the drop of the view. */
     static final String DROP_REMOVES_VIEW_GRANTS = "DROP MATERIALIZED VIEW, which also removes the view's rows/ grants";
     /** What the remedies of a view restricted to rows say of a view beside which {@code VIEW_TABLE_ROW} names a row. */
@@ -358,6 +389,16 @@ final class SchemaInspector
      * DSE 5.1 one only.
      */
     boolean unloadableTablesFound;
+    /**
+     * With {@link #dse51}: whether a table is restricted to rows ({@code ROW_LEVEL_ACCESS}), whose remedy, the
+     * {@code UNRESTRICT ROWS} of the table, is a schema change, none of which is made in the mixed phase.
+     */
+    boolean rowRestrictedTablesFound;
+    /**
+     * With {@link #dse51}: whether {@code system_auth.role_permissions} holds row-level grants
+     * ({@code ROW_LEVEL_ACCESS}).
+     */
+    boolean rowGrantsFound;
     /** The tables of {@code system_schema} the traces of the node inspection of DSE 5.1 are read from. */
     static final List<String> MARKER_SCHEMA_TABLES = List.of(SchemaKeyspaceTables.KEYSPACES,
                                                              SchemaKeyspaceTables.INDEXES,
@@ -787,8 +828,8 @@ final class SchemaInspector
         if (!unloadable.isEmpty())
             findings.add(blocking("UNLOADABLE_KEYSPACE",
                                   "keyspaces whose replication HCD 2.0 cannot load: " + list(unloadable),
-                                  "ALTER KEYSPACE on DSE to a replication strategy HCD 2.0 has (NetworkTopologyStrategy, SimpleStrategy, " +
-                                  "EverywhereStrategy)"));
+                                  schemaChange("ALTER KEYSPACE on DSE to a replication strategy HCD 2.0 has " +
+                                               "(NetworkTopologyStrategy, SimpleStrategy, EverywhereStrategy)")));
     }
 
     /**
@@ -1644,7 +1685,8 @@ final class SchemaInspector
         if (!unloadable.isEmpty())
             findings.add(blocking("UNLOADABLE_TYPE",
                                   "user types HCD 2.0 cannot load: " + list(unloadable),
-                                  "change or drop them on DSE (with the tables that use them); a DSE-only field type has no counterpart in HCD 2.0"));
+                                  schemaChange("change or drop them on DSE (with the tables that use them); a " +
+                                               "DSE-only field type has no counterpart in HCD 2.0")));
         return result;
     }
 
@@ -1699,8 +1741,9 @@ final class SchemaInspector
         if (!encrypted.isEmpty())
             findings.add(blocking("TDE_TABLE",
                                   "encrypted (TDE) tables: " + list(encrypted) + "; the upgrade applies to clusters without encrypted tables or views",
-                                  "decrypt them on DSE (ALTER TABLE ... WITH compression = {'class': 'LZ4Compressor'}, then nodetool upgradesstables -a " +
-                                  "on every node) before the upgrade"));
+                                  schemaChange("decrypt them on DSE (ALTER TABLE ... WITH compression = {'class': " +
+                                               "'LZ4Compressor'}, then nodetool upgradesstables -a on every node) " +
+                                               "before the upgrade")));
         // with the setting on, the finding of dse.yaml's system_info_encryption names these tables and their remedy
         if (!systemInfoEncrypted.isEmpty() && !systemInfoEncryption)
             findings.add(blocking("TDE_TABLE",
@@ -1717,21 +1760,24 @@ final class SchemaInspector
         if (!unloadableClasses.isEmpty())
             findings.add(blocking("UNLOADABLE_CLASS",
                                   "tables with a compaction or compression class HCD 2.0 cannot load: " + list(unloadableClasses),
-                                  "ALTER these tables on DSE to classes DSE and HCD 2.0 both have (for example SizeTieredCompactionStrategy or " +
-                                  "LeveledCompactionStrategy, LZ4Compressor)"));
+                                  schemaChange("ALTER these tables on DSE to classes DSE and HCD 2.0 both have (for " +
+                                               "example SizeTieredCompactionStrategy or LeveledCompactionStrategy, " +
+                                               "LZ4Compressor)")));
         unloadableTablesFound |= !unloadableTables.isEmpty();
         if (!unloadableTables.isEmpty())
             findings.add(blocking("UNLOADABLE_TABLE",
                                   "tables HCD 2.0 cannot load: " + list(unloadableTables),
-                                  "change or drop these tables on DSE; an upgraded node does not start with them"));
+                                  schemaChange("change or drop these tables on DSE; an upgraded node does not start " +
+                                               "with them")));
         if (!compact.isEmpty() && dse51)
             findings.add(blocking("COMPACT_STORAGE",
                                   "tables with COMPACT STORAGE: " + list(compact) + "; HCD 2.0 does not load them, " +
                                   "and DSE 5.1 runs DROP COMPACT STORAGE with no setting to allow it",
-                                  DSE51_BEFORE + "ALTER TABLE ... DROP COMPACT STORAGE for each of them (DSE 5.1 " +
-                                  "runs it once every sstable of the table is at me: nodetool upgradesstables " +
-                                  "first, as the upgrade requires anyway); the tables keep their data, and CQL may " +
-                                  "then show columns COMPACT STORAGE hid (such as column1 and value)"));
+                                  schemaChange(DSE51_BEFORE + "ALTER TABLE ... DROP COMPACT STORAGE for each of " +
+                                               "them (DSE 5.1 runs it once every sstable of the table is at me: " +
+                                               "nodetool upgradesstables first, as the upgrade requires anyway); " +
+                                               "the tables keep their data, and CQL may then show columns COMPACT " +
+                                               "STORAGE hid (such as column1 and value)")));
         else if (!compact.isEmpty())
             findings.add(blocking("COMPACT_STORAGE",
                                   "tables with COMPACT STORAGE: " + list(compact),
@@ -1739,7 +1785,8 @@ final class SchemaInspector
         if (!legacyAuth.isEmpty())
             findings.add(blocking("LEGACY_AUTH_TABLES",
                                   "legacy authentication tables: " + list(legacyAuth) + "; HCD 2.0 refuses to start while they exist",
-                                  "check that their content was migrated to roles, role_members and role_permissions, then drop them on DSE"));
+                                  schemaChange("check that their content was migrated to roles, role_members and " +
+                                               "role_permissions, then drop them on DSE")));
     }
 
     /**
@@ -1911,13 +1958,15 @@ final class SchemaInspector
                                   "them as indexes that do nothing, the queries using them fail on it, and it " +
                                   "writes no SASI file for the data it stores: once rolled back to DSE 5.1, such a " +
                                   "node's indexes miss that data",
-                                  DSE51_BEFORE + "DROP INDEX for each (and create SAI indexes in their place once " +
-                                  "no node runs DSE 5.1 and the upgrade is complete, if needed)"));
+                                  schemaChange(DSE51_BEFORE + "DROP INDEX for each (and create SAI indexes in their " +
+                                               "place once no node runs DSE 5.1 and the upgrade is complete, if " +
+                                               "needed)")));
         if (!unloadable.isEmpty())
             findings.add(blocking("UNLOADABLE_CLASS",
                                   "indexes of a class HCD 2.0 does not have: " + list(unloadable) + "; an upgraded node would load them as indexes that do " +
                                   "nothing, and the queries using them would fail",
-                                  "DROP INDEX on DSE (and recreate them as SAI indexes once the upgrade is complete, if needed)"));
+                                  schemaChange("DROP INDEX on DSE (and recreate them as SAI indexes once the " +
+                                               "upgrade is complete, if needed)")));
     }
 
     // ---- views ----
@@ -1991,8 +2040,9 @@ final class SchemaInspector
             findings.add(blocking("TDE_TABLE",
                                   "encrypted (TDE) materialized views: " + list(viewsEncrypted) + "; the upgrade applies to clusters without encrypted " +
                                   "tables or views",
-                                  "decrypt them on DSE (ALTER MATERIALIZED VIEW ... WITH compression = {'class': 'LZ4Compressor'}, then nodetool " +
-                                  "upgradesstables -a on every node) before the upgrade"));
+                                  schemaChange("decrypt them on DSE (ALTER MATERIALIZED VIEW ... WITH compression = " +
+                                               "{'class': 'LZ4Compressor'}, then nodetool upgradesstables -a on " +
+                                               "every node) before the upgrade")));
         if (!unloadable.isEmpty())
             findings.add(blocking("UNLOADABLE_TABLE",
                                   "materialized views HCD 2.0 cannot load: " + list(unloadable),
@@ -2258,7 +2308,19 @@ final class SchemaInspector
         if (!unloadable.isEmpty())
             findings.add(blocking("UNLOADABLE_TABLE",
                                   "dropped columns of a type HCD 2.0 cannot load (the schema load parses them too): " + list(unloadable),
-                                  "on DSE, recreate the table without the dropped column's history (copy its data to a new table), or contact support"));
+                                  schemaChange("on DSE, recreate the table without the dropped column's history " +
+                                               "(copy its data to a new table), or contact support")));
+    }
+
+    /**
+     * The remedy of a finding of a DSE 5.1 node that is a schema change on DSE (those the Schema step names, and the
+     * {@code ROW_LEVEL_ACCESS} of the tables restricted to rows): in the mixed phase
+     * ({@code UPGRADED_PEERS}), {@link #NO_SCHEMA_CHANGE_IN_MIXED_PHASE}, as the views have
+     * {@link #NO_VIEW_CHANGE_IN_MIXED_PHASE}; {@code remedy} otherwise, and always for a DSE 6 node.
+     */
+    private String schemaChange(String remedy)
+    {
+        return dse51 && mixedPhase ? NO_SCHEMA_CHANGE_IN_MIXED_PHASE : remedy;
     }
 
     // ---- functions and triggers ----
@@ -2282,11 +2344,13 @@ final class SchemaInspector
         if (!javascript.isEmpty())
             findings.add(blocking("JAVASCRIPT_UDF",
                                   "user-defined functions written in JavaScript: " + list(javascript) + "; HCD 2.0 runs Java functions only",
-                                  "rewrite them in Java, or drop them (and the aggregates using them), on DSE"));
+                                  schemaChange("rewrite them in Java, or drop them (and the aggregates using them), " +
+                                               "on DSE")));
         if (!other.isEmpty())
             findings.add(blocking("UDF_LANGUAGE",
                                   "user-defined functions in a language HCD 2.0 does not run: " + list(other),
-                                  "rewrite them in Java, or drop them (and the aggregates using them), on DSE"));
+                                  schemaChange("rewrite them in Java, or drop them (and the aggregates using them), " +
+                                               "on DSE")));
     }
 
     private void checkTriggers()
@@ -2404,15 +2468,21 @@ final class SchemaInspector
                                   "DSE RESTRICT entries in system_auth.role_permissions: " + list(restrictions) + "; HCD 2.0 does not enforce them, so ignored " +
                                   "they would grant access, and an upgraded node refuses to start while they exist",
                                   "UNRESTRICT each of them on DSE before the upgrade"));
+        rowGrantsFound = dse51 && !rowGrants.isEmpty();
+        // in the mixed phase the REVOKE, no schema change, still applies, but not to the grants of a table or view
+        // still restricted to rows, on this node or another, whose UNRESTRICT ROWS, drop and creation are not made
+        // then: their roles would lose their rows on DSE 5.1
         if (!rowGrants.isEmpty() && dse51)
             findings.add(blocking("ROW_LEVEL_ACCESS",
                                   "DSE row-level access control grants in system_auth.role_permissions: " +
                                   list(rowGrants) + "; HCD 2.0 does not enforce them, and a node in DSE_5_1 mode " +
                                   "refuses to start while one exists, whether or not a table or view is still " +
                                   "restricted to rows",
-                                  DSE51_BEFORE + "REVOKE each of them (REVOKE SELECT ON '<value>' ROWS IN " +
+                                  (mixedPhase ? "on DSE 5.1: " : DSE51_BEFORE) +
+                                  "REVOKE each of them (REVOKE SELECT ON '<value>' ROWS IN " +
                                   "<keyspace>.<table> FROM <role>, and the same for MODIFY): UNRESTRICT ROWS does " +
-                                  "not revoke them"));
+                                  "not revoke them" +
+                                  (mixedPhase ? NOT_THE_GRANTS_OF_RESTRICTED : "")));
         else if (!rowGrants.isEmpty())
             findings.add(blocking("ROW_LEVEL_ACCESS",
                                   "DSE row-level access control grants in system_auth.role_permissions: " + list(rowGrants) + "; HCD 2.0 does not enforce them",
@@ -2477,16 +2547,17 @@ final class SchemaInspector
         }
         if (dse51)
             checkDse51RowLevelViews();
+        rowRestrictedTablesFound = dse51 && !restricted.isEmpty();
         if (!restricted.isEmpty() && dse51)
             findings.add(blocking("ROW_LEVEL_ACCESS",
                                   "tables restricted to rows by DSE row-level access control (" +
                                   Dse6AccessControlCheck.RLAC_EXTENSION_KEY + "): " + list(restricted) + "; HCD 2.0 " +
                                   "does not enforce it, and a node in DSE_5_1 mode refuses to start while a table " +
                                   "holds it",
-                                  DSE51_BEFORE + accessBeforeRestrictionsGo("tables") + "UNRESTRICT ROWS ON " +
-                                  "<keyspace>.<table> for each, then REVOKE their rows/ grants, which UNRESTRICT " +
-                                  "ROWS leaves (see ROW_LEVEL_ACCESS of system_auth.role_permissions); " +
-                                  NEVER_UNRESTRICT_VIEW));
+                                  schemaChange(DSE51_BEFORE + accessBeforeRestrictionsGo("tables") +
+                                               "UNRESTRICT ROWS ON <keyspace>.<table> for each, then REVOKE their " +
+                                               "rows/ grants, which UNRESTRICT ROWS leaves (see ROW_LEVEL_ACCESS of " +
+                                               "system_auth.role_permissions); " + NEVER_UNRESTRICT_VIEW)));
         else if (!restricted.isEmpty())
             findings.add(blocking("ROW_LEVEL_ACCESS",
                                   "tables restricted to rows by DSE row-level access control (" + Dse6AccessControlCheck.RLAC_EXTENSION_KEY + "): " +
@@ -2535,7 +2606,7 @@ final class SchemaInspector
                                   "view in the schema of the node that ran it " + RESTRICTION_SPREADS_AT_RESTART +
                                   ", so the reports of the other nodes may not show it",
                                   (mixedPhase
-                                   ? MIXED_PHASE_NO_VIEW_CHANGE_PREFIX
+                                   ? MIXED_PHASE_NO_VIEW_CHANGE_PREFIX + KEEP_VIEW_GRANTS_IN_MIXED_PHASE
                                    : DSE51_BEFORE +
                                      (restrictedViewsWithTableRow.isEmpty()
                                       ? ""
