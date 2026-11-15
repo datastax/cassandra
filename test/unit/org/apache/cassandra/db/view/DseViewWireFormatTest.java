@@ -1178,8 +1178,20 @@ public class DseViewWireFormatTest extends CQLTester
         Path dir = Files.createDirectories(importRoot.resolve(KEYSPACE).resolve(table + '-' + store.metadata.id.toHexString()));
         for (Path file : files)
             Files.copy(file, dir.resolve(file.getFileName()));
-        // import only places the files, which an upgraded node finds on disk at startup
-        List<String> failed = store.importNewSSTables(Collections.singleton(dir.toString()), false, false, true, false, false, true, true);
+        // import only places the files, which an upgraded node finds on disk at startup; the upgrade guards of the
+        // mode refuse sstable import in DSE_6 mode, so it runs with the mode off and the mode of the test is restored
+        // afterwards
+        InternodeCompatibilityMode mode = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        List<String> failed;
+        try
+        {
+            failed = store.importNewSSTables(Collections.singleton(dir.toString()), false, false, true, false, false, true, true);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+        }
         assertThat(failed).isEmpty();
     }
 }
