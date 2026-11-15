@@ -3474,7 +3474,10 @@ public class StorageProxy implements StorageProxyMBean
                     creationTime -= TimeUnit.MILLISECONDS.convert(Math.max(0, approxTime.now() - mutationCreationTimeNanos), NANOSECONDS);
                 }
                 logger.trace("Adding hints for {} with creation time {} ms", validTargets, creationTime);
-                HintsService.instance.write(hostIds, Hint.create(mutation,  creationTime));
+                // false only for a hint the DSE 5.1 mode's hints files cannot hold: not stored, so neither counted
+                // nor taken as a write at ANY, which then times out as no write took place
+                if (!HintsService.instance.tryWrite(hostIds, Hint.create(mutation,  creationTime)))
+                    return;
                 validTargets.forEach(HintsService.instance.metrics::incrCreatedHints);
                 // Notify the handler only for CL == ANY
                 if (responseHandler != null && responseHandler.replicaPlan.consistencyLevel() == ConsistencyLevel.ANY)

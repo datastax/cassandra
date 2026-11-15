@@ -16,6 +16,8 @@
 
 package org.apache.cassandra.config;
 
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.junit.After;
@@ -53,7 +55,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * {@code storage_compatibility_mode: DSE_5_1} (which requires it in turn), the big sstable format,
  * {@code paxos_variant: v1} at startup and at run time, the default compression selector and {@code flush_compression}
  * {@code fast} or {@code table}, the checksum type CRC32, no transient replication, and numeric sstable generations,
- * with the texts of the DSE 6 mode worded for DSE 5.1. The tool and client paths are {@link Dse51ModeToolTest} and
+ * a {@code hints_compression} DSE 5.1 can build, with the texts of the DSE 6 mode worded for DSE 5.1. The tool and
+ * client paths are {@link Dse51ModeToolTest} and
  * {@link Dse51ModeClientTest}.
  */
 public class Dse51ModeConfigTest
@@ -619,5 +622,150 @@ public class Dse51ModeConfigTest
                             ", expected NONE, DSE_6 or DSE_5_1");
             }
         }
+    }
+
+    private static Config dse51ConfigWithHintsCompression(String className, Map<String, String> options)
+    {
+        Config config = dse51Config();
+        config.hints_compression = new ParameterizedClass(className, options);
+        return config;
+    }
+
+    private static final String HINTS_COMPRESSION_REMEDY =
+    ", so DSE 5.1 could not build the compressor of the hints files written with it, and a node rolled back to " +
+    "DSE 5.1 would never deliver them; set hints_compression to LZ4Compressor (with no option but " +
+    "lz4_compressor_type fast or high and lz4_high_compressor_level from 1 to 17), SnappyCompressor or " +
+    "DeflateCompressor (with no option), by the short name or under org.apache.cassandra.io.compress, or remove it, " +
+    "in conf/cassandra.yaml, then restart the node";
+
+    /**
+     * {@code hints_compression} in the mode: the compressors DSE 5.1 builds a hints compressor with, by the short name
+     * or under {@code org.apache.cassandra.io.compress}, with the options it supports, are accepted; another class, a
+     * class under another package, an option the class does not support ({@code chunk_length_in_kb} among them), a
+     * value out of range, an option without a name, and an option of the class without a value, which the node cannot
+     * build, are refused; {@code crc_check_chance}, which DSE 5.1 removes, is refused with a text of its own.
+     */
+    @Test
+    public void dse51RefusesAHintsCompressionDse51CannotBuild()
+    {
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+        apply(dse51Config());
+        apply(dse51ConfigWithHintsCompression("LZ4Compressor", null));
+        apply(dse51ConfigWithHintsCompression("LZ4Compressor", Map.of()));
+        apply(dse51ConfigWithHintsCompression("org.apache.cassandra.io.compress.LZ4Compressor",
+                                              Map.of("lz4_compressor_type", "high",
+                                                     "lz4_high_compressor_level", "17")));
+        apply(dse51ConfigWithHintsCompression("LZ4Compressor", Map.of("lz4_compressor_type", "fast",
+                                                                      "lz4_high_compressor_level", "1")));
+        apply(dse51ConfigWithHintsCompression("SnappyCompressor", Map.of()));
+        apply(dse51ConfigWithHintsCompression("org.apache.cassandra.io.compress.DeflateCompressor", null));
+        assertThat(mode()).isEqualTo(DSE_5_1);
+        // an option without a value is its default in DSE 5.1, but the node cannot build such a compressor
+        Map<String, String> nullType = new HashMap<>();
+        nullType.put("lz4_compressor_type", null);
+        assertThatThrownBy(() -> apply(dse51ConfigWithHintsCompression("LZ4Compressor", nullType)))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessage("internode_compatibility_mode DSE_5_1 refuses hints_compression LZ4Compressor with " +
+                    "{lz4_compressor_type=null}: the option lz4_compressor_type has no value, and the node cannot " +
+                    "build the compressor of its hints files with it; give the option a value or remove it, in " +
+                    "conf/cassandra.yaml, then restart the node");
+
+        Map<String, String[]> refused = new LinkedHashMap<>();
+        refused.put("the class ZstdCompressor is not one DSE 5.1 builds",
+                    new String[]{ "ZstdCompressor" });
+        refused.put("the class com.example.LZ4Compressor is not one DSE 5.1 builds",
+                    new String[]{ "com.example.LZ4Compressor" });
+        refused.put("the class org.apache.cassandra.io.compress.sub.LZ4Compressor is not one DSE 5.1 builds",
+                    new String[]{ "org.apache.cassandra.io.compress.sub.LZ4Compressor" });
+        refused.put("the class lz4compressor is not one DSE 5.1 builds", new String[]{ "lz4compressor" });
+        refused.put("it names no class", new String[]{ "" });
+        refused.put("the option chunk_length_in_kb is not one LZ4Compressor supports in DSE 5.1",
+                    new String[]{ "LZ4Compressor", "chunk_length_in_kb", "64" });
+        refused.put("the option unknown is not one LZ4Compressor supports in DSE 5.1",
+                    new String[]{ "LZ4Compressor", "unknown", "x" });
+        refused.put("the option lz4_compressor_type is not one SnappyCompressor supports in DSE 5.1",
+                    new String[]{ "SnappyCompressor", "lz4_compressor_type", "fast" });
+        refused.put("the option chunk_length_in_kb is not one DeflateCompressor supports in DSE 5.1",
+                    new String[]{ "DeflateCompressor", "chunk_length_in_kb", "16" });
+        refused.put("the value HIGH of lz4_compressor_type is not fast or high",
+                    new String[]{ "LZ4Compressor", "lz4_compressor_type", "HIGH" });
+        refused.put("the value 0 of lz4_high_compressor_level is not a number from 1 to 17",
+                    new String[]{ "LZ4Compressor", "lz4_high_compressor_level", "0" });
+        refused.put("the value 18 of lz4_high_compressor_level is not a number from 1 to 17",
+                    new String[]{ "LZ4Compressor", "lz4_high_compressor_level", "18" });
+        refused.put("the value nine of lz4_high_compressor_level is not a number from 1 to 17",
+                    new String[]{ "LZ4Compressor", "lz4_high_compressor_level", "nine" });
+        for (Map.Entry<String, String[]> e : refused.entrySet())
+        {
+            String[] setting = e.getValue();
+            Map<String, String> options = setting.length == 1 ? Map.of() : Map.of(setting[1], setting[2]);
+            String shown = setting[0] + (options.isEmpty() ? "" : " with " + options);
+            assertThatThrownBy(() -> apply(dse51ConfigWithHintsCompression(setting[0], options)))
+            .as(e.getKey())
+            .isInstanceOf(ConfigurationException.class)
+            .hasMessage("internode_compatibility_mode DSE_5_1 refuses hints_compression " + shown + ": " + e.getKey() +
+                        HINTS_COMPRESSION_REMEDY);
+        }
+        // crc_check_chance, which DSE 5.1 removes with a warning, with a text of its own
+        assertThatThrownBy(() -> apply(dse51ConfigWithHintsCompression("LZ4Compressor",
+                                                                       Map.of("crc_check_chance", "1.0"))))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessage("internode_compatibility_mode DSE_5_1 refuses hints_compression LZ4Compressor with " +
+                    "{crc_check_chance=1.0}: the option crc_check_chance has no use in a hints file (DSE 5.1 removes " +
+                    "it with a warning); remove it from hints_compression in conf/cassandra.yaml, then restart the " +
+                    "node");
+        // crc_check_chance before an option of the class without a value
+        Map<String, String> crcAndNoValue = new HashMap<>();
+        crcAndNoValue.put("crc_check_chance", "1.0");
+        crcAndNoValue.put("lz4_compressor_type", null);
+        assertThatThrownBy(() -> apply(dse51ConfigWithHintsCompression("LZ4Compressor", crcAndNoValue)))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessage("internode_compatibility_mode DSE_5_1 refuses hints_compression LZ4Compressor with " +
+                    crcAndNoValue + ": the option crc_check_chance has no use in a hints file (DSE 5.1 removes it " +
+                    "with a warning); remove it from hints_compression in conf/cassandra.yaml, then restart the " +
+                    "node");
+        // an option the class does not support, or a class DSE 5.1 does not build, refused whatever the values
+        Map<String, String> unsupportedWithoutValue = new HashMap<>();
+        unsupportedWithoutValue.put("chunk_length_in_kb", null);
+        assertThatThrownBy(() -> apply(dse51ConfigWithHintsCompression("SnappyCompressor", unsupportedWithoutValue)))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessage("internode_compatibility_mode DSE_5_1 refuses hints_compression SnappyCompressor with " +
+                    "{chunk_length_in_kb=null}: the option chunk_length_in_kb is not one SnappyCompressor supports " +
+                    "in DSE 5.1" + HINTS_COMPRESSION_REMEDY);
+        Map<String, String> levelWithoutValue = new HashMap<>();
+        levelWithoutValue.put("level", null);
+        assertThatThrownBy(() -> apply(dse51ConfigWithHintsCompression("ZstdCompressor", levelWithoutValue)))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessage("internode_compatibility_mode DSE_5_1 refuses hints_compression ZstdCompressor with " +
+                    "{level=null}: the class ZstdCompressor is not one DSE 5.1 builds" + HINTS_COMPRESSION_REMEDY);
+        // an option without a name
+        Map<String, String> noName = new HashMap<>();
+        noName.put(null, "x");
+        assertThatThrownBy(() -> apply(dse51ConfigWithHintsCompression("LZ4Compressor", noName)))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessage("internode_compatibility_mode DSE_5_1 refuses hints_compression LZ4Compressor with {null=x}: an " +
+                    "option has no name" + HINTS_COMPRESSION_REMEDY);
+        // the first option refused by name, when several are
+        assertThatThrownBy(() -> apply(dse51ConfigWithHintsCompression("LZ4Compressor",
+                                                                       Map.of("lz4_compressor_type", "fast",
+                                                                              "chunk_length_in_kb", "64",
+                                                                              "crc_check_chance", "0.5"))))
+        .isInstanceOf(ConfigurationException.class)
+        .hasMessageContaining(": the option chunk_length_in_kb is not one LZ4Compressor supports in DSE 5.1, so ");
+    }
+
+    /** The other modes keep {@code hints_compression} as they had it: a chunk length is not refused. */
+    @Test
+    public void theOtherModesStartWithAnyHintsCompression()
+    {
+        Config none = new Config();
+        none.hints_compression = new ParameterizedClass("LZ4Compressor", Map.of("chunk_length_in_kb", "64"));
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
+        apply(none);
+        assertThat(mode()).isEqualTo(NONE);
+        Config dse6 = dse6Config();
+        dse6.hints_compression = new ParameterizedClass("ZstdCompressor", Map.of("chunk_length_in_kb", "64"));
+        apply(dse6);
+        assertThat(mode()).isEqualTo(DSE_6);
     }
 }
