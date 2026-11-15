@@ -326,6 +326,7 @@ public class CompactionGraph implements Closeable, Accountable
                 // this all runs on the same compaction thread, so we don't need to worry about concurrency
                 int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
                 assert ordinal > maxOrdinal : "Unexpected ordinal " + ordinal + " previous max " + maxOrdinal;
+                int previousMaxOrdinal = maxOrdinal;
                 maxOrdinal = ordinal;
                 CompactionVectorPostings postings = new CompactionVectorPostings(ordinal, segmentRowId);
                 Data<CompactionVectorPostings> data = postingsQueryContext.wrapValueAsData(postings);
@@ -396,10 +397,10 @@ public class CompactionGraph implements Closeable, Accountable
                 // is only needed during index build. It is a temp file.
                 onDiskVectorValuesWriter.write(ordinal, vector);
 
-                // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
-                while (compressedVectors.count() < ordinal)
-                    compressedVectors.setZero(compressedVectors.count());
-                compressedVectors.encodeAndSet(ordinal, vector);
+                // Fill in any holes in the pqVectors; the vector itself is encoded when its node is added, on an
+                // insertion thread, so this thread does not encode
+                for (int hole = previousMaxOrdinal + 1; hole < ordinal; hole++)
+                    compressedVectors.setZero(hole);
 
                 // Track the bytes used as a result of this operation
                 bytesUsed += postings.ramBytesUsed();
@@ -455,6 +456,7 @@ public class CompactionGraph implements Closeable, Accountable
         trainingLock.readLock().lock();
         try
         {
+            compressedVectors.encodeAndSet(result.ordinal, result.vector);
             return builder.addGraphNode(result.ordinal, result.vector);
         }
         finally
