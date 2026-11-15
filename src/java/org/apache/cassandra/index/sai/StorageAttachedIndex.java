@@ -211,6 +211,8 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.NEIGHBORHOOD_OVERFLOW,
                                                                      IndexWriterConfig.ALPHA,
                                                                      IndexWriterConfig.ENABLE_HIERARCHY,
+                                                                     IndexWriterConfig.ENABLE_ASH,
+                                                                     IndexWriterConfig.ASH_DIMENSIONS,
                                                                      IndexWriterConfig.SIMILARITY_FUNCTION,
                                                                      IndexWriterConfig.SOURCE_MODEL,
                                                                      IndexWriterConfig.OPTIMIZE_FOR,

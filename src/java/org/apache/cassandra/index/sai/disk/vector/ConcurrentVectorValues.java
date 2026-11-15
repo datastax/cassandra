@@ -27,7 +27,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import io.github.jbellis.jvector.util.DenseIntMap;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
-import io.github.jbellis.jvector.vector.ArrayVectorFloat;
+import io.github.jbellis.jvector.vector.types.FloatArray;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import org.apache.cassandra.io.util.SequentialWriter;
 
@@ -101,7 +101,7 @@ public class ConcurrentVectorValues implements RamAwareVectorValues
 
         for (var i = 0; i < size(); i++) {
             int ord = ordinalMapper.applyAsInt(i);
-            var fb = FloatBuffer.wrap(((ArrayVectorFloat) values.get(ord)).get());
+            var fb = FloatBuffer.wrap(((FloatArray) values.get(ord)).array());
             var bb = ByteBuffer.allocate(fb.capacity() * Float.BYTES);
             bb.asFloatBuffer().put(fb);
             writer.write(bb);

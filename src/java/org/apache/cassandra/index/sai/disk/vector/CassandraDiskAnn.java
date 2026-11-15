@@ -33,6 +33,7 @@ import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
+import io.github.jbellis.jvector.quantization.ASHVectors;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
@@ -140,6 +141,14 @@ public class CassandraDiskAnn
                 {
                     compressedVectors = PQVectors.load(reader, reader.getFilePointer());
                     pq = ((PQVectors) compressedVectors).getCompressor();
+                    compression = new VectorCompression(compressionType,
+                                                        compressedVectors.getOriginalSize(),
+                                                        compressedVectors.getCompressedSize());
+                }
+                else if (compressionType == VectorCompression.CompressionType.ASH)
+                {
+                    compressedVectors = ASHVectors.load(reader);
+                    pq = null;
                     compression = new VectorCompression(compressionType,
                                                         compressedVectors.getOriginalSize(),
                                                         compressedVectors.getCompressedSize());
@@ -254,8 +263,9 @@ public class CassandraDiskAnn
             else
             {
                 // unit vectors defined with dot product should switch to cosine similarity for compressed
-                // comparisons, since the compression does not maintain unit length
+                // comparisons, since the compression does not maintain unit length; ASH scores dot products
                 var sf = pqUnitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
+                         && compression.type == VectorCompression.CompressionType.PRODUCT_QUANTIZATION
                          ? VectorSimilarityFunction.COSINE
                          : similarityFunction;
                 var asf = compressedVectors.precomputedScoreFunctionFor(queryVector, sf);

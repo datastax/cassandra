@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.LongAdder;
 import java.util.function.ToIntFunction;
 import javax.annotation.Nullable;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Runnables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,6 +48,7 @@ import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -116,6 +118,14 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
         PrimaryKey primaryKey = indexContext.keyFactory().create(key, clustering);
         long allocatedBytes = index(primaryKey, value);
         memtable.markExtraOnHeapUsed(allocatedBytes, opGroup);
+        long allocatedOffHeapBytes = graph.takeOffHeapBytes();
+        if (allocatedOffHeapBytes > 0)
+        {
+            if (offHeapPoolLimited())
+                memtable.markExtraOffHeapUsed(allocatedOffHeapBytes, opGroup);
+            else
+                memtable.markExtraOnHeapUsed(allocatedOffHeapBytes, opGroup);
+        }
         onIndexUpdated();
     }
 
@@ -234,7 +244,7 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
         assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer.operator;
 
         var qv = orderer.getVectorTerm();
-        var rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
+        var rerankK = orderer.rerankKFor(limit, graph.searchCompression());
 
         return List.of(searchInternal(context, qv, keyRange, limit, rerankK, 0, orderer.usePruning()));
     }
@@ -329,7 +339,7 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
             relevantOrdinals.add(i);
         });
 
-        int rerankK = orderer.rerankKFor(limit, VectorCompression.NO_COMPRESSION);
+        int rerankK = orderer.rerankKFor(limit, graph.searchCompression());
         int maxBruteForceRows = maxBruteForceRows(rerankK, relevantOrdinals.size(), graph.size());
         Tracing.logAndTrace(logger, "{} rows relevant to current memtable out of {} materialized by SAI; max brute force rows is {} for memtable index with {} nodes, rerankK {}",
                             relevantOrdinals.size(), keys.size(), maxBruteForceRows, graph.size(), rerankK);
@@ -492,13 +502,29 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     @Override
     public long estimatedOnHeapMemoryUsed()
     {
-        return graph.ramBytesUsed();
+        return graph.ramBytesUsed() + (offHeapPoolLimited() ? 0 : graph.offHeapBytesUsed());
     }
 
     @Override
     public long estimatedOffHeapMemoryUsed()
     {
-        return 0;
+        return offHeapPoolLimited() ? graph.offHeapBytesUsed() : 0;
+    }
+
+    /** Native memory the index holds outside the heap, whichever memtable pool it is counted against. */
+    @VisibleForTesting
+    public long nativeBytesUsed()
+    {
+        return graph.offHeapBytesUsed();
+    }
+
+    /**
+     * Whether the memtable pool limits off-heap memory. An allocation type that allocates nothing off heap gives that
+     * pool no limit, and native memory the index allocates is counted against the heap pool instead.
+     */
+    private static boolean offHeapPoolLimited()
+    {
+        return AbstractAllocatorMemtable.MEMORY_POOL.offHeap.limit > 0;
     }
 
     @Override

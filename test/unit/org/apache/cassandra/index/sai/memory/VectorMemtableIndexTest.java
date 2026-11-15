@@ -27,23 +27,30 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.awaitility.Awaitility;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.github.jbellis.jvector.vector.VectorizationProvider;
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Clustering;
+import org.apache.cassandra.db.ClusteringComparator;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.marshal.FloatType;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.VectorType;
+import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.BootStrapper;
 import org.apache.cassandra.dht.Bounds;
@@ -55,12 +62,15 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.cql.VectorTester;
+import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.plan.Orderer;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.inject.Injections;
 import org.apache.cassandra.inject.InvokePointBuilder;
 import org.apache.cassandra.locator.TokenMetadata;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
@@ -202,6 +212,49 @@ public class VectorMemtableIndexTest extends SAITester
         });
         assertTrue("Expected at least " + expectedVectorsReturned + " results but got " + actualVectorsReturned,
                    actualVectorsReturned.get() >= expectedVectorsReturned.get() * expectedRecall);
+    }
+
+    @Test
+    public void ashIndexChargesItsHeapAndNativeMemoryToTheMemtable()
+    {
+        // An enable_ash index charges its heap to the memtable's on-heap pool, and the native memory its model keeps
+        // outside the heap, with a native vectorization backend, to the off-heap pool, or to the on-heap pool when the
+        // memtable allocation type allocates nothing off heap.
+        dimensionCount = 64;
+        indexContext = new IndexContext(cfs.getKeyspaceName(),
+                                        cfs.getTableName(),
+                                        cfs.metadata().id,
+                                        UTF8Type.instance,
+                                        new ClusteringComparator(),
+                                        ColumnMetadata.regularColumn("sai", "internal", "index", VectorType.getInstance(FloatType.instance, dimensionCount)),
+                                        IndexTarget.Type.SIMPLE,
+                                        IndexMetadata.fromSchemaMetadata("index", IndexMetadata.Kind.CUSTOM,
+                                                                         Map.of(IndexWriterConfig.ENABLE_ASH, "true",
+                                                                                IndexWriterConfig.SIMILARITY_FUNCTION, "dot_product")),
+                                        cfs);
+        var memtable = (AbstractAllocatorMemtable) cfs.getCurrentMemtable();
+        memtableIndex = new VectorMemtableIndex(indexContext, memtable);
+        long onHeapBefore = memtable.getAllocator().onHeap().owns();
+        long offHeapBefore = memtable.getAllocator().offHeap().owns();
+
+        // The index fixes its first model after 20 x 64 vectors; with a native backend, its projections are native.
+        for (int pk = 0; pk < 2000; pk++)
+            addRow(pk, randomVectorSerialized());
+        boolean nativeBackend = VectorizationProvider.getInstance().getClass().getSimpleName().equals("NativeVectorizationProvider");
+        if (nativeBackend)
+            Awaitility.await().atMost(1, TimeUnit.MINUTES).until(() -> memtableIndex.nativeBytesUsed() > 0);
+        // The next insert reports what fixing the model allocated.
+        addRow(2000, randomVectorSerialized());
+
+        long onHeapCharged = memtable.getAllocator().onHeap().owns() - onHeapBefore;
+        long offHeapCharged = memtable.getAllocator().offHeap().owns() - offHeapBefore;
+        boolean offHeapLimited = AbstractAllocatorMemtable.MEMORY_POOL.offHeap.limit > 0;
+        assertEquals(memtableIndex.estimatedOffHeapMemoryUsed(), offHeapCharged);
+        assertEquals(nativeBackend && offHeapLimited, offHeapCharged > 0);
+        assertEquals(nativeBackend, memtableIndex.nativeBytesUsed() > 0);
+        long onHeapHeld = memtableIndex.estimatedOnHeapMemoryUsed();
+        assertTrue("charged " + onHeapCharged + " on-heap for " + onHeapHeld + " held",
+                   Math.abs(onHeapCharged - onHeapHeld) <= onHeapHeld / 10);
     }
 
     @Test

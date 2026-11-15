@@ -23,7 +23,6 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 
-import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
@@ -165,7 +164,7 @@ public class OnDiskVectorValuesWriterTest extends SAITester
     {
         int dimension = 5;
         float[] data = { 1.5f, 2.5f, 3.5f, 4.5f, 5.5f };
-        ArrayVectorFloat vector = (ArrayVectorFloat) vts.createFloatVector(data);
+        VectorFloat<?> vector = vts.createFloatVector(data);
 
         try (OnDiskVectorValuesWriter writer = new OnDiskVectorValuesWriter(tempFile, dimension))
         {

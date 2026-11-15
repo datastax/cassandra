@@ -168,4 +168,74 @@ public class IndexWriterConfigTest
         .isInstanceOf(InvalidRequestException.class)
         .hasMessageContaining("Enable hierarchy must be 'true' or 'false' for index test, was 'foo'");
     }
+
+    @Test
+    public void enableAshTest()
+    {
+        Map<String, String> options = new HashMap<>();
+        // ASH is off unless enabled
+        IndexWriterConfig config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options);
+        assertThat(config.isAshEnabled()).isFalse();
+
+        // ASH scores dot products only
+        options.put(IndexWriterConfig.ENABLE_ASH, "true");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Enable ASH requires similarity function DOT_PRODUCT for index test, was COSINE");
+
+        // Provide a valid enable_ash
+        options.put(IndexWriterConfig.SIMILARITY_FUNCTION, "dot_product");
+        config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options);
+        assertThat(config.isAshEnabled()).isTrue();
+
+        // ASH needs at least 2 dimensions
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 1), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Enable ASH requires vectors of at least 2 dimensions for index test");
+
+        // Provide an invalid enable_ash
+        options.put(IndexWriterConfig.ENABLE_ASH, "foo");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 3), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("Enable ASH must be 'true' or 'false' for index test, was 'foo'");
+    }
+
+    @Test
+    public void ashDimensionsTest()
+    {
+        Map<String, String> options = new HashMap<>();
+        options.put(IndexWriterConfig.SIMILARITY_FUNCTION, "dot_product");
+        options.put(IndexWriterConfig.ENABLE_ASH, "true");
+        // ASH codes project to half the dimensions unless set
+        IndexWriterConfig config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 384), options);
+        assertThat(config.getAshDimensions(384)).isEqualTo(192);
+
+        // Provide a valid ash_dimensions
+        options.put(IndexWriterConfig.ASH_DIMENSIONS, "380");
+        config = IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 384), options);
+        assertThat(config.getAshDimensions(384)).isEqualTo(380);
+
+        // ash_dimensions must be between 1 and the vector dimension
+        options.put(IndexWriterConfig.ASH_DIMENSIONS, "385");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 384), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("ASH dimensions must be between 1 and the vector dimension 384 for index test, was 385");
+        options.put(IndexWriterConfig.ASH_DIMENSIONS, "0");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 384), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("ASH dimensions must be between 1 and the vector dimension 384 for index test, was 0");
+
+        // Provide an invalid ash_dimensions
+        options.put(IndexWriterConfig.ASH_DIMENSIONS, "foo");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 384), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("ASH dimensions must be an integer for index test, was 'foo'");
+
+        // ash_dimensions needs enable_ash
+        options.put(IndexWriterConfig.ASH_DIMENSIONS, "380");
+        options.put(IndexWriterConfig.ENABLE_ASH, "false");
+        assertThatThrownBy(() -> IndexWriterConfig.fromOptions("test", VectorType.getInstance(FloatType.instance, 384), options))
+        .isInstanceOf(InvalidRequestException.class)
+        .hasMessageContaining("ASH dimensions requires enable_ash for index test");
+    }
 }

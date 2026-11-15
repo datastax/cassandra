@@ -24,6 +24,7 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ForkJoinPool;
@@ -54,6 +55,9 @@ import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.NVQ;
 import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
+import io.github.jbellis.jvector.quantization.AsymmetricHashing;
+import io.github.jbellis.jvector.quantization.CompressedVectors;
+import io.github.jbellis.jvector.quantization.MutableASHVectors;
 import io.github.jbellis.jvector.quantization.MutablePQVectors;
 import io.github.jbellis.jvector.quantization.NVQuantization;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
@@ -154,6 +158,9 @@ public class CompactionGraph implements Closeable, Accountable
     private MutablePQVectors compressedVectors;
     // tracks compressedVectors.ramBytesUsed() without calling it for every inserted vector
     private CompressedPQVectorsBytesTracker compressedVectorsBytes;
+    // with an ASH compressor, the codes in place of compressedVectors, and the graph's scores over them
+    private MutableASHVectors ashVectors;
+    private BuildScoreProvider ashScores;
     private GraphIndexBuilder builder;
 
     private final VectorFloat<?> globalMean;
@@ -213,6 +220,15 @@ public class CompactionGraph implements Closeable, Accountable
             compressedVectors = new MutablePQVectors((ProductQuantization) compressor);
             compressedVectorsBytes = new CompressedPQVectorsBytesTracker(compressedVectors);
             bsp = BuildScoreProvider.pqBuildScoreProvider(similarityFunction, compressedVectors);
+        }
+        else if (compressor instanceof AsymmetricHashing)
+        {
+            // The model is kept, not refined. Nodes are inserted by their codes, scored against each other's codes,
+            // and the codes are encoded on the insertion threads. The vectors given here are read only to score
+            // across models, which one model never does.
+            ashVectors = new MutableASHVectors((AsymmetricHashing) compressor);
+            ashScores = ashVectors.buildScoreProvider(new ListRandomAccessVectorValues(List.of(), dimension));
+            bsp = ashScores;
         }
         else
         {
@@ -326,6 +342,7 @@ public class CompactionGraph implements Closeable, Accountable
                 // this all runs on the same compaction thread, so we don't need to worry about concurrency
                 int ordinal = useSyntheticOrdinals ? nextOrdinal++ : segmentRowId;
                 assert ordinal > maxOrdinal : "Unexpected ordinal " + ordinal + " previous max " + maxOrdinal;
+                int previousMaxOrdinal = maxOrdinal;
                 maxOrdinal = ordinal;
                 CompactionVectorPostings postings = new CompactionVectorPostings(ordinal, segmentRowId);
                 Data<CompactionVectorPostings> data = postingsQueryContext.wrapValueAsData(postings);
@@ -396,6 +413,9 @@ public class CompactionGraph implements Closeable, Accountable
                 // is only needed during index build. It is a temp file.
                 onDiskVectorValuesWriter.write(ordinal, vector);
 
+                if (ashVectors != null)
+                    return addAshCodes(bytesUsed + postings.ramBytesUsed(), previousMaxOrdinal, ordinal, vector);
+
                 // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
                 while (compressedVectors.count() < ordinal)
                     compressedVectors.setZero(compressedVectors.count());
@@ -450,8 +470,26 @@ public class CompactionGraph implements Closeable, Accountable
         }
     }
 
+    /**
+     * Fills the holes before {@code ordinal} with zero codes and counts the codes' bytes; the vector itself is encoded
+     * when its node is added, on an insertion thread.
+     */
+    private InsertionResult addAshCodes(long bytesUsed, int previousMaxOrdinal, int ordinal, VectorFloat<?> vector)
+    {
+        for (int hole = previousMaxOrdinal + 1; hole < ordinal; hole++)
+            ashVectors.setZero(hole);
+        bytesUsed += (ordinal - previousMaxOrdinal) * ashVectors.bytesPerVector();
+        return new InsertionResult(bytesUsed, ordinal, vector);
+    }
+
     public long addGraphNode(InsertionResult result)
     {
+        if (ashVectors != null)
+        {
+            ashVectors.encodeAndSet(result.ordinal, result.vector);
+            return builder.addGraphNode(result.ordinal, ashScores.searchProviderFor(result.ordinal));
+        }
+
         trainingLock.readLock().lock();
         try
         {
@@ -472,14 +510,14 @@ public class CompactionGraph implements Closeable, Accountable
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
         assert !useSyntheticOrdinals || nextOrdinal == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
                                                                                                  nextOrdinal, builder.getGraph().size());
-        assert compressedVectors.count() == builder.getGraph().getIdUpperBound() : String.format("Largest vector id %d != largest graph id %d",
-                                                                                                 compressedVectors.count(), builder.getGraph().getIdUpperBound());
+        assert codes().count() == builder.getGraph().getIdUpperBound() : String.format("Largest vector id %d != largest graph id %d",
+                                                                                       codes().count(), builder.getGraph().getIdUpperBound());
         assert postingsMap.keySet().size() == builder.getGraph().size() : String.format("postings map entry count %d != vector count %d",
                                                                                         postingsMap.keySet().size(), builder.getGraph().size());
         if (logger.isDebugEnabled())
         {
             logger.debug("Writing graph with {} rows and {} distinct vectors", rowsAdded, builder.getGraph().size());
-            logger.debug("Estimated size is {} + {}", compressedVectors.ramBytesUsed(), builder.getGraph().ramBytesUsed());
+            logger.debug("Estimated size is {} + {}", codes().ramBytesUsed(), builder.getGraph().ramBytesUsed());
         }
 
         try (var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true);
@@ -492,8 +530,12 @@ public class CompactionGraph implements Closeable, Accountable
             long pqOffset = pqOutput.getFilePointer();
             Version version = context.version();
             boolean writeFusedPQ = JVectorVersionUtil.shouldWriteFused(version);
-            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, VectorCompression.CompressionType.PRODUCT_QUANTIZATION, version);
-            if (writeFusedPQ)
+            var compressionType = ashVectors != null ? VectorCompression.CompressionType.ASH : VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
+            CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, compressionType, version);
+            if (ashVectors != null)
+                // ASH codes carry their own format version, independent of the graph's
+                ashVectors.write(pqOutput.asSequentialWriter(), AsymmetricHashing.MIN_FORMAT_VERSION);
+            else if (writeFusedPQ)
                 // With FusedPQ the per-vector codes are embedded in TERMS_DATA; only the codebook
                 // (compressor metadata) is needed in the PQ file so that the query vector can be
                 // encoded at search time. Writing full PQVectors here would duplicate the codes on disk.
@@ -607,7 +649,7 @@ public class CompactionGraph implements Closeable, Accountable
         if (globalMean == null)
             return null;
         // Scale in place then create the NVQ
-        VectorUtil.scale(globalMean, 1.0f / compressedVectors.count());
+        VectorUtil.scale(globalMean, 1.0f / codes().count());
         return NVQuantization.create(globalMean, JVectorVersionUtil.NUM_SUB_VECTORS);
     }
 
@@ -628,7 +670,13 @@ public class CompactionGraph implements Closeable, Accountable
 
     public long ramBytesUsed()
     {
-        return compressedVectors.ramBytesUsed() + builder.getGraph().ramBytesUsed();
+        return codes().ramBytesUsed() + builder.getGraph().ramBytesUsed();
+    }
+
+    /** The codes the graph is built with: ASH codes with an ASH compressor, PQ codes otherwise. */
+    private CompressedVectors codes()
+    {
+        return ashVectors != null ? ashVectors : compressedVectors;
     }
 
     public boolean requiresFlush()

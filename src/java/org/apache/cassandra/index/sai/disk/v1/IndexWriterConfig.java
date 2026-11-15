@@ -25,6 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
@@ -47,6 +48,8 @@ public class IndexWriterConfig
     public static final String NEIGHBORHOOD_OVERFLOW = "neighborhood_overflow";
     public static final String ALPHA = "alpha";
     public static final String ENABLE_HIERARCHY = "enable_hierarchy";
+    public static final String ENABLE_ASH = "enable_ash";
+    public static final String ASH_DIMENSIONS = "ash_dimensions";
     public static final String SIMILARITY_FUNCTION = "similarity_function";
     public static final String SOURCE_MODEL = "source_model";
     public static final String OPTIMIZE_FOR = "optimize_for"; // unused, retained for compatibility w/ old schemas
@@ -57,6 +60,7 @@ public class IndexWriterConfig
     public static final int DEFAULT_MAXIMUM_NODE_CONNECTIONS = 16;
     public static final int DEFAULT_CONSTRUCTION_BEAM_WIDTH = 100;
     public static final boolean DEFAULT_ENABLE_HIERARCHY = false;
+    public static final boolean DEFAULT_ENABLE_ASH = false;
 
     public static final int MAX_TOP_K = SAI_VECTOR_SEARCH_MAX_TOP_K.getInt();
 
@@ -93,6 +97,8 @@ public class IndexWriterConfig
     private final Float neighborhoodOverflow; // default varies for in memory/compaction build
     private final Float alpha; // default varies for in memory/compaction build
     private final boolean enableHierarchy; // defaults to false
+    private final boolean enableAsh; // defaults to false
+    private final Integer ashDimensions; // projected dimensions of ASH codes; defaults to half the vector dimension
 
     public IndexWriterConfig(String indexName,
                              int bkdPostingsSkip,
@@ -131,6 +137,23 @@ public class IndexWriterConfig
                              Float alpha,
                              boolean enableHierarchy)
     {
+        this(indexName, bkdPostingsSkip, bkdPostingsMinLeaves, maximumNodeConnections, constructionBeamWidth,
+             similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy, DEFAULT_ENABLE_ASH, null);
+    }
+
+    public IndexWriterConfig(String indexName,
+                             int bkdPostingsSkip,
+                             int bkdPostingsMinLeaves,
+                             int maximumNodeConnections,
+                             int constructionBeamWidth,
+                             VectorSimilarityFunction similarityFunction,
+                             VectorSourceModel sourceModel,
+                             Float neighborhoodOverflow,
+                             Float alpha,
+                             boolean enableHierarchy,
+                             boolean enableAsh,
+                             Integer ashDimensions)
+    {
         this.indexName = indexName;
         this.bkdPostingsSkip = bkdPostingsSkip;
         this.bkdPostingsMinLeaves = bkdPostingsMinLeaves;
@@ -141,6 +164,8 @@ public class IndexWriterConfig
         this.neighborhoodOverflow = neighborhoodOverflow;
         this.alpha = alpha;
         this.enableHierarchy = enableHierarchy;
+        this.enableAsh = enableAsh;
+        this.ashDimensions = ashDimensions;
     }
 
     public String getIndexName()
@@ -204,6 +229,17 @@ public class IndexWriterConfig
         return enableHierarchy;
     }
 
+    public boolean isAshEnabled()
+    {
+        return enableAsh;
+    }
+
+    /** The projected dimensions of ASH codes for vectors of {@code dimension} dimensions. */
+    public int getAshDimensions(int dimension)
+    {
+        return ashDimensions == null ? dimension / 2 : ashDimensions;
+    }
+
     public static IndexWriterConfig fromOptions(String indexName, AbstractType<?> type, Map<String, String> options)
     {
         int minLeaves = DEFAULT_POSTING_LIST_MIN_LEAVES;
@@ -216,6 +252,8 @@ public class IndexWriterConfig
         Float neighborhoodOverflow = null;
         Float alpha = null;
         boolean enableHierarchy = DEFAULT_ENABLE_HIERARCHY;
+        boolean enableAsh = DEFAULT_ENABLE_ASH;
+        Integer ashDimensions = null;
 
         if (options.get(POSTING_LIST_LVL_MIN_LEAVES) != null || options.get(POSTING_LIST_LVL_SKIP_OPTION) != null)
         {
@@ -261,7 +299,9 @@ public class IndexWriterConfig
                  options.get(SOURCE_MODEL) != null ||
                  options.get(NEIGHBORHOOD_OVERFLOW) != null ||
                  options.get(ALPHA) != null ||
-                 options.get(ENABLE_HIERARCHY) != null)
+                 options.get(ENABLE_HIERARCHY) != null ||
+                 options.get(ENABLE_ASH) != null ||
+                 options.get(ASH_DIMENSIONS) != null)
         {
             if (!type.isVector())
                 throw new InvalidRequestException(String.format("CQL type %s cannot have vector options", type.asCQL3Type()));
@@ -368,9 +408,44 @@ public class IndexWriterConfig
                                                                   indexName, value));
                 enableHierarchy = Boolean.parseBoolean(value);
             }
+
+            if (options.containsKey(ENABLE_ASH))
+            {
+                String value = options.get(ENABLE_ASH).toLowerCase();
+                if (!value.equals("true") && !value.equals("false"))
+                    throw new InvalidRequestException(String.format("Enable ASH must be 'true' or 'false' for index %s, was '%s'",
+                                                                  indexName, value));
+                enableAsh = Boolean.parseBoolean(value);
+                if (enableAsh && similarityFunction != VectorSimilarityFunction.DOT_PRODUCT)
+                    throw new InvalidRequestException(String.format("Enable ASH requires similarity function DOT_PRODUCT for index %s, was %s",
+                                                                  indexName, similarityFunction));
+                if (enableAsh && ((VectorType<?>) type).dimension < 2)
+                    throw new InvalidRequestException(String.format("Enable ASH requires vectors of at least 2 dimensions for index %s",
+                                                                  indexName));
+            }
+
+            if (options.containsKey(ASH_DIMENSIONS))
+            {
+                if (!enableAsh)
+                    throw new InvalidRequestException(String.format("ASH dimensions requires enable_ash for index %s", indexName));
+                String value = options.get(ASH_DIMENSIONS);
+                int dimension = ((VectorType<?>) type).dimension;
+                try
+                {
+                    ashDimensions = Integer.parseInt(value);
+                }
+                catch (NumberFormatException e)
+                {
+                    throw new InvalidRequestException(String.format("ASH dimensions must be an integer for index %s, was '%s'",
+                                                                  indexName, value));
+                }
+                if (ashDimensions < 1 || ashDimensions > dimension)
+                    throw new InvalidRequestException(String.format("ASH dimensions must be between 1 and the vector dimension %d for index %s, was %d",
+                                                                  dimension, indexName, ashDimensions));
+            }
         }
 
-        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy);
+        return new IndexWriterConfig(indexName, skip, minLeaves, maximumNodeConnections, queueSize, similarityFunction, sourceModel, neighborhoodOverflow, alpha, enableHierarchy, enableAsh, ashDimensions);
     }
 
     public static IndexWriterConfig defaultConfig(String indexName)
@@ -393,7 +468,7 @@ public class IndexWriterConfig
     @Override
     public String toString()
     {
-        return String.format("IndexWriterConfig{%s=%d, %s=%d, %s=%d, %s=%d, %s=%s, %s=%s, %s=%f, %s=%f, %s=%b}",
+        return String.format("IndexWriterConfig{%s=%d, %s=%d, %s=%d, %s=%d, %s=%s, %s=%s, %s=%f, %s=%f, %s=%b, %s=%b, %s=%s}",
                              POSTING_LIST_LVL_SKIP_OPTION, bkdPostingsSkip,
                              POSTING_LIST_LVL_MIN_LEAVES, bkdPostingsMinLeaves,
                              MAXIMUM_NODE_CONNECTIONS, maximumNodeConnections,
@@ -402,6 +477,8 @@ public class IndexWriterConfig
                              SOURCE_MODEL, sourceModel,
                              NEIGHBORHOOD_OVERFLOW, neighborhoodOverflow,
                              ALPHA, alpha,
-                             ENABLE_HIERARCHY, enableHierarchy);
+                             ENABLE_HIERARCHY, enableHierarchy,
+                             ENABLE_ASH, enableAsh,
+                             ASH_DIMENSIONS, ashDimensions);
     }
 }
