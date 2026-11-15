@@ -46,8 +46,13 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.RequestCallback;
+import org.apache.cassandra.net.ReadRequestCallback;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.sensors.Context;
+import org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator;
+import org.apache.cassandra.sensors.RequestSensors;
+import org.apache.cassandra.sensors.RequestTracker;
+import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.QueryInfoTracker;
 import org.apache.cassandra.service.reads.DataResolver;
 import org.apache.cassandra.service.reads.ReadCallback;
@@ -88,6 +93,11 @@ public class EndpointGroupingCoordinator
     private final Dispatcher.RequestTime requestTime;
     private QueryInfoTracker.ReadTracker readTracker;
     private final int vnodeRanges;
+
+    private final RequestSensors requestSensors = RequestTracker.instance.get();
+    // The endpoints are queried in parallel, so the execution time of this read is the max of the times they report.
+    // It is written to the sensors once, when the iterator returned by execute() is closed.
+    private final ExecutionTimeSensorAccumulator execTimeAccumulator = new ExecutionTimeSensorAccumulator(1);
 
     /**
      * @param command current range read command
@@ -138,7 +148,8 @@ public class EndpointGroupingCoordinator
         for (EndpointQueryContext replica : replicas())
             replica.queryReplica();
 
-        return counter.applyTo(PartitionIterators.concat(concurrentQueries));
+        return PartitionIterators.doOnClose(counter.applyTo(PartitionIterators.concat(concurrentQueries)),
+                                            () -> execTimeAccumulator.onResponse(requestSensors));
     }
 
     @VisibleForTesting
@@ -186,7 +197,9 @@ public class EndpointGroupingCoordinator
             endpointContexts.computeIfAbsent(replica.endpoint(),
                                              k -> new EndpointQueryContext(replica.endpoint(),
                                                                            command.createLimitedCounter(false),
-                                                                           requestTime)).add(handler);
+                                                                           requestTime,
+                                                                           requestSensors,
+                                                                           execTimeAccumulator)).add(handler);
         }
         return new SingleRangeResponse(resolver, handler, NoopReadRepair.instance);
     }
@@ -202,11 +215,19 @@ public class EndpointGroupingCoordinator
         // aka. no more data can be fetched.
         private final DataLimits.Counter singleResultCounter;
         private final Dispatcher.RequestTime requestTime;
+        private final RequestSensors requestSensors;
+        private final ExecutionTimeSensorAccumulator execTimeAccumulator;
 
         private MultiRangeReadCommand multiRangeCommand;
 
-        public EndpointQueryContext(InetAddressAndPort endpoint, DataLimits.Counter singleResultCounter, Dispatcher.RequestTime requestTime)
+        public EndpointQueryContext(InetAddressAndPort endpoint,
+                                    DataLimits.Counter singleResultCounter,
+                                    Dispatcher.RequestTime requestTime,
+                                    RequestSensors requestSensors,
+                                    ExecutionTimeSensorAccumulator execTimeAccumulator)
         {
+            this.requestSensors = requestSensors;
+            this.execTimeAccumulator = execTimeAccumulator;
             this.endpoint = endpoint;
             this.handlers = new ArrayList<>();
             this.singleResultCounter = singleResultCounter;
@@ -249,8 +270,26 @@ public class EndpointGroupingCoordinator
          * 3. passing the split single-range response to a corresponding read callback which will
          *    start resolving responses if it has got enough responses for the consistency level requirement.
          */
-        private class SingleEndpointCallback implements RequestCallback<ReadResponse>
+        private class SingleEndpointCallback implements ReadRequestCallback<ReadResponse>
         {
+            @Override
+            public Context sensorsContext()
+            {
+                return Context.from(multiRangeCommand);
+            }
+
+            @Override
+            public RequestSensors getRequestSensors()
+            {
+                return requestSensors;
+            }
+
+            @Override
+            public void accumulateExecutionTimeSensor(Context context, Type type, double value)
+            {
+                execTimeAccumulator.accumulate(context, type, value);
+            }
+
             @Override
             public void onResponse(Message<ReadResponse> response)
             {

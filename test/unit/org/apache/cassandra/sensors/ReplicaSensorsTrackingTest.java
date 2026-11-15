@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.sensors;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,15 +45,20 @@ import org.apache.cassandra.db.CounterMutationCallback;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.MultiRangeReadCommand;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.RepairedDataInfo;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.locator.EndpointsForRange;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
@@ -78,6 +84,7 @@ import org.apache.cassandra.service.paxos.v1.PrepareCallback;
 import org.apache.cassandra.service.paxos.v1.ProposeCallback;
 import org.apache.cassandra.service.reads.DigestResolver;
 import org.apache.cassandra.service.reads.ReadCallback;
+import org.apache.cassandra.service.reads.range.EndpointGroupingCoordinator;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
@@ -222,6 +229,87 @@ public class ReplicaSensorsTrackingTest
         assertThat(actualWriteBytesSensor.getValue())
                 .as("WRITE_BYTES must remain zero for regular read (verb handler emits READ_BYTES only)")
                 .isZero();
+    }
+
+    /**
+     * Range reads with endpoint grouping (see {@link EndpointGroupingCoordinator}): READ_BYTES is the sum of the values
+     * the endpoints report. READ_EXECUTION_TIME is the max of the values reported before the iterator is closed, written
+     * once on close and not once per vnode range.
+     */
+    @Test
+    public void testSensorsTrackedForEndpointGrouping()
+    {
+        RequestSensors sensors = new ActiveRequestSensors();
+        Context context = Context.from(cfs.metadata());
+        sensors.registerSensor(context, Type.READ_BYTES);
+        sensors.registerSensor(context, Type.READ_EXECUTION_TIME);
+        RequestTracker.instance.set(sensors);
+        Sensor readBytes = sensors.getSensor(context, Type.READ_BYTES).get();
+        Sensor executionTime = sensors.getSensor(context, Type.READ_EXECUTION_TIME).get();
+
+        // Two vnode ranges, both replicated to the same three endpoints.
+        PartitionRangeReadCommand command = (PartitionRangeReadCommand) Util.cmd(cfs).build();
+        EndpointsForRange replicas = EndpointsForRange.of(targets.get(0), targets.get(1), targets.get(2));
+        ReplicaPlan.ForRangeRead plan = new ReplicaPlan.ForRangeRead(ks, ks.getReplicationStrategy(), ConsistencyLevel.ALL,
+                                                                     command.dataRange().keyRange(), replicas, replicas, 1);
+        EndpointGroupingCoordinator coordinator =
+            new EndpointGroupingCoordinator(command,
+                                            DataLimits.NONE.newCounter(command.nowInSec(), true, command.selectsFullPartition(), true),
+                                            Arrays.asList(plan, plan).iterator(),
+                                            2,
+                                            Dispatcher.RequestTime.forImmediateExecution(),
+                                            QueryInfoTracker.ReadTracker.NOOP);
+
+        // Capture the request sent to each endpoint, and drop it.
+        Map<InetAddressAndPort, Message<?>> requests = new HashMap<>();
+        MessagingService.instance().outboundSink.add((message, to) -> {
+            if (message.verb() != Verb.MULTI_RANGE_REQ)
+                return true;
+            requests.put(to, message);
+            return false;
+        });
+        PartitionIterator result;
+        try
+        {
+            result = coordinator.execute();
+        }
+        finally
+        {
+            MessagingService.instance().outboundSink.clear();
+        }
+        assertThat(requests.size()).isEqualTo(replicas.size());
+
+        respondToMultiRangeRead(requests, replicas.get(0), context, 42, 100_000_000L);
+        respondToMultiRangeRead(requests, replicas.get(1), context, 17, 200_000_000L);
+        assertThat(readBytes.getValue()).isEqualTo(42 + 17);
+        assertThat(executionTime.getValue()).isZero();
+
+        // The iterator is closed before the third endpoint has responded, e.g. because a LIMIT is reached.
+        result.close();
+        assertThat(executionTime.getValue()).isEqualTo(200_000_000L);
+
+        // A response arriving after the close does not record the execution time again.
+        respondToMultiRangeRead(requests, replicas.get(2), context, 50, 300_000_000L);
+        assertThat(executionTime.getValue()).isEqualTo(200_000_000L);
+    }
+
+    private void respondToMultiRangeRead(Map<InetAddressAndPort, Message<?>> requests, Replica replica, Context context, double readBytes, double executionTime)
+    {
+        Sensor readBytesSensor = new mockingSensor(context, Type.READ_BYTES);
+        readBytesSensor.increment(readBytes);
+        Sensor executionTimeSensor = new mockingSensor(context, Type.READ_EXECUTION_TIME);
+        executionTimeSensor.increment(executionTime);
+
+        Message<?> request = requests.get(replica.endpoint());
+        MultiRangeReadCommand multiRangeCommand = (MultiRangeReadCommand) request.payload;
+        UnfilteredPartitionIterator data = Mockito.mock(UnfilteredPartitionIterator.class);
+        Mockito.when(data.metadata()).thenReturn(multiRangeCommand.metadata());
+        Mockito.when(data.hasNext()).thenReturn(false);
+        ReadResponse response = multiRangeCommand.createResponse(data, RepairedDataInfo.NO_OP_REPAIRED_DATA_INFO);
+        Message.Builder<ReadResponse> builder = Message.builder(Verb.MULTI_RANGE_RSP, response).from(replica.endpoint()).withId(request.id());
+        for (Sensor sensor : List.of(readBytesSensor, executionTimeSensor))
+            builder.withCustomParam(SensorsCustomParams.paramForRequestSensor(sensor).get(), SensorsCustomParams.sensorValueAsBytes(sensor.getValue()));
+        ResponseVerbHandler.instance.doVerb(builder.build());
     }
 
     @Test

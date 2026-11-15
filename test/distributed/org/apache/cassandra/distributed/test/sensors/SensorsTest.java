@@ -319,8 +319,9 @@ public class SensorsTest extends TestBaseImpl
 
     /**
      * SAI scenarios on a scalar column ({@value TBL_SAI}): inserts (insertRow path), updates (updateRow path),
-     * and CAS (insert via IF NOT EXISTS / update via IF condition).
+     * CAS (insert via IF NOT EXISTS / update via IF condition), and index reads.
      * The update path exercises {@code TrieMemtableIndex.update(ByteBuffer, ByteBuffer)}.
+     * Index reads are range reads executed with endpoint grouping (see {@code EndpointGroupingCoordinator}).
      */
     private static List<Object[]> saiScalarScenarios()
     {
@@ -329,6 +330,7 @@ public class SensorsTest extends TestBaseImpl
         String writeUpdate = withKeyspace("INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (1, 'sai updated')");
         String cas = withKeyspace("UPDATE %s." + TBL_SAI + " SET v1 = 'sai cas update' WHERE pk = 1 IF v1 = 'sai read me'");
         String casInsert = withKeyspace("INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (5, 'sai cas insert') IF NOT EXISTS");
+        String indexRead = withKeyspace("SELECT * FROM %s." + TBL_SAI + " WHERE v1 = 'sai read me'");
         String loggedBatch = String.format("BEGIN BATCH\n" +
                                            "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (2, 'sai read me 2');\n" +
                                            "INSERT INTO %s." + TBL_SAI + "(pk, v1) VALUES (3, 'sai read me 3');\n" +
@@ -361,6 +363,8 @@ public class SensorsTest extends TestBaseImpl
         result.add(new Object[]{ "sai: CAS IF NOT EXISTS (insertRow path) [v2]", noPrep, casInsert, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
         result.add(new Object[]{ "sai: CAS IF condition (updateRow path) [v1]", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
         result.add(new Object[]{ "sai: CAS IF condition (updateRow path) [v2]", new String[]{ write }, cas, new String[]{ WRITE_SAI, WRITE_EXECUTION_TIME_SAI, READ_SAI, READ_EXECUTION_TIME_SAI, INDEX_WRITE_SAI, READ_COST, WRITE_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v2 });
+        result.add(new Object[]{ "sai: index read (paging)", new String[]{ write }, indexRead, new String[]{ READ_SAI, READ_EXECUTION_TIME_SAI, READ_COST, TOTAL_COST }, true, false, Config.PaxosVariant.v1 });
+        result.add(new Object[]{ "sai: index read (no paging)", new String[]{ write }, indexRead, new String[]{ READ_SAI, READ_EXECUTION_TIME_SAI, READ_COST, TOTAL_COST }, false, false, Config.PaxosVariant.v1 });
         return result;
     }
 

@@ -33,9 +33,11 @@ import org.apache.cassandra.sensors.Sensor;
 import org.apache.cassandra.sensors.SensorsCustomParams;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.paxos.v1.AbstractPaxosCallback;
-import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.NoSpamLogger;
 
+import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.utils.MonotonicClock.Global.preciseTime;
 
@@ -70,7 +72,16 @@ public class ResponseVerbHandler implements IVerbHandler
         else
         {
             MessagingService.instance().latencySubscribers.maybeAdd(cb, message.verb(), message.from(), latencyNanos, NANOSECONDS, false);
-            trackReplicaSensors(callbackInfo, message);
+            try
+            {
+                trackReplicaSensors(callbackInfo, message);
+            }
+            catch (Throwable e)
+            {
+                // Do not let sensor tracking break response handling.
+                JVMStabilityInspector.inspectThrowable(e);
+                NoSpamLogger.log(logger, NoSpamLogger.Level.ERROR, 1, MINUTES, "Error for response callback {} and message {}, no sensors will be tracked.", cb, message, e);
+            }
             cb.onResponse(message);
         }
     }
@@ -118,10 +129,9 @@ public class ResponseVerbHandler implements IVerbHandler
                 accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
             }
         }
-        else if (callbackInfo.callback instanceof ReadCallback)
+        else if (callbackInfo.callback instanceof ReadRequestCallback)
         {
-            ReadCallback<?, ?> readCallback = (ReadCallback<?, ?>) callbackInfo.callback;
-            Context context = Context.from(readCallback.command());
+            Context context = ((ReadRequestCallback<?>) callbackInfo.callback).sensorsContext();
             incrementSensor(sensors, context, Type.READ_BYTES, message);
             incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
             accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.READ_EXECUTION_TIME, message);
@@ -175,6 +185,12 @@ public class ResponseVerbHandler implements IVerbHandler
             incrementSensor(sensors, context, Type.INDEX_WRITE_BYTES, message);
             incrementSensor(sensors, context, Type.INTERNODE_BYTES, message);
             accumulateExecutionTimeSensor(callbackInfo.callback, sensors, context, Type.WRITE_EXECUTION_TIME, message);
+        }
+        // Only when the replica did send sensor values: some callbacks with sensors, such as the batchlog store's,
+        // get empty responses and have nothing to track.
+        else if (message.header.customParams() != null && !message.header.customParams().isEmpty())
+        {
+            NoSpamLogger.log(logger, NoSpamLogger.Level.INFO, 1, MINUTES, "Ignored response callback {} for message {}, no sensors will be tracked.", callbackInfo.callback, message);
         }
     }
 
