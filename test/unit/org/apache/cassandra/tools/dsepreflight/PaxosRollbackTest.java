@@ -2330,5 +2330,18 @@ public class PaxosRollbackTest
         assertThat(result.nodes).isEmpty();
         assertThat(result.reportsRead).isZero();
         assertThat(aggregate.exitCode).isEqualTo(DsePreflight.EXIT_BLOCKED);
+
+        // more reports, written in an order that is neither theirs nor its reverse: named in the order of their names,
+        // the order the aggregate reads the files in, not the order the file system lists the directory in (five
+        // names: a listing in that order by chance is possible, and ClusterAggregateTest pins the order itself)
+        for (String name : List.of("paxos-c", "paxos-a", "paxos-d", "paxos-b"))
+            Files.copy(reports.resolve("paxos.json"), reports.resolve(name + ".json"));
+        ClusterAggregate.AggregateReport ordered = ClusterAggregate.aggregate(reports);
+        assertThat(ordered.findings).filteredOn(f -> f.code.equals("PAXOS_ROLLBACK_REPORT_SKIPPED"))
+                                    .singleElement()
+                                    .satisfies(f -> assertThat(f.message)
+                                                    .isEqualTo("Paxos rollback reports (--paxos-rollback) in the " +
+                                                               "directory, skipped: paxos-a.json, paxos-b.json, " +
+                                                               "paxos-c.json, paxos-d.json, paxos.json"));
     }
 }
