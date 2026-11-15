@@ -16,7 +16,9 @@
 
 package org.apache.cassandra.distributed.test.dsecompat;
 
+import java.io.IOException;
 import java.net.InetAddress;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -26,8 +28,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.junit.Test;
 
@@ -47,8 +52,10 @@ import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
+import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.service.DseUpgradeMarker;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
@@ -429,6 +436,108 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
                 assertThat(found).as(table).isEqualTo(tokens);
             }
         }
+    }
+
+    /**
+     * The hints of a node in the mode: with a replica down, the writes at ONE are stored in hints files of version 1
+     * (named {@code <host id>-<timestamp>-1.hints}, the version 1 DSE 5.1 reads at the start of each), and delivered
+     * once the replica is back. After the flag drop of both nodes ({@code NONE} with {@code HCD_1}), the hints file of
+     * version 1 the node wrote in the mode before it stopped is delivered too.
+     */
+    @Test
+    public void theHintsOfTheModeAreOfVersion1AndDeliveredInTheModeAndAfterTheFlagDrop() throws Throwable
+    {
+        try (Cluster cluster = upgradedNodes(NODES, "CREATE TABLE %s.h (id int PRIMARY KEY, v text)"))
+        {
+            IInvokableInstance coordinator = cluster.get(1);
+            IInvokableInstance replica = cluster.get(2);
+            String replicaHostId = replica.callOnInstance(() -> StorageService.instance.getLocalHostUUID().toString());
+            Path hints = Path.of(coordinator.callOnInstance(() -> DatabaseDescriptor.getHintsDirectory()
+                                                                                    .absolutePath()));
+
+            replica.shutdown().get();
+            ClusterUtils.awaitRingStatus(coordinator, replica, "Down");
+            writeAtOne(cluster, 0);
+            coordinator.runOnInstance(() -> {
+                UUID target = UUID.fromString(replicaHostId);
+                HintsService.instance.flushAndFsyncBlockingly(List.of(target));
+            });
+            assertHintsFilesOfVersion1(hints, replicaHostId);
+
+            replica.startup();
+            awaitHintsDelivered(coordinator, replica, ROWS);
+
+            // the flag drop, with a hints file of version 1 left on the coordinator: written in the mode, closed when
+            // the coordinator stops
+            replica.shutdown().get();
+            ClusterUtils.awaitRingStatus(coordinator, replica, "Down");
+            writeAtOne(cluster, ROWS);
+            coordinator.shutdown().get();
+            assertHintsFilesOfVersion1(hints, replicaHostId);
+            for (IInvokableInstance instance : List.of(coordinator, replica))
+            {
+                instance.config().set("internode_compatibility_mode", "NONE");
+                instance.config().set("storage_compatibility_mode", "HCD_1");
+                try (WithProperties ignore = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS,
+                                                                      true))
+                {
+                    instance.startup();
+                }
+                assertThat(instance.callOnInstance(DatabaseDescriptor::isDse51CompatibilityMode)).isFalse();
+            }
+            awaitHintsDelivered(coordinator, replica, 2 * ROWS);
+        }
+    }
+
+    /** {@link #ROWS} rows from {@code first} on, written through node 1 at ONE. */
+    private static void writeAtOne(Cluster cluster, int first)
+    {
+        for (int i = first; i < first + ROWS; i++)
+            cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.h (id, v) VALUES (?, ?)"),
+                                           ConsistencyLevel.ONE, i, "v" + i);
+    }
+
+    /** The hints files for the host in the directory: at least one, each named and started as version 1. */
+    private static void assertHintsFilesOfVersion1(Path directory, String hostId) throws IOException
+    {
+        List<String> descriptors = new ArrayList<>();
+        try (Stream<Path> files = Files.list(directory))
+        {
+            for (Path file : (Iterable<Path>) files::iterator)
+            {
+                String name = file.getFileName().toString();
+                if (name.startsWith(hostId) && name.endsWith(".hints") && !name.endsWith("-Statistics.hints"))
+                    descriptors.add(name + " version " + ByteBuffer.wrap(Files.readAllBytes(file)).getInt());
+            }
+        }
+        assertThat(descriptors).isNotEmpty()
+                               .allMatch(d -> d.matches(Pattern.quote(hostId) + "-[0-9]+-1\\.hints version 1"),
+                                         "named and started as version 1");
+    }
+
+    /** Waits for the instance to have no hints file left for the replica, and for the replica to hold the rows. */
+    private static void awaitHintsDelivered(IInvokableInstance instance, IInvokableInstance replica, int rows)
+    throws InterruptedException
+    {
+        ClusterUtils.awaitRingStatus(instance, replica, "Up");
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(3);
+        Object[][] count = null;
+        while (System.nanoTime() < deadline)
+        {
+            count = replica.executeInternal(withKeyspace("SELECT count(*) FROM %s.h"));
+            if ((long) count[0][0] == rows)
+                break;
+            Thread.sleep(1000);
+        }
+        assertThat(count).isDeepEqualTo(new Object[][]{ { (long) rows } });
+        long pending = 1;
+        while (System.nanoTime() < deadline && pending > 0)
+        {
+            pending = instance.callOnInstance(() -> (long) HintsService.instance.getPendingHintsInfo().size());
+            if (pending > 0)
+                Thread.sleep(1000);
+        }
+        assertThat(pending).as("targets with hints pending").isZero();
     }
 
     /** The node has the marker of the upgrade from DSE 5.1, and not the one of the upgrade from DSE 6. */

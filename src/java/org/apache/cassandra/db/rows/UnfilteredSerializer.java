@@ -305,17 +305,7 @@ public class UnfilteredSerializer
     {
         SerializationHeader header = helper.header;
         if (DseCompat.isPre40Layout(version) && !header.isForSSTable())
-        {
-            if (marker.isBoundary())
-            {
-                checkPre40DeletionTime(((RangeTombstoneBoundaryMarker) marker).endDeletionTime().localDeletionTime(), version);
-                checkPre40DeletionTime(((RangeTombstoneBoundaryMarker) marker).startDeletionTime().localDeletionTime(), version);
-            }
-            else
-            {
-                checkPre40DeletionTime(((RangeTombstoneBoundMarker) marker).deletionTime().localDeletionTime(), version);
-            }
-        }
+            checkPre40DeletionTimes(marker, version);
         out.writeByte((byte)IS_MARKER);
         ClusteringBoundOrBoundary.serializer.serialize(marker.clustering(), out, version, header.clusteringTypes());
 
@@ -406,12 +396,42 @@ public class UnfilteredSerializer
     private static void checkPre40DeletionTime(long localDeletionTime, int version, Version sstableVersion)
     {
         if (localDeletionTime > CellData.MAX_DELETION_TIME_2038_LEGACY_CAP && localDeletionTime != Cell.NO_DELETION_TIME)
-            throw new IllegalStateException(DseCompat.source() + " compatibility mode: local deletion time " +
-                                            localDeletionTime + " is past 2038 and cannot be " +
-                                            (sstableVersion == null
-                                             ? "sent at messaging version " + version
-                                             : "written to an sstable of version " + sstableVersion) +
-                                            ", whose deletion times are 32-bit");
+            throw new Pre40DeletionTimeException(localDeletionTime, version, sstableVersion);
+    }
+
+    /**
+     * The refusal of {@link #checkPre40DeletionTime(long, int)} and of a rewrite at big {@code me}
+     * ({@link #checkPre40SSTableDeletionTimes}, {@link #checkPre40SSTableDeletionTime}), with the time refused.
+     */
+    public static final class Pre40DeletionTimeException extends IllegalStateException
+    {
+        /** the local deletion or expiration time past 2038 */
+        public final long localDeletionTime;
+
+        Pre40DeletionTimeException(long localDeletionTime, int version, Version sstableVersion)
+        {
+            super(DseCompat.source() + " compatibility mode: local deletion time " + localDeletionTime + " is past " +
+                  "2038 and cannot be " + (sstableVersion == null
+                                           ? "sent at messaging version " + version
+                                           : "written to an sstable of version " + sstableVersion) +
+                  ", whose deletion times are 32-bit");
+            this.localDeletionTime = localDeletionTime;
+        }
+    }
+
+    /**
+     * The checks of {@link #checkPre40DeletionTime(long, int)} the pre-4.0 codec makes while it writes
+     * {@code unfiltered} for messaging, made without writing it: those of a row (its liveness, its deletion, its cells
+     * and complex deletions) or of a range tombstone marker (its deletion times): the codec's own check of a marker,
+     * and the one of a caller that must know before it writes (the hints of the DSE 5.1 compatibility mode,
+     * {@code org.apache.cassandra.hints.Dse51Hints}).
+     *
+     * @throws Pre40DeletionTimeException (an {@link IllegalStateException}) with the text of the codec, for a time
+     *                                     past 2038
+     */
+    public static void checkPre40DeletionTimes(Unfiltered unfiltered, int version)
+    {
+        checkPre40DeletionTimes(unfiltered, version, null);
     }
 
     private static void checkPre40DeletionTimes(Row row, int version)

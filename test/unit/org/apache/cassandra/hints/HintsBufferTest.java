@@ -29,6 +29,8 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.marshal.ValueAccessors;
@@ -36,11 +38,14 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -158,6 +163,46 @@ public class HintsBufferTest
 
         // free the buffer
         buffer.free();
+    }
+
+    /**
+     * With {@code storage_compatibility_mode: DSE_5_1} the pool sizes a hint, and the buffer writes it, at messaging
+     * version 11, the version of the hints files of version 1 the buffer is flushed to.
+     */
+    @Test
+    public void inTheDse51ModeAHintIsSizedAndWrittenAtVersion11() throws IOException
+    {
+        StorageCompatibilityMode storageBefore = DatabaseDescriptor.getStorageCompatibilityMode();
+        InternodeCompatibilityMode internodeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        HintsBufferPool pool = new HintsBufferPool(1 << 20, (buffer, p) -> {});
+        try
+        {
+            UUID hostId = UUID.randomUUID();
+            Hint hint = createHint(0, System.currentTimeMillis());
+            pool.write(Collections.singleton(hostId), hint);
+            ByteBuffer entry = pool.currentBuffer().consumingHintsIterator(hostId).next();
+            byte[] expected;
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                Hint.serializer.serialize(hint, out, MessagingService.VERSION_3014);
+                expected = out.toByteArray();
+            }
+            assertEquals(Hint.serializer.serializedSize(hint, MessagingService.VERSION_3014), expected.length);
+            DataInputPlus in = new DataInputBuffer(entry, true);
+            assertEquals(expected.length, in.readInt());
+            in.readInt(); // the checksum of the size
+            byte[] written = new byte[expected.length];
+            in.readFully(written);
+            assertArrayEquals(expected, written);
+        }
+        finally
+        {
+            pool.close();
+            DatabaseDescriptor.setStorageCompatibilityMode(storageBefore);
+            DatabaseDescriptor.setInternodeCompatibilityMode(internodeBefore);
+        }
     }
 
     private static int validateEntry(UUID hostId, ByteBuffer buffer, long baseTimestamp, UUID[] load) throws IOException

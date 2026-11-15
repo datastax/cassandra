@@ -30,6 +30,7 @@ import com.google.common.io.ByteStreams;
 import org.apache.cassandra.io.util.File;
 import org.junit.Test;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
@@ -290,5 +291,52 @@ public class HintsDescriptorTest
         int resolvedMsgVersion = HintsDescriptor.messagingVersion(hintsVersion);
         assertEquals("Hints VERSION_40 should resolve back to messaging VERSION_40",
                      MessagingService.Version.VERSION_40.value, resolvedMsgVersion);
+    }
+
+    /**
+     * With {@code storage_compatibility_mode: DSE_5_1} new files are of hints version 1, the one DSE 5.1 reads, their
+     * mutations written and read at messaging version 11; every other mode keeps the version of its storage messaging
+     * version, and reads version 1 at 10.
+     */
+    @Test
+    public void dse51WritesVersion1AtMessagingVersion11AndTheOtherModesAreUnchanged()
+    {
+        StorageCompatibilityMode before = DatabaseDescriptor.getStorageCompatibilityMode();
+        try
+        {
+            for (StorageCompatibilityMode mode : StorageCompatibilityMode.values())
+            {
+                DatabaseDescriptor.setStorageCompatibilityMode(mode);
+                UUID hostId = UUID.randomUUID();
+                HintsDescriptor descriptor = new HintsDescriptor(hostId, System.currentTimeMillis());
+                if (mode == StorageCompatibilityMode.DSE_5_1)
+                {
+                    assertThat(HintsDescriptor.currentStorageVersion()).isEqualTo(HintsDescriptor.VERSION_30);
+                    assertThat(HintsDescriptor.currentWriteMessagingVersion()).isEqualTo(MessagingService.VERSION_3014);
+                    assertThat(HintsDescriptor.messagingVersion(HintsDescriptor.VERSION_30))
+                    .isEqualTo(MessagingService.VERSION_3014);
+                    assertThat(descriptor.fileName()).isEqualTo(hostId + "-" + descriptor.timestamp + "-1.hints");
+                }
+                else
+                {
+                    int storage = mode.storageMessagingVersion();
+                    assertThat(HintsDescriptor.currentStorageVersion()).as(mode.toString())
+                    .isEqualTo(HintsDescriptor.hintsVersionFromMessagingVersion(storage));
+                    assertThat(HintsDescriptor.currentWriteMessagingVersion()).as(mode.toString()).isEqualTo(storage);
+                    assertThat(HintsDescriptor.messagingVersion(HintsDescriptor.VERSION_30)).as(mode.toString())
+                    .isEqualTo(MessagingService.VERSION_30);
+                }
+                assertThat(descriptor.version).isEqualTo(HintsDescriptor.currentStorageVersion());
+                assertThat(descriptor.messagingVersion()).as(mode.toString())
+                .isEqualTo(HintsDescriptor.currentWriteMessagingVersion());
+                // the other versions are read at their own messaging version in every mode
+                assertThat(HintsDescriptor.messagingVersion(HintsDescriptor.VERSION_40))
+                .isEqualTo(MessagingService.VERSION_40);
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(before);
+        }
     }
 }

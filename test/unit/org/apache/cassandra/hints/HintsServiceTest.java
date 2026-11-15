@@ -49,13 +49,19 @@ import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import com.codahale.metrics.Counter;
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.DurationSpec;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.locator.AbstractNetworkTopologySnitch;
@@ -72,6 +78,21 @@ import org.apache.cassandra.net.MockMessagingSpy;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.concurrent.Future;
+import org.apache.cassandra.transport.Dispatcher;
+import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.AbstractWriteResponseHandler;
+import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.metrics.CassandraMetricsRegistry;
+import org.apache.cassandra.locator.ReplicaUtils;
+import org.apache.cassandra.locator.ReplicaPlans;
+import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.hints.HintsTestUtil.*;
 import static org.junit.Assert.assertEquals;
@@ -832,5 +853,119 @@ public class HintsServiceTest
             Hint hint = Hint.create(builder.buildAsMutation(), now);
             HintsService.instance.write(hostId, hint);
         }
+    }
+
+    /**
+     * In the DSE 5.1 storage mode a hint re-addressed to all the replicas of its token (a hint of a host that left)
+     * that the mode's hints files cannot hold, a deletion time past 2038, is refused and counted, for all of them.
+     */
+    @Test
+    public void testWriteForAllReplicasRefusedInTheDse51Mode() throws Exception
+    {
+        TokenMetadata tokens = StorageService.instance.getTokenMetadata();
+        InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.4");
+        UUID peerHostId = UUID.randomUUID();
+        Mutation mutation = RowUpdateBuilder.deleteRowAt(metadata, FBUtilities.timestampMicros(),
+                                                         CellData.MAX_DELETION_TIME_2038_LEGACY_CAP + 1000L,
+                                                         "refused", "name");
+        StorageCompatibilityMode storageBefore = DatabaseDescriptor.getStorageCompatibilityMode();
+        InternodeCompatibilityMode internodeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        long initialHints = StorageMetrics.totalHints.getCount();
+        DseCompatRefusals.reset();
+        // the hint stored outside the mode stays on disk
+        HintsService.instance.pauseDispatch();
+        try
+        {
+            tokens.updateNormalToken(mutation.key().getToken(), peer);
+            tokens.updateHostId(peerHostId, peer);
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            HintsService.instance.writeForAllReplicas(Hint.create(mutation, FBUtilities.now().toEpochMilli()));
+            assertEquals(1, DseCompatRefusals.count(Dse51Hints.REFUSED_HINT));
+            assertEquals(initialHints, StorageMetrics.totalHints.getCount());
+            assertEquals(0, HintsService.instance.getTotalHintsSize(peerHostId));
+
+            // the same hint outside the mode is stored for the replica
+            DatabaseDescriptor.setStorageCompatibilityMode(storageBefore);
+            DatabaseDescriptor.setInternodeCompatibilityMode(internodeBefore);
+            HintsService.instance.writeForAllReplicas(Hint.create(mutation, FBUtilities.now().toEpochMilli()));
+            assertEquals(initialHints + 1, StorageMetrics.totalHints.getCount());
+            assertEquals(1, DseCompatRefusals.count(Dse51Hints.REFUSED_HINT));
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(storageBefore);
+            DatabaseDescriptor.setInternodeCompatibilityMode(internodeBefore);
+            DseCompatRefusals.reset();
+            HintsService.instance.deleteAllHintsForEndpoint(peer);
+            tokens.removeEndpoint(peer);
+        }
+    }
+
+    /**
+     * In the DSE 5.1 storage mode a write at ANY whose hint the mode's hints files cannot hold (a deletion time past
+     * 2038) is not answered by the hint: the hint is refused and counted, neither counted as created nor taken as the
+     * write, which then times out as no write took place; outside the mode the same hint is taken as the write.
+     */
+    @Test
+    public void testWriteAtAnyNotAnsweredByARefusedHintInTheDse51Mode() throws Exception
+    {
+        TokenMetadata tokens = StorageService.instance.getTokenMetadata();
+        InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.6");
+        UUID peerHostId = UUID.randomUUID();
+        Mutation mutation = RowUpdateBuilder.deleteRowAt(metadata, FBUtilities.timestampMicros(),
+                                                         CellData.MAX_DELETION_TIME_2038_LEGACY_CAP + 1000L,
+                                                         "refused at any", "name");
+        String createdName = "Hints_created-" + peer.toString().replace(':', '.');
+        Counter created = CassandraMetricsRegistry.Metrics.counter(new DefaultNameFactory("HintsService")
+                                                                   .createMetricName(createdName));
+        StorageCompatibilityMode storageBefore = DatabaseDescriptor.getStorageCompatibilityMode();
+        InternodeCompatibilityMode internodeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DseCompatRefusals.reset();
+        HintsService.instance.pauseDispatch();
+        try
+        {
+            Token token = mutation.key().getToken();
+            tokens.updateNormalToken(token, peer);
+            tokens.updateHostId(peerHostId, peer);
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            long createdBefore = created.getCount();
+            AbstractWriteResponseHandler<IMutation> refused = submitHintAtAny(mutation, peer, token);
+            assertEquals(1, DseCompatRefusals.count(Dse51Hints.REFUSED_HINT));
+            assertEquals(0, refused.ackCount());
+            assertEquals(createdBefore, created.getCount());
+
+            DatabaseDescriptor.setStorageCompatibilityMode(storageBefore);
+            DatabaseDescriptor.setInternodeCompatibilityMode(internodeBefore);
+            AbstractWriteResponseHandler<IMutation> stored = submitHintAtAny(mutation, peer, token);
+            assertEquals(1, stored.ackCount());
+            assertEquals(createdBefore + 1, created.getCount());
+            assertEquals(1, DseCompatRefusals.count(Dse51Hints.REFUSED_HINT));
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(storageBefore);
+            DatabaseDescriptor.setInternodeCompatibilityMode(internodeBefore);
+            DseCompatRefusals.reset();
+            HintsService.instance.deleteAllHintsForEndpoint(peer);
+            tokens.removeEndpoint(peer);
+        }
+    }
+
+    /** Submits the hint of a write at ANY to the replica, as the write's coordinator does, and waits for its task. */
+    private static AbstractWriteResponseHandler<IMutation> submitHintAtAny(Mutation mutation, InetAddressAndPort peer,
+                                                                           Token token)
+    {
+        Keyspace keyspace = Keyspace.open(KEYSPACE);
+        ReplicaPlan.ForWrite plan = ReplicaPlans.forWrite(keyspace, ConsistencyLevel.ANY, token, ReplicaPlans.writeAll);
+        AbstractWriteResponseHandler<IMutation> handler =
+        keyspace.getReplicationStrategy().getWriteResponseHandler(plan, null, WriteType.SIMPLE, null,
+                                                                  Dispatcher.RequestTime.forImmediateExecution());
+        long inProgress = StorageMetrics.totalHintsInProgress.getCount();
+        StorageProxy.submitHint(mutation, ReplicaUtils.full(peer, token), handler);
+        Awaitility.await().atMost(30, TimeUnit.SECONDS)
+                  .until(() -> StorageMetrics.totalHintsInProgress.getCount() == inProgress);
+        return handler;
     }
 }

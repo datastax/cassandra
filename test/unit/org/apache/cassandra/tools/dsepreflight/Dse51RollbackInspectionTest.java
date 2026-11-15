@@ -20,16 +20,19 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.lang.reflect.Proxy;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.zip.CRC32;
@@ -45,12 +48,15 @@ import org.junit.rules.TemporaryFolder;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.commitlog.CommitLogDescriptor;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
+import org.apache.cassandra.io.compress.ICompressor;
+import org.apache.cassandra.io.compress.LZ4Compressor;
 import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.File;
@@ -77,7 +83,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * DSE 5.1 peers and the record of the values of DSE 5.1's columns, which every node of HCD 2.0 in the mode holds. Each
  * refusal is made by one change to that node: the captured DSE 5.1.51 commit log segment (it holds mutations) and
  * transaction log, and, generated here since the capture holds none, sstables of other versions or with a
- * non-numeric identifier, hints files of version 2 or with a damaged descriptor, an incomplete snapshot or several,
+ * non-numeric identifier, hints files of version 2 or with a damaged descriptor, the captured hints file damaged,
+ * cut short or compressed, an incomplete snapshot or several,
  * and directories that are missing or cannot be read. What a real drain leaves in the commit log is checked by
  * {@link Dse51RollbackCommitLogTest}.
  */
@@ -89,6 +96,10 @@ public class Dse51RollbackInspectionTest
     private static final UUID NODE_2 = Dse51Fixtures.HOST_IDS.get(1);
     private static final UUID NODE_3 = Dse51Fixtures.HOST_IDS.get(2);
     private static final String SEGMENT = "CommitLog-7-1793990000000.log";
+    /** The timestamp of the hints files generated here. */
+    private static final long TIMESTAMP = 1793990000000L;
+    /** The size of the descriptor of DSE 5.1.51's hints file: its fields, its parameters {} and its checksums. */
+    private static final int CAPTURED_DESCRIPTOR_SIZE = 4 + 8 + 16 + 4 + 4 + 2 + 4;
     /** The address of node 3 in node 1's system.peers. */
     private static String node3Address;
 
@@ -248,14 +259,24 @@ public class Dse51RollbackInspectionTest
     /** A hints file of the version given, its descriptor only, as {@code HintsDescriptor} lays it out. */
     private static void hintsFile(Path file, int version, UUID hostId) throws IOException
     {
-        byte[] json = "{}".getBytes(StandardCharsets.UTF_8);
+        hintsFile(file, version, hostId, TIMESTAMP, "{}", new byte[0]);
+    }
+
+    /**
+     * A hints file: the descriptor of the version, host id, timestamp and parameters (JSON) given, laid out as
+     * {@code HintsDescriptor} lays it out, then {@code body}.
+     */
+    private static void hintsFile(Path file, int version, UUID hostId, long timestamp, String parameters, byte[] body)
+    throws IOException
+    {
+        byte[] json = parameters.getBytes(StandardCharsets.UTF_8);
         CRC32 crc = new CRC32();
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (DataOutputStream out = new DataOutputStream(bytes))
         {
             out.writeInt(version);
             FBUtilities.updateChecksumInt(crc, version);
-            long[] values = { 1793990000000L, hostId.getMostSignificantBits(), hostId.getLeastSignificantBits() };
+            long[] values = { timestamp, hostId.getMostSignificantBits(), hostId.getLeastSignificantBits() };
             for (long value : values)
             {
                 out.writeLong(value);
@@ -268,8 +289,49 @@ public class Dse51RollbackInspectionTest
             out.write(json);
             crc.update(json, 0, json.length);
             out.writeInt((int) crc.getValue());
+            out.write(body);
         }
         Files.write(file, bytes.toByteArray());
+    }
+
+    /** The hints framed as a hints file holds them: each size and its checksum, the hint and its checksum. */
+    private static byte[] entries(List<byte[]> hints) throws IOException
+    {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (DataOutputStream out = new DataOutputStream(bytes))
+        {
+            for (byte[] hint : hints)
+            {
+                CRC32 crc = new CRC32();
+                out.writeInt(hint.length);
+                FBUtilities.updateChecksumInt(crc, hint.length);
+                out.writeInt((int) crc.getValue());
+                out.write(hint);
+                crc.update(hint, 0, hint.length);
+                out.writeInt((int) crc.getValue());
+            }
+        }
+        return bytes.toByteArray();
+    }
+
+    /** The entries of DSE 5.1.51's hints file in one LZ4 block, as a compressed hints file holds them. */
+    private static byte[] capturedEntriesInOneLz4Block() throws IOException
+    {
+        byte[] entries = capturedEntries();
+        ICompressor lz4 = LZ4Compressor.create(Map.of());
+        ByteBuffer compressed = ByteBuffer.allocate(lz4.initialCompressedBufferLength(entries.length));
+        lz4.compress(ByteBuffer.wrap(entries), compressed);
+        compressed.flip();
+        ByteBuffer block = ByteBuffer.allocate(8 + compressed.remaining());
+        block.putInt(entries.length).putInt(compressed.remaining()).put(compressed);
+        return block.array();
+    }
+
+    /** The bytes of DSE 5.1.51's hints file after its descriptor: its entries. */
+    private static byte[] capturedEntries() throws IOException
+    {
+        byte[] file = Files.readAllBytes(DseFixtures.dse51().hintsFile());
+        return Arrays.copyOfRange(file, CAPTURED_DESCRIPTOR_SIZE, file.length);
     }
 
     private static Path tableDirectory(Dse51NodeFixture node, String keyspace, String table) throws IOException
@@ -515,12 +577,338 @@ public class Dse51RollbackInspectionTest
         assertThat(assertBlocked(node, "HINTS_DESCRIPTOR_UNREADABLE").finding("HINTS_DESCRIPTOR_UNREADABLE").message)
         .contains(byDescriptor.getFileName() + " (IOException: the checksum of its header does not match)");
 
-        // a file named for node 2 whose descriptor names node 3 is node 3's
+        // a file named for node 2 whose descriptor names node 3: DSE 5.1.51 would open it by the name its descriptor
+        // gives, and never find it
         hintsFile(byDescriptor, 1, NODE_3);
-        Run byHost = assertReady(node);
+        Run byHost = assertBlocked(node, "HINTS_DAMAGED");
+        assertThat(byHost.finding("HINTS_DAMAGED").message)
+        .contains(byDescriptor.getFileName() + " (its name is not " + NODE_3 + "-" + TIMESTAMP + "-1.hints, the one " +
+                  "its descriptor gives, which DSE 5.1.51 opens it by)");
+        assertThat(byHost.report.hintsByTarget.values()).noneMatch(names -> names.contains(byDescriptor.getFileName()
+                                                                                                       .toString()));
+        // named after its descriptor, it is node 3's
+        Files.delete(byDescriptor);
+        Path renamed = node.hints.resolve(NODE_3 + "-" + TIMESTAMP + "-1.hints");
+        hintsFile(renamed, 1, NODE_3);
+        Run named = assertReady(node);
         String target = NODE_3 + " (" + node3Address + ", release " + Dse51Fixtures.RELEASE_VERSION + ')';
-        assertThat(byHost.report.hintsByTarget).containsOnlyKeys(target);
-        assertThat(byHost.report.hintsByTarget.get(target)).contains(byDescriptor.getFileName().toString());
+        assertThat(named.report.hintsByTarget).containsOnlyKeys(target);
+        assertThat(named.report.hintsByTarget.get(target)).contains(renamed.getFileName().toString());
+    }
+
+    /**
+     * A hints file of version 1 that DSE 5.1.51 would set aside as corrupt, stopping the node by its disk failure
+     * policy, or never deliver, refuses the rollback, read to its end as DSE 5.1.51 frames it: an entry size whose
+     * checksum does not match, zeros after its last entry, a compression DSE 5.1.51 cannot build or an encryption
+     * parameter. Such a file is neither listed by target nor kept.
+     */
+    @Test
+    public void refusesHintsFilesDse51WouldSetAsideOrNeverDeliver() throws IOException
+    {
+        Dse51NodeFixture node = node();
+        Path captured = node.hints.resolve(DseFixtures.dse51().hintsFile().getFileName());
+        byte[] original = Files.readAllBytes(captured);
+        String name = captured.getFileName().toString();
+
+        byte[] sizeChecksum = original.clone();
+        sizeChecksum[CAPTURED_DESCRIPTOR_SIZE + 4] ^= 1;
+        Files.write(captured, sizeChecksum);
+        Run run = assertBlocked(node, "HINTS_DAMAGED");
+        Finding damaged = run.finding("HINTS_DAMAGED");
+        assertThat(damaged.message)
+        .isEqualTo("hints files of version 1 that DSE 5.1.51 would set aside as corrupt, handing the error to its " +
+                   "disk failure policy (stop in the cassandra.yaml DSE 5.1.51 ships, which stops the node's " +
+                   "transports), or would never deliver: " + name + " (an entry size whose checksum does not match, " +
+                   "at byte 0 of its entries)");
+        assertThat(damaged.remedy)
+        .isEqualTo("move them, with their companions, out of the hints directory before DSE 5.1 starts, and repair " +
+                   "the tables of their targets once the cluster runs one release");
+        assertThat(run.report.hintsByTarget).isEmpty();
+        assertThat(run.report.kept).doesNotContain(captured.toString());
+
+        // a file padded or preallocated: DSE 5.1.51 reads the zeros as a size whose checksum does not match
+        byte[] padded = Arrays.copyOf(original, original.length + 16);
+        Files.write(captured, padded);
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(name + " (zeros after its last entry, at byte " + (original.length - CAPTURED_DESCRIPTOR_SIZE) +
+                  " of its entries, which DSE 5.1.51 reads as a size whose checksum does not match)");
+        Files.write(captured, original);
+        assertReady(node);
+
+        // a compression DSE 5.1.51 cannot build, and an encryption parameter
+        Files.delete(captured);
+        Path compressed = node.hints.resolve(NODE_3 + "-" + TIMESTAMP + "-1.hints");
+        hintsFile(compressed, 1, NODE_3, TIMESTAMP,
+                  "{\"compression\":{\"class_name\":\"LZ4Compressor\",\"parameters\":{\"chunk_length_in_kb\":\"64\"}}}",
+                  new byte[0]);
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(compressed.getFileName() + " (its compression {class_name=LZ4Compressor, " +
+                  "parameters={chunk_length_in_kb=64}} is not one DSE 5.1.51 can build: the option " +
+                  "chunk_length_in_kb is not one LZ4Compressor supports in DSE 5.1)");
+        hintsFile(compressed, 1, NODE_3, TIMESTAMP, "{\"compression\":{\"class_name\":\"ZstdCompressor\"}}",
+                  new byte[0]);
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(compressed.getFileName() + " (its compression {class_name=ZstdCompressor} is not one DSE 5.1.51 " +
+                  "can build: the class ZstdCompressor is not one DSE 5.1 builds)");
+        hintsFile(compressed, 1, NODE_3, TIMESTAMP, "{\"encryption\":{\"cipher\":\"AES/CBC/PKCS5Padding\"}}",
+                  new byte[0]);
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(compressed.getFileName() + " (its descriptor has an encryption parameter, which neither DSE " +
+                  "5.1.51's writer nor this software's writes, so this check does not read the file)");
+    }
+
+    /**
+     * A hints file of version 1 of which DSE 5.1.51 would drop some hints alone, with a warning, is warned about and
+     * kept: a partial entry at its end (a file cut short), a hint whose checksum does not match.
+     */
+    @Test
+    public void warnsAboutHintsFilesDse51WouldDeliverInPart() throws IOException
+    {
+        Dse51NodeFixture node = node();
+        Path captured = node.hints.resolve(DseFixtures.dse51().hintsFile().getFileName());
+        byte[] original = Files.readAllBytes(captured);
+        String name = captured.getFileName().toString();
+        List<byte[]> hints = DseFixtures.hintsRecords(captured);
+        int lastEntry = entries(hints.subList(0, hints.size() - 1)).length;
+
+        Files.write(captured, Arrays.copyOf(original, CAPTURED_DESCRIPTOR_SIZE + lastEntry + 10));
+        Run cut = assertReady(node);
+        Finding truncated = cut.finding("HINTS_TRUNCATED");
+        assertThat(truncated.severity).isEqualTo(Finding.Severity.WARNING);
+        assertThat(truncated.message)
+        .isEqualTo("hints files of version 1 of which DSE 5.1.51 would drop some hints, with a warning, and deliver " +
+                   "the others: " + name + " (a partial entry at its end, at byte " + lastEntry + " of its " +
+                   "entries); it drops a partial entry at the end of a file and a hint whose checksum does not " +
+                   "match");
+        assertThat(truncated.remedy)
+        .isEqualTo("the rollback goes on; repair the tables of their targets once the cluster runs one release");
+        assertThat(cut.report.kept).contains(captured.toString());
+
+        byte[] hintChecksum = original.clone();
+        // the last byte of the first hint
+        hintChecksum[CAPTURED_DESCRIPTOR_SIZE + 8 + hints.get(0).length - 1] ^= 1;
+        Files.write(captured, hintChecksum);
+        assertThat(assertReady(node).finding("HINTS_TRUNCATED").message)
+        .contains(name + " (1 hint whose checksum does not match)");
+    }
+
+    /**
+     * A compressed hints file of version 1 (the hints of DSE 5.1.51's file in one LZ4 block, as this software and
+     * DSE 5.1.51 write it) is read through its decompressor and accepted; a block cut short, or zeros after the last
+     * block, refuse the rollback.
+     */
+    @Test
+    public void readsACompressedHintsFileThroughItsDecompressor() throws IOException
+    {
+        Dse51NodeFixture node = node();
+        Files.delete(node.hints.resolve(DseFixtures.dse51().hintsFile().getFileName()));
+        ByteBuffer block = ByteBuffer.wrap(capturedEntriesInOneLz4Block());
+        Path file = node.hints.resolve(NODE_3 + "-" + TIMESTAMP + "-1.hints");
+        String parameters = "{\"compression\":{\"class_name\":\"LZ4Compressor\"}}";
+        hintsFile(file, 1, NODE_3, TIMESTAMP, parameters, block.array());
+        Run run = assertReady(node);
+        assertThat(run.codes(Finding.Severity.WARNING)).isEmpty();
+        assertThat(run.report.kept).contains(file.toString());
+
+        // as DSE 5.1.51 reads the compression: crc_check_chance removed, with a warning
+        String withCrcCheckChance = "{\"compression\":{\"class_name\":\"LZ4Compressor\"," +
+                                    "\"parameters\":{\"crc_check_chance\":\"0.5\"}}}";
+        hintsFile(file, 1, NODE_3, TIMESTAMP, withCrcCheckChance, block.array());
+        assertThat(assertReady(node).codes(Finding.Severity.WARNING)).isEmpty();
+
+        hintsFile(file, 1, NODE_3, TIMESTAMP, parameters, Arrays.copyOf(block.array(), block.capacity() + 8));
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(file.getFileName() + " (zeros after its last compressed block, at byte " +
+                  (40 + parameters.length() + block.capacity()) + " of the file)");
+        hintsFile(file, 1, NODE_3, TIMESTAMP, parameters, Arrays.copyOf(block.array(), block.capacity() - 1));
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(file.getFileName() + " (a compressed block cut short, at byte " + (40 + parameters.length()) +
+                  " of the file)");
+    }
+
+    /**
+     * The other flaws of a version-1 file the check reads: a negative entry size whose checksum matches, a compressed
+     * block that cannot be decompressed, a compression parameter or options that are not maps, refuse the rollback; a
+     * descriptor whose parameters are not JSON is a damaged descriptor; so do a compression that names no class and an
+     * option the class does not support, without a value; a block that declares no uncompressed byte is read through
+     * the decompressor as the others; the null value of an option of the class is its default in DSE 5.1.51, and is
+     * accepted.
+     */
+    @Test
+    public void refusesTheOtherFlawsOfAVersion1File() throws IOException
+    {
+        Dse51NodeFixture node = node();
+        Files.delete(node.hints.resolve(DseFixtures.dse51().hintsFile().getFileName()));
+        Path file = node.hints.resolve(NODE_3 + "-" + TIMESTAMP + "-1.hints");
+        String name = file.getFileName().toString();
+
+        ByteArrayOutputStream negative = new ByteArrayOutputStream();
+        try (DataOutputStream out = new DataOutputStream(negative))
+        {
+            CRC32 crc = new CRC32();
+            out.writeInt(-5);
+            FBUtilities.updateChecksumInt(crc, -5);
+            out.writeInt((int) crc.getValue());
+        }
+        hintsFile(file, 1, NODE_3, TIMESTAMP, "{}", negative.toByteArray());
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(name + " (a negative entry size, at byte 0 of its entries)");
+
+        String lz4 = "{\"compression\":{\"class_name\":\"LZ4Compressor\"}}";
+        ByteBuffer garbage = ByteBuffer.allocate(8 + 16);
+        garbage.putInt(1000).putInt(16);
+        for (int i = 0; i < 16; i++)
+            garbage.put((byte) 0xFF);
+        hintsFile(file, 1, NODE_3, TIMESTAMP, lz4, garbage.array());
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .contains(name + " (a compressed block that cannot be decompressed, at byte " + (40 + lz4.length()) +
+                  " of the file (");
+
+        hintsFile(file, 1, NODE_3, TIMESTAMP, "{\"compression\":\"LZ4Compressor\"}", new byte[0]);
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(name + " (its compression parameter LZ4Compressor is not a class with its options)");
+        hintsFile(file, 1, NODE_3, TIMESTAMP,
+                  "{\"compression\":{\"class_name\":\"LZ4Compressor\",\"parameters\":\"fast\"}}", new byte[0]);
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(name + " (the options fast of its compression are not a map)");
+
+        hintsFile(file, 1, NODE_3, TIMESTAMP, "{not json", new byte[0]);
+        assertThat(assertBlocked(node, "HINTS_DESCRIPTOR_UNREADABLE").finding("HINTS_DESCRIPTOR_UNREADABLE").message)
+        .contains(name + " (");
+
+        hintsFile(file, 1, NODE_3, TIMESTAMP, "{\"compression\":{\"class_name\":\"\"}}", new byte[0]);
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(name + " (its compression {class_name=} is not one DSE 5.1.51 can build: it names no class)");
+        hintsFile(file, 1, NODE_3, TIMESTAMP, "{\"compression\":{\"class_name\":\"SnappyCompressor\"," +
+                                              "\"parameters\":{\"chunk_length_in_kb\":null}}}", new byte[0]);
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .endsWith(name + " (its compression {class_name=SnappyCompressor, parameters={chunk_length_in_kb=null}} is " +
+                  "not one DSE 5.1.51 can build: the option chunk_length_in_kb is not one SnappyCompressor supports " +
+                  "in DSE 5.1)");
+
+        // a block that declares no uncompressed byte goes through the decompressor, then the next block is read
+        ICompressor compressor = LZ4Compressor.create(Map.of());
+        ByteBuffer empty = ByteBuffer.allocate(compressor.initialCompressedBufferLength(0));
+        compressor.compress(ByteBuffer.allocate(0), empty);
+        empty.flip();
+        byte[] next = capturedEntriesInOneLz4Block();
+        ByteBuffer twoBlocks = ByteBuffer.allocate(8 + empty.remaining() + next.length);
+        twoBlocks.putInt(0).putInt(empty.remaining()).put(empty).put(next);
+        hintsFile(file, 1, NODE_3, TIMESTAMP, "{\"compression\":{\"class_name\":\"LZ4Compressor\"}}",
+                  twoBlocks.array());
+        Dse51HintsFileCheck.Outcome outcome = Dse51HintsFileCheck.check(file);
+        assertThat(outcome.damaged).isNull();
+        assertThat(outcome.unverified).isNull();
+        assertThat(outcome.truncated).isNull();
+        assertThat(outcome.blocks).isEqualTo(2);
+        assertThat(outcome.hints).isEqualTo(Dse51Fixtures.FIXTURE_HINTS);
+        assertReady(node);
+        // the decompressor reads such a block: one it cannot decompress (here a negative length) is damaged
+        ByteBuffer garbage0 = ByteBuffer.allocate(8 + 4 + next.length);
+        garbage0.putInt(0).putInt(4).putInt(-1).put(next);
+        hintsFile(file, 1, NODE_3, TIMESTAMP, "{\"compression\":{\"class_name\":\"LZ4Compressor\"}}",
+                  garbage0.array());
+        assertThat(assertBlocked(node, "HINTS_DAMAGED").finding("HINTS_DAMAGED").message)
+        .contains(name + " (a compressed block that cannot be decompressed, at byte " +
+                  (40 + "{\"compression\":{\"class_name\":\"LZ4Compressor\"}}".length()) + " of the file (");
+
+        String nullType = "{\"compression\":{\"class_name\":\"LZ4Compressor\"," +
+                          "\"parameters\":{\"lz4_compressor_type\":null}}}";
+        hintsFile(file, 1, NODE_3, TIMESTAMP, nullType, new byte[0]);
+        assertThat(assertReady(node).report.kept).contains(file.toString());
+    }
+
+    /**
+     * A version-1 file the check cannot read to its end here, sound or not, refuses the rollback without calling it
+     * damaged: an encrypting compressor of DSE 5.1.51, a block larger than this JVM holds, a decompressor or a
+     * compressor this JVM cannot run or build (a native library missing).
+     */
+    @Test
+    public void refusesAVersion1FileItCannotReadHere() throws IOException
+    {
+        Dse51NodeFixture node = node();
+        Path captured = node.hints.resolve(DseFixtures.dse51().hintsFile().getFileName());
+        Files.delete(captured);
+        Path file = node.hints.resolve(NODE_3 + "-" + TIMESTAMP + "-1.hints");
+        String name = file.getFileName().toString();
+        String prefix = "hints files of version 1 this check could not read to their end here: " + name + " (";
+
+        // the compressors of DSE 5.1.51 this software does not have, by the short name or under the package
+        for (String encrypting : List.of("EncryptingLZ4Compressor", "Encryptor",
+                                         "org.apache.cassandra.io.compress.EncryptingSnappyCompressor"))
+        {
+            hintsFile(file, 1, NODE_3, TIMESTAMP, "{\"compression\":{\"class_name\":\"" + encrypting + "\"}}",
+                      new byte[0]);
+            assertThat(assertBlocked(node, "HINTS_UNVERIFIED").finding("HINTS_UNVERIFIED").message)
+            .startsWith(prefix + "its compressor " + encrypting + " is DSE 5.1.51's own, which encrypts the file " +
+                        "and which this software does not have)");
+        }
+
+        // a block larger than the JVM of the check holds
+        String lz4 = "{\"compression\":{\"class_name\":\"LZ4Compressor\"}}";
+        byte[] block = capturedEntriesInOneLz4Block();
+        hintsFile(file, 1, NODE_3, TIMESTAMP, lz4, block);
+        long maxBlockSize = Dse51HintsFileCheck.maxBlockSize;
+        Dse51HintsFileCheck.maxBlockSize = 1024;
+        try
+        {
+            assertThat(assertBlocked(node, "HINTS_UNVERIFIED").finding("HINTS_UNVERIFIED").message)
+            .startsWith(prefix + "a compressed block of " + ByteBuffer.wrap(block).getInt(4) + " bytes, " +
+                        capturedEntries().length + " uncompressed, at byte " + (40 + lz4.length()) + " of the " +
+                        "file, above what this JVM can hold)");
+        }
+        finally
+        {
+            Dse51HintsFileCheck.maxBlockSize = maxBlockSize;
+        }
+
+        // a decompressor this JVM cannot run, a native library failing at its first use
+        hintsFile(file, 1, NODE_3, TIMESTAMP, lz4, block);
+        Function<ParameterizedClass, ICompressor> builder = Dse51HintsFileCheck.compressorFactory;
+        ICompressor real = LZ4Compressor.create(Map.of());
+        Dse51HintsFileCheck.compressorFactory = compression -> (ICompressor) Proxy.newProxyInstance(
+            ICompressor.class.getClassLoader(), new Class<?>[]{ ICompressor.class }, (proxy, method, args) -> {
+                if (method.getName().equals("uncompress"))
+                    throw new UnsatisfiedLinkError("no native library");
+                return method.invoke(real, args);
+            });
+        try
+        {
+            assertThat(assertBlocked(node, "HINTS_UNVERIFIED").finding("HINTS_UNVERIFIED").message)
+            .startsWith(prefix + "a compressed block this JVM cannot decompress, at byte " + (40 + lz4.length()) +
+                        " of the file (java.lang.UnsatisfiedLinkError: no native library))");
+        }
+        finally
+        {
+            Dse51HintsFileCheck.compressorFactory = builder;
+        }
+
+        hintsFile(file, 1, NODE_3, TIMESTAMP, "{\"compression\":{\"class_name\":\"SnappyCompressor\"}}",
+                  new byte[0]);
+        Function<ParameterizedClass, ICompressor> factory = Dse51HintsFileCheck.compressorFactory;
+        Dse51HintsFileCheck.compressorFactory = compression -> {
+            throw new UnsatisfiedLinkError("no native library");
+        };
+        try
+        {
+            Run run = assertBlocked(node, "HINTS_UNVERIFIED");
+            Finding unverified = run.finding("HINTS_UNVERIFIED");
+            assertThat(unverified.message)
+            .isEqualTo("hints files of version 1 this check could not read to their end here: " +
+                       name + " (its compressor SnappyCompressor cannot be built here to read it " +
+                       "(java.lang.UnsatisfiedLinkError: no native library)); whether DSE 5.1.51 delivers them is " +
+                       "not known");
+            assertThat(unverified.remedy)
+            .isEqualTo("run the tool as the user HCD 2.0 runs as (or as root), on a host where the compressor of " +
+                       "the files loads and with a heap that holds their blocks, and run this check again; or move " +
+                       "them, with their companions, out of the hints directory before DSE 5.1 starts, and repair " +
+                       "the tables of their targets once the cluster runs one release");
+            assertThat(run.report.kept).doesNotContain(file.toString());
+        }
+        finally
+        {
+            Dse51HintsFileCheck.compressorFactory = factory;
+        }
     }
 
     /** A hints directory that is missing may not be HCD 2.0's. */
