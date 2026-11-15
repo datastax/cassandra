@@ -852,34 +852,37 @@ public class StartupChecks
     };
 
     /**
+     * The last local deletion time big {@code me} holds, {@code CellData.MAX_DELETION_TIME_2038_LEGACY_CAP}, as the
+     * remedy names it (a literal, so that the remedy stays a compile-time constant; a test checks it against the cap).
+     */
+    @VisibleForTesting
+    static final String DSE51_ME_LAST_TIME = "2038-01-19T03:14:06Z";
+
+    /**
      * The first remedy of the refusal of {@link #checkDse6Artefacts} in {@code DSE_5_1} when it lists big sstables that
      * {@code sstableupgrade}, run with the node's configuration, rewrites at {@code me}
      * ({@link #isBigSSTableRewrittenAtMe}), the one remedy that keeps the node's data without a snapshot restore. The
      * writer of {@code me} holds no pending repair session, which {@code Upgrader} copies from each sstable: one still
      * pending repair (a node run without the mode and repaired incrementally) is not rewritten until
-     * {@code sstablerepairedset} clears it; {@code sstableupgrade} prints "Error upgrading" for an sstable it fails to
-     * rewrite and still exits 0. Left to the snapshot restore: the sstables of a secondary index, which
-     * {@code sstableupgrade <keyspace> <table>} does not list, and a table with an {@code oa} sstable with a deletion
-     * or expiration time after 2038, which {@code me} cannot hold: the writer of {@code me} does not check the times
-     * of an sstable, so the text asks for the check before the tool, on the estimated tombstone drop times of
-     * {@code sstablemetadata}, where those times are recorded (its maximum local deletion time is that of a live cell,
-     * no deletion, as soon as the sstable holds one), with a margin of a year: the histogram holds at most 100 points
-     * and replaces the two nearest with their weighted mean, so a time after 2038 can show earlier; with times spread
-     * over at most the 20 years of the longest TTL, a merge moves a point by about a hundredth of that span, a few
-     * months. A rule of thumb, not a bound.
+     * {@code sstablerepairedset} clears it. {@code Upgrader} also refuses, in a rewrite at {@code me} of an
+     * {@code oa} sstable, a deletion or expiration time after the cap of {@code CellData}
+     * ({@value #DSE51_ME_LAST_TIME}), which {@code me} cannot hold
+     * ({@code UnfilteredSerializer.checkPre40SSTableDeletionTimes}), so that such an sstable is not rewritten either,
+     * rather than rewritten with a wrong time. For an sstable it does not rewrite, {@code sstableupgrade} prints
+     * "Error upgrading", keeps the sstable and still exits 0, and the next start refuses it again. Left to the
+     * snapshot restore: those sstables, and the sstables of a secondary index, which
+     * {@code sstableupgrade <keyspace> <table>} does not list (nor does it take the name of an index's table).
      */
     private static final String DSE51_REWRITE_AT_ME =
         ". Rewrite the big sstables of a version newer than " + DSE_51_MODE_MAX_BIG_VERSION + " among them at " +
         DSE_51_MODE_MAX_BIG_VERSION + ", the node stopped: sstableupgrade <keyspace> <table>, run with this node's " +
         "cassandra.yaml, for each of their tables, then start the node again. Before it, the node stopped: " +
-        "sstablemetadata on each oa sstable listed, and no sstableupgrade of a table with one whose estimated " +
-        "tombstone drop times (those of its tombstones and expiring cells) reach 2037-01-19 or later: " +
-        DSE_51_MODE_MAX_BIG_VERSION + " cannot hold a time after 2038-01-19, which sstableupgrade would write wrong, " +
-        "and the histogram can show such a time up to about a year earlier, merging close times into their mean; " +
-        "and sstablerepairedset --really-set --is-unrepaired <its Data.db file> on an sstable still pending repair " +
+        "sstablerepairedset --really-set --is-unrepaired <its Data.db file> on an sstable still pending repair " +
         "(incrementally repaired while the node ran without the mode), which sstableupgrade does not rewrite " +
-        "otherwise (it prints \"Error upgrading\" for an sstable it fails to rewrite and still exits 0). The " +
-        "sstables of a secondary index (the .<index> directories of a table) are not rewritten so either.";
+        "otherwise. Nor does it rewrite an oa sstable with a deletion or expiration time after " + DSE51_ME_LAST_TIME +
+        ", which " + DSE_51_MODE_MAX_BIG_VERSION + " cannot hold: for an sstable it does not rewrite, it prints " +
+        "\"Error upgrading\", keeps the sstable and still exits 0, and the next start refuses it again. The sstables " +
+        "of a secondary index (the .<index> directories of a table) are not rewritten so either.";
 
     /** Creates the upgrade marker if it is absent; returns true if this call created it. */
     @VisibleForTesting

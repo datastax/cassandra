@@ -17,13 +17,18 @@
 package org.apache.cassandra.io.sstable.format.big;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.google.common.collect.Iterables;
@@ -40,19 +45,35 @@ import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.BufferClusteringBound;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.LivenessInfo;
+import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.compaction.Upgrader;
 import org.apache.cassandra.db.guardrails.Guardrails;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.BTreeRow;
+import org.apache.cassandra.db.rows.BufferCell;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.ComplexColumnData;
+import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.RangeTombstoneBoundaryMarker;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredSerializer;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.exceptions.StartupException;
@@ -71,6 +92,8 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StartupChecks;
 import org.apache.cassandra.service.StorageService;
@@ -90,7 +113,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * fixtures), rewritten here from the rows this software reads in them, come out with the very bytes DSE 5.1.51 wrote,
  * component by component, but for the order of the lines of {@code TOC.txt}; the host id and the commit log intervals
  * of the statistics, the only fields that depend on the node and its commit log rather than on the rows, are given
- * DSE's values. The big {@code nb} and {@code oa} sstables stay readable while {@code me} is written.
+ * DSE's values. The big {@code nb} and {@code oa} sstables stay readable while {@code me} is written; sstableupgrade
+ * ({@code Upgrader}) refuses to rewrite at {@code me} an {@code oa} sstable holding a deletion or expiration time past
+ * 2038, which {@code me} cannot hold; the writer of {@code me} itself does not refuse one.
  */
 public class BigMeWriterTest extends CQLTester
 {
@@ -443,6 +468,328 @@ public class BigMeWriterTest extends CQLTester
     }
 
     /**
+     * sstableupgrade, run with the node's configuration, refuses to rewrite at me an oa sstable (one a node run outside
+     * the storage mode can leave) holding a deletion or expiration time past 2038, which the 32-bit deletion times of
+     * me cannot hold, wherever the partition holds it: {@code Upgrader}, as sstableupgrade runs it, fails with the
+     * message (sstableupgrade prints it after "Error upgrading"), the oa sstable is kept and nothing of me is left, and
+     * the start check still refuses the oa sstable, with the remedy that says so. Each case has a time of its own, so
+     * that the message shows which time was refused. The same partitions with their times at the cap are rewritten.
+     */
+    @Test
+    public void anOaSSTableWithATimePast2038IsNotRewrittenAtMeBySstableupgrade() throws Throwable
+    {
+        createTable("CREATE TABLE %s (k int, c int, v text, s set<text>, st text static, PRIMARY KEY (k, c))");
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.disableAutoCompaction();
+        long cap = CellData.MAX_DELETION_TIME_2038_LEGACY_CAP;
+        StartupChecksOptions options = new StartupChecksOptions();
+        Map<String, Function<Long, PartitionUpdate>> cases = timeCases(cfs.metadata());
+        long past2038 = cap;
+        for (Map.Entry<String, Function<Long, PartitionUpdate>> e : cases.entrySet())
+        {
+            past2038 += 1000;
+            Descriptor oa = cfs.newSSTableDescriptor(cfs.getDirectories().getDirectoryForNewSSTables(),
+                                                     BigFormat.getInstance().getVersion("oa"));
+            write(cfs, oa, e.getValue().apply(past2038));
+            try
+            {
+                assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(options))
+                .as(e.getKey())
+                .isInstanceOf(StartupException.class)
+                .hasMessageContaining(oa.fileFor(Components.DATA).name())
+                .hasMessageContaining("Nor does it rewrite an oa sstable with a deletion or expiration time after " +
+                                      "2038-01-19T03:14:06Z, which me cannot hold");
+
+                assertThatThrownBy(() -> upgradeAsSstableupgrade(cfs, oa))
+                .as(e.getKey())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("DSE 5.1 compatibility mode: local deletion time " + past2038 + " is past 2038 and " +
+                            "cannot be written to an sstable of version me, whose deletion times are 32-bit");
+                assertThat(oa.fileFor(Components.DATA).exists()).as(e.getKey()).isTrue();
+                assertThat(cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().keySet())
+                .as(e.getKey())
+                .containsExactly(oa);
+                assertThat(oa.directory.list()).as(e.getKey()).noneMatch(f -> f.name().contains("_txn_"));
+                assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(options))
+                .as(e.getKey())
+                .isInstanceOf(StartupException.class)
+                .hasMessageContaining(oa.fileFor(Components.DATA).name());
+            }
+            finally
+            {
+                deleteComponents(oa);
+            }
+        }
+
+        // at the cap: rewritten at me, with the same rows
+        for (Map.Entry<String, Function<Long, PartitionUpdate>> e : cases.entrySet())
+        {
+            Descriptor oa = cfs.newSSTableDescriptor(cfs.getDirectories().getDirectoryForNewSSTables(),
+                                                     BigFormat.getInstance().getVersion("oa"));
+            write(cfs, oa, e.getValue().apply(cap));
+            try
+            {
+                SSTableReader source = SSTableReader.open(cfs, oa, cfs.metadata);
+                List<Object> rows;
+                try
+                {
+                    rows = contentOf(source);
+                }
+                finally
+                {
+                    source.selfRef().release();
+                }
+                upgradeAsSstableupgrade(cfs, oa);
+                Descriptor me = Iterables.getOnlyElement(
+                    cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().keySet());
+                assertThat(me.version.version).as(e.getKey()).isEqualTo("me");
+                SSTableReader rewritten = SSTableReader.open(cfs, me, cfs.metadata);
+                try
+                {
+                    assertThat(contentOf(rewritten)).as(e.getKey()).isEqualTo(rows);
+                }
+                finally
+                {
+                    rewritten.selfRef().release();
+                    deleteComponents(me);
+                }
+            }
+            finally
+            {
+                // left by a failed rewrite, it would fail the start checks of the other tests
+                deleteComponents(oa);
+            }
+        }
+    }
+
+    /**
+     * The walk of the refusal reaches both deletion times of a range tombstone boundary: one closing past the cap (in
+     * a partition, the bound that opened it is refused first) and one opening past it.
+     */
+    @Test
+    public void bothDeletionTimesOfABoundaryAreChecked()
+    {
+        long cap = CellData.MAX_DELETION_TIME_2038_LEGACY_CAP;
+        Version me = BigFormat.getInstance().getVersion("me");
+        ByteBuffer[] three = { Int32Type.instance.decompose(3) };
+        DeletionTime withinCap = DeletionTime.build(1000, cap);
+        DeletionTime closing = DeletionTime.build(2000, cap + 1);
+        DeletionTime opening = DeletionTime.build(2000, cap + 2);
+        assertThatThrownBy(() -> UnfilteredSerializer.checkPre40SSTableDeletionTimes(
+            RangeTombstoneBoundaryMarker.exclusiveCloseInclusiveOpen(false, three, ByteBufferAccessor.instance,
+                                                                     closing, withinCap), me))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("DSE 5.1 compatibility mode: local deletion time " + (cap + 1) + " is past 2038 and cannot be " +
+                    "written to an sstable of version me, whose deletion times are 32-bit");
+        assertThatThrownBy(() -> UnfilteredSerializer.checkPre40SSTableDeletionTimes(
+            RangeTombstoneBoundaryMarker.exclusiveCloseInclusiveOpen(false, three, ByteBufferAccessor.instance,
+                                                                     withinCap, opening), me))
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("DSE 5.1 compatibility mode: local deletion time " + (cap + 2) + " is past 2038 and cannot be " +
+                    "written to an sstable of version me, whose deletion times are 32-bit");
+        UnfilteredSerializer.checkPre40SSTableDeletionTimes(
+            RangeTombstoneBoundaryMarker.exclusiveCloseInclusiveOpen(false, three, ByteBufferAccessor.instance,
+                                                                     withinCap, withinCap), me);
+    }
+
+    /**
+     * Nothing but the rewrite of an oa sstable refuses a time past the cap: the 3.x sstables DSE 5.1 wrote can hold
+     * the overflowed expiration times of CASSANDRA-14092, which this software reads as times past the cap (but for
+     * the negative ones, read as {@link CellData#INVALID_DELETION_TIME}, which the read validation takes for a
+     * damaged sstable and scrub repairs), and the node in the mode keeps writing and compacting them at me, as it
+     * reads them (here a me sstable, written by this software, holding an expiring cell past the cap, compacted with
+     * another one; no fixture holds such a cell written by DSE 5.1).
+     */
+    @Test
+    public void aTimePastTheCapInMeIsStillCompacted() throws Throwable
+    {
+        // just past the cap, and well past it
+        long cap = CellData.MAX_DELETION_TIME_2038_LEGACY_CAP;
+        long[] times = { cap + 1, cap + 1000 };
+        for (long time : times)
+        {
+            createTable("CREATE TABLE %s (k int, c int, v text, s set<text>, st text static, PRIMARY KEY (k, c))");
+            ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+            cfs.disableAutoCompaction();
+            execute("INSERT INTO %s (k, c, v) VALUES (2, 2, 'w')");
+            flush();
+            Descriptor me = cfs.newSSTableDescriptor(cfs.getDirectories().getDirectoryForNewSSTables(),
+                                                     BigFormat.getInstance().getVersion("me"));
+            write(cfs, me, timeCases(cfs.metadata()).get("expiring cell").apply(time));
+            SSTableReader written = SSTableReader.open(cfs, me, cfs.metadata);
+            Cell<?> before = cellOfKeyOne(written);
+            assertThat(before.localDeletionTime()).isEqualTo(time);
+            cfs.addSSTable(written);
+            assertThat(cfs.getLiveSSTables()).hasSize(2);
+            cfs.forceMajorCompaction();
+            assertThat(cfs.getLiveSSTables()).hasSize(1);
+            SSTableReader compacted = cfs.getLiveSSTables().iterator().next();
+            assertWrittenForDse51(compacted);
+            // written back as it was read
+            Cell<?> after = cellOfKeyOne(compacted);
+            assertThat(after.localDeletionTime()).as("time %d", time).isEqualTo(before.localDeletionTime());
+            assertThat(after.ttl()).isEqualTo(before.ttl());
+            assertThat(after.timestamp()).isEqualTo(before.timestamp());
+        }
+    }
+
+    /** The cell of {@code v} in the row of the partition of key 1 of {@code sstable}. */
+    private static Cell<?> cellOfKeyOne(SSTableReader sstable)
+    {
+        ColumnMetadata v = sstable.metadata().getColumn(ColumnIdentifier.getInterned("v", false));
+        try (ISSTableScanner scanner = sstable.getScanner())
+        {
+            while (scanner.hasNext())
+            {
+                try (UnfilteredRowIterator partition = scanner.next())
+                {
+                    if (Int32Type.instance.compose(partition.partitionKey().getKey()) != 1)
+                        continue;
+                    return ((Row) partition.next()).getCell(v);
+                }
+            }
+        }
+        throw new AssertionError("no partition of key 1 in " + sstable);
+    }
+
+    /**
+     * The partitions of the cases of the refusal, each with one deletion or expiration time, given: a partition
+     * deletion, a row deletion, a cell tombstone, an expiring cell (built with the expiration time itself: the
+     * expiration overflow policy caps one computed from a TTL), an expiring row liveness, a complex deletion (a
+     * whole-collection assignment), a static row, a range tombstone, and two adjacent range tombstones meeting in a
+     * boundary that opens with the time.
+     */
+    private static Map<String, Function<Long, PartitionUpdate>> timeCases(TableMetadata metadata)
+    {
+        ColumnMetadata v = metadata.getColumn(ColumnIdentifier.getInterned("v", false));
+        ColumnMetadata st = metadata.getColumn(ColumnIdentifier.getInterned("st", false));
+        DecoratedKey key = metadata.partitioner.decorateKey(Int32Type.instance.decompose(1));
+        Clustering<?> clustering = Clustering.make(Int32Type.instance.decompose(1));
+        ByteBuffer one = Int32Type.instance.decompose(1);
+        ByteBuffer three = Int32Type.instance.decompose(3);
+        ByteBuffer five = Int32Type.instance.decompose(5);
+        ByteBuffer x = UTF8Type.instance.decompose("x");
+        long cap = CellData.MAX_DELETION_TIME_2038_LEGACY_CAP;
+        Map<String, Function<Long, PartitionUpdate>> cases = new LinkedHashMap<>();
+        cases.put("partition deletion", time -> PartitionUpdate.fullPartitionDelete(metadata, key, 1000, time));
+        cases.put("row deletion", time -> {
+            PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, 1).timestamp(1000)
+                                                                   .nowInSec(time);
+            builder.row(1).delete();
+            return builder.build();
+        });
+        cases.put("cell tombstone", time -> PartitionUpdate.singleRowUpdate(metadata, key, BTreeRow.singleCellRow(
+            clustering, BufferCell.tombstone(v, 1000, time))));
+        cases.put("expiring cell", time -> PartitionUpdate.singleRowUpdate(metadata, key, BTreeRow.singleCellRow(
+            clustering, new BufferCell(v, 1000, 100, time, x, null))));
+        cases.put("expiring row liveness", time -> PartitionUpdate.singleRowUpdate(
+            metadata, key, BTreeRow.noCellLiveRow(clustering, LivenessInfo.withExpirationTime(1000, 100, time))));
+        cases.put("complex deletion", time -> {
+            PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(metadata, 1).timestamp(1000)
+                                                                   .nowInSec(time);
+            builder.row(1).add("s", Collections.singleton("a"));
+            return builder.build();
+        });
+        cases.put("static row", time -> PartitionUpdate.singleRowUpdate(metadata, key, BTreeRow.singleCellRow(
+            Clustering.STATIC_CLUSTERING, BufferCell.tombstone(st, 1000, time))));
+        cases.put("range tombstone bounds", time -> PartitionUpdate.simpleBuilder(metadata, 1).addRangeTombstone(
+            new RangeTombstone(Slice.make(BufferClusteringBound.inclusiveStartOf(one),
+                                          BufferClusteringBound.inclusiveEndOf(three)),
+                               DeletionTime.build(1000, time))).build());
+        Slice oneToThree = Slice.make(BufferClusteringBound.inclusiveStartOf(one),
+                                      BufferClusteringBound.exclusiveEndOf(three));
+        Slice threeToFive = Slice.make(BufferClusteringBound.inclusiveStartOf(three),
+                                       BufferClusteringBound.inclusiveEndOf(five));
+        cases.put("range tombstone boundary opening with the time", time ->
+            PartitionUpdate.simpleBuilder(metadata, 1)
+                           .addRangeTombstone(new RangeTombstone(oneToThree, DeletionTime.build(1000, cap)))
+                           .addRangeTombstone(new RangeTombstone(threeToFive, DeletionTime.build(2000, time)))
+                           .build());
+        return cases;
+    }
+
+    /**
+     * The sstables of a legacy secondary index are not rewritten at me by sstableupgrade: {@code sstableupgrade
+     * <keyspace> <table>} selects the sstables of the table's own directory only (its lister, as the tool builds it,
+     * lists the table's nb sstable, not the index's), and takes no index's table (the schema it looks the name up in
+     * has none), so the start check, which refused the table's and the index's nb sstables with the rewrite as the
+     * first remedy, still refuses the index's after the rewrite of what the tool selects (by {@code Upgrader} as
+     * sstableupgrade runs it), with the snapshot restore alone. The selection mirrors the one of
+     * {@code StandaloneUpgrader.main} (its lister, then the sstables with their primary components and not at the
+     * latest version), whose entry point is not run here: it loads the schema from disk and shuts the compaction
+     * manager down, which the other tests of this class need (the tool's own run is left to the lab).
+     */
+    @Test
+    public void theSSTablesOfASecondaryIndexAreNotRewrittenAtMeBySstableupgrade() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, v text, PRIMARY KEY (pk, ck))");
+        String index = createIndex("CREATE INDEX ON %s (v)");
+        ColumnFamilyStore cfs = getCurrentColumnFamilyStore();
+        cfs.disableAutoCompaction();
+        ColumnFamilyStore indexCfs = cfs.indexManager.getIndexByName(index).getBackingTable().orElseThrow();
+        indexCfs.disableAutoCompaction();
+        for (int pk = 0; pk < 4; pk++)
+            execute("INSERT INTO %s (pk, ck, v) VALUES (?, 0, ?)", pk, "v" + pk);
+        flush();
+        SSTableReader table = Iterables.getOnlyElement(cfs.getLiveSSTables());
+        SSTableReader indexTable = Iterables.getOnlyElement(indexCfs.getLiveSSTables());
+        assertWrittenForDse51(table);
+        assertWrittenForDse51(indexTable);
+        // what a run without the mode leaves: the same rows in nb sstables of the table's and the index's directories
+        Version nb = BigFormat.getInstance().getVersion("nb");
+        Descriptor nbTable = cfs.newSSTableDescriptor(cfs.getDirectories().getDirectoryForNewSSTables(), nb);
+        Descriptor nbIndex = indexCfs.newSSTableDescriptor(indexCfs.getDirectories().getDirectoryForNewSSTables(), nb);
+        rewrite(cfs, table, nbTable, partitionsOf(table));
+        rewrite(indexCfs, indexTable, nbIndex, partitionsOf(indexTable));
+        assertThat(nbIndex.directory.name()).startsWith(Directories.SECONDARY_INDEX_NAME_SEPARATOR);
+        try
+        {
+            StartupChecksOptions options = new StartupChecksOptions();
+            assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(options))
+            .isInstanceOf(StartupException.class)
+            .hasMessageContaining(nbTable.directory.name() + '/' + nbTable.fileFor(Components.DATA).name())
+            .hasMessageContaining(nbIndex.directory.name() + '/' + nbIndex.fileFor(Components.DATA).name())
+            .hasMessageContaining(". Rewrite the big sstables of a version newer than me among them at me")
+            .hasMessageContaining("Otherwise, and for the other files, restore the node from its pre-upgrade " +
+                                  "snapshot.");
+
+            // the sstables sstableupgrade <keyspace> <table> selects, listed as it lists them: the table's, not the
+            // index's
+            Version latest = DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion();
+            List<Descriptor> selected = cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW)
+                                           .includeBackups(false).sortedList().stream()
+                                           .filter(e -> e.getValue().containsAll(
+                                               e.getKey().getFormat().primaryComponents()))
+                                           .map(Map.Entry::getKey)
+                                           .filter(d -> !d.version.equals(latest))
+                                           .collect(Collectors.toList());
+            assertThat(selected).containsExactly(nbTable);
+            for (Descriptor descriptor : selected)
+                upgradeAsSstableupgrade(cfs, descriptor);
+            assertThat(nbTable.fileFor(Components.DATA).exists()).isFalse();
+            // the index's sstable is kept, and the name of the index's table is not one sstableupgrade takes
+            assertThat(nbIndex.fileFor(Components.DATA).exists()).isTrue();
+            assertThat(indexCfs.name).isEqualTo(cfs.name + '.' + index);
+            assertThat(Schema.instance.getTableMetadataRef(KEYSPACE, indexCfs.name)).isNull();
+            assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(options))
+            .isInstanceOf(StartupException.class)
+            .hasMessageContaining(nbIndex.directory.name() + '/' + nbIndex.fileFor(Components.DATA).name())
+            .hasMessageContaining(". Restore the node from its pre-upgrade snapshot.")
+            .hasMessageNotContaining(". Rewrite the big sstables")
+            .hasMessageNotContaining(nbTable.directory.name() + '/' + nbTable.fileFor(Components.DATA).name());
+        }
+        finally
+        {
+            deleteComponents(nbTable);
+            deleteComponents(nbIndex);
+            // the rewrite of the table's nb sstable at me
+            for (Descriptor descriptor : cfs.getDirectories().sstableLister(Directories.OnTxnErr.THROW).list().keySet())
+                if (!descriptor.id.equals(table.descriptor.id))
+                    deleteComponents(descriptor);
+        }
+    }
+
+    /**
      * Rewrites the sstable of {@code descriptor} as sstableupgrade does: opened without validation, then
      * {@code Upgrader} in an offline transaction of {@code UPGRADE_SSTABLES}, the source removed.
      */
@@ -653,6 +1000,38 @@ public class BigMeWriterTest extends CQLTester
                 Throwables.maybeFail(writer.commit(txn.commit(null)));
             }
         }
+    }
+
+    /** Writes {@code update}, one partition, in an sstable of {@code ours}, as {@link #rewrite} writes. */
+    private static void write(ColumnFamilyStore cfs, Descriptor ours, PartitionUpdate update)
+    {
+        try (LifecycleTransaction txn = LifecycleTransaction.offline(OperationType.WRITE, cfs.metadata))
+        {
+            SerializationHeader header = new SerializationHeader(true, cfs.metadata(), update.columns(),
+                                                                 EncodingStats.NO_STATS);
+            try (SSTableWriter writer = ours.getFormat().getWriterFactory().builder(ours)
+                                            .setKeyCount(1)
+                                            .setTableMetadataRef(cfs.metadata)
+                                            .setMetadataCollector(new MetadataCollector(cfs.metadata().comparator))
+                                            .setSerializationHeader(header)
+                                            .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                                            .setSecondaryIndexGroups(cfs.indexManager.listIndexGroups())
+                                            .build(txn, cfs);
+                 UnfilteredRowIterator partition = update.unfilteredIterator())
+            {
+                writer.append(partition);
+                writer.prepareToCommit();
+                txn.prepareToCommit();
+                Throwables.maybeFail(writer.commit(txn.commit(null)));
+            }
+        }
+    }
+
+    /** Deletes the components of {@code descriptor} that exist, so that the start checks of the other tests pass. */
+    private static void deleteComponents(Descriptor descriptor)
+    {
+        for (Component component : descriptor.discoverComponents())
+            descriptor.fileFor(component).tryDelete();
     }
 
     private static int partitionsOf(SSTableReader sstable)

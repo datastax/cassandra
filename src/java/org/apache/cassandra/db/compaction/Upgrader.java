@@ -23,13 +23,20 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.rows.RangeTombstoneMarker;
+import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredSerializer;
+import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableRewriter;
 import org.apache.cassandra.io.sstable.ScannerList;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.File;
@@ -88,8 +95,15 @@ public class Upgrader
         {
             writer.switchWriter(createCompactionWriter(sstable.getSSTableMetadata()));
             iter.setTargetDirectory(writer.currentWriter().getFilename());
+            // the DSE 5.1 compatibility mode: big me, whose deletion times are 32-bit, written from an sstable whose
+            // deletion times go past 2038 (oa)
+            Version written = writer.currentWriter().descriptor.version;
+            boolean refuse = written.hasPre40Encoding() && sstable.descriptor.version.hasUIntDeletionTime();
+            RefusePast2038 refusePast2038 = refuse ? new RefusePast2038(written) : null;
+            // a refusal of the partition deletion or the static row throws from apply, the partition then closed
+            // with the scanners of the compaction iterator, the rewrite aborted
             while (iter.hasNext())
-                writer.append(iter.next());
+                writer.append(refusePast2038 != null ? Transformation.apply(iter.next(), refusePast2038) : iter.next());
 
             writer.finish();
             outputHandler.output("Upgrade of " + sstable + " complete.");
@@ -102,6 +116,50 @@ public class Upgrader
         finally
         {
             controller.close();
+        }
+    }
+
+    /**
+     * The rewrite at big {@code me} (a version with {@link Version#hasPre40Encoding()}, written in the DSE 5.1
+     * compatibility mode only) of an sstable whose deletion times go past 2038 ({@code oa}): a deletion or expiration
+     * time past the cap of {@code me}, which its writer would write wrong, is refused before it is written
+     * ({@link UnfilteredSerializer#checkPre40SSTableDeletionTimes}), so that the rewrite fails and the source is kept.
+     */
+    private static final class RefusePast2038 extends Transformation<UnfilteredRowIterator>
+    {
+        private final Version written;
+
+        private RefusePast2038(Version written)
+        {
+            this.written = written;
+        }
+
+        @Override
+        protected DeletionTime applyToDeletion(DeletionTime deletionTime)
+        {
+            UnfilteredSerializer.checkPre40SSTableDeletionTime(deletionTime, written);
+            return deletionTime;
+        }
+
+        @Override
+        protected Row applyToStatic(Row row)
+        {
+            UnfilteredSerializer.checkPre40SSTableDeletionTimes(row, written);
+            return row;
+        }
+
+        @Override
+        protected Row applyToRow(Row row)
+        {
+            UnfilteredSerializer.checkPre40SSTableDeletionTimes(row, written);
+            return row;
+        }
+
+        @Override
+        protected RangeTombstoneMarker applyToMarker(RangeTombstoneMarker marker)
+        {
+            UnfilteredSerializer.checkPre40SSTableDeletionTimes(marker, written);
+            return marker;
         }
     }
 

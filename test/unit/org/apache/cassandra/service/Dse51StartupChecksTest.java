@@ -23,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Instant;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.db.Dse51SystemTables;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
@@ -86,19 +88,16 @@ public class Dse51StartupChecksTest
     private static final String REWRITE_AT_ME = ". Rewrite the big sstables of a version newer than me among them at " +
                                                 "me, the node stopped: sstableupgrade <keyspace> <table>, run with " +
                                                 "this node's cassandra.yaml, for each of their tables, then start " +
-                                                "the node again. Before it, the node stopped: sstablemetadata on " +
-                                                "each oa sstable listed, and no sstableupgrade of a table with one " +
-                                                "whose estimated tombstone drop times (those of its tombstones and " +
-                                                "expiring cells) reach 2037-01-19 or later: me cannot hold a time " +
-                                                "after 2038-01-19, which sstableupgrade would write wrong, and the " +
-                                                "histogram can show such a time up to about a year earlier, merging " +
-                                                "close times into their mean; and sstablerepairedset --really-set " +
-                                                "--is-unrepaired <its Data.db file> on an sstable still pending " +
-                                                "repair (incrementally repaired while the node ran without the " +
-                                                "mode), which sstableupgrade does not rewrite otherwise (it prints " +
-                                                "\"Error upgrading\" for an sstable it fails to rewrite and still " +
-                                                "exits 0). The sstables of a secondary index (the .<index> " +
-                                                "directories of a table) are not rewritten so either.";
+                                                "the node again. Before it, the node stopped: sstablerepairedset " +
+                                                "--really-set --is-unrepaired <its Data.db file> on an sstable " +
+                                                "still pending repair (incrementally repaired while the node ran " +
+                                                "without the mode), which sstableupgrade does not rewrite " +
+                                                "otherwise. Nor does it rewrite an oa sstable with a deletion or " +
+                                                "expiration time after 2038-01-19T03:14:06Z, which me cannot " +
+                                                "hold: for an sstable it does not rewrite, it prints \"Error " +
+                                                "upgrading\", keeps the sstable and still exits 0, and the next " +
+                                                "start refuses it again. The sstables of a secondary index (the " +
+                                                ".<index> directories of a table) are not rewritten so either.";
     /** The end of that refusal: the snapshot restore, and the deletion of the files. */
     private static final String RESTORE = " the node from its pre-upgrade snapshot. Deleting these files instead " +
                                           "loses this node's copy of their data: do it only if that data is " +
@@ -286,6 +285,9 @@ public class Dse51StartupChecksTest
     @Test
     public void dse51NamesSstableupgradeForTheBigSSTablesItRewritesAtMe() throws Exception
     {
+        // the last time me holds, as the remedy names it: the cap of the 32-bit deletion times
+        assertThat(StartupChecks.DSE51_ME_LAST_TIME)
+        .isEqualTo(Instant.ofEpochSecond(CellData.MAX_DELETION_TIME_2038_LEGACY_CAP).toString());
         assertThat(StartupChecks.isBigSSTableRewrittenAtMe("nb-2-big-Data.db")).isTrue();
         assertThat(StartupChecks.isBigSSTableRewrittenAtMe("oa-7-big-Index.db")).isTrue();
         assertThat(StartupChecks.isBigSSTableRewrittenAtMe("na-1-big-Data.db")).isTrue();
