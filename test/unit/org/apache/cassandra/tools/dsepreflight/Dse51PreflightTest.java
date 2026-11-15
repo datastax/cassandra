@@ -30,6 +30,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -476,10 +477,23 @@ public class Dse51PreflightTest
             assertThat(mixed.stream().filter(f -> f.code.equals(code)).findFirst().orElseThrow(AssertionError::new)
                             .remedy)
             .as(code)
-            .isEqualTo(SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX + SchemaInspector.NEVER_UNRESTRICT_VIEW)
+            .isEqualTo(SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX +
+                       (code.equals("RESTRICTED_VIEW") ? SchemaInspector.KEEP_VIEW_GRANTS_IN_MIXED_PHASE : "") +
+                       SchemaInspector.NEVER_UNRESTRICT_VIEW)
             .startsWith("the upgrade has started (UPGRADED_PEERS): no view is dropped or created in the mixed " +
                         "phase, whose DSE schema changes the upgraded nodes do not take: upgrade no further node " +
-                        "and report to the upgrade owner; never UNRESTRICT ROWS on a view");
+                        "and report to the upgrade owner; ")
+            .endsWith("never UNRESTRICT ROWS on a view: on DSE 5.1.51 it fails and leaves on the node that ran it a " +
+                      "row of system_schema.tables after which DSE does not start that node");
+        // and no other schema change
+        for (String code : List.of("COMPACT_STORAGE", "SASI_INDEX"))
+            assertThat(mixed.stream().filter(f -> f.code.equals(code)).findFirst().orElseThrow(AssertionError::new)
+                            .remedy)
+            .as(code)
+            .isEqualTo(SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE)
+            .isEqualTo("the upgrade has started (UPGRADED_PEERS): no schema change is made in the mixed phase, " +
+                       "whose DSE schema changes the upgraded nodes do not take: upgrade no further node and report " +
+                       "to the upgrade owner");
 
         // a column of the view of a type this software does not have: the view is one to drop and create again
         node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
@@ -524,8 +538,8 @@ public class Dse51PreflightTest
                   everyNode);
         assertThat(mixedRun.report.upgradePath.upgradeSteps)
         .filteredOn(s -> s.startsWith("Schema: "))
-        .containsExactly("Schema: change on DSE 5.1, before the first node is upgraded, what COMPACT_STORAGE, " +
-                         "SASI_INDEX name; for the views UNLOADABLE_TABLE names, see Materialized views");
+        .containsExactly("Schema: " + SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE + " (see COMPACT_STORAGE, " +
+                         "SASI_INDEX); for the views UNLOADABLE_TABLE names, see Materialized views");
     }
 
     /**
@@ -559,9 +573,13 @@ public class Dse51PreflightTest
                                                  .with("position", -1)
                                                  .with("type", "'org.apache.cassandra.db.marshal.NoSuchType'"));
         DsePreflightTest.Run withTable = assertBlocked(run(node), "UNLOADABLE_TABLE");
+        assertThat(withTable.findings("UNLOADABLE_TABLE"))
+        .filteredOn(f -> f.message.startsWith("tables HCD 2.0 cannot load: "))
+        .singleElement()
+        .satisfies(f -> assertThat(f.remedy).isEqualTo(SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE));
         assertThat(withTable.report.upgradePath.upgradeSteps)
         .filteredOn(s -> s.startsWith("Schema: ") || s.startsWith("Materialized views: "))
-        .containsExactly("Schema: change on DSE 5.1, before the first node is upgraded, what UNLOADABLE_TABLE name; " +
+        .containsExactly("Schema: " + SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE + " (see UNLOADABLE_TABLE); " +
                          "for the views UNLOADABLE_TABLE names, see Materialized views",
                          "Materialized views: " + SchemaInspector.NO_VIEW_CHANGE_IN_MIXED_PHASE +
                          " (see UNLOADABLE_TABLE); a RESTRICT ROWS on a view is in the schema of the node that ran " +
@@ -574,9 +592,14 @@ public class Dse51PreflightTest
                           List.of("table_name", "column_name"),
                           row("test_ks", "t", "old").with("dropped_time", new Date(1))
                                                     .with("type", "'org.apache.cassandra.db.marshal.NoSuchType'"));
-        assertThat(assertBlocked(run(dropped), "UNLOADABLE_TABLE").report.upgradePath.upgradeSteps)
+        DsePreflightTest.Run withDropped = assertBlocked(run(dropped), "UNLOADABLE_TABLE");
+        assertThat(withDropped.findings("UNLOADABLE_TABLE"))
+        .filteredOn(f -> f.message.startsWith("dropped columns of a type HCD 2.0 cannot load"))
+        .singleElement()
+        .satisfies(f -> assertThat(f.remedy).isEqualTo(SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE));
+        assertThat(withDropped.report.upgradePath.upgradeSteps)
         .filteredOn(s -> s.startsWith("Schema: "))
-        .containsExactly("Schema: change on DSE 5.1, before the first node is upgraded, what UNLOADABLE_TABLE name; " +
+        .containsExactly("Schema: " + SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE + " (see UNLOADABLE_TABLE); " +
                          "for the views UNLOADABLE_TABLE names, see Materialized views");
 
         // the view alone, with a table of system_schema that cannot be read: the step says both
@@ -638,6 +661,20 @@ public class Dse51PreflightTest
                    "revoke them");
         assertThat(run.report.accessControls.rolePermissionsRows).isEqualTo(5);
         assertThat(run.report.upgradePath.upgradeSteps)
+        .contains("Security: resolve the blocking access control findings above, on DSE 5.1");
+
+        // in the mixed phase, with no table or view restricted to rows in this node's schema: the REVOKE on DSE 5.1,
+        // but for the grants of a table or view restricted in the schema of another node
+        node.writeRows("system", "peers", List.of("peer"), List.of(),
+                       row(InetAddress.getByName("127.0.51.14")).with("release_version",
+                                                                      FBUtilities.getReleaseVersionString()));
+        DsePreflightTest.Run mixed = assertBlocked(run(node), "ROW_LEVEL_ACCESS");
+        assertThat(mixed.report.peers).anyMatch(p -> p.upgraded);
+        assertThat(blocking(mixed, "ROW_LEVEL_ACCESS").remedy)
+        .isEqualTo("on DSE 5.1: REVOKE each of them (REVOKE SELECT ON '<value>' ROWS IN <keyspace>.<table> FROM " +
+                   "<role>, and the same for MODIFY): UNRESTRICT ROWS does not revoke them" +
+                   SchemaInspector.NOT_THE_GRANTS_OF_RESTRICTED);
+        assertThat(mixed.report.upgradePath.upgradeSteps)
         .contains("Security: resolve the blocking access control findings above, on DSE 5.1");
     }
 
@@ -1006,6 +1043,278 @@ public class Dse51PreflightTest
                                                          "org.apache.cassandra.io.compress.EncryptingLZ4Compressor)");
         assertThat(run.report.upgradePath.upgradeSteps)
         .contains("Schema: change on DSE 5.1, before the first node is upgraded, what TDE_TABLE name");
+    }
+
+    /**
+     * In the mixed phase no schema change is made, as for the views: the remedies of every schema finding of a DSE 5.1
+     * node the Schema step names (here the capture's COMPACT_STORAGE and SASI_INDEX, and a keyspace, a user type, a
+     * table and an index of a class, a table with a column type, a legacy authentication table, a JavaScript and a
+     * Python function, an encrypted table and an encrypted view, written here) and the Schema step say so, where
+     * before the mixed phase they ask for the change on DSE, each with its text as before; so do the remedy of the
+     * capture's table restricted to rows (its UNRESTRICT ROWS) and the Security step, while the REVOKE of a rows/
+     * grant, written here, stays, but for those of a table or view still restricted (with a table only, a view only,
+     * or both restricted); and the same finding of a DSE 6 node keeps its remedy in the mixed phase.
+     */
+    @Test
+    public void inTheMixedPhaseNoSchemaChangeIsMade() throws IOException
+    {
+        Dse51NodeFixture node = schemaAsCaptured();
+        String encrypting = "org.apache.cassandra.io.compress.EncryptingLZ4Compressor";
+        node.writeRows(SchemaInspector.SCHEMA, "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("custom_replication").with("replication", Map.of("class", "com.example.NoSuchStrategy",
+                                                                            "dc1", "3")));
+        node.writeRows(SchemaInspector.SCHEMA, "types", KEYSPACES_KEY, List.of("type_name"),
+                       row("test_ks", "geo").with("field_names", List.of("place"))
+                                            .with("field_types", List.of("'com.example.marshal.NoSuchType'")));
+        writeTable(node, "custom", Map.of("class", "com.example.NoSuchCompactionStrategy"));
+        writeTable(node, "secret", Map.of("class", "SizeTieredCompactionStrategy"));
+        node.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                       row("test_ks", "secret").with("compression", Map.of("class", encrypting)));
+        writeTable(node, "badtype", Map.of("class", "SizeTieredCompactionStrategy"));
+        node.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                       withTableOptions(row("test_ks", "badtype"), "badtype"));
+        node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                       row("test_ks", "badtype", "bad").with("clustering_order", "none")
+                                                       .with("column_name_bytes", ByteBufferUtil.bytes("bad"))
+                                                       .with("kind", "regular")
+                                                       .with("position", -1)
+                                                       .with("type", "'org.apache.cassandra.db.marshal.NoSuchType'"));
+        node.writeRows(SchemaInspector.SCHEMA, "indexes", KEYSPACES_KEY, List.of("table_name", "index_name"),
+                       row("test_ks", "custom", "custom_idx").with("kind", "CUSTOM")
+                                                             .with("options", Map.of("class_name",
+                                                                                     "com.example.NoSuchIndex",
+                                                                                     "target", "id")));
+        node.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                       withTableOptions(row("system_auth", "users"), "users").with("flags", Set.of("compound")));
+        node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                       row("system_auth", "users", "name").with("clustering_order", "none")
+                                                          .with("column_name_bytes", ByteBufferUtil.bytes("name"))
+                                                          .with("kind", "partition_key")
+                                                          .with("position", 0)
+                                                          .with("type", "text"));
+        node.writeRows(SchemaInspector.SCHEMA, "functions", KEYSPACES_KEY, List.of("function_name", "argument_types"),
+                       function("plus_one", "javascript"), function("minus_one", "python"));
+        node.writeRows(SchemaInspector.SCHEMA, "views", KEYSPACES_KEY, List.of("view_name"),
+                       row("test_ks", "rlac_by_v").with("compression", Map.of("class", encrypting)));
+        // rows/ grants on the capture's table and view restricted to rows
+        node.writeRows("system_auth", "role_permissions", List.of("role"), List.of("resource"),
+                       row("reader", "rows/EU/data/test_ks/rlac").with("permissions", Set.of("SELECT")),
+                       row("reader", "rows/EU/data/test_ks/rlac_by_v").with("permissions", Set.of("SELECT")));
+
+        // before the mixed phase: each remedy as before, a change on DSE
+        Map<String, List<String>> remedies = new LinkedHashMap<>();
+        remedies.put("COMPACT_STORAGE", List.of("on DSE 5.1, before the first node is upgraded: ALTER TABLE ... " +
+                                                "DROP COMPACT STORAGE for each of them (DSE 5.1 runs it once every " +
+                                                "sstable of the table is at me: nodetool upgradesstables first, as " +
+                                                "the upgrade requires anyway); the tables keep their data, and CQL " +
+                                                "may then show columns COMPACT STORAGE hid (such as column1 and " +
+                                                "value)"));
+        remedies.put("SASI_INDEX", List.of("on DSE 5.1, before the first node is upgraded: DROP INDEX for each (and " +
+                                           "create SAI indexes in their place once no node runs DSE 5.1 and the " +
+                                           "upgrade is complete, if needed)"));
+        remedies.put("UNLOADABLE_KEYSPACE", List.of("ALTER KEYSPACE on DSE to a replication strategy HCD 2.0 has " +
+                                                    "(NetworkTopologyStrategy, SimpleStrategy, EverywhereStrategy)"));
+        remedies.put("UNLOADABLE_TYPE", List.of("change or drop them on DSE (with the tables that use them); a " +
+                                                "DSE-only field type has no counterpart in HCD 2.0"));
+        remedies.put("UNLOADABLE_TABLE", List.of("change or drop these tables on DSE; an upgraded node does not " +
+                                                 "start with them"));
+        remedies.put("UNLOADABLE_CLASS", List.of("ALTER these tables on DSE to classes DSE and HCD 2.0 both have " +
+                                                 "(for example SizeTieredCompactionStrategy or " +
+                                                 "LeveledCompactionStrategy, LZ4Compressor)",
+                                                 "DROP INDEX on DSE (and recreate them as SAI indexes once the " +
+                                                 "upgrade is complete, if needed)"));
+        remedies.put("LEGACY_AUTH_TABLES", List.of("check that their content was migrated to roles, role_members and " +
+                                                   "role_permissions, then drop them on DSE"));
+        remedies.put("JAVASCRIPT_UDF", List.of("rewrite them in Java, or drop them (and the aggregates using " +
+                                               "them), on DSE"));
+        remedies.put("UDF_LANGUAGE", List.of("rewrite them in Java, or drop them (and the aggregates using them), on " +
+                                             "DSE"));
+        remedies.put("TDE_TABLE", List.of("decrypt them on DSE (ALTER TABLE ... WITH compression = {'class': " +
+                                          "'LZ4Compressor'}, then nodetool upgradesstables -a on every node) before " +
+                                          "the upgrade",
+                                          "decrypt them on DSE (ALTER MATERIALIZED VIEW ... WITH compression = " +
+                                          "{'class': 'LZ4Compressor'}, then nodetool upgradesstables -a on every " +
+                                          "node) before the upgrade"));
+        DsePreflightTest.Run before = assertBlocked(run(node), "UNLOADABLE_KEYSPACE");
+        assertThat(before.report.peers).noneMatch(p -> p.upgraded);
+        // the table with a column type HCD 2.0 cannot load, beside the capture's table of a user type it lacks; the
+        // legacy authentication table loads
+        assertThat(before.messages("UNLOADABLE_TABLE"))
+        .isEqualTo("tables HCD 2.0 cannot load: test_ks.badtype: Unable to find abstract-type class " +
+                   "'org.apache.cassandra.db.marshal.NoSuchType', test_ks.t: Unknown type test_ks.addr");
+        remedies.forEach((code, expected) -> assertThat(before.findings(code))
+                                             .as(code)
+                                             .extracting(f -> f.remedy)
+                                             .containsExactlyInAnyOrderElementsOf(expected));
+        assertThat(before.report.upgradePath.upgradeSteps)
+        .filteredOn(s -> s.startsWith("Schema: "))
+        .containsExactly("Schema: change on DSE 5.1, before the first node is upgraded, what COMPACT_STORAGE, " +
+                         "SASI_INDEX, UNLOADABLE_KEYSPACE, UNLOADABLE_TYPE, UNLOADABLE_TABLE, UNLOADABLE_CLASS, " +
+                         "LEGACY_AUTH_TABLES, JAVASCRIPT_UDF, UDF_LANGUAGE, TDE_TABLE name");
+
+        // in the mixed phase: the one text, the messages as before
+        node.writeRows("system", "peers", List.of("peer"), List.of(),
+                       row(InetAddress.getByName("127.0.51.14")).with("release_version",
+                                                                      FBUtilities.getReleaseVersionString()));
+        DsePreflightTest.Run mixed = assertBlocked(run(node), "UNLOADABLE_KEYSPACE");
+        assertThat(mixed.report.peers).anyMatch(p -> p.upgraded);
+        for (String code : remedies.keySet())
+        {
+            assertThat(mixed.findings(code)).as(code)
+                                            .hasSameSizeAs(remedies.get(code))
+                                            .allSatisfy(f -> assertThat(f.remedy).isEqualTo(
+                                                SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE));
+            List<String> messagesBefore = before.findings(code).stream().map(f -> f.message)
+                                                .collect(Collectors.toList());
+            assertThat(mixed.findings(code)).as(code)
+                                            .extracting(f -> f.message)
+                                            .containsExactlyInAnyOrderElementsOf(messagesBefore);
+        }
+        assertThat(mixed.report.upgradePath.upgradeSteps)
+        .filteredOn(s -> s.startsWith("Schema: "))
+        .containsExactly("Schema: the upgrade has started (UPGRADED_PEERS): no schema change is made in the mixed " +
+                         "phase, whose DSE schema changes the upgraded nodes do not take: upgrade no further node " +
+                         "and report to the upgrade owner (see COMPACT_STORAGE, SASI_INDEX, UNLOADABLE_KEYSPACE, " +
+                         "UNLOADABLE_TYPE, UNLOADABLE_TABLE, UNLOADABLE_CLASS, LEGACY_AUTH_TABLES, JAVASCRIPT_UDF, " +
+                         "UDF_LANGUAGE, TDE_TABLE)");
+        // the table restricted to rows: its UNRESTRICT ROWS is a schema change too, and the Security step says so;
+        // the grants of system_auth.role_permissions keep their remedy, a REVOKE, but for those of a restricted
+        // table or view (the warning of the settings, ROW_LEVEL_ACCESS of dse.yaml, keeps its text)
+        String restrictedTables = "tables restricted to rows by DSE row-level access control";
+        assertThat(before.findings("ROW_LEVEL_ACCESS")).filteredOn(f -> f.message.startsWith(restrictedTables))
+                                                       .singleElement()
+                                                       .satisfies(f -> assertThat(f.remedy).startsWith(
+                                                           "on DSE 5.1, before the first node is upgraded: "));
+        assertThat(mixed.findings("ROW_LEVEL_ACCESS")).filteredOn(f -> f.message.startsWith(restrictedTables))
+                                                      .singleElement()
+                                                      .satisfies(f -> assertThat(f.remedy).isEqualTo(
+                                                          SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE));
+        String revoke = "REVOKE each of them (REVOKE SELECT ON '<value>' ROWS IN <keyspace>.<table> FROM <role>, " +
+                        "and the same for MODIFY): UNRESTRICT ROWS does not revoke them";
+        String grants = "DSE row-level access control grants in system_auth.role_permissions";
+        assertThat(before.findings("ROW_LEVEL_ACCESS")).filteredOn(f -> f.message.startsWith(grants))
+                                                       .singleElement()
+                                                       .satisfies(f -> assertThat(f.remedy).isEqualTo(
+                                                           "on DSE 5.1, before the first node is upgraded: " + revoke));
+        assertThat(mixed.findings("ROW_LEVEL_ACCESS")).filteredOn(f -> f.message.startsWith(grants))
+                                                      .singleElement()
+                                                      .satisfies(f -> assertThat(f.remedy).isEqualTo(
+                                                          "on DSE 5.1: " + revoke +
+                                                          SchemaInspector.NOT_THE_GRANTS_OF_RESTRICTED));
+        assertThat(SchemaInspector.NOT_THE_GRANTS_OF_RESTRICTED)
+        .isEqualTo("; not those of a table or view still restricted to rows, in the schema of this node or of " +
+                   "another (see ROW_LEVEL_ACCESS of the tables, RESTRICTED_VIEW and the aggregate's " +
+                   "RESTRICTED_VIEW), whose roles would lose their rows on the DSE 5.1 nodes");
+        assertThat(before.report.upgradePath.upgradeSteps)
+        .contains("Security: resolve the blocking access control findings above, on DSE 5.1");
+        String tablesAndViews = "for the tables restricted to rows (ROW_LEVEL_ACCESS), " +
+                                SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE + "; for the views restricted to " +
+                                "rows, see Materialized views";
+        assertThat(mixed.report.upgradePath.upgradeSteps)
+        .contains("Security: resolve the other blocking access control findings above, on DSE 5.1; " +
+                  tablesAndViews);
+        // without the grants, the restricted table and view are the only findings of the step
+        node.deleteRows("system_auth", "role_permissions", List.of("role"), List.of("resource"),
+                        row("reader", "rows/EU/data/test_ks/rlac"), row("reader", "rows/EU/data/test_ks/rlac_by_v"));
+        DsePreflightTest.Run withoutGrants = assertBlocked(run(node), "UNLOADABLE_KEYSPACE");
+        assertThat(withoutGrants.findings("ROW_LEVEL_ACCESS")).noneMatch(f -> f.message.startsWith(grants));
+        assertThat(withoutGrants.report.upgradePath.upgradeSteps).contains("Security: " + tablesAndViews);
+
+        // role_permissions not read: no grant known, the step says what was not read
+        Dse51NodeFixture noPermissions = schemaAsCaptured();
+        Path permissions = noPermissions.data.resolve("system_auth")
+                                             .resolve("role_permissions-3afbe79f219431a7add7f5ab90d8ec9c");
+        Files.write(permissions.resolve("me-1-big-Data.db"), new byte[]{ 1, 2, 3 });
+        noPermissions.writeRows("system", "peers", List.of("peer"), List.of(),
+                                row(InetAddress.getByName("127.0.51.14")).with("release_version",
+                                                                               FBUtilities.getReleaseVersionString()));
+        assertThat(assertBlocked(run(noPermissions), "UNREADABLE_SCHEMA").report.upgradePath.upgradeSteps)
+        .contains("Security: " + tablesAndViews + "; not checked completely (not read: " +
+                  "system_auth.role_permissions)");
+
+        // a restricted table without a restricted view, and a restricted view without a restricted table: the step
+        // names what is found, the clause of the grants is the same
+        for (boolean tableRestricted : new boolean[]{ true, false })
+        {
+            Dse51NodeFixture one = schemaAsCaptured();
+            if (tableRestricted)
+                one.writeRows(SchemaInspector.SCHEMA, "views", KEYSPACES_KEY, List.of("view_name"),
+                              row("test_ks", "rlac_by_v").with("extensions", Map.of()));
+            else
+                one.writeRows(SchemaInspector.SCHEMA, "tables", KEYSPACES_KEY, List.of("table_name"),
+                              row("test_ks", "rlac").with("extensions", Map.of()));
+            one.writeRows("system_auth", "role_permissions", List.of("role"), List.of("resource"),
+                          row("reader", "rows/EU/data/test_ks/rlac").with("permissions", Set.of("SELECT")));
+            one.writeRows("system", "peers", List.of("peer"), List.of(),
+                          row(InetAddress.getByName("127.0.51.14")).with("release_version",
+                                                                         FBUtilities.getReleaseVersionString()));
+            DsePreflightTest.Run run = assertBlocked(run(one), "ROW_LEVEL_ACCESS");
+            String what = tableRestricted ? "table" : "view";
+            assertThat(run.findings("ROW_LEVEL_ACCESS")).as(what)
+                                                        .filteredOn(f -> f.message.startsWith(grants))
+                                                        .singleElement()
+                                                        .satisfies(f -> assertThat(f.remedy).isEqualTo(
+                                                            "on DSE 5.1: " + revoke +
+                                                            SchemaInspector.NOT_THE_GRANTS_OF_RESTRICTED));
+            assertThat(run.report.upgradePath.upgradeSteps).as(what)
+            .contains("Security: resolve the other blocking access control findings above, on DSE 5.1; " +
+                      (tableRestricted ? "for the tables restricted to rows (ROW_LEVEL_ACCESS), " +
+                                         SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE
+                                       : "for the views restricted to rows, see Materialized views"));
+        }
+
+        // a DSE 6 node in the mixed phase keeps the remedy: what a DSE 5.1 inspection says then is not a DSE 6 text
+        DseNodeFixture dse6 = DseNodeFixture.create(temporaryFolder.newFolder().toPath());
+        dse6.writeRows("system_schema", "keyspaces", KEYSPACES_KEY, List.of(),
+                       row("custom_replication").with("durable_writes", true)
+                                                .with("replication", Map.of("class", "com.example.NoSuchStrategy",
+                                                                            "dc1", "3")));
+        dse6.editPeers(peers -> peers.get(0).put("release_version", FBUtilities.getReleaseVersionString()));
+        DsePreflightTest.Run dse6Mixed = DsePreflightTest.run(temporaryFolder.newFolder().toPath()
+                                                                             .resolve("dse6.json"), dse6.args());
+        assertThat(dse6Mixed.report.peers).anyMatch(p -> p.upgraded);
+        assertThat(dse6Mixed.findings("UNLOADABLE_KEYSPACE")).extracting(f -> f.remedy)
+                                                             .containsExactly(remedies.get("UNLOADABLE_KEYSPACE")
+                                                                                      .get(0));
+    }
+
+    /**
+     * {@code row} of system_schema.tables of {@code test_ks.<table>} or {@code system_auth.<table>}, with an id of its
+     * name and a complete set of table options as DSE 5.1 has them (DSE's defaults, the compaction as 3.x stores it),
+     * so that the schema load reads its options.
+     */
+    private static DseNodeFixture.SchemaRow withTableOptions(DseNodeFixture.SchemaRow row, String table)
+    {
+        return row.with("id", UUID.nameUUIDFromBytes(table.getBytes(StandardCharsets.UTF_8)))
+                  .with("bloom_filter_fp_chance", 0.01)
+                  .with("caching", Map.of("keys", "ALL", "rows_per_partition", "NONE"))
+                  .with("cdc", false)
+                  .with("comment", "")
+                  .with("compaction", Map.of("class",
+                                             "org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy",
+                                             "max_threshold", "32", "min_threshold", "4"))
+                  .with("compression", Map.of("class", "org.apache.cassandra.io.compress.LZ4Compressor",
+                                              "chunk_length_in_kb", "64"))
+                  .with("crc_check_chance", 1.0)
+                  .with("dclocal_read_repair_chance", 0.1)
+                  .with("default_time_to_live", 0)
+                  .with("extensions", Map.of())
+                  .with("gc_grace_seconds", 864000)
+                  .with("max_index_interval", 2048)
+                  .with("memtable_flush_period_in_ms", 0)
+                  .with("min_index_interval", 128)
+                  .with("read_repair_chance", 0.0)
+                  .with("speculative_retry", "99PERCENTILE");
+    }
+
+    /** A function of {@code test_ks} of one int argument, in {@code language}. */
+    private static DseNodeFixture.SchemaRow function(String name, String language)
+    {
+        return row("test_ks", name, List.of("int")).with("argument_names", List.of("x"))
+                                                   .with("body", "return x + 1;")
+                                                   .with("called_on_null_input", true)
+                                                   .with("language", language)
+                                                   .with("return_type", "int");
     }
 
     /**

@@ -1381,10 +1381,12 @@ public class ClusterAggregateTest
             report.peers.add(upgraded);
         });
         Aggregate mixed = aggregate(reports);
-        for (String code : List.of("RESTRICTED_VIEW", "VIEW_TABLE_ROW"))
-            assertThat(remedy(mixed, code)).as(code)
-                                           .isEqualTo(SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX +
-                                                      SchemaInspector.NEVER_UNRESTRICT_VIEW);
+        assertThat(remedy(mixed, "RESTRICTED_VIEW"))
+        .isEqualTo(SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX + "keep the rows/ grants on these views (no " +
+                   "REVOKE: their roles would lose their rows on the DSE 5.1 nodes); " +
+                   SchemaInspector.NEVER_UNRESTRICT_VIEW);
+        assertThat(remedy(mixed, "VIEW_TABLE_ROW"))
+        .isEqualTo(SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX + SchemaInspector.NEVER_UNRESTRICT_VIEW);
     }
 
     @Test

@@ -295,9 +295,6 @@ final class ClusterAggregate
             findings.add(blocking("UNREADABLE_REPORT", "reports that cannot be read: " + list(unreadable),
                                   "run the tool again on those nodes with --json, with the same release of HCD 2.0, and remove from the " +
                                   "directory any file that is not a node report of this tool"));
-        // in the order of their names, not the order of the directory, which differs from one file system to another
-        Collections.sort(dse51Reports);
-        Collections.sort(dse6Reports);
         if (!dse51Reports.isEmpty() && !dse6Reports.isEmpty())
             findings.add(blocking("MIXED_SOURCES",
                                   "reports of DSE 5.1 nodes and of DSE 6 nodes in one aggregate: DSE 5.1 " +
@@ -512,7 +509,8 @@ final class ClusterAggregate
                                   "schema of the node that ran it " + SchemaInspector.RESTRICTION_SPREADS_AT_RESTART +
                                   ", and a node in DSE_5_1 mode refuses to start while its schema holds one",
                                   (mixedPhase
-                                   ? SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX
+                                   ? SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX +
+                                     SchemaInspector.KEEP_VIEW_GRANTS_IN_MIXED_PHASE
                                    : "on DSE 5.1, before the first node is upgraded: " +
                                      (viewTableRows.isEmpty()
                                       ? ""

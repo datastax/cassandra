@@ -1819,7 +1819,13 @@ final class Dse51NodeInspector
                 schemaCodes.remove("UNLOADABLE_TABLE");
             unloadableViews = "for the views UNLOADABLE_TABLE names, see Materialized views";
         }
-        if (!schemaCodes.isEmpty())
+        // in the mixed phase no schema change is made, as for the views (see the Materialized views step)
+        if (!schemaCodes.isEmpty() && mixedPhase)
+            steps.add("Schema: " + SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE + " (see " +
+                      String.join(", ", schemaCodes) + ')' +
+                      (unloadableViews.isEmpty() ? "" : "; " + unloadableViews) +
+                      (schemaNotRead.isEmpty() ? "" : "; " + schemaNotRead));
+        else if (!schemaCodes.isEmpty())
             steps.add("Schema: change on DSE 5.1, before the first node is upgraded, what " +
                       String.join(", ", schemaCodes) + " name" +
                       (unloadableViews.isEmpty() ? "" : "; " + unloadableViews) +
@@ -1893,7 +1899,25 @@ final class Dse51NodeInspector
             securityNotRead.add("the inspection of the schema failed, see INSPECTION_ERROR");
         String securityIncomplete = securityNotRead.isEmpty() ? "" : "not checked completely (not read: " +
                                                                      String.join(", ", securityNotRead) + ')';
-        if (has("RESTRICT", "ROW_LEVEL_ACCESS", "RESTRICTED_VIEW"))
+        // in the mixed phase no schema change is made: neither the UNRESTRICT ROWS of a table nor the drop of a view
+        boolean restrictedViews = !schema.restrictedViews.isEmpty();
+        if (mixedPhase && (schema.rowRestrictedTablesFound || restrictedViews))
+        {
+            List<String> security = new ArrayList<>();
+            // the grants: RESTRICT, which the step of before names, cannot be found on a DSE 5.1 node, whose
+            // role_permissions has no restricted column
+            if (schema.rowGrantsFound)
+                security.add("resolve the other blocking access control findings above, on DSE 5.1");
+            if (schema.rowRestrictedTablesFound)
+                security.add("for the tables restricted to rows (ROW_LEVEL_ACCESS), " +
+                             SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE);
+            if (restrictedViews)
+                security.add("for the views restricted to rows, see Materialized views");
+            if (!securityIncomplete.isEmpty())
+                security.add(securityIncomplete);
+            steps.add("Security: " + String.join("; ", security));
+        }
+        else if (has("RESTRICT", "ROW_LEVEL_ACCESS", "RESTRICTED_VIEW"))
             steps.add("Security: resolve the blocking access control findings above, on DSE 5.1" +
                       (securityIncomplete.isEmpty() ? "" : "; " + securityIncomplete));
         else if (warns("ROW_LEVEL_ACCESS", "PROXY_GRANT", "DELEGATION", "LONE_WRITE_GRANT", "DSE_ONLY_PERMISSION",
