@@ -124,6 +124,8 @@
     <property name="maven-repository-id" value="datastax.snapshots.https"/>
 
     <property name="test.timeout" value="480000" />
+    <!-- experiment only: heap for forked unit-test JVMs, e.g. -Dtest.maxmemory=48g for the ASH benchmark driver -->
+    <property name="test.maxmemory" value="1024m" />
     <property name="test.memory.timeout" value="480000" />
     <property name="test.long.timeout" value="600000" />
     <property name="test.burn.timeout" value="60000000" />
@@ -1440,7 +1442,7 @@
       <mkdir dir="${build.test.output.dir}"/>
       <mkdir dir="${build.test.output.dir}/@{tag}"/>
       <mkdir dir="${tmp.dir}"/>
-      <junit-timeout fork="on" forkmode="@{forkmode}" failureproperty="testfailed" maxmemory="1024m" timeout="@{timeout}" showoutput="@{showoutput}">
+      <junit-timeout fork="on" forkmode="@{forkmode}" failureproperty="testfailed" maxmemory="${test.maxmemory}" timeout="@{timeout}" showoutput="@{showoutput}">
         <formatter classname="org.apache.cassandra.CassandraXMLJUnitResultFormatter" extension=".xml" usefile="true"/>
         <formatter classname="org.apache.cassandra.CassandraBriefJUnitResultFormatter" usefile="false"/>
         <jvmarg value="-Dstorage-config=${test.conf}"/>

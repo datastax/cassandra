@@ -165,6 +165,18 @@ public class CompactionGraph implements Closeable, Accountable
 
     private final VectorFloat<?> globalMean;
 
+    // TIMING (experiment only)
+    final java.util.concurrent.atomic.LongAdder T_ADD = new java.util.concurrent.atomic.LongAdder(), T_ENCODE = new java.util.concurrent.atomic.LongAdder(),
+        T_INSERT = new java.util.concurrent.atomic.LongAdder(), N_INSERT = new java.util.concurrent.atomic.LongAdder(),
+        T_DESER = new java.util.concurrent.atomic.LongAdder(), T_MAP = new java.util.concurrent.atomic.LongAdder(), T_TEMP = new java.util.concurrent.atomic.LongAdder();
+    long firstAdd = Long.MAX_VALUE, lastAdd;
+    final java.util.concurrent.atomic.AtomicLong FIRST_INSERT = new java.util.concurrent.atomic.AtomicLong(Long.MAX_VALUE), LAST_INSERT = new java.util.concurrent.atomic.AtomicLong();
+    static void timing(String line)
+    {
+        try { java.nio.file.Files.writeString(java.nio.file.Path.of(System.getProperty("bench.out", "/tmp/compaction-timing.txt")), line + "\n", java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND); }
+        catch (IOException e) { throw new java.io.UncheckedIOException(e); }
+    }
+
     public CompactionGraph(IndexComponents.ForWrite perIndexComponents, VectorCompressor<?> compressor, boolean unitVectors, long keyCount, boolean allRowsHaveVectors) throws IOException
     {
         this.perIndexComponents = perIndexComponents;
@@ -304,7 +316,16 @@ public class CompactionGraph implements Closeable, Accountable
      */
     public InsertionResult maybeAddVector(ByteBuffer term, int segmentRowId) throws IOException
     {
+        long tStart = nanoTime();
+        if (firstAdd == Long.MAX_VALUE) firstAdd = tStart;
+        try { return maybeAddVectorTimed(term, segmentRowId); }
+        finally { lastAdd = nanoTime(); T_ADD.add(lastAdd - tStart); }
+    }
+
+    private InsertionResult maybeAddVectorTimed(ByteBuffer term, int segmentRowId) throws IOException
+    {
         assert term != null && term.remaining() != 0;
+        long tDeser = nanoTime();
 
         var vector = vts.createFloatVector(serializer.deserializeFloatArray(term));
         // Validate the vector.  Since we are compacting, invalid vectors are ignored instead of failing the operation.
@@ -327,6 +348,8 @@ public class CompactionGraph implements Closeable, Accountable
         lastRowId = segmentRowId;
         rowsAdded++;
 
+        T_DESER.add(nanoTime() - tDeser);
+        long tMap = nanoTime();
         var bytesUsed = 0L;
         // QueryContext allows us to avoid re-serializing the vector. Closing the queryContext releases the lock.
         // Note that a normal put operation follows this flow, so the overhead of acquiring the lock is required.
@@ -411,15 +434,18 @@ public class CompactionGraph implements Closeable, Accountable
 
                 // Store the vector on disk in a mapping from ordinal -> vector for fast retrieval later. This mapping
                 // is only needed during index build. It is a temp file.
+                long tTemp = nanoTime();
+                T_MAP.add(tTemp - tMap);
                 onDiskVectorValuesWriter.write(ordinal, vector);
+                T_TEMP.add(nanoTime() - tTemp);
 
                 if (ashVectors != null)
                     return addAshCodes(bytesUsed + postings.ramBytesUsed(), previousMaxOrdinal, ordinal, vector);
 
-                // Fill in any holes in the pqVectors (setZero has the side effect of increasing the count)
-                while (compressedVectors.count() < ordinal)
-                    compressedVectors.setZero(compressedVectors.count());
-                compressedVectors.encodeAndSet(ordinal, vector);
+                // Fill in any holes in the pqVectors; the vector itself is encoded when its node is added, on an
+                // insertion thread, so this thread does not encode
+                for (int hole = previousMaxOrdinal + 1; hole < ordinal; hole++)
+                    compressedVectors.setZero(hole);
 
                 // Track the bytes used as a result of this operation
                 bytesUsed += postings.ramBytesUsed();
@@ -484,6 +510,20 @@ public class CompactionGraph implements Closeable, Accountable
 
     public long addGraphNode(InsertionResult result)
     {
+        long tStart = nanoTime();
+        FIRST_INSERT.accumulateAndGet(tStart, Math::min);
+        try { return addGraphNodeTimed(result); }
+        finally
+        {
+            long tEnd = nanoTime();
+            T_INSERT.add(tEnd - tStart);
+            N_INSERT.increment();
+            LAST_INSERT.accumulateAndGet(tEnd, Math::max);
+        }
+    }
+
+    private long addGraphNodeTimed(InsertionResult result)
+    {
         if (ashVectors != null)
         {
             ashVectors.encodeAndSet(result.ordinal, result.vector);
@@ -493,6 +533,7 @@ public class CompactionGraph implements Closeable, Accountable
         trainingLock.readLock().lock();
         try
         {
+            compressedVectors.encodeAndSet(result.ordinal, result.vector);
             return builder.addGraphNode(result.ordinal, result.vector);
         }
         finally
@@ -502,6 +543,19 @@ public class CompactionGraph implements Closeable, Accountable
     }
 
     public SegmentMetadata.ComponentMetadataMap flush() throws IOException
+    {
+        long tFlush = nanoTime();
+        try { return flushTimed(tFlush); }
+        finally
+        {
+            timing(String.format("CGTIMING codes=%s vectors=%d producerSpan=%.1fs serialAdd=%.1fs (deserialize %.1fs, map %.1fs, tempFile %.1fs, pqEncode %.1fs) insertCpu=%.1fs insertWall=%.1fs flush=%.1fs",
+                                 ashVectors != null ? "ASH" : "PQ", N_INSERT.sum(), (lastAdd - firstAdd) / 1e9, T_ADD.sum() / 1e9, T_DESER.sum() / 1e9, T_MAP.sum() / 1e9,
+                                 T_TEMP.sum() / 1e9, T_ENCODE.sum() / 1e9, T_INSERT.sum() / 1e9,
+                                 (LAST_INSERT.get() - FIRST_INSERT.get()) / 1e9, (nanoTime() - tFlush) / 1e9));
+        }
+    }
+
+    private SegmentMetadata.ComponentMetadataMap flushTimed(long tFlush) throws IOException
     {
         // Close the temporary file so the reader will know it is the end of the file.
         onDiskVectorValuesWriter.close();
@@ -574,7 +628,9 @@ public class CompactionGraph implements Closeable, Accountable
             });
 
             // complete internal graph clean up
+            long tCleanup = nanoTime();
             builder.cleanup();
+            timing(String.format("CGTIMING flush: start=%.1fs cleanup=%.1fs", (tCleanup - tFlush) / 1e9, (nanoTime() - tCleanup) / 1e9));
 
             // wait for postings to finish writing and clean up related resources
             long postingsEnd = postingsFuture.get();
@@ -628,6 +684,7 @@ public class CompactionGraph implements Closeable, Accountable
 
                 SAICodecUtils.writeFooter(writer.getOutput(), writer.checksum());
                 logger.info("Writing graph took {}ms", (nanoTime() - start) / 1_000_000);
+                timing(String.format("CGTIMING flush: termsWrite=%.1fs parallelWriter=%s", (nanoTime() - start) / 1e9, PARALLEL_ENCODING_WRITING));
                 termsLength = writer.getOutput().position() - termsOffset;
             }
             // write remaining footers/checksums
