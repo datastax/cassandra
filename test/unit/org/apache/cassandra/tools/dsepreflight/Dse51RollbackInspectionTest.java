@@ -973,7 +973,9 @@ public class Dse51RollbackInspectionTest
                                     new PrintStream(new ByteArrayOutputStream())))
         .isEqualTo(DsePreflight.EXIT_READY);
         // two more reports of the check, written in an order neither their names nor its reverse follow: the names are
-        // listed in their order, not the order of the directory
+        // listed in the order of their names, the order the aggregate reads the files in, not the order the file
+        // system lists the directory in (three names: a listing in that order by chance is possible, and
+        // ClusterAggregateTest pins the order itself)
         Files.copy(reports.resolve("rollback.json"), reports.resolve("z-rollback.json"));
         Files.copy(reports.resolve("rollback.json"), reports.resolve("m-rollback.json"));
         ClusterAggregate.AggregateReport aggregate = ClusterAggregate.aggregate(reports);

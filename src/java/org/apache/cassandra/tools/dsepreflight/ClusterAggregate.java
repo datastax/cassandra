@@ -345,8 +345,6 @@ final class ClusterAggregate
             findings.add(info("AGGREGATE_REPORT_SKIPPED", "aggregate reports in the directory, skipped: " + list(skipped)));
         if (!skippedPaxos.isEmpty())
             findings.add(info("PAXOS_ROLLBACK_REPORT_SKIPPED", "Paxos rollback reports (--paxos-rollback) in the directory, skipped: " + list(skippedPaxos)));
-        // in the order of their names, not the order of the directory, which differs from one file system to another
-        Collections.sort(skippedRollbackChecks);
         if (!skippedRollbackChecks.isEmpty())
             findings.add(info("ROLLBACK_CHECK_REPORT_SKIPPED",
                               "reports of the rollback check (--rollback-check) in the directory, skipped: " +
