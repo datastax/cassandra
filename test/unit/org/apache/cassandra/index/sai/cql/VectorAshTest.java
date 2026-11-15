@@ -30,6 +30,7 @@ import io.github.jbellis.jvector.quantization.AsymmetricHashing;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
+import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 
@@ -84,7 +85,12 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
         var sai = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.listIndexes().iterator().next();
         for (var index : sai.getIndexContext().getView().getIndexes())
             for (var segment : index.getSegments())
-                assertEquals(VectorCompression.CompressionType.ASH, ((V2VectorIndexSearcher) segment.getIndexSearcher()).getCompression().type);
+            {
+                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                assertEquals(VectorCompression.CompressionType.ASH, searcher.getCompression().type);
+                // flushed and compacted ASH segments rerank with NVQ whenever NVQ is enabled for this version
+                assertEquals(JVectorVersionUtil.shouldWriteNVQ(64, version), searcher.graph.usesNVQ());
+            }
         assertThat(fractionFindingThemselves(vectors)).isGreaterThanOrEqualTo(0.9);
     }
 
@@ -156,7 +162,12 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
         assertEquals(1, indexes.size());
         for (var index : indexes)
             for (var segment : index.getSegments())
-                assertEquals(VectorCompression.CompressionType.ASH, ((V2VectorIndexSearcher) segment.getIndexSearcher()).getCompression().type);
+            {
+                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                assertEquals(VectorCompression.CompressionType.ASH, searcher.getCompression().type);
+                // flushed and compacted ASH segments rerank with NVQ whenever NVQ is enabled for this version
+                assertEquals(JVectorVersionUtil.shouldWriteNVQ(64, version), searcher.graph.usesNVQ());
+            }
         assertThat(fractionFindingThemselves(vectors)).isGreaterThanOrEqualTo(0.9);
     }
 
