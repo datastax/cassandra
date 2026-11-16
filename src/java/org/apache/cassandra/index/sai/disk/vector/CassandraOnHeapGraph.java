@@ -41,7 +41,6 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.github.jbellis.jvector.disk.RandomAccessWriter;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
@@ -512,7 +511,9 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
         var indexFile = termsDataComponent.file();
-        long termsOffset = graphOffset(indexFile.exists() ? indexFile.length() : 0, perIndexComponents.context());
+        long termsOffset = SAICodecUtils.headerSize();
+        if (indexFile.exists())
+            termsOffset += indexFile.length();
         try (var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true);
              var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true))
         {
@@ -557,7 +558,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                  var view = builder().getGraph().getView())
             {
                 indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
-                writeHeaderAndPad(indexWriter.getOutput(), termsOffset, perIndexComponents.version());
+                SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()), perIndexComponents.version());
                 assert indexWriter.getOutput().position() == termsOffset : "termsOffset " + termsOffset + " != " + indexWriter.getOutput().position();
 
                 // write the graph
@@ -577,29 +578,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
     }
 
-    /** Page size that graph records are aligned to on JVector file format 7 and later. */
-    static final int GRAPH_PAGE_BYTES = 4096;
-
     /**
-     * Returns where a segment's graph starts in the terms file: after the segment's header and, on JVector file
-     * format 7 and later, rounded up to a page boundary so that the page-aligned graph records line up with pages.
+     * Page size that graph records are aligned to on JVector file format 7 and later; JVector pads the graph's
+     * header so its records line up with the pages of the whole file.
      */
-    static long graphOffset(long segmentStart, IndexContext context)
-    {
-        long offset = segmentStart + SAICodecUtils.headerSize();
-        if (context.version().onDiskFormat().jvectorFileFormatVersion() >= 7)
-            offset = (offset + GRAPH_PAGE_BYTES - 1) / GRAPH_PAGE_BYTES * GRAPH_PAGE_BYTES;
-        return offset;
-    }
-
-    /** Writes the segment header, then zeros up to {@code graphOffset}, where the graph starts. */
-    static void writeHeaderAndPad(RandomAccessWriter out, long graphOffset, Version version) throws IOException
-    {
-        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(out), version);
-        long pad = graphOffset - out.position();
-        if (pad > 0)
-            out.write(new byte[(int) pad]);
-    }
+    static final int GRAPH_PAGE_BYTES = 4096;
 
     private RandomAccessOnDiskGraphIndexWriter createIndexWriter(File indexFile, long termsOffset, IndexContext context, OrdinalMapper ordinalMapper, VectorCompressor<?> compressor, NVQuantization nvq) throws IOException
     {
