@@ -135,57 +135,62 @@ public final class ThreadAwareSecurityManager extends SecurityManager
         // A ProtectionDomain can have its origin at an oridinary code-source or provided via a
         // AccessController.doPrivileded() call.
         //
-        Policy.setPolicy(new Policy()
+        // The policy only serves the UDF sandbox, which install() skips when UDFs are disabled; JDK 24 and later
+        // refuse to set a system-wide policy, so skipping it here too lets the node start on those JDKs.
+        if (!DISABLE_USER_DEFINED_FUNCTIONS.getBoolean())
         {
-            public PermissionCollection getPermissions(CodeSource codesource)
+            Policy.setPolicy(new Policy()
             {
-                // contract of getPermissions() methods is to return a _mutable_ PermissionCollection
-
-                Permissions perms = new Permissions();
-
-                if (codesource == null || codesource.getLocation() == null)
-                    return perms;
-
-                switch (codesource.getLocation().getProtocol())
+                public PermissionCollection getPermissions(CodeSource codesource)
                 {
-                    case "jar":   // One-JAR or Uno-Jar source
-                        if (!codesource.getLocation().getPath().startsWith("file:")) {
-                            return perms;
-                        } // else fall through and add AllPermission()
-                    case "file":  // Standard file system source
-                        // All JARs and class files reside on the file system - we can safely
-                        // assume that these classes are "good".
-                        perms.add(new AllPermission());
+                    // contract of getPermissions() methods is to return a _mutable_ PermissionCollection
+
+                    Permissions perms = new Permissions();
+
+                    if (codesource == null || codesource.getLocation() == null)
                         return perms;
+
+                    switch (codesource.getLocation().getProtocol())
+                    {
+                        case "jar":   // One-JAR or Uno-Jar source
+                            if (!codesource.getLocation().getPath().startsWith("file:")) {
+                                return perms;
+                            } // else fall through and add AllPermission()
+                        case "file":  // Standard file system source
+                            // All JARs and class files reside on the file system - we can safely
+                            // assume that these classes are "good".
+                            perms.add(new AllPermission());
+                            return perms;
+                    }
+
+                    return perms;
                 }
 
-                return perms;
-            }
-
-            public PermissionCollection getPermissions(ProtectionDomain domain)
-            {
-                return getPermissions(domain.getCodeSource());
-            }
-
-            public boolean implies(ProtectionDomain domain, Permission permission)
-            {
-                CodeSource codesource = domain.getCodeSource();
-                if (codesource == null || codesource.getLocation() == null)
-                    return false;
-
-                switch (codesource.getLocation().getProtocol())
+                public PermissionCollection getPermissions(ProtectionDomain domain)
                 {
-                    case "jar":   // One-JAR or Uno-Jar source
-                        return codesource.getLocation().getPath().startsWith("file:");
-                    case "file":  // Standard file system source
-                        // All JARs and class files reside on the file system - we can safely
-                        // assume that these classes are "good".
-                        return true;
+                    return getPermissions(domain.getCodeSource());
                 }
 
-                return false;
-            }
-        });
+                public boolean implies(ProtectionDomain domain, Permission permission)
+                {
+                    CodeSource codesource = domain.getCodeSource();
+                    if (codesource == null || codesource.getLocation() == null)
+                        return false;
+
+                    switch (codesource.getLocation().getProtocol())
+                    {
+                        case "jar":   // One-JAR or Uno-Jar source
+                            return codesource.getLocation().getPath().startsWith("file:");
+                        case "file":  // Standard file system source
+                            // All JARs and class files reside on the file system - we can safely
+                            // assume that these classes are "good".
+                            return true;
+                    }
+
+                    return false;
+                }
+            });
+        }
     }
 
     private static final FastThreadLocal<Boolean> initializedThread = new FastThreadLocal<>();
