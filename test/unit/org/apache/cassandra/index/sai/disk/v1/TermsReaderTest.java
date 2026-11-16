@@ -292,8 +292,8 @@ public class TermsReaderTest extends SaiRandomizedTest
         {
             for (int i = 0; i < 200; i++)
             {
-                // The range queries merge the posting lists lazily up to a number of terms, and read them all
-                // otherwise: here the ranges have up to 50 terms.
+                // The range queries open a limited number of posting lists, and read all the others when the
+                // row ids go past the open ones: here the ranges have up to 50 terms.
                 TermsReader.setMaxLazyPostingLists(new int[]{ 0, 1, 5, 20, 1024 }[randomIntBetween(0, 4)]);
 
                 // The scans require ordered bounds. Equal bounds are covered: unless both are inclusive the range is
@@ -343,10 +343,36 @@ public class TermsReaderTest extends SaiRandomizedTest
                 Set<Integer> actualRows = new TreeSet<>();
                 try (PostingList postings = reader.rangeMatch(start, end, upperInclusive, listener, new QueryContext()))
                 {
+                    assertTrue(range, postings.size() >= expectedRows.size());
                     for (long rowId = postings.nextPosting(); rowId != PostingList.END_OF_STREAM; rowId = postings.nextPosting())
                         actualRows.add((int) rowId);
                 }
                 assertEquals(range, expectedRows, actualRows);
+
+                // the same with skips, which can land before, on and after the last row id of the open posting lists
+                TreeSet<Integer> sortedRows = new TreeSet<>(expectedRows);
+                try (PostingList postings = reader.rangeMatch(start, end, upperInclusive, listener, new QueryContext()))
+                {
+                    int last = -1;
+                    while (last != PostingList.END_OF_STREAM)
+                    {
+                        Integer expected;
+                        int actual;
+                        if (randomBoolean())
+                        {
+                            expected = sortedRows.higher(last);
+                            actual = postings.nextPosting();
+                        }
+                        else
+                        {
+                            int target = last + randomIntBetween(1, 300);
+                            expected = sortedRows.ceiling(target);
+                            actual = postings.advance(target);
+                        }
+                        assertEquals(range, expected == null ? PostingList.END_OF_STREAM : expected, actual);
+                        last = actual;
+                    }
+                }
 
                 assertEquals(range, toStrings(expectedTerms), scannedTerms(reader.rangeTerms(expression, true)));
                 Collections.reverse(expectedTerms);
