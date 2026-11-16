@@ -20,10 +20,13 @@ package org.apache.cassandra.db.commitlog;
 
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -37,6 +40,7 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.AppenderBase;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
@@ -76,6 +80,108 @@ public class CommitLogReplayerTest
         Assert.assertThrows(ExecutionException.class, () -> mutationFuture.get());
         Assert.assertTrue(!replayer.getSegmentWithFailedMutations().isEmpty());
         Assert.assertTrue(replayer.getSegmentWithFailedMutations().contains(failedSegment));
+    }
+
+    /**
+     * When the mutation is applied successfully, the returned future must succeed with the submitted result and no
+     * segment must be recorded as failed.
+     */
+    @Test
+    @BMRules(rules = { @BMRule(name = "Succeed applying mutation",
+            targetClass = "org.apache.cassandra.concurrent.Stage",
+            targetMethod = "submit",
+            action = "return org.apache.cassandra.utils.concurrent.ImmediateFuture.success(Integer.valueOf(42));") } )
+    public void testSuccessfulMutationCompletesFutureAndTracksNoFailedSegment() throws Exception
+    {
+        CommitLogReplayer.MutationInitiator mutationInitiator = new CommitLogReplayer.MutationInitiator()
+        {
+            @Override
+            protected void onFailedMutation(String keyspace, Collection<TableId> tableIds)
+            {
+                Assert.fail("onFailedMutation must not be called when the mutation succeeds");
+            }
+        };
+        CommitLogReplayer replayer = new CommitLogReplayer(CommitLog.instance, CommitLogPosition.NONE, null, CommitLogReplayer.ReplayFilter.create());
+        CommitLogDescriptor descriptor = mock(CommitLogDescriptor.class);
+        when(descriptor.fileName()).thenReturn("segment");
+        Future<Integer> mutationFuture = mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
+
+        Assert.assertEquals(Integer.valueOf(42), mutationFuture.get(5, TimeUnit.SECONDS));
+        Assert.assertTrue(replayer.getSegmentWithFailedMutations().isEmpty());
+    }
+
+    /**
+     * If the overridable onFailedMutation hook throws, the returned future must still complete and the segment must
+     * still be recorded as failed. Otherwise the replayer would wait forever in FBUtilities.waitOnFuture.
+     */
+    @Test
+    @BMRules(rules = { @BMRule(name = "Fail applying mutation",
+            targetClass = "org.apache.cassandra.concurrent.Stage",
+            targetMethod = "submit",
+            action = "return org.apache.cassandra.utils.concurrent.ImmediateFuture.failure(new RuntimeException(\"mutation failed\"));") } )
+    public void testFutureCompletesWhenOnFailedMutationHookThrows() throws Exception
+    {
+        CommitLogReplayer.MutationInitiator mutationInitiator = new CommitLogReplayer.MutationInitiator()
+        {
+            @Override
+            protected void onFailedMutation(String keyspace, Collection<TableId> tableIds)
+            {
+                throw new IllegalStateException("hook failed");
+            }
+        };
+        CommitLogReplayer replayer = new CommitLogReplayer(CommitLog.instance, CommitLogPosition.NONE, null, CommitLogReplayer.ReplayFilter.create());
+        CommitLogDescriptor descriptor = mock(CommitLogDescriptor.class);
+        String failedSegment = "failedSegment";
+        when(descriptor.fileName()).thenReturn(failedSegment);
+        Future<Integer> mutationFuture = mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
+
+        Assert.assertTrue("returned future must complete even if onFailedMutation throws", mutationFuture.awaitUninterruptibly(5, TimeUnit.SECONDS));
+        Assert.assertTrue(mutationFuture.isDone());
+        Assert.assertTrue("segment must be recorded as failed even if the hook throws",
+                          replayer.getSegmentWithFailedMutations().contains(failedSegment));
+    }
+
+    /**
+     * The original failure cause must be propagated unchanged, Errors included (not wrapped in a RuntimeException).
+     */
+    @Test
+    @BMRules(rules = { @BMRule(name = "Fail applying mutation with an Error",
+            targetClass = "org.apache.cassandra.concurrent.Stage",
+            targetMethod = "submit",
+            action = "return org.apache.cassandra.utils.concurrent.ImmediateFuture.failure(new java.lang.AssertionError(\"boom\"));") } )
+    public void testOriginalErrorIsPropagatedWhenMutationFails()
+    {
+        CommitLogReplayer.MutationInitiator mutationInitiator = new CommitLogReplayer.MutationInitiator();
+        CommitLogReplayer replayer = new CommitLogReplayer(CommitLog.instance, CommitLogPosition.NONE, null, CommitLogReplayer.ReplayFilter.create());
+        CommitLogDescriptor descriptor = mock(CommitLogDescriptor.class);
+        when(descriptor.fileName()).thenReturn("failedSegment");
+        Future<Integer> mutationFuture = mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
+
+        Assert.assertTrue(mutationFuture.isDone());
+        Throwable cause = mutationFuture.cause();
+        Assert.assertTrue("expected the original AssertionError but got " + cause, cause instanceof AssertionError);
+        Assert.assertEquals("boom", cause.getMessage());
+    }
+
+    /**
+     * A failure with no cause (e.g. CancellationException) must not be replaced by a RuntimeException wrapping null.
+     */
+    @Test
+    @BMRules(rules = { @BMRule(name = "Fail applying mutation with a cancellation",
+            targetClass = "org.apache.cassandra.concurrent.Stage",
+            targetMethod = "submit",
+            action = "return org.apache.cassandra.utils.concurrent.ImmediateFuture.failure(new java.util.concurrent.CancellationException(\"cancelled\"));") } )
+    public void testCauseIsPreservedWhenFailureHasNoCause()
+    {
+        CommitLogReplayer.MutationInitiator mutationInitiator = new CommitLogReplayer.MutationInitiator();
+        CommitLogReplayer replayer = new CommitLogReplayer(CommitLog.instance, CommitLogPosition.NONE, null, CommitLogReplayer.ReplayFilter.create());
+        CommitLogDescriptor descriptor = mock(CommitLogDescriptor.class);
+        when(descriptor.fileName()).thenReturn("failedSegment");
+        Future<Integer> mutationFuture = mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
+
+        Assert.assertTrue(mutationFuture.isDone());
+        Throwable cause = mutationFuture.cause();
+        Assert.assertTrue("expected CancellationException but got " + cause, cause instanceof CancellationException);
     }
 
     /**
