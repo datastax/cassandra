@@ -21,14 +21,13 @@ import javax.annotation.Nullable;
 import org.apache.cassandra.cql3.Operator;
 
 /**
- * Thrown when a {@code LIKE} pattern can't be compiled into an automaton (see
- * {@link org.apache.cassandra.cql3.LikePatterns#forPatternOperator}): it is syntactically invalid or too complex to
- * determinize.
+ * Thrown when a {@code LIKE} pattern is not in the valid internal form of its operator (see
+ * {@link org.apache.cassandra.cql3.LikePatterns#forPatternOperator}).
  * <p>
- * Coordinators compile the patterns of {@code LIKE} restrictions when the restriction is bound, so the client gets
- * this {@link InvalidRequestException} before the query reaches the replicas. The operator evaluating the pattern
- * ({@link Operator#isSatisfiedBy}) doesn't know the restricted column, which its caller adds with
- * {@link #withColumn}.
+ * Coordinators translate the patterns of {@code LIKE} restrictions into that form when the restriction is bound,
+ * rejecting the invalid ones, so this can only happen with a pattern built elsewhere, e.g. by a coordinator that does
+ * not use the same form. The operator evaluating the pattern ({@link Operator#isSatisfiedBy}) doesn't know the
+ * restricted column, which its caller adds with {@link #withColumn}.
  */
 public final class InvalidPatternException extends InvalidRequestException
 {
@@ -41,7 +40,7 @@ public final class InvalidPatternException extends InvalidRequestException
     /**
      * @param operator the pattern operator
      * @param column the restricted column, or {@code null} if it isn't known
-     * @param reason why the pattern can't be compiled
+     * @param reason why the pattern is invalid
      */
     public InvalidPatternException(Operator operator, @Nullable Object column, String reason)
     {

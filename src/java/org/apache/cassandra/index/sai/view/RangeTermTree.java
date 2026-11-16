@@ -36,9 +36,8 @@ import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.plan.Expression;
-import org.apache.cassandra.index.sai.utils.AutomatonQueries;
+import org.apache.cassandra.index.sai.utils.PrefixRange;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Interval;
 import org.apache.cassandra.utils.IntervalTree;
 
@@ -58,10 +57,8 @@ public class RangeTermTree implements TermTree
 
     public Set<SSTableIndex> search(Expression e)
     {
-        if (e.getOp() == Expression.Op.PREFIX)
-            return searchPrefix(ByteBufferUtil.getArray(e.lower.value.encoded));
-        if (e.getOp() == Expression.Op.AUTOMATON)
-            return searchPrefix(e.getAutomatonCommonPrefix());
+        if (e.getOp() == Expression.Op.PATTERN)
+            return searchPrefix(e.getPatternLiteralPrefix());
 
         // Get the bounds given the version. Notice that we use the partially-encoded representation for bounds
         // because that is how we store them in the range tree. The comparator is used to compare the bounds to
@@ -78,7 +75,7 @@ public class RangeTermTree implements TermTree
      */
     private Set<SSTableIndex> searchPrefix(byte[] prefix)
     {
-        byte[] upperBytes = AutomatonQueries.prefixUpperBound(prefix);
+        byte[] upperBytes = PrefixRange.upperBound(prefix);
         // an empty prefix, or one made of 0xFF bytes only (not valid UTF-8): no pruning
         if (upperBytes == null)
             return searchRange(version -> null, version -> null);

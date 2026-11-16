@@ -227,8 +227,8 @@ public class OperationTest extends IndexingSchemaLoader
 
         List<Expression> expectedExpressions = new ArrayList<Expression>(2)
         {{
-                // LIKE_MATCHES is automaton-served; building through add() sets the operation (Op.AUTOMATON)
-                // and the pattern operator consistently
+                // LIKE_MATCHES is served by pattern matching; building through add() sets the operation
+                // (Op.PATTERN) and the pattern operator consistently
                 add(new Expression(SAITester.createIndexContext("comment", UTF8Type.instance))
                     .add(Operator.LIKE_MATCHES, UTF8Type.instance.decompose("soft eng")));
 

@@ -424,8 +424,8 @@ public class AllowFilteringTest extends SAITester
         execute("INSERT INTO %s (a, b, c, d) VALUES ('2', 'Test2', 'MyTest', 'Testing')");
         execute("INSERT INTO %s (a, b, c, d) VALUES ('3', 'Other', 'Teest', 'Other')");
 
-        // All LIKE variants are supported by the index and don't require ALLOW FILTERING (the non-prefix
-        // variants are served by automaton intersection, see AutomatonQueryTest)
+        // All LIKE variants are supported by the index and don't require ALLOW FILTERING (they are served by
+        // walking the terms trie with the pattern, see LikePatternQueryTest)
         beforeAndAfterFlush(() -> {
             assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE b LIKE 'Test'"), row("1"));
             assertRowsIgnoringOrder(execute("SELECT a FROM %s WHERE c LIKE 'Test'"), row("1"));

@@ -20,6 +20,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -35,9 +36,11 @@ import com.carrotsearch.randomizedtesting.annotations.ParametersFactory;
 import org.agrona.collections.Int2IntHashMap;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.LikePatterns;
+import org.apache.cassandra.cql3.LikeReference;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.tries.TriePattern;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
@@ -45,6 +48,7 @@ import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
 import org.apache.cassandra.index.sai.disk.MemtableTermsIterator;
 import org.apache.cassandra.index.sai.disk.PostingList;
+import org.apache.cassandra.index.sai.disk.TermsIterator;
 import org.apache.cassandra.index.sai.disk.io.IndexFileUtils;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
@@ -66,20 +70,19 @@ import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.lucene.util.automaton.Automata;
-import org.apache.lucene.util.automaton.CompiledAutomaton;
+import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
 
 import static org.apache.cassandra.index.sai.metrics.QueryEventListeners.NO_OP_TRIE_LISTENER;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Disk-level tests for the automaton term-matching engine serving the non-prefix LIKE variants ({@code TermsReader#intersect} and
- * {@code InvertedIndexSearcher#search} with a pattern expression): builds real per-segment inverted indexes from synthetic
- * term/rowid data and compares the engine results with a brute-force reference that runs the same automaton
- * over every term.
+ * Disk-level tests for the term-matching engine serving the LIKE variants ({@code TermsReader#patternMatch},
+ * {@code TermsReader#patternTerms} and {@code InvertedIndexSearcher#search} with a pattern expression), which walks the
+ * terms trie with the pattern: builds real per-segment inverted indexes from synthetic term/rowid data and compares the
+ * engine results with a brute-force reference that evaluates the pattern on every term with {@link LikeReference}.
  */
-public class AutomatonIntersectionTest extends SaiRandomizedTest
+public class TermsReaderPatternTest extends SaiRandomizedTest
 {
 
     private final Version version;
@@ -106,7 +109,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         SAIUtil.setCurrentVersion(version);
     }
 
-    public AutomatonIntersectionTest(Version version)
+    public TermsReaderPatternTest(Version version)
     {
         this.version = version;
     }
@@ -117,8 +120,8 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         Map<String, TreeSet<Integer>> dictionary = dictionary("abc", "abcabc", "xabcx", "a%b", "a_c", "ab", "", "zzz");
         withIndex(dictionary, fixture ->
         {
-            for (String pattern : new String[]{ "abc%", "%abc", "%abc%", "a%c", "%", "abc", "a_c", "a%%c" })
-                assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.patternAutomaton(pattern), "LIKE " + pattern);
+            for (String pattern : new String[]{ "abc%", "%abc", "%abc%", "a%c", "%", "abc", "a_c", "a%%c", "a\\_c", "_bc%", "%_" })
+                assertEngineMatchesBruteForce(fixture, dictionary, Operator.LIKE_MATCHES, pattern);
         });
     }
 
@@ -129,30 +132,27 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         withIndex(dictionary, fixture ->
         {
             // an empty LIKE pattern accepts only the empty term, which is not in the dictionary
-            assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.patternAutomaton(""), "empty LIKE");
-            // empty suffix/contains automatons accept every term
-            assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.suffixAutomaton(""), "empty suffix");
-            assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.containsAutomaton(""), "empty contains");
-            // the empty language matches nothing at all
-            assertEngineMatchesBruteForce(fixture, dictionary, LikePatterns.compile(Automata.makeEmpty()), "empty language");
+            assertEngineMatchesBruteForce(fixture, dictionary, Operator.LIKE_MATCHES, "");
+            // empty suffix/contains patterns accept every term
+            assertEngineMatchesBruteForce(fixture, dictionary, Operator.LIKE_SUFFIX, "");
+            assertEngineMatchesBruteForce(fixture, dictionary, Operator.LIKE_CONTAINS, "");
         });
     }
 
     @Test
     public void testCommonPrefixBoundingCorrectness() throws IOException
     {
-        // Terms straddling the [enc("ab"), enc("ac")) scan bounds of a LIKE 'ab%'-style automaton: "aa<U+FFFF>" and "ab"
-        // sit just below/at the lower bound, "ab<U+FFFF>..." just below the upper bound, "ac" exactly at the
-        // (exclusive) upper bound and "ac\0-like" terms just above it.
+        // Terms straddling the range [enc("ab"), enc("ac")) of the terms matching LIKE 'ab%': "aa<U+FFFF>" and "ab"
+        // sit just below/at its start, "ab<U+FFFF>..." just below its end, "ac" exactly at the (exclusive) end and
+        // "ac\0-like" terms just above it.
         Map<String, TreeSet<Integer>> dictionary = dictionary("aa", "aa\uFFFF", "ab", "ab\0", "ab\uFFFF\uFFFF",
                                                               "abz", "ac", "aca", "b", "");
         withIndex(dictionary, fixture ->
         {
-            CompiledAutomaton automaton = LikePatterns.patternAutomaton("ab%");
-            assertEngineMatchesBruteForce(fixture, dictionary, automaton, "prefix bounds ab%");
+            assertEngineMatchesBruteForce(fixture, dictionary, Operator.LIKE_MATCHES, "ab%");
 
-            var results = intersect(fixture, automaton);
-            var expected = expectedRowIds(dictionary, automaton);
+            var results = patternMatch(fixture, Operator.LIKE_MATCHES, "ab%");
+            var expected = expectedRowIds(dictionary, Operator.LIKE_MATCHES, "ab%");
             // guard against a vacuous comparison: exactly the four "ab"-prefixed terms must have matched
             assertEquals(union(dictionary, "ab", "ab\0", "ab\uFFFF\uFFFF", "abz"), expected);
             assertEquals(expected, results);
@@ -176,15 +176,15 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         withIndex(dictionary, fixture ->
         {
             QueryContext expired = new QueryContext(abortedCommand);
-            assertThrows(AbortedOperationException.class, () -> intersect(fixture, LikePatterns.patternAutomaton("a%"), expired));
+            assertThrows(AbortedOperationException.class, () -> patternMatch(fixture, Operator.LIKE_MATCHES, "a%", expired));
         });
     }
 
     /**
      * If the second postings input open fails, the first one must be closed on the way out instead of leaking
      * (TermsReader used to open both before the try block whose catch closes them). Exercised for all the
-     * two-open scan paths: the filtered range scan of the automaton intersection, the exact term lookup
-     * ({@code TermQuery}'s constructor) and the unfiltered range scan ({@code readAndMergePostings}, both).
+     * two-open scan paths: the pattern scan, the exact term lookup ({@code TermQuery}'s constructor) and the
+     * unfiltered range scan ({@code readAndMergePostings}, both).
      */
     @Test
     public void testFirstPostingsInputClosedWhenSecondOpenFails() throws IOException
@@ -192,11 +192,8 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         Map<String, TreeSet<Integer>> dictionary = dictionary("alpha", "alps", "beta", "gamma");
         withIndex(dictionary, fixture ->
         {
-            CompiledAutomaton automaton = LikePatterns.patternAutomaton("al%");
-            assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NORMAL, automaton.type);
-
-            // automaton intersection: filtered range scan
-            expectInjectedOpenFailure(() -> intersect(fixture, automaton));
+            // pattern scan
+            expectInjectedOpenFailure(() -> patternMatch(fixture, Operator.LIKE_MATCHES, "al%"));
 
             // exact match: the two opens in TermQuery's constructor
             ByteComparable term = version.onDiskFormat().encodeForTrie(UTF8Type.instance.decompose("alpha"), UTF8Type.instance);
@@ -287,9 +284,8 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
 
         withIndex(dictionary, fixture ->
         {
-            CompiledAutomaton automaton = LikePatterns.patternAutomaton("match%");
-            var results = intersect(fixture, automaton);
-            var expected = expectedRowIds(dictionary, automaton);
+            var results = patternMatch(fixture, Operator.LIKE_MATCHES, "match%");
+            var expected = expectedRowIds(dictionary, Operator.LIKE_MATCHES, "match%");
             assertEquals(512 + 7 + 512, expected.size());
             assertEquals(expected, results);
         });
@@ -311,13 +307,59 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
 
         withIndex(dictionary, fixture ->
         {
-            for (int i = 0; i < 30; i++)
+            for (int i = 0; i < 100; i++)
             {
                 String seed = terms.get(nextInt(terms.size()));
-                CompiledAutomaton automaton = randomAutomaton(seed);
-                assertEngineMatchesBruteForce(fixture, dictionary, automaton, "randomized " + i);
+                Pair<Operator, String> pattern = randomPattern(seed);
+                assertEngineMatchesBruteForce(fixture, dictionary, pattern.left, pattern.right);
             }
         });
+    }
+
+    /** The terms of the ordering scans restricted by a pattern ({@code LIKE} on the ordering column), in both orders. */
+    @Test
+    public void testPatternTermsInBothOrders() throws IOException
+    {
+        Map<String, TreeSet<Integer>> dictionary = new TreeMap<>();
+        int rowId = 0;
+        while (dictionary.size() < 2_000)
+            dictionary.computeIfAbsent(randomTerm(), k -> new TreeSet<>()).add(rowId++);
+        List<String> terms = new ArrayList<>(dictionary.keySet());
+        // the order of the terms dictionary
+        terms.sort((a, b) -> compareUnsigned(utf8Bytes(a), utf8Bytes(b)));
+
+        withIndex(dictionary, fixture ->
+        {
+            for (int i = 0; i < 30; i++)
+            {
+                Pair<Operator, String> pattern = randomPattern(terms.get(nextInt(terms.size())));
+                Expression expression = new Expression(fixture.indexContext).add(pattern.left, UTF8Type.instance.decompose(pattern.right));
+                if (expression.getOp() != Expression.Op.PATTERN)
+                    continue; // a wildcard-free pattern, served as an equality
+
+                List<String> expected = terms.stream()
+                                             .filter(t -> LikeReference.matches(pattern.left, pattern.right, t))
+                                             .collect(Collectors.toList());
+                String description = pattern.left + " '" + pattern.right + "'";
+                assertEquals(description + " ascending", expected, patternTerms(fixture, expression, true));
+                Collections.reverse(expected);
+                assertEquals(description + " descending", expected, patternTerms(fixture, expression, false));
+            }
+        });
+    }
+
+    private static List<String> patternTerms(Fixture fixture, Expression expression, boolean ascending) throws IOException
+    {
+        List<String> terms = new ArrayList<>();
+        try (TermsIterator iterator = fixture.reader.patternTerms(expression, ascending))
+        {
+            while (iterator.hasNext())
+            {
+                ByteComparable term = iterator.next();
+                terms.add(new String(ByteSourceInverse.readBytes(term.asComparableBytes(fixture.termsEncodingVersion)), StandardCharsets.UTF_8));
+            }
+        }
+        return terms;
     }
 
     @Test
@@ -354,7 +396,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
             {
                 assertTrue(searcher instanceof InvertedIndexSearcher);
                 String pattern = "al_%";
-                TreeSet<Integer> expected = expectedRowIds(dictionary, LikePatterns.patternAutomaton(pattern));
+                TreeSet<Integer> expected = expectedRowIds(dictionary, Operator.LIKE_MATCHES, pattern);
                 assertEquals(union(dictionary, "alpha", "alps", "alcove"), expected);
 
                 Expression expression = new Expression(indexContext).add(Operator.LIKE_MATCHES, UTF8Type.instance.decompose(pattern));
@@ -376,10 +418,14 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
     private static class Fixture
     {
         final TermsReader reader;
+        final IndexContext indexContext;
+        final ByteComparable.Version termsEncodingVersion;
 
-        Fixture(TermsReader reader)
+        Fixture(TermsReader reader, IndexContext indexContext, ByteComparable.Version termsEncodingVersion)
         {
             this.reader = reader;
+            this.indexContext = indexContext;
+            this.termsEncodingVersion = termsEncodingVersion;
         }
     }
 
@@ -417,7 +463,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
                                                   termsFooterPointer,
                                                   version))
         {
-            test.accept(new Fixture(reader));
+            test.accept(new Fixture(reader, indexContext, components.byteComparableVersionFor(IndexComponentType.TERMS_DATA)));
         }
     }
 
@@ -449,18 +495,19 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
     }
 
     /** Runs the engine and collects the resulting row ids. */
-    private TreeSet<Integer> intersect(Fixture fixture, CompiledAutomaton automaton) throws IOException
+    private TreeSet<Integer> patternMatch(Fixture fixture, Operator operator, String value) throws IOException
     {
-        return intersect(fixture, automaton, new QueryContext());
+        return patternMatch(fixture, operator, value, new QueryContext());
     }
 
-    /** Same as {@link #intersect(Fixture, CompiledAutomaton)}, with the given query context (which counts the visited terms). */
-    private TreeSet<Integer> intersect(Fixture fixture, CompiledAutomaton automaton, QueryContext context) throws IOException
+    /** Same as {@link #patternMatch(Fixture, Operator, String)}, with the given query context. */
+    private TreeSet<Integer> patternMatch(Fixture fixture, Operator operator, String value, QueryContext context) throws IOException
     {
+        TriePattern pattern = LikePatterns.forPatternOperator(operator, UTF8Type.instance.decompose(value), null);
         TreeSet<Integer> results = new TreeSet<>();
-        try (PostingList postings = fixture.reader.intersect(automaton,
-                                                             (QueryEventListener.TrieIndexEventListener) NO_OP_TRIE_LISTENER,
-                                                             context))
+        try (PostingList postings = fixture.reader.patternMatch(pattern,
+                                                                (QueryEventListener.TrieIndexEventListener) NO_OP_TRIE_LISTENER,
+                                                                context))
         {
             assertNotNull(postings);
             for (long rowId = postings.nextPosting(); rowId != PostingList.END_OF_STREAM; rowId = postings.nextPosting())
@@ -469,24 +516,24 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         return results;
     }
 
-    /** Brute-force reference: run the automaton over the UTF-8 bytes of every dictionary term. */
-    private static TreeSet<Integer> expectedRowIds(Map<String, TreeSet<Integer>> dictionary, CompiledAutomaton automaton)
+    /** Brute-force reference: evaluate the pattern on every dictionary term with {@link LikeReference}. */
+    private static TreeSet<Integer> expectedRowIds(Map<String, TreeSet<Integer>> dictionary, Operator operator, String value)
     {
         TreeSet<Integer> expected = new TreeSet<>();
         for (Map.Entry<String, TreeSet<Integer>> entry : dictionary.entrySet())
-            if (LikePatterns.accepts(automaton, utf8Bytes(entry.getKey())))
+            if (LikeReference.matches(operator, value, entry.getKey()))
                 expected.addAll(entry.getValue());
         return expected;
     }
 
     private void assertEngineMatchesBruteForce(Fixture fixture,
                                                Map<String, TreeSet<Integer>> dictionary,
-                                               CompiledAutomaton automaton,
-                                               String description) throws IOException
+                                               Operator operator,
+                                               String value) throws IOException
     {
-        assertEquals("engine and brute-force results differ for " + description,
-                     expectedRowIds(dictionary, automaton),
-                     intersect(fixture, automaton));
+        assertEquals("engine and brute-force results differ for " + operator + " '" + value + "'",
+                     expectedRowIds(dictionary, operator, value),
+                     patternMatch(fixture, operator, value));
     }
 
     /** Builds a dictionary mapping each distinct term to a singleton posting of its position. */
@@ -548,26 +595,47 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
         return sb.toString();
     }
 
-    /** Random automaton derived from an existing dictionary term so that queries frequently match. */
-    private CompiledAutomaton randomAutomaton(String seed)
+    /** Random pattern derived from an existing dictionary term so that queries frequently match. */
+    private Pair<Operator, String> randomPattern(String seed)
     {
-        switch (nextInt(5))
+        switch (nextInt(7))
         {
-            case 0: // prefix wildcard
-                return LikePatterns.patternAutomaton(seed.substring(0, seed.offsetByCodePoints(0, randomIntBetween(1, Math.max(1, seed.codePointCount(0, seed.length()) - 1)))) + '%');
+            case 0: // prefix wildcard, as a generic pattern or as the prefix operator
+            {
+                String prefix = seed.substring(0, seed.offsetByCodePoints(0, randomIntBetween(1, Math.max(1, seed.codePointCount(0, seed.length()) - 1))));
+                return randomBoolean() ? Pair.create(Operator.LIKE_MATCHES, LikePatterns.escape(prefix) + '%')
+                                       : Pair.create(Operator.LIKE_PREFIX, prefix);
+            }
             case 1: // contains
-                return LikePatterns.patternAutomaton('%' + randomSubstring(seed) + '%');
+                return Pair.create(Operator.LIKE_MATCHES, '%' + LikePatterns.escape(randomSubstring(seed)) + '%');
             case 2: // suffix
-                return LikePatterns.patternAutomaton('%' + randomSubstring(seed));
-            case 3: // suffix (trimmed-value factory, embedded '%' would be literal)
-                return LikePatterns.suffixAutomaton(randomSubstring(seed));
-            default: // generic two-segment pattern, replacing a random code point with an any-string wildcard
+                return Pair.create(Operator.LIKE_MATCHES, '%' + LikePatterns.escape(randomSubstring(seed)));
+            case 3: // suffix (trimmed value, embedded '%' would be literal)
+                return Pair.create(Operator.LIKE_SUFFIX, randomSubstring(seed));
+            case 4: // contains (trimmed value)
+                return Pair.create(Operator.LIKE_CONTAINS, randomSubstring(seed));
+            case 5: // generic two-segment pattern, replacing a random code point with an any-string wildcard
             {
                 int cpCount = seed.codePointCount(0, seed.length());
                 int cpIndex = nextInt(cpCount);
                 int start = seed.offsetByCodePoints(0, cpIndex);
                 int end = seed.offsetByCodePoints(start, 1);
-                return LikePatterns.patternAutomaton(seed.substring(0, start) + '%' + seed.substring(end));
+                return Pair.create(Operator.LIKE_MATCHES, LikePatterns.escape(seed.substring(0, start)) + '%' + LikePatterns.escape(seed.substring(end)));
+            }
+            default: // generic pattern, replacing random code points with single-character or any-string wildcards
+            {
+                StringBuilder pattern = new StringBuilder();
+                for (int i = 0; i < seed.length(); i = seed.offsetByCodePoints(i, 1))
+                {
+                    int r = nextInt(10);
+                    if (r < 3)
+                        pattern.append('_');
+                    else if (r < 4)
+                        pattern.append('%');
+                    else
+                        pattern.append(LikePatterns.escape(new String(Character.toChars(seed.codePointAt(i)))));
+                }
+                return Pair.create(Operator.LIKE_MATCHES, pattern.toString());
             }
         }
     }

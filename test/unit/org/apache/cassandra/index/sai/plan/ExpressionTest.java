@@ -19,6 +19,7 @@
 package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 
 import org.junit.Test;
 
@@ -26,6 +27,7 @@ import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.SAITester;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -107,14 +109,18 @@ public class ExpressionTest
         assertEquals(Expression.Op.EQ, makeExpression(Operator.LIKE_MATCHES, "abc").getOp());
         assertEquals(makeExpression(Operator.EQ, "abc"), makeExpression(Operator.LIKE_MATCHES, "abc"));
         assertEquals(makeExpression(Operator.EQ, "é日😀_%\\"), makeExpression(Operator.LIKE_MATCHES, "é日😀\\_\\%\\\\"));
-        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "a%c").getOp());
-        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "a_c").getOp());
-        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "a\\\\_").getOp());
-        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_MATCHES, "%abc%").getOp());
+        assertEquals(Expression.Op.PATTERN, makeExpression(Operator.LIKE_MATCHES, "a%c").getOp());
+        assertEquals(Expression.Op.PATTERN, makeExpression(Operator.LIKE_MATCHES, "a_c").getOp());
+        assertEquals(Expression.Op.PATTERN, makeExpression(Operator.LIKE_MATCHES, "a\\\\_").getOp());
+        assertEquals(Expression.Op.PATTERN, makeExpression(Operator.LIKE_MATCHES, "%abc%").getOp());
         // the other pattern operators carry the literal left once their leading/trailing wildcards were trimmed
-        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_SUFFIX, "abc").getOp());
-        assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_CONTAINS, "abc").getOp());
-        assertEquals(Expression.Op.PREFIX, makeExpression(Operator.LIKE_PREFIX, "abc").getOp());
+        assertEquals(Expression.Op.PATTERN, makeExpression(Operator.LIKE_SUFFIX, "abc").getOp());
+        assertEquals(Expression.Op.PATTERN, makeExpression(Operator.LIKE_CONTAINS, "abc").getOp());
+        assertEquals(Expression.Op.PATTERN, makeExpression(Operator.LIKE_PREFIX, "abc").getOp());
+        // all of them match their terms with a trie pattern, whose literal prefix bounds the terms it can match
+        assertArrayEquals("abc".getBytes(StandardCharsets.UTF_8), makeExpression(Operator.LIKE_PREFIX, "abc").getPatternLiteralPrefix());
+        assertArrayEquals("a".getBytes(StandardCharsets.UTF_8), makeExpression(Operator.LIKE_MATCHES, "a_c%").getPatternLiteralPrefix());
+        assertArrayEquals(new byte[0], makeExpression(Operator.LIKE_SUFFIX, "abc").getPatternLiteralPrefix());
     }
 
     private static Expression makeExpression(Operator op)

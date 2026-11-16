@@ -1066,8 +1066,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
             case NOT_CONTAINS_KEY:
             case NOT_CONTAINS_VALUE:
             case RANGE:
-            case PREFIX:
-            case AUTOMATON:
+            case PATTERN:
                 return (indexFeatureSet.hasTermsHistogram() && optimizerOptions.useTermStatistics())
                        ? estimateMatchingRowCountUsingHistograms(predicate)
                        : estimateMatchingRowCountUsingIndex(predicate);

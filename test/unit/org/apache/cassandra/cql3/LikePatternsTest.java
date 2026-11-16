@@ -19,13 +19,14 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 import java.util.function.UnaryOperator;
 
 import org.junit.Test;
 
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.tries.TriePattern;
 import org.apache.cassandra.exceptions.InvalidPatternException;
-import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
@@ -37,13 +38,14 @@ import static org.junit.Assert.assertTrue;
 /**
  * CQL LIKE pattern translation. CQL LIKE semantics (SingleColumnRestriction.LikeRestriction): '%' matches any
  * string and '_' any single character; the patterns of LIKE_MATCHES escape their literal wildcards with '\'.
+ * The results are compared with {@link LikeReference}, an independent implementation of the semantics.
  */
 public class LikePatternsTest
 {
     @Test
     public void likePrefixPattern()
     {
-        CompiledAutomaton a = LikePatterns.patternAutomaton("abc%");
+        TriePattern a = pattern("abc%");
         assertAccepts(a, "abc", "abcd", "abc%", "abc def");
         assertRejects(a, "ab", "xabc", "ABC", "");
     }
@@ -51,7 +53,7 @@ public class LikePatternsTest
     @Test
     public void likeSuffixPattern()
     {
-        CompiledAutomaton a = LikePatterns.patternAutomaton("%abc");
+        TriePattern a = pattern("%abc");
         assertAccepts(a, "abc", "xabc", "xxabc");
         assertRejects(a, "abcx", "ab", "");
     }
@@ -59,7 +61,7 @@ public class LikePatternsTest
     @Test
     public void likeContainsPattern()
     {
-        CompiledAutomaton a = LikePatterns.patternAutomaton("%abc%");
+        TriePattern a = pattern("%abc%");
         assertAccepts(a, "abc", "xabc", "abcx", "xabcx", "ababc");
         assertRejects(a, "ab", "axbxc", "");
     }
@@ -67,7 +69,7 @@ public class LikePatternsTest
     @Test
     public void likeGenericPattern()
     {
-        CompiledAutomaton a = LikePatterns.patternAutomaton("a%b");
+        TriePattern a = pattern("a%b");
         assertAccepts(a, "ab", "axb", "axxxb", "abb", "aab");
         assertRejects(a, "ba", "a", "b", "axbx", "xab", "");
     }
@@ -75,23 +77,21 @@ public class LikePatternsTest
     @Test
     public void likeConsecutiveWildcardsCollapse()
     {
-        CompiledAutomaton single = LikePatterns.patternAutomaton("a%b");
-        CompiledAutomaton doubled = LikePatterns.patternAutomaton("a%%b");
+        TriePattern single = pattern("a%b");
+        TriePattern doubled = pattern("a%%b");
+        assertEquals(single, doubled);
         for (String candidate : new String[]{ "ab", "axb", "a", "b", "axxb", "" })
-            assertEquals(candidate,
-                         LikePatterns.accepts(single, utf8(candidate)),
-                         LikePatterns.accepts(doubled, utf8(candidate)));
+            assertEquals(candidate, single.matches(utf8Buffer(candidate)), doubled.matches(utf8Buffer(candidate)));
     }
 
     @Test
     public void likeMatchAllAndEmptyPatterns()
     {
-        CompiledAutomaton all = LikePatterns.patternAutomaton("%");
-        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.ALL, all.type);
+        TriePattern all = pattern("%");
         assertAccepts(all, "", "a", "anything at all", "日本語");
 
         // an empty pattern accepts only the empty term
-        CompiledAutomaton empty = LikePatterns.patternAutomaton("");
+        TriePattern empty = pattern("");
         assertAccepts(empty, "");
         assertRejects(empty, "a", " ");
     }
@@ -99,8 +99,7 @@ public class LikePatternsTest
     @Test
     public void likeWithoutWildcardIsExactMatch()
     {
-        CompiledAutomaton a = LikePatterns.patternAutomaton("abc");
-        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, a.type);
+        TriePattern a = pattern("abc");
         assertAccepts(a, "abc");
         assertRejects(a, "ab", "abcd", "xabc");
     }
@@ -108,11 +107,11 @@ public class LikePatternsTest
     @Test
     public void likeUnderscoreMatchesOneCharacter()
     {
-        CompiledAutomaton underscore = LikePatterns.patternAutomaton("a_c");
+        TriePattern underscore = pattern("a_c");
         assertAccepts(underscore, "a_c", "abc", "aéc", "a😀c", "a%c");
         assertRejects(underscore, "ac", "abbc", "aééc", "abcd");
 
-        CompiledAutomaton mixed = LikePatterns.patternAutomaton("_a%b__");
+        TriePattern mixed = pattern("_a%b__");
         assertAccepts(mixed, "xab12", "😀aéb😀😀", "xaxxxb12");
         assertRejects(mixed, "ab12", "xab1", "xab123");
     }
@@ -121,17 +120,16 @@ public class LikePatternsTest
     public void likeEscapesAreLiterals()
     {
         // the internal form escapes the literal wildcards and the escape itself with a backslash
-        CompiledAutomaton escaped = LikePatterns.patternAutomaton("a\\_\\%\\\\%");
+        TriePattern escaped = pattern("a\\_\\%\\\\%");
         assertAccepts(escaped, "a_%\\", "a_%\\xyz");
         assertRejects(escaped, "ab%\\", "a_x\\", "a_%x");
 
-        CompiledAutomaton exact = LikePatterns.patternAutomaton("a\\%");
-        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, exact.type);
+        TriePattern exact = pattern("a\\%");
         assertAccepts(exact, "a%");
         assertRejects(exact, "a", "ab");
 
-        assertThatThrownBy(() -> LikePatterns.patternAutomaton("a\\")).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> LikePatterns.patternAutomaton("a\\b")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> pattern("a\\")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> pattern("a\\b")).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -177,7 +175,7 @@ public class LikePatternsTest
             ByteBuffer escaped = utf8Buffer(LikePatterns.escape(literal));
             assertFalse(literal, LikePatterns.hasWildcard(escaped));
             assertEquals(literal, UTF8Type.instance.compose(LikePatterns.unescape(escaped)));
-            assertAccepts(LikePatterns.patternAutomaton(LikePatterns.escape(literal)), literal);
+            assertAccepts(pattern(LikePatterns.escape(literal)), literal);
         }
     }
 
@@ -227,8 +225,8 @@ public class LikePatternsTest
                                                                                                    .replace('z', '\\'));
         String normalized = normalize("axyz%x", toWildcards);
         assertEquals("a\\_\\%\\\\%\\_", normalized);
-        assertAccepts(LikePatterns.patternAutomaton(normalized), "a_%\\b_", "a_%\\_");
-        assertRejects(LikePatterns.patternAutomaton(normalized), "abcd_", "a_%\\b");
+        assertAccepts(pattern(normalized), "a_%\\b_", "a_%\\_");
+        assertRejects(pattern(normalized), "abcd_", "a_%\\b");
     }
 
     @Test
@@ -250,107 +248,106 @@ public class LikePatternsTest
     public void likeRegexpMetacharsAreLiterals()
     {
         // regexp/wildcard metacharacters in the pattern are literal characters
-        CompiledAutomaton dot = LikePatterns.patternAutomaton("a.c%");
+        TriePattern dot = pattern("a.c%");
         assertAccepts(dot, "a.c", "a.cd");
         assertRejects(dot, "abc", "abcd");
 
-        CompiledAutomaton star = LikePatterns.patternAutomaton("a*c");
+        TriePattern star = pattern("a*c");
         assertAccepts(star, "a*c");
         assertRejects(star, "ac", "axxc");
+
+        TriePattern question = pattern("a?c");
+        assertAccepts(question, "a?c");
+        assertRejects(question, "abc");
     }
 
     @Test
     public void likeUnicodePattern()
     {
-        CompiledAutomaton a = LikePatterns.patternAutomaton("caf%é");
+        TriePattern a = pattern("caf%é");
         assertAccepts(a, "café", "cafffé", "cafés café é");
         assertRejects(a, "cafe", "café.");
 
-        CompiledAutomaton emoji = LikePatterns.patternAutomaton("😀%");
+        TriePattern emoji = pattern("😀%");
         assertAccepts(emoji, "😀", "😀abc", "😀😁");
         assertRejects(emoji, "😁", "a😀");
     }
 
     @Test
-    public void suffixAndContainsAutomataMatchTheirLiteralsLiterally()
-    {
-        // the value of LIKE_SUFFIX/LIKE_CONTAINS is a literal: a '%' in it is not a wildcard
-        CompiledAutomaton suffix = LikePatterns.suffixAutomaton("a%c");
-        assertAccepts(suffix, "a%c", "xa%c");
-        assertRejects(suffix, "abc", "a%cx");
-
-        CompiledAutomaton contains = LikePatterns.containsAutomaton("a%c");
-        assertAccepts(contains, "a%c", "xa%cx");
-        assertRejects(contains, "abc", "ac");
-    }
-
-    @Test
-    public void forPatternOperatorCachesCompiledAutomata()
+    public void forPatternOperatorCachesPatterns()
     {
         // Post-filtering calls forPatternOperator once per candidate row: equal (operator, pattern bytes) keys
-        // must hit the shared compile cache and return the same instance, also for a different buffer holding
-        // the same content (the probe is content-keyed and copies nothing).
+        // must hit the shared cache and return the same instance, also for a different buffer holding the same
+        // content (the probe is content-keyed and copies nothing).
         ByteBuffer pattern = ByteBuffer.wrap(utf8("cache%test"));
-        CompiledAutomaton first = LikePatterns.forPatternOperator(Operator.LIKE_CONTAINS, pattern, "c");
+        TriePattern first = LikePatterns.forPatternOperator(Operator.LIKE_CONTAINS, pattern, "c");
         assertSame(first, LikePatterns.forPatternOperator(Operator.LIKE_CONTAINS, ByteBuffer.wrap(utf8("cache%test")), "c"));
-        // the operator is part of the key: same bytes under another operator compile independently
+        // the operator is part of the key: same bytes under another operator build another pattern
         assertNotSame(first, LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, ByteBuffer.wrap(utf8("cache%test")), "c"));
     }
 
+    /**
+     * Patterns alternating literals and wildcards used to be rejected, as their automata were too complex to
+     * determinize. Matching doesn't need that, and they are served.
+     */
     @Test
-    public void forPatternOperatorRejectsPatternsTooComplexToDeterminize()
+    public void servesPatternsWithManyWildcards()
     {
-        // enough alternating wildcards and literals to exceed Lucene's determinization work limit
-        ByteBuffer pattern = ByteBuffer.wrap(utf8("a%".repeat(1000) + 'a'));
-        assertThatThrownBy(() -> LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, pattern, "v"))
-            .isInstanceOf(InvalidPatternException.class)
-            .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
-        // the column is optional (the Operator post-filter doesn't know it)
-        assertThatThrownBy(() -> LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, pattern, null))
-            .isInstanceOf(InvalidPatternException.class)
-            .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction: ");
+        String patternString = "a%".repeat(1000) + 'a';
+        TriePattern pattern = LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, utf8Buffer(patternString), "v");
+        String matching = "ab".repeat(1000) + 'a';
+        assertTrue(pattern.matches(utf8Buffer(matching)));
+        assertTrue(pattern.matches(utf8Buffer("a".repeat(1001))));
+        assertFalse(pattern.matches(utf8Buffer("a".repeat(1000))));
+        assertFalse(pattern.matches(utf8Buffer(matching + 'b')));
     }
 
+    /**
+     * The automaton of {@code '%a<n x _>b%'} has about 2^n states, and was rejected from n = 12. These patterns are
+     * served, and match what they should.
+     */
     @Test
-    public void forPatternOperatorBoundsExplodingPatterns()
+    public void servesPatternsThatExplodeAsAutomata()
     {
-        // the DFA of '%a<n x _>b%' has about 2^n states: it compiles up to the determinization work limit...
-        CompiledAutomaton served = LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, ByteBuffer.wrap(utf8("%a" + "_".repeat(10) + "b%")), "v");
-        assertTrue(LikePatterns.accepts(served, utf8("xa" + "aé日bcaaaaa" + "bx")));
-        assertTrue(LikePatterns.accepts(served, utf8("a" + "a".repeat(10) + "b")));
-        assertFalse(LikePatterns.accepts(served, utf8("a" + "a".repeat(9) + "b")));
-        assertFalse(LikePatterns.accepts(served, utf8("a" + "a".repeat(11) + "c")));
-
-        // ... and past it is rejected
-        for (int underscores : new int[]{ 12, 50, 1000 })
+        Random random = new Random(1);
+        String[] alphabet = { "a", "b", "c", "é", "日" };
+        for (int underscores : new int[]{ 10, 12, 50, 1000 })
         {
-            ByteBuffer pattern = ByteBuffer.wrap(utf8("%a" + "_".repeat(underscores) + "b%"));
-            assertThatThrownBy(() -> LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, pattern, "v"))
-                .isInstanceOf(InvalidPatternException.class)
-                .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
+            String patternString = "%a" + "_".repeat(underscores) + "b%";
+            TriePattern pattern = LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, utf8Buffer(patternString), "v");
+            assertTrue(pattern.matches(utf8Buffer("x" + "a".repeat(underscores + 1) + "bx")));
+            assertTrue(pattern.matches(utf8Buffer("a" + "é".repeat(underscores) + "b")));
+            assertFalse(pattern.matches(utf8Buffer("a" + "a".repeat(underscores - 1) + "b")));
+            assertFalse(pattern.matches(utf8Buffer("a" + "a".repeat(underscores + 1) + "c")));
+            for (int i = 0; i < 200; i++)
+            {
+                StringBuilder value = new StringBuilder();
+                for (int length = underscores + random.nextInt(20); length > 0; length--)
+                    value.append(alphabet[random.nextInt(alphabet.length)]);
+                assertEquals(patternString + " on " + value,
+                             LikeReference.matchesPattern(patternString, value.toString()),
+                             pattern.matches(utf8Buffer(value.toString())));
+            }
         }
     }
 
     @Test
-    public void compilesPatternsWithLongLeadingLiterals()
+    public void servesPatternsWithLongLiterals()
     {
-        // Lucene's finiteness check recurses over the automaton and gives up past 1000 states; a LIKE pattern's
-        // finiteness is known without it (wildcards: infinite language, none: a single string), so a pattern
-        // whose first literal is longer than that compiles
         String literal = "x".repeat(1500);
-        CompiledAutomaton pattern = LikePatterns.patternAutomaton(literal + "%y");
-        assertTrue(LikePatterns.accepts(pattern, utf8(literal + "abcy")));
-        assertFalse(LikePatterns.accepts(pattern, utf8(literal + "abc")));
-        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, LikePatterns.patternAutomaton(literal).type);
-        assertTrue(LikePatterns.accepts(LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, ByteBuffer.wrap(utf8(literal + "%y")), "v"),
-                                        utf8(literal + "y")));
+        TriePattern pattern = pattern(literal + "%y");
+        assertTrue(pattern.matches(utf8Buffer(literal + "abcy")));
+        assertFalse(pattern.matches(utf8Buffer(literal + "abc")));
+        assertTrue(pattern(literal).matches(utf8Buffer(literal)));
+        assertTrue(LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, utf8Buffer(literal + "%y"), "v")
+                               .matches(utf8Buffer(literal + "y")));
     }
 
     @Test
     public void likeMatchesOperatorPostFilterSemantics()
     {
         // The LIKE_MATCHES post-filter (used by filtering and replica filtering protection) evaluates the same
-        // automaton as the index side: every '%' is an any-string wildcard. It used to be a plain 'contains'
+        // pattern as the index side: every '%' is an any-string wildcard. It used to be a plain 'contains'
         // check treating '%' as a literal character, so 'a%b' patterns could never match.
         ByteBuffer pattern = ByteBuffer.wrap(utf8("qu%ck"));
         assertTrue(Operator.LIKE_MATCHES.isSatisfiedBy(UTF8Type.instance, ByteBuffer.wrap(utf8("quick")), pattern));
@@ -380,26 +377,18 @@ public class LikePatternsTest
         assertFalse(Operator.LIKE_MATCHES.isSatisfiedBy(UTF8Type.instance, ByteBuffer.wrap(utf8("xabx")), pattern));
     }
 
-    private static void assertAccepts(CompiledAutomaton automaton, String... candidates)
-    {
-        for (String candidate : candidates)
-            assertTrue("expected automaton to accept: " + candidate, LikePatterns.accepts(automaton, utf8(candidate)));
-    }
-
-    private static void assertRejects(CompiledAutomaton automaton, String... candidates)
-    {
-        for (String candidate : candidates)
-            assertFalse("expected automaton to reject: " + candidate, LikePatterns.accepts(automaton, utf8(candidate)));
-    }
-
     @Test
-    public void forPatternOperatorReadsSuffixAndContainsValuesAsLiterals()
+    public void forPatternOperatorReadsPrefixSuffixAndContainsValuesAsLiterals()
     {
-        // the values of LIKE_SUFFIX and LIKE_CONTAINS are unescaped literals: '_', '%' and '\\' are no wildcards
-        CompiledAutomaton suffix = LikePatterns.forPatternOperator(Operator.LIKE_SUFFIX, utf8Buffer("a_\\"), "v");
+        // the values of LIKE_PREFIX, LIKE_SUFFIX and LIKE_CONTAINS are unescaped literals: '_', '%' and '\\' are no
+        // wildcards
+        TriePattern prefix = LikePatterns.forPatternOperator(Operator.LIKE_PREFIX, utf8Buffer("a_\\"), "v");
+        assertAccepts(prefix, "a_\\x", "a_\\");
+        assertRejects(prefix, "ab\\x", "xa_\\");
+        TriePattern suffix = LikePatterns.forPatternOperator(Operator.LIKE_SUFFIX, utf8Buffer("a_\\"), "v");
         assertAccepts(suffix, "xa_\\", "a_\\");
         assertRejects(suffix, "xab\\", "a_");
-        CompiledAutomaton contains = LikePatterns.forPatternOperator(Operator.LIKE_CONTAINS, utf8Buffer("%_"), "v");
+        TriePattern contains = LikePatterns.forPatternOperator(Operator.LIKE_CONTAINS, utf8Buffer("%_"), "v");
         assertAccepts(contains, "x%_y", "%_");
         assertRejects(contains, "x%ay", "x_%y");
         // while the same bytes are a pattern for LIKE_MATCHES
@@ -413,25 +402,78 @@ public class LikePatternsTest
             assertThatThrownBy(() -> LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, utf8Buffer(pattern), "v"))
             .isInstanceOf(InvalidPatternException.class)
             .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v");
+        // the column is optional (the Operator post-filter doesn't know it)
+        assertThatThrownBy(() -> LikePatterns.forPatternOperator(Operator.LIKE_MATCHES, utf8Buffer("a\\"), null))
+            .isInstanceOf(InvalidPatternException.class)
+            .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction: ");
     }
 
     @Test
-    public void acceptsBufferSlicesAndDirectBuffers()
+    public void matchesBufferSlicesAndDirectBuffers()
     {
-        for (CompiledAutomaton automaton : new CompiledAutomaton[]{ LikePatterns.patternAutomaton("a_c"), LikePatterns.patternAutomaton("abc") })
+        for (TriePattern pattern : new TriePattern[]{ pattern("a_c"), pattern("abc") })
         {
             ByteBuffer slice = utf8Buffer("xxabcyy");
             slice.position(2).limit(5);
-            assertTrue(LikePatterns.accepts(automaton, slice));
+            assertTrue(pattern.matches(slice));
             assertEquals(2, slice.position());
 
             ByteBuffer direct = ByteBuffer.allocateDirect(3);
             direct.put(utf8("abc")).flip();
-            assertTrue(LikePatterns.accepts(automaton, direct));
+            assertTrue(pattern.matches(direct));
             assertEquals(0, direct.position());
 
-            assertFalse(LikePatterns.accepts(automaton, utf8Buffer("abcd")));
+            assertFalse(pattern.matches(utf8Buffer("abcd")));
         }
+    }
+
+    /** Random patterns and values over a small alphabet, compared with the reference implementation. */
+    @Test
+    public void matchesLikeReference()
+    {
+        Random random = new Random(42);
+        String[] alphabet = { "a", "b", "%", "_", "\\", "é", "日", "😀" };
+        String[] valueAlphabet = { "a", "b", "%", "_", "\\", "é", "日", "😀" };
+        for (int i = 0; i < 2000; i++)
+        {
+            StringBuilder pattern = new StringBuilder();
+            for (int length = random.nextInt(8); length > 0; length--)
+            {
+                String c = alphabet[random.nextInt(alphabet.length)];
+                if (c.equals("\\"))
+                    pattern.append('\\').append("%_\\".charAt(random.nextInt(3))); // a valid escape
+                else
+                    pattern.append(c);
+            }
+            Operator operator = new Operator[]{ Operator.LIKE_MATCHES, Operator.LIKE_PREFIX, Operator.LIKE_SUFFIX, Operator.LIKE_CONTAINS }[random.nextInt(4)];
+            TriePattern triePattern = LikePatterns.forPatternOperator(operator, utf8Buffer(pattern.toString()), "v");
+            for (int j = 0; j < 20; j++)
+            {
+                StringBuilder value = new StringBuilder();
+                for (int length = random.nextInt(8); length > 0; length--)
+                    value.append(valueAlphabet[random.nextInt(valueAlphabet.length)]);
+                assertEquals(operator + " '" + pattern + "' on '" + value + "'",
+                             LikeReference.matches(operator, pattern.toString(), value.toString()),
+                             triePattern.matches(utf8Buffer(value.toString())));
+            }
+        }
+    }
+
+    private static TriePattern pattern(String internalForm)
+    {
+        return LikePatterns.triePattern(utf8Buffer(internalForm));
+    }
+
+    private static void assertAccepts(TriePattern pattern, String... candidates)
+    {
+        for (String candidate : candidates)
+            assertTrue("expected pattern " + pattern + " to accept: " + candidate, pattern.matches(utf8Buffer(candidate)));
+    }
+
+    private static void assertRejects(TriePattern pattern, String... candidates)
+    {
+        for (String candidate : candidates)
+            assertFalse("expected pattern " + pattern + " to reject: " + candidate, pattern.matches(utf8Buffer(candidate)));
     }
 
     private static String unescape(String pattern)

@@ -36,16 +36,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * A LIKE pattern too complex to be compiled into an automaton is rejected by the coordinator with an invalid request
- * naming the column, whatever index serves the restriction (here a custom, non-SAI one, whose rows the replicas
- * filter with the pattern): it never reaches the replicas.
+ * The replicas filter the rows with LIKE patterns with the semantics of the coordinator, whatever index serves the
+ * restriction (here a custom, non-SAI one, whose rows the replicas filter with the pattern), including the patterns
+ * whose automaton used to be too complex to determinize. Invalid patterns are rejected by the coordinator: they never
+ * reach the replicas.
  */
-public class LikeInvalidPatternDistributedTest extends TestBaseImpl
+public class LikePatternDistributedTest extends TestBaseImpl
 {
-    private static final String ERROR = "Invalid pattern for LIKE '<term>' restriction on column v";
-
     @Test
-    public void testRemoteInvalidPatternFailure() throws Exception
+    public void testRemotePatternFiltering() throws Exception
     {
         try (Cluster cluster = init(Cluster.build(2).withConfig(config -> config.with(GOSSIP).with(NETWORK)).start()))
         {
@@ -57,20 +56,25 @@ public class LikeInvalidPatternDistributedTest extends TestBaseImpl
             IInvokableInstance replica = cluster.get(2);
             replica.executeInternal(withKeyspace("INSERT INTO %s.t (pk, v) VALUES (1, 'abc')"));
             replica.executeInternal(withKeyspace("INSERT INTO %s.t (pk, v) VALUES (2, 'xyz')"));
-
-            // a valid pattern is filtered on the replicas with the LIKE semantics
-            assertRows(cluster.coordinator(1).execute(withKeyspace("SELECT pk FROM %s.t WHERE v LIKE 'a%%c'"), ConsistencyLevel.ALL),
-                       row(1));
-
-            // a generic pattern too complex to determinize
-            StringBuilder pattern = new StringBuilder();
-            for (int i = 0; i < 1000; i++)
-                pattern.append("a%");
-            pattern.append('a');
+            replica.executeInternal(withKeyspace("INSERT INTO %s.t (pk, v) VALUES (3, ?)"), "a".repeat(1001));
+            replica.executeInternal(withKeyspace("INSERT INTO %s.t (pk, v) VALUES (4, 'a_d')"));
 
             long mark = replica.logs().mark();
-            assertThatThrownBy(() -> cluster.coordinator(1).execute(withKeyspace("SELECT pk FROM %s.t WHERE v LIKE ?"), ConsistencyLevel.ALL, pattern.toString()))
-                .hasMessageStartingWith(ERROR);
+
+            // generic patterns are filtered on the replicas with the LIKE semantics
+            assertRows(cluster.coordinator(1).execute(withKeyspace("SELECT pk FROM %s.t WHERE v LIKE 'a%%c'"), ConsistencyLevel.ALL),
+                       row(1));
+            assertRows(cluster.coordinator(1).execute(withKeyspace("SELECT pk FROM %s.t WHERE v LIKE 'a!_%%' ESCAPE '!'"), ConsistencyLevel.ALL),
+                       row(4));
+
+            // a generic pattern whose automaton was too complex to determinize
+            String pattern = "a%".repeat(1000) + 'a';
+            assertRows(cluster.coordinator(1).execute(withKeyspace("SELECT pk FROM %s.t WHERE v LIKE ?"), ConsistencyLevel.ALL, pattern),
+                       row(3));
+
+            // an invalid escape is rejected by the coordinator
+            assertThatThrownBy(() -> cluster.coordinator(1).execute(withKeyspace("SELECT pk FROM %s.t WHERE v LIKE 'a!b' ESCAPE '!'"), ConsistencyLevel.ALL))
+                .hasMessageContaining("The escape character of a LIKE pattern must be followed by '%', '_' or itself");
 
             assertThat(replica.logs().grep(mark, "Invalid pattern").getResult()).isEmpty();
         }

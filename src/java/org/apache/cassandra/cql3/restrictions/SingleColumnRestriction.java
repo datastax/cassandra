@@ -1050,11 +1050,6 @@ public abstract class SingleColumnRestriction implements SingleRestriction
             indexRegistry.getBestIndexFor(expression, indexHints)
                          .orElseThrow(() -> invalidRequest("%s is only supported on properly indexed columns",
                                                            expression));
-
-            // whatever index serves it, the rows are filtered with the pattern (Operator#isSatisfiedBy): reject a
-            // pattern that can't be compiled here rather than on the replicas
-            if (operation.left != Operator.LIKE_PREFIX)
-                LikePatterns.forPatternOperator(operation.left, operation.right, columnDef.name);
         }
 
         /**
