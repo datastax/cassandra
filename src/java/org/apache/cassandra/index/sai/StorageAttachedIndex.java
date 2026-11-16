@@ -211,6 +211,8 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.NEIGHBORHOOD_OVERFLOW,
                                                                      IndexWriterConfig.ALPHA,
                                                                      IndexWriterConfig.ENABLE_HIERARCHY,
+                                                                     IndexWriterConfig.ENABLE_ASH,
+                                                                     IndexWriterConfig.ASH_DIMENSIONS,
                                                                      IndexWriterConfig.SIMILARITY_FUNCTION,
                                                                      IndexWriterConfig.SOURCE_MODEL,
                                                                      IndexWriterConfig.OPTIMIZE_FOR,
@@ -361,6 +363,9 @@ public class StorageAttachedIndex implements Index
             {
                 throw new InvalidRequestException(vectorUnsupportedByCurrentVersionError(Version.current(metadata.keyspace)));
             }
+
+            if (config.isAshEnabled() && !Version.current(metadata.keyspace).onOrAfter(Version.ASH_EARLIEST))
+                throw new InvalidRequestException(ashUnsupportedByCurrentVersionError(Version.current(metadata.keyspace)));
 
             // Also, any pre-existing indexes must be in a version compatible with vectors.
             ColumnFamilyStore baseCfs = Schema.instance.getColumnFamilyStoreInstance(metadata.id);
@@ -539,6 +544,17 @@ public class StorageAttachedIndex implements Index
                              "The on-disk format version can be set via the -D%s system property.",
                              currentVersion,
                              Version.JVECTOR_EARLIEST,
+                             CassandraRelevantProperties.SAI_CURRENT_VERSION.name());
+    }
+
+    @VisibleForTesting
+    public static String ashUnsupportedByCurrentVersionError(Version currentVersion)
+    {
+        return String.format("The current configured on-disk format version %s does not support enable_ash. " +
+                             "The minimum version that supports ASH is %s. " +
+                             "The on-disk format version can be set via the -D%s system property.",
+                             currentVersion,
+                             Version.ASH_EARLIEST,
                              CassandraRelevantProperties.SAI_CURRENT_VERSION.name());
     }
 

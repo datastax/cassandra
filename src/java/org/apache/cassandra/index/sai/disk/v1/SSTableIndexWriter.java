@@ -380,7 +380,24 @@ public class SSTableIndexWriter implements PerIndexWriter
     {
         SegmentBuilder builder;
 
-        if (indexContext.isVector())
+        if (indexContext.isVector() && indexContext.getIndexWriterConfig().isAshEnabled())
+        {
+            // build a CompactionGraph with the newest ASH model, or, without one, with a model it trains on a sample of
+            // the segment's vectors; otherwise build on heap
+            var ash = CassandraOnHeapGraph.getAshIfPresent(indexContext);
+            if (V3OnDiskFormat.ENABLE_LTM_CONSTRUCTION)
+            {
+                var allRowsHaveVectors = allRowsHaveVectorsInWrittenSegments(indexContext);
+                builder = ash != null
+                          ? new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, ash.model, ash.unitVectors, allRowsHaveVectors, limiter)
+                          : new SegmentBuilder.VectorOffHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, null, false, allRowsHaveVectors, limiter);
+            }
+            else
+            {
+                builder = new SegmentBuilder.VectorOnHeapSegmentBuilder(perIndexComponents, rowIdOffset, keyCount, limiter);
+            }
+        }
+        else if (indexContext.isVector())
         {
             // if we have a PQ instance available, we can use it to build a CompactionGraph;
             // otherwise, build on heap (which will create PQ for next time, if we have enough vectors)

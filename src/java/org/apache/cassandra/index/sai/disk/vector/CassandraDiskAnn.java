@@ -33,6 +33,7 @@ import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndex;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
 import io.github.jbellis.jvector.graph.similarity.SearchScoreProvider;
+import io.github.jbellis.jvector.quantization.ASHVectors;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.ProductQuantization;
@@ -81,7 +82,7 @@ public class CassandraDiskAnn
     @Nullable
     private final ProductQuantization pq;
     private final VectorCompression compression;
-    final boolean pqUnitVectors;
+    final boolean unitVectors; // whether the compressed vectors were all unit length when written
 
     private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
 
@@ -105,22 +106,24 @@ public class CassandraDiskAnn
         // so the toString() method will print all the enabled features.
         logger.debug("Opened graph for {} for sstable row id offset {} with {} features", source, segmentMetadata.segmentRowIdOffset, features);
 
-        long pqSegmentOffset = this.componentMetadatas.get(IndexComponentType.PQ).offset;
-        try (var pqFile = indexFiles.pq();
-             var reader = pqFile.createReader())
+        // ASH codes have their own component; PQ codes, or none, are in the PQ component
+        var codesComponent = this.componentMetadatas.getOptional(IndexComponentType.ASH) != null ? IndexComponentType.ASH : IndexComponentType.PQ;
+        long codesSegmentOffset = this.componentMetadatas.get(codesComponent).offset;
+        try (var codesFile = codesComponent == IndexComponentType.ASH ? indexFiles.ash() : indexFiles.pq();
+             var reader = codesFile.createReader())
         {
-            reader.seek(pqSegmentOffset);
+            reader.seek(codesSegmentOffset);
             var version = PQVersion.V0;
             if (reader.readInt() == PQ_MAGIC)
             {
                 version = PQVersion.values()[reader.readInt()];
                 assert PQVersion.V1.compareTo(version) >= 0 : String.format("Old PQ version %s written with PQ_MAGIC!?", version);
-                pqUnitVectors = reader.readBoolean();
+                unitVectors = reader.readBoolean();
             }
             else
             {
-                pqUnitVectors = true;
-                reader.seek(pqSegmentOffset);
+                unitVectors = true;
+                reader.seek(codesSegmentOffset);
             }
 
             VectorCompression.CompressionType compressionType = VectorCompression.CompressionType.values()[reader.readByte()];
@@ -140,6 +143,14 @@ public class CassandraDiskAnn
                 {
                     compressedVectors = PQVectors.load(reader, reader.getFilePointer());
                     pq = ((PQVectors) compressedVectors).getCompressor();
+                    compression = new VectorCompression(compressionType,
+                                                        compressedVectors.getOriginalSize(),
+                                                        compressedVectors.getCompressedSize());
+                }
+                else if (compressionType == VectorCompression.CompressionType.ASH)
+                {
+                    compressedVectors = ASHVectors.load(reader);
+                    pq = null;
                     compression = new VectorCompression(compressionType,
                                                         compressedVectors.getOriginalSize(),
                                                         compressedVectors.getCompressedSize());
@@ -254,8 +265,9 @@ public class CassandraDiskAnn
             else
             {
                 // unit vectors defined with dot product should switch to cosine similarity for compressed
-                // comparisons, since the compression does not maintain unit length
-                var sf = pqUnitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
+                // comparisons, since the compression does not maintain unit length; ASH scores dot products
+                var sf = unitVectors && similarityFunction == VectorSimilarityFunction.DOT_PRODUCT
+                         && compression.type == VectorCompression.CompressionType.PRODUCT_QUANTIZATION
                          ? VectorSimilarityFunction.COSINE
                          : similarityFunction;
                 var asf = compressedVectors.precomputedScoreFunctionFor(queryVector, sf);
@@ -329,7 +341,7 @@ public class CassandraDiskAnn
 
     public boolean containsUnitVectors()
     {
-        return pqUnitVectors;
+        return unitVectors;
     }
 
     public int maxDegree()

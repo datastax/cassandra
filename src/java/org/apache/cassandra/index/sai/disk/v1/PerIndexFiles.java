@@ -105,6 +105,12 @@ public class PerIndexFiles implements Closeable
     }
 
     /** It is the caller's responsibility to close the returned file handle. */
+    public FileHandle ash()
+    {
+        return getFile(IndexComponentType.ASH).sharedCopy();
+    }
+
+    /** It is the caller's responsibility to close the returned file handle. */
     public FileHandle docLengths()
     {
         return getFile(IndexComponentType.DOC_LENGTHS).sharedCopy();

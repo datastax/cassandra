@@ -46,16 +46,20 @@ import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.SearchResult;
+import io.github.jbellis.jvector.graph.StreamingASHIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OnDiskParallelGraphIndexWriter;
-import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.RandomAccessOnDiskGraphIndexWriter;
+import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
 import io.github.jbellis.jvector.graph.disk.feature.InlineVectors;
 import io.github.jbellis.jvector.graph.disk.feature.NVQ;
+import io.github.jbellis.jvector.graph.similarity.BuildScoreProvider;
 import io.github.jbellis.jvector.graph.similarity.DefaultSearchScoreProvider;
+import io.github.jbellis.jvector.quantization.ASHVectors;
+import io.github.jbellis.jvector.quantization.AsymmetricHashing;
 import io.github.jbellis.jvector.quantization.CompressedVectors;
 import io.github.jbellis.jvector.quantization.PQVectors;
 import io.github.jbellis.jvector.quantization.NVQuantization;
@@ -84,6 +88,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
 import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
@@ -119,12 +124,16 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnHeapGraph.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+    // ASH codes store two bits for each projected dimension; see IndexWriterConfig#getAshDimensions
+    static final int ASH_BITS_PER_DIMENSION = 2;
 
     // We use the metable reference for easier tracing.
     private final String source;
     private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
     private final ConcurrentVectorValues vectorValues;
-    private final GraphIndexBuilder builder;
+    private final GraphIndexBuilder builder; // null when the index builds with ASH; see builder()
+    private final StreamingASHIndex streamingIndex; // null unless the index builds with ASH
+    private final VectorCompression searchCompression; // how graph searches score: exactly, or with ASH codes
     private final VectorType.VectorSerializer serializer;
     private final VectorSimilarityFunction similarityFunction;
     private final ConcurrentMap<VectorFloat<?>, VectorPostings<T>> postingsMap;
@@ -174,22 +183,59 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // Assume true until we observe otherwise.
         allVectorsAreUnitLength = true;
 
-        // NVQ is only written during compaction to save on compute costs
-        writeNvq = JVectorVersionUtil.shouldWriteNVQ(dimension, context.version()) && !forSearching;
+        // NVQ is only written during compaction to save on compute costs, except for ASH indexes, whose streaming mean
+        // lets a memtable flush encode NVQ without another pass over the vectors
+        writeNvq = JVectorVersionUtil.shouldWriteNVQ(dimension, context.version()) && (!forSearching || indexConfig.isAshEnabled());
 
         // This is only a warning since it's not a fatal error to write without hierarchy
         if (indexConfig.isHierarchyEnabled() && jvectorVersion < 4)
             logger.warn("Hierarchical graphs configured but node configured with V3OnDiskFormat.JVECTOR_VERSION {}. " +
                         "Skipping setting for {}", jvectorVersion, indexConfig.getIndexName());
 
-        builder = new GraphIndexBuilder(vectorValues,
-                                        similarityFunction,
-                                        indexConfig.getAnnMaxDegree(),
-                                        indexConfig.getConstructionBeamWidth(),
-                                        indexConfig.getNeighborhoodOverflow(1.0f), // no overflow means add will be a bit slower but flush will be faster
-                                        indexConfig.getAlpha(dimension > 3 ? 1.2f : 2.0f),
-                                        indexConfig.isHierarchyEnabled() && jvectorVersion >= 4);
-        searchers = ThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(builder.getGraph())));
+        if (indexConfig.isAshEnabled())
+        {
+            // The index builds and searches with ASH codes and reranks with the vectors held here. It starts with the
+            // newest flushed segment's ASH model, or, without one, with exact scores until it trains its model on a
+            // sample of the vectors as they arrive.
+            var options = new StreamingASHIndex.Options();
+            options.train = true;
+            int encodedBits = ashEncodedBits(indexConfig, dimension);
+            searchCompression = new VectorCompression(CompressionType.ASH, dimension * Float.BYTES, (encodedBits + Byte.SIZE - 1) / Byte.SIZE);
+            Function<BuildScoreProvider, GraphIndexBuilder> builders = scores -> new GraphIndexBuilder(scores,
+                                                                                                    dimension,
+                                                                                                    indexConfig.getAnnMaxDegree(),
+                                                                                                    indexConfig.getConstructionBeamWidth(),
+                                                                                                    indexConfig.getNeighborhoodOverflow(1.0f),
+                                                                                                    indexConfig.getAlpha(dimension > 3 ? 1.2f : 2.0f),
+                                                                                                    indexConfig.isHierarchyEnabled() && jvectorVersion >= 4);
+            var ash = getAshIfPresent(context);
+            streamingIndex = ash == null
+                             ? StreamingASHIndex.coldStart(vectorValues, similarityFunction, encodedBits, ASH_BITS_PER_DIMENSION, builders, options)
+                             : StreamingASHIndex.withModel(vectorValues, similarityFunction, ash.model, builders, options);
+            builder = null;
+        }
+        else
+        {
+            streamingIndex = null;
+            searchCompression = VectorCompression.NO_COMPRESSION;
+            builder = new GraphIndexBuilder(vectorValues,
+                                            similarityFunction,
+                                            indexConfig.getAnnMaxDegree(),
+                                            indexConfig.getConstructionBeamWidth(),
+                                            indexConfig.getNeighborhoodOverflow(1.0f), // no overflow means add will be a bit slower but flush will be faster
+                                            indexConfig.getAlpha(dimension > 3 ? 1.2f : 2.0f),
+                                            indexConfig.isHierarchyEnabled() && jvectorVersion >= 4);
+        }
+        searchers = ThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(builder().getGraph())));
+    }
+
+    /**
+     * The graph's builder. An ASH index replaces its builder once, when its first model is ready, so this is read
+     * for each use rather than kept.
+     */
+    private GraphIndexBuilder builder()
+    {
+        return streamingIndex == null ? builder : streamingIndex.builder();
     }
 
     public int size()
@@ -287,7 +333,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 bytesUsed += postings.ramBytesUsed();
                 var success = postingsByOrdinal.compareAndPut(ordinal, null, postings);
                 assert success : "postingsByOrdinal already contains an entry for ordinal " + ordinal;
-                bytesUsed += builder.addGraphNode(ordinal, vector);
+                bytesUsed += streamingIndex == null ? builder.addGraphNode(ordinal, vector) : streamingIndex.add(ordinal);
 
                 // If necessary, check if the vector is unit length.
                 if (!sourceModel.hasKnownUnitLengthVectors() && allVectorsAreUnitLength)
@@ -364,10 +410,12 @@ public class CassandraOnHeapGraph<T> implements Accountable
         var graphAccessManager = searchers.get();
         var searcher = graphAccessManager.get();
         searcher.usePruning(usePruning);
-        searcher.setView(builder.getGraph().getView());
+        searcher.setView(builder().getGraph().getView());
         try
         {
-            var ssf = DefaultSearchScoreProvider.exact(queryVector, similarityFunction, vectorValues);
+            var ssf = streamingIndex == null
+                      ? DefaultSearchScoreProvider.exact(queryVector, similarityFunction, vectorValues)
+                      : streamingIndex.searchScoreProviderFor(queryVector);
             long start = nanoTime();
             var result = searcher.search(ssf, limit, rerankK, threshold, 0.0f, bits);
             long elapsed = nanoTime() - start;
@@ -402,6 +450,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
      */
     public boolean preFlush(ToIntFunction<T> postingTransformer)
     {
+        // An ASH index finishes any training and model change first, so its graph no longer changes.
+        if (streamingIndex != null)
+            streamingIndex.prepareForFlush();
+
         var it = postingsMap.entrySet().iterator();
         while (it.hasNext()) {
             var entry = it.next();
@@ -410,17 +462,17 @@ public class CassandraOnHeapGraph<T> implements Accountable
             if (vp.isEmpty() || vp.shouldAppendDeletedOrdinal())
                 deletedOrdinals.add(vp.getOrdinal());
         }
-        return deletedOrdinals.size() < builder.getGraph().size();
+        return deletedOrdinals.size() < builder().getGraph().size();
     }
 
     public SegmentMetadata.ComponentMetadataMap flush(IndexComponents.ForWrite perIndexComponents) throws IOException
     {
-        int nInProgress = builder.insertsInProgress();
+        int nInProgress = builder().insertsInProgress();
         assert nInProgress == 0 : String.format("Attempting to write graph while %d inserts are in progress", nInProgress);
-        assert nextOrdinal.get() == builder.getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
-                                                                              nextOrdinal.get(), builder.getGraph().size());
-        assert vectorValues.size() == builder.getGraph().size() : String.format("vector count %d != graph size %d",
-                                                                                vectorValues.size(), builder.getGraph().size());
+        assert nextOrdinal.get() == builder().getGraph().size() : String.format("nextOrdinal %d != graph size %d -- ordinals should be sequential",
+                                                                                nextOrdinal.get(), builder().getGraph().size());
+        assert vectorValues.size() == builder().getGraph().size() : String.format("vector count %d != graph size %d",
+                                                                                  vectorValues.size(), builder().getGraph().size());
         logger.debug("Writing graph with {} rows and {} distinct vectors", postingsMap.values().stream().mapToInt(VectorPostings::size).sum(), vectorValues.size());
 
         // compute the remapping of old ordinals to new (to fill in holes from deletion and/or to create a
@@ -442,16 +494,16 @@ public class CassandraOnHeapGraph<T> implements Accountable
                             postingsMap.keySet().size(), deletedOrdinals.size(), vectorValues.size());
             // remove deleted ordinals from the graph.  this is not done at remove() time, because the same vector
             // could be added back again, "undeleting" the ordinal, and the concurrency gets tricky
-            deletedOrdinals.stream().parallel().forEach(builder::markNodeDeleted);
+            deletedOrdinals.stream().parallel().forEach(builder()::markNodeDeleted);
             deletedOrdinals.clear();
-            builder.cleanup();
+            builder().cleanup();
             remappedPostings = V5VectorPostingsWriter.remapForMemtable(postingsMap, perIndexComponents.version());
         }
         else
         {
             assert postingsMap.keySet().size() == vectorValues.size() : String.format("postings map entry count %d != vector count %d",
                                                                                       postingsMap.keySet().size(), vectorValues.size());
-            builder.cleanup();
+            builder().cleanup();
             remappedPostings = V2VectorPostingsWriter.remapForMemtable(postingsMap, !deletedOrdinals.isEmpty());
         }
 
@@ -462,19 +514,24 @@ public class CassandraOnHeapGraph<T> implements Accountable
         long termsOffset = SAICodecUtils.headerSize();
         if (indexFile.exists())
             termsOffset += indexFile.length();
-        try (var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true);
+        var codesComponent = codesComponentType(perIndexComponents);
+        try (var codesOutput = perIndexComponents.addOrGet(codesComponent).openOutput(true);
              var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true))
         {
-            SAICodecUtils.writeHeader(pqOutput);
+            SAICodecUtils.writeHeader(codesOutput);
             SAICodecUtils.writeHeader(postingsOutput);
 
             // Write fused unless we don't meet some criteria (will be determined in the writePQ method)
             boolean writeFusedPQ = JVectorVersionUtil.shouldWriteFused(perIndexComponents.version());
 
-            // compute and write PQ
-            long pqOffset = pqOutput.getFilePointer();
-            var compressor = writePQ(pqOutput.asSequentialWriter(), remappedPostings, perIndexComponents.context(), writeFusedPQ);
-            long pqLength = pqOutput.getFilePointer() - pqOffset;
+            // compute and write the ASH or PQ codes
+            long codesOffset = codesOutput.getFilePointer();
+            VectorCompressor<?> compressor = null;
+            if (streamingIndex != null)
+                writeAsh(codesOutput.asSequentialWriter(), remappedPostings, perIndexComponents.version());
+            else
+                compressor = writePQ(codesOutput.asSequentialWriter(), remappedPostings, perIndexComponents.context(), writeFusedPQ);
+            long codesLength = codesOutput.getFilePointer() - codesOffset;
 
             // write postings
             long postingsOffset = postingsOutput.getFilePointer();
@@ -488,7 +545,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             else
             {
                 IntUnaryOperator newToOldMapper = remappedPostings.ordinalMapper::newToOld;
-                postingsPosition = new V2VectorPostingsWriter<T>(remappedPostings.structure == Structure.ONE_TO_ONE, builder.getGraph().size(), newToOldMapper)
+                postingsPosition = new V2VectorPostingsWriter<T>(remappedPostings.structure == Structure.ONE_TO_ONE, builder().getGraph().size(), newToOldMapper)
                                    .writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap, deletedOrdinals);
             }
             long postingsLength = postingsPosition - postingsOffset;
@@ -497,10 +554,13 @@ public class CassandraOnHeapGraph<T> implements Accountable
             // insertions, it would be a bit more complicated. All vectors are in memory, so the computation to build the
             // mean vector should be pretty fast, and this path is only used when we don't have an existing
             // ProductQuantization.
-            NVQuantization nvq = writeNvq ? NVQuantization.compute(vectorValues, NUM_SUB_VECTORS) : null;
+            // An ASH index kept the mean as vectors arrived, so it needs no pass over them.
+            NVQuantization nvq = !writeNvq ? null
+                                 : streamingIndex == null ? NVQuantization.compute(vectorValues, NUM_SUB_VECTORS)
+                                 : NVQuantization.create(streamingIndex.mean(), NUM_SUB_VECTORS);
 
             try (var indexWriter = createIndexWriter(indexFile, termsOffset, perIndexComponents.context(), ordinalMapper, compressor, nvq);
-                 var view = builder.getGraph().getView())
+                 var view = builder().getGraph().getView())
             {
                 indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
                 SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()), perIndexComponents.version());
@@ -514,11 +574,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 long termsLength = indexWriter.getOutput().position() - termsOffset;
 
                 // write remaining footers/checksums
-                SAICodecUtils.writeFooter(pqOutput);
+                SAICodecUtils.writeFooter(codesOutput);
                 SAICodecUtils.writeFooter(postingsOutput);
 
                 // add components to the metadata map
-                return createMetadataMap(termsOffset, termsLength, postingsOffset, postingsLength, pqOffset, pqLength);
+                return createMetadataMap(termsOffset, termsLength, postingsOffset, postingsLength, codesComponent, codesOffset, codesLength);
             }
         }
     }
@@ -534,12 +594,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // Writes the graph with the parallel writer when compaction does (see CompactionGraph)
         var path = indexFile.toPath();
         var indexWriterBuilder = CompactionGraph.PARALLEL_ENCODING_WRITING
-                                 ? new OnDiskParallelGraphIndexWriter.Builder(builder.getGraph(), path)
+                                 ? new OnDiskParallelGraphIndexWriter.Builder(builder().getGraph(), path)
                                    .withStartOffset(termsOffset)
                                    .withParallelWorkerThreads(CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_NUM_THREADS.getInt())
                                    .withParallelDirectBuffers(CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_USE_DIRECT_BUFFERS.getBoolean())
-                                 : new OnDiskGraphIndexWriter.Builder(builder.getGraph(), path).withStartOffset(termsOffset);
-
+                                 : new OnDiskGraphIndexWriter.Builder(builder().getGraph(), path).withStartOffset(termsOffset);
         int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
         indexWriterBuilder.withVersion(jvectorVersion)
                           .withMapper(ordinalMapper)
@@ -553,14 +612,26 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return indexWriterBuilder.build();
     }
 
-    static SegmentMetadata.ComponentMetadataMap createMetadataMap(long termsOffset, long termsLength, long postingsOffset, long postingsLength, long pqOffset, long pqLength)
+    static SegmentMetadata.ComponentMetadataMap createMetadataMap(long termsOffset, long termsLength, long postingsOffset, long postingsLength,
+                                                                  IndexComponentType codesComponent, long codesOffset, long codesLength)
     {
         SegmentMetadata.ComponentMetadataMap metadataMap = new SegmentMetadata.ComponentMetadataMap();
         metadataMap.put(IndexComponentType.TERMS_DATA, -1, termsOffset, termsLength, Map.of());
         metadataMap.put(IndexComponentType.POSTING_LISTS, -1, postingsOffset, postingsLength, Map.of());
         Map<String, String> vectorConfigs = Map.of("SEGMENT_ID", ByteBufferUtil.bytesToHex(ByteBuffer.wrap(StringHelper.randomId())));
-        metadataMap.put(IndexComponentType.PQ, -1, pqOffset, pqLength, vectorConfigs);
+        metadataMap.put(codesComponent, -1, codesOffset, codesLength, vectorConfigs);
         return metadataMap;
+    }
+
+    /**
+     * The component a segment's compressed vectors go to: {@link IndexComponentType#ASH} for an index with
+     * {@code enable_ash} on a version that has it, {@link IndexComponentType#PQ} otherwise.
+     */
+    static IndexComponentType codesComponentType(IndexComponents.ForWrite perIndexComponents)
+    {
+        return perIndexComponents.version().onDiskFormat().perIndexComponentTypes(perIndexComponents.context()).contains(IndexComponentType.ASH)
+               ? IndexComponentType.ASH
+               : IndexComponentType.PQ;
     }
 
     private EnumMap<FeatureId, IntFunction<Feature.State>> suppliers(ImmutableGraphIndex.View view, VectorCompressor<?> compressor, NVQuantization nvq, boolean writeFusedPQ)
@@ -590,6 +661,58 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
 
         return features;
+    }
+
+    /** The size of the ASH codes of an index of vectors of {@code dimension} dimensions, header included. */
+    static int ashEncodedBits(IndexWriterConfig config, int dimension)
+    {
+        return AsymmetricHashing.HEADER_BITS + ASH_BITS_PER_DIMENSION * config.getAshDimensions(dimension);
+    }
+
+    /**
+     * The ASH model of the newest flushed segment that has one with this index's code size, so a new memtable's index
+     * or a compaction starts with it instead of training its own; null if there is none.
+     */
+    public static AshInfo getAshIfPresent(IndexContext indexContext)
+    {
+        int encodedBits = ashEncodedBits(indexContext.getIndexWriterConfig(), ((VectorType<?>) indexContext.getValidator()).dimension);
+        var view = indexContext.getReferencedView(TimeUnit.SECONDS.toNanos(5));
+        if (view == null)
+        {
+            logger.warn("Unable to get view of already built indexes for {}", indexContext);
+            return null;
+        }
+
+        try
+        {
+            var indexes = new ArrayList<>(view.getIndexes());
+            indexes.sort(Comparator.comparing(SSTableIndex::getSSTable, CompactionSSTable.maxTimestampDescending));
+            for (SSTableIndex index : indexes)
+            {
+                for (Segment segment : index.getSegments())
+                {
+                    var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                    var graph = searcher.graph;
+                    if (graph.getCompression().type != CompressionType.ASH)
+                        continue;
+                    var model = ((ASHVectors) graph.getCompressedVectors()).getCompressor();
+                    if (model.encodedBits == encodedBits)
+                        return new AshInfo(model, searcher.containsUnitVectors());
+                }
+            }
+            return null;
+        }
+        finally
+        {
+            view.release();
+        }
+    }
+
+    /** The model the ASH index encodes new vectors with, or null without ASH or while it still scores exactly. */
+    @VisibleForTesting
+    public AsymmetricHashing ashModel()
+    {
+        return streamingIndex == null ? null : streamingIndex.model();
     }
 
     /**
@@ -668,7 +791,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
 
         var actualType = compressor == null ? CompressionType.NONE : preferredCompression.type;
-        writePqHeader(writer, allVectorsAreUnitLength, actualType, indexContext.version());
+        writeCompressionHeader(writer, allVectorsAreUnitLength, actualType, indexContext.version());
         if (actualType == CompressionType.NONE)
             return null;
 
@@ -683,7 +806,25 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return null; // Don't need compressor in this case
     }
 
-    static void writePqHeader(DataOutput writer, boolean unitVectors, CompressionType type, Version version)
+    /**
+     * Writes the ASH model and codes, which {@link #preFlush} left encoded with one model, in new-ordinal order. The
+     * codes carry their own format version, independent of the graph's.
+     */
+    private void writeAsh(SequentialWriter writer, V5VectorPostingsWriter.RemappedPostings remapped, Version version) throws IOException
+    {
+        int[] newToOld = new int[remapped.maxNewOrdinal + 1];
+        for (int i = 0; i < newToOld.length; i++)
+        {
+            int oldOrdinal = remapped.ordinalMapper.newToOld(i);
+            // a new ordinal without a vector is never searched, so any code can fill its place
+            newToOld[i] = oldOrdinal == OrdinalMapper.OMITTED ? 0 : oldOrdinal;
+        }
+        writeCompressionHeader(writer, allVectorsAreUnitLength, CompressionType.ASH, version);
+        streamingIndex.codes().snapshot(newToOld).write(writer, AsymmetricHashing.MIN_FORMAT_VERSION);
+    }
+
+    /** The header of a segment's compressed vectors, before the PQ or ASH codes; read back by {@link CassandraDiskAnn}. */
+    static void writeCompressionHeader(DataOutput writer, boolean unitVectors, CompressionType type, Version version)
     throws IOException
     {
         if (version.onDiskFormat().jvectorFileFormatVersion() >= 3)
@@ -721,7 +862,32 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
     public long ramBytesUsed()
     {
-        return postingsBytesUsed() + vectorValues.ramBytesUsed() + builder.getGraph().ramBytesUsed();
+        return postingsBytesUsed() + vectorValues.ramBytesUsed()
+               + (streamingIndex == null ? builder.getGraph().ramBytesUsed() : streamingIndex.heapBytesUsed());
+    }
+
+    /**
+     * Native memory the ASH index allocated outside the heap since this was last called, such as its model's native
+     * projections, for the memtable's off-heap pool; zero without ASH. Heap is reported by {@link #add}.
+     */
+    public long takeOffHeapBytes()
+    {
+        return streamingIndex == null ? 0 : streamingIndex.takeNativeBytes();
+    }
+
+    /**
+     * How graph searches score candidates: exactly, or with ASH codes, so callers can size the candidate list as for
+     * compressed vectors.
+     */
+    public VectorCompression searchCompression()
+    {
+        return searchCompression;
+    }
+
+    /** Native memory the ASH index holds outside the heap; zero without ASH. */
+    public long offHeapBytesUsed()
+    {
+        return streamingIndex == null ? 0 : streamingIndex.nativeBytesUsed();
     }
 
     private long postingsBytesUsed()
@@ -752,11 +918,23 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
     }
 
+    public static class AshInfo
+    {
+        public final AsymmetricHashing model;
+        public final boolean unitVectors;
+
+        public AshInfo(AsymmetricHashing model, boolean unitVectors)
+        {
+            this.model = model;
+            this.unitVectors = unitVectors;
+        }
+    }
+
     /** ensures that the graph is connected -- normally not necessary but it can help tests reason about the state */
     @VisibleForTesting
     public void cleanup()
     {
-        builder.cleanup();
+        builder().cleanup();
     }
 
     /**

@@ -47,6 +47,12 @@ public enum IndexComponentType
      */
     VECTOR("Vector"),
     PQ("PQ"),
+    /**
+     * The ASH model and codes of a vector index with {@code enable_ash}, in place of {@link #PQ}.
+     *
+     * V10
+     */
+    ASH("ASH"),
 
     /**
      * Term dictionary written by {@code TrieTermsDictionaryWriter} stores mappings of term and

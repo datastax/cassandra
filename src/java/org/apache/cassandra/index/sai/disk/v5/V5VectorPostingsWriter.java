@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.IntFunction;
 import java.util.function.IntPredicate;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
@@ -153,6 +154,15 @@ public class V5VectorPostingsWriter<T>
                               RandomAccessVectorValues vectorValues,
                               Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
     {
+        return writePostings(writer, byVector(vectorValues, postingsMap));
+    }
+
+    /**
+     * As {@link #writePostings(SequentialWriter, RandomAccessVectorValues, Map)}, with each original ordinal's postings
+     * from {@code postingsByOrdinal}, for a caller that keeps no copy of the vectors the postings are keyed by.
+     */
+    public long writePostings(SequentialWriter writer, IntFunction<? extends VectorPostings<T>> postingsByOrdinal) throws IOException
+    {
         var structure = remappedPostings.structure;
 
         writer.writeInt(MAGIC);
@@ -172,11 +182,17 @@ public class V5VectorPostingsWriter<T>
         else
         {
             assert structure == Structure.ZERO_OR_ONE_TO_MANY;
-            writeGenericOrdinalToRowIdMapping(writer, vectorValues, postingsMap);
-            writeGenericRowIdMapping(writer, vectorValues, postingsMap);
+            writeGenericOrdinalToRowIdMapping(writer, postingsByOrdinal);
+            writeGenericRowIdMapping(writer, postingsByOrdinal);
         }
 
         return writer.position();
+    }
+
+    private static <T> IntFunction<VectorPostings<T>> byVector(RandomAccessVectorValues vectorValues,
+                                                              Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap)
+    {
+        return ordinal -> postingsMap.get(vectorValues.getVector(ordinal));
     }
 
     private void writeOneToManyOrdinalMapping(SequentialWriter writer) throws IOException
@@ -257,6 +273,11 @@ public class V5VectorPostingsWriter<T>
                                                   RandomAccessVectorValues vectorValues,
                                                   Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
     {
+        writeGenericOrdinalToRowIdMapping(writer, byVector(vectorValues, postingsMap));
+    }
+
+    private void writeGenericOrdinalToRowIdMapping(SequentialWriter writer, IntFunction<? extends VectorPostings<T>> postingsByOrdinal) throws IOException
+    {
         long ordToRowOffset = writer.getOnDiskFilePointer();
 
         var newToOldMapper = (IntUnaryOperator) remappedPostings.ordinalMapper::newToOld;
@@ -276,7 +297,7 @@ public class V5VectorPostingsWriter<T>
             }
             else
             {
-                var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
+                var rowIds = postingsByOrdinal.apply(originalOrdinal).getRowIds();
                 postingListSize = rowIds.size();
             }
             nextOffset += 4 + (postingListSize * 4L); // 4 bytes for size and 4 bytes for each integer in the list
@@ -292,7 +313,7 @@ public class V5VectorPostingsWriter<T>
                 writer.writeInt(0);
                 continue;
             }
-            var rowIds = postingsMap.get(vectorValues.getVector(originalOrdinal)).getRowIds();
+            var rowIds = postingsByOrdinal.apply(originalOrdinal).getRowIds();
             writer.writeInt(rowIds.size());
             for (int r = 0; r < rowIds.size(); r++)
                 writer.writeInt(rowIds.getInt(r));
@@ -304,6 +325,11 @@ public class V5VectorPostingsWriter<T>
                                          RandomAccessVectorValues vectorValues,
                                          Map<? extends VectorFloat<?>, ? extends VectorPostings<T>> postingsMap) throws IOException
     {
+        writeGenericRowIdMapping(writer, byVector(vectorValues, postingsMap));
+    }
+
+    private void writeGenericRowIdMapping(SequentialWriter writer, IntFunction<? extends VectorPostings<T>> postingsByOrdinal) throws IOException
+    {
         long startOffset = writer.position();
 
         // Create a Map of rowId -> ordinal
@@ -314,7 +340,7 @@ public class V5VectorPostingsWriter<T>
             if (ord == OrdinalMapper.OMITTED)
                 continue;
 
-            var rowIds = postingsMap.get(vectorValues.getVector(ord)).getRowIds();
+            var rowIds = postingsByOrdinal.apply(ord).getRowIds();
             for (int r = 0; r < rowIds.size(); r++)
             {
                 var rowId = rowIds.getInt(r);
