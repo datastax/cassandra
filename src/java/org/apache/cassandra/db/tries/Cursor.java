@@ -301,6 +301,15 @@ interface Cursor<T>
         return ((long) ~depth << DEPTH_SHIFT) | transitionXored;
     }
 
+    static long encodeWithOverflow(int depth, int transition, Direction direction)
+    {
+        assert depth >= -1;
+        assert transition <= 0x100 && transition >= -1;
+        // The xor below flips transition bits and also sets the direction bit to 1 for REVERSE direction.
+        long transitionXored = direction.select(transition << TRANSITION_SHIFT, (255 - transition) << TRANSITION_SHIFT | (1L << DIRECTION_BIT));
+        return ((long) ~depth << DEPTH_SHIFT) | transitionXored;
+    }
+
     /// Returns the position that descends one byte from the given, i.e.
     ///   `positionForDescentWithByte(encodedPosition, incomingByte) ==
     ///        encode(depth(encodedPosition) + 1, incomingByte, direction(encodedPosition))`
