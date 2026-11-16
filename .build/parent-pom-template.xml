@@ -1260,7 +1260,7 @@
       <dependency>
         <groupId>io.github.jbellis</groupId>
         <artifactId>jvector</artifactId>
-        <version>4.1.0-ash-poc.5</version>
+        <version>4.1.0-ash-poc.6</version>
       </dependency>
       <dependency>
         <groupId>com.carrotsearch.randomizedtesting</groupId>
