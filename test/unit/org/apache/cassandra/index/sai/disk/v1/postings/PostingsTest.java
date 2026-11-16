@@ -374,7 +374,10 @@ public class PostingsTest extends SaiRandomizedTest
                     {
                         String message = String.format("%d row ids in blocks of %d, frequencies %s", expected[i].length, blockSize, frequencies);
                         SortedRowIdsBuilder rowIds = new SortedRowIdsBuilder(Integer.MAX_VALUE - 1);
+                        assertEquals(message, expected[i][0], reader.firstRowId(pointers[i]));
+                        assertEquals(message, expected[i].length, reader.numPostings());
                         reader.readAll(pointers[i], rowIds);
+                        assertEquals(message, expected[i].length, reader.numPostings());
                         decoded += expected[i].length;
 
                         int[] distinct = IntStream.of(expected[i]).distinct().toArray();
@@ -396,6 +399,19 @@ public class PostingsTest extends SaiRandomizedTest
                 assertEquals(union.length, postings.size());
                 for (int rowId : union)
                     assertEquals(rowId, postings.nextPosting());
+
+                // only the row ids from a given one
+                for (int from : new int[]{ 0, 1, union[union.length / 2], union[union.length - 1], union[union.length - 1] + 1 })
+                {
+                    rowIds = new SortedRowIdsBuilder(Integer.MAX_VALUE - 1);
+                    for (long pointer : pointers)
+                        reader.readAll(pointer, rowIds, from);
+                    postings = rowIds.build();
+                    for (int rowId : union)
+                        if (rowId >= from)
+                            assertEquals(rowId, postings.nextPosting());
+                    assertEquals(PostingList.END_OF_STREAM, postings.nextPosting());
+                }
             }
         }
     }

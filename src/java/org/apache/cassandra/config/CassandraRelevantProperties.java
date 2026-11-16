@@ -939,8 +939,9 @@ public enum CassandraRelevantProperties
     SAI_QUERY_PLAN_METRICS_ENABLED("cassandra.sai.metrics.query_plan.enabled", "true"),
 
     /**
-     * The largest number of terms of a range, prefix or pattern query on a literal index whose posting lists are
-     * kept open and merged lazily in a segment. With more matching terms the posting lists are all read into a set
+     * The largest number of posting lists that a range, prefix or pattern query on a literal index keeps open and
+     * merges lazily in a segment. With more matching terms only the posting lists with the smallest first row ids
+     * are opened; if the query reads past them, the remaining row ids of all the posting lists are read into a set
      * of row ids, which takes one bit per row of the segment at most.
      */
     SAI_RANGE_QUERY_MAX_LAZY_POSTING_LISTS("cassandra.sai.range_query.max_lazy_posting_lists", "1024"),

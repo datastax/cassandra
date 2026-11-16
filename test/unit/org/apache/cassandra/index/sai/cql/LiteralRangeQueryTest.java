@@ -405,8 +405,9 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
     }
 
     /**
-     * Above a number of terms in the range the posting lists of a segment are not merged lazily, they are all
-     * read into a set of row ids: same results with nearly all the ranges above that number.
+     * Above a number of terms in the range only some posting lists of a segment are opened, and the others are
+     * read into a set of row ids when the query goes past them: same results with nearly all the ranges above
+     * that number.
      */
     @Test
     public void testRandomizedRangesReadingAllPostingLists()

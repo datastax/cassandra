@@ -47,6 +47,7 @@ import org.apache.cassandra.index.sai.disk.v1.postings.EagerPostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.ScanningPostingsReader;
+import org.apache.cassandra.index.sai.disk.v1.postings.SmallestFirstRowIds;
 import org.apache.cassandra.index.sai.disk.v1.postings.SortedRowIdsBuilder;
 import org.apache.cassandra.index.sai.disk.v1.trie.ReverseTrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
@@ -94,9 +95,8 @@ public class TermsReader implements Closeable
     private final int maxSegmentRowId;
 
     /**
-     * The largest number of terms whose posting lists a range query keeps open and merges lazily. With more terms
-     * the query reads all the posting lists to the end, see {@link RangeQuery#readAndMergePostings}. An open
-     * {@link PostingsReader} retains a few hundred bytes.
+     * The largest number of posting lists that a range query keeps open in a segment, see {@link RangePostingList}.
+     * An open {@link PostingsReader} retains a few hundred bytes.
      */
     private static volatile int maxLazyPostingLists = Math.max(0, CassandraRelevantProperties.SAI_RANGE_QUERY_MAX_LAZY_POSTING_LISTS.getInt());
 
@@ -435,14 +435,7 @@ public class TermsReader implements Closeable
             // Note: we always pass true for include start because we use the ByteComparable terminator above
             // to selectively determine when we have a match on the first/last term. This is probably part of the API
             // that could change, but it's been there for a bit, so we'll leave it for now.
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
-                                                                                  termDictionaryRoot,
-                                                                                  lower,
-                                                                                  upper,
-                                                                                  true,
-                                                                                  upperInclusive,
-                                                                                  termFilter != null,
-                                                                                  termDictionaryFileEncodingVersion))
+            try (TrieTermsDictionaryReader reader = termsOfTheRange())
             {
                 if (!reader.hasNext())
                     return PostingList.EMPTY;
@@ -463,116 +456,265 @@ public class TermsReader implements Closeable
             }
         }
 
+        private TrieTermsDictionaryReader termsOfTheRange()
+        {
+            return new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
+                                                 termDictionaryRoot,
+                                                 lower,
+                                                 upper,
+                                                 true,
+                                                 upperInclusive,
+                                                 termFilter != null,
+                                                 termDictionaryFileEncodingVersion);
+        }
+
         /**
-         * Reads the posting lists of the terms of the range accepted by the term filter, if any, and merges them
-         * into a single posting list. It assumes that the posting list for each term is sorted.
-         * <p>
-         * The result is in row id order, so the first row id of every term is needed before the first row id can
-         * be returned: the work is proportional to the number of terms of the range whatever the limit of the
-         * query. What is bounded is the memory:
-         * <ul>
-         *     <li>up to {@link #maxLazyPostingLists} terms, each posting list stays open and they are merged
-         *     lazily, so that a query with a small limit reads the beginning of each list only;</li>
-         *     <li>above that, no posting list stays open: they are all read to the end, one after the other, into
-         *     a {@link SortedRowIdsBuilder}, which takes one bit per row of the segment at most.</li>
-         * </ul>
+         * @return the offset of the posting list of the next term, or -1 if the term filter rejects the term
+         */
+        private long nextPostingsOffset(TrieTermsDictionaryReader reader)
+        {
+            if (termFilter == null)
+                return reader.nextAsLong();
+
+            Pair<ByteComparable, Long> entry = reader.next();
+            return termFilter.test(ByteSourceInverse.readBytes(entry.left.asComparableBytes(termDictionaryFileEncodingVersion)))
+                   ? entry.right
+                   : -1;
+        }
+
+        /**
+         * Merges the posting lists of the terms of the range accepted by the term filter, if any, into a single
+         * posting list. It assumes that the posting list for each term is sorted.
          *
          * @return the posting lists for the terms matching the query.
          */
         private PostingList readAndMergePostings(TrieTermsDictionaryReader reader) throws IOException
         {
             assert reader.hasNext();
-            int maxLazy = maxLazyPostingLists;
 
-            // index inputs will be closed with the onClose method of the returned merged posting list;
+            // index inputs will be closed by the returned posting list;
             // if the second open throws, the first must be closed here instead of leaking
             IndexInput postingsInput = IndexFileUtils.instance().openInput(postingsFile);
-            IndexInput postingsSummaryInput;
+            IndexInput postingsSummaryInput = null;
             try
             {
                 postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
+                return new RangePostingList(reader, postingsInput, postingsSummaryInput);
             }
             catch (Throwable t)
             {
                 FileUtils.closeQuietly(postingsInput);
+                FileUtils.closeQuietly(postingsSummaryInput);
                 throw t;
             }
+        }
 
-            ArrayList<PostingList> postingLists = new ArrayList<>();
-            try
+        /**
+         * The union of the posting lists of the terms of a range, in row id order.
+         * <p>
+         * The first row id of every term is needed before the first row id can be returned, so the work is
+         * proportional to the number of terms of the range whatever the limit of the query. What is bounded is the
+         * memory, and the number of rows read:
+         * <ul>
+         *     <li>The terms are visited once and at most {@link #maxLazyPostingLists} posting lists are kept, the
+         *     ones with the smallest first row ids, picked with a heap. Only these are opened, and merged lazily.
+         *     When no posting list is left out this is the whole result.</li>
+         *     <li>Otherwise all the row ids of the posting lists left out are greater than or equal to the largest
+         *     first row id of the ones kept: up to that row id, included, the merge is exact. A query with a small
+         *     limit normally stops there.</li>
+         *     <li>If more row ids are asked for, the terms are visited a second time and the remaining row ids of
+         *     all the posting lists are read, one list after the other, into a {@link SortedRowIdsBuilder}, which
+         *     takes one bit per row of the segment at most. Refilling the heap instead would visit the terms
+         *     again for every {@link #maxLazyPostingLists} lists consumed.</li>
+         * </ul>
+         */
+        private class RangePostingList implements PostingList
+        {
+            private final IndexInput postingsInput;
+            private final IndexInput postingsSummaryInput;
+            private final int size;
+
+            // the source of the row ids up to lastExactRowId: after that row id it misses the posting lists left out
+            private PostingList current = PostingList.EMPTY;
+            private int lastExactRowId = END_OF_STREAM;
+
+            RangePostingList(TrieTermsDictionaryReader reader, IndexInput postingsInput, IndexInput postingsSummaryInput) throws IOException
             {
-                // The offsets of the posting lists of the first terms, until it is known whether the range has
-                // more terms than the lazy merge accepts.
-                long[] offsets = new long[Math.min(maxLazy, 16)];
+                this.postingsInput = postingsInput;
+                this.postingsSummaryInput = postingsSummaryInput;
+
+                int maxOpen = maxLazyPostingLists;
+                if (maxOpen > 0)
+                {
+                    size = openSmallestPostingLists(reader, maxOpen);
+                }
+                else
+                {
+                    readRemainingRowIds(reader, 0);
+                    size = current.size();
+                }
+            }
+
+            /**
+             * Opens the posting lists with the smallest first row ids, all of them if they are not too many.
+             *
+             * @return the total number of postings of the range
+             */
+            private int openSmallestPostingLists(TrieTermsDictionaryReader reader, int maxOpen) throws IOException
+            {
+                // The offsets of the posting lists of the first terms: the first row ids are not needed until
+                // it is known that the range has more terms than the posting lists to open.
+                long[] offsets = new long[Math.min(maxOpen, 16)];
                 int terms = 0;
-                EagerPostingsReader eagerReader = null;
-                SortedRowIdsBuilder rowIds = null;
+                long totalPostings = 0;
+                EagerPostingsReader firstRowIdReader = null;
+                SmallestFirstRowIds smallest = null;
                 do
                 {
-                    long postingsOffset;
-                    if (termFilter == null)
-                    {
-                        postingsOffset = reader.nextAsLong();
-                    }
-                    else
-                    {
-                        Pair<ByteComparable, Long> entry = reader.next();
-                        if (!termFilter.test(ByteSourceInverse.readBytes(entry.left.asComparableBytes(termDictionaryFileEncodingVersion))))
-                            continue;
-                        postingsOffset = entry.right;
-                    }
-
-                    if (terms < maxLazy)
-                    {
-                        if (terms == offsets.length)
-                            offsets = Arrays.copyOf(offsets, (int) Math.min(terms * 2L, maxLazy));
-                        offsets[terms++] = postingsOffset;
+                    long postingsOffset = nextPostingsOffset(reader);
+                    if (postingsOffset < 0)
                         continue;
+
+                    if (smallest == null)
+                    {
+                        if (terms < maxOpen)
+                        {
+                            if (terms == offsets.length)
+                                offsets = Arrays.copyOf(offsets, (int) Math.min(terms * 2L, maxOpen));
+                            offsets[terms++] = postingsOffset;
+                            continue;
+                        }
+
+                        // The summary input serves this reader: all its users seek before they read.
+                        firstRowIdReader = new EagerPostingsReader(postingsSummaryInput, readFrequencies());
+                        int[] firstRowIds = new int[maxOpen];
+                        for (int i = 0; i < maxOpen; i++)
+                        {
+                            firstRowIds[i] = firstRowIdReader.firstRowId(offsets[i]);
+                            totalPostings += firstRowIdReader.numPostings();
+                        }
+                        smallest = new SmallestFirstRowIds(firstRowIds, offsets, maxOpen);
                     }
 
-                    if (eagerReader == null)
-                    {
-                        // Too many terms. The summary input serves this reader: all its users seek before they read.
-                        eagerReader = new EagerPostingsReader(postingsSummaryInput, readFrequencies());
-                        rowIds = new SortedRowIdsBuilder(maxSegmentRowId);
-                        for (int i = 0; i < terms; i++)
-                            eagerReader.readAll(offsets[i], rowIds);
-                        offsets = null;
-                    }
-                    eagerReader.readAll(postingsOffset, rowIds);
+                    smallest.offer(firstRowIdReader.firstRowId(postingsOffset), postingsOffset);
+                    totalPostings += firstRowIdReader.numPostings();
                     if ((++terms & 1023) == 0)
                         context.checkpoint();
                 } while (reader.hasNext());
 
-                if (eagerReader != null)
+                ArrayList<PostingList> postingLists = new ArrayList<>(Math.min(terms, maxOpen));
+                try
                 {
-                    listener.postingListEventListener().postingDecoded(eagerReader.postingsDecoded());
-                    postingLists.add(rowIds.build());
-                }
-                else
-                {
-                    for (int i = 0; i < terms; i++)
+                    if (smallest == null)
                     {
-                        var currentReader = currentReader(postingsInput, postingsSummaryInput, offsets[i]);
-                        if (!currentReader.isEmpty())
-                            postingLists.add(currentReader);
-                        else
-                            FileUtils.close(currentReader);
+                        for (int i = 0; i < terms; i++)
+                        {
+                            var currentReader = currentReader(postingsInput, postingsSummaryInput, offsets[i]);
+                            if (!currentReader.isEmpty())
+                                postingLists.add(currentReader);
+                            else
+                                FileUtils.close(currentReader);
+                        }
+                    }
+                    else
+                    {
+                        for (int i = 0; i < smallest.size(); i++)
+                            if (smallest.firstRowId(i) != END_OF_STREAM)
+                                postingLists.add(currentReader(postingsInput, postingsSummaryInput, smallest.offset(i)));
                     }
                 }
-            }
-            catch (Throwable e)
-            {
-                // a mid-scan failure exits before the merged posting list (whose onClose owns the resources)
-                // could be built: release the collected postings and both inputs
-                FileUtils.closeQuietly(postingLists);
-                FileUtils.closeQuietly(postingsInput);
-                FileUtils.closeQuietly(postingsSummaryInput);
-                throw e;
+                catch (Throwable t)
+                {
+                    FileUtils.closeQuietly(postingLists);
+                    throw t;
+                }
+
+                current = MergePostingList.merge(postingLists);
+                if (smallest == null)
+                    return current.size();
+
+                if (smallest.leftOut())
+                    lastExactRowId = smallest.largestFirstRowId();
+                return (int) Math.min(totalPostings, Integer.MAX_VALUE);
             }
 
-            return MergePostingList.merge(postingLists)
-                                   .onClose(() -> FileUtils.close(postingsInput, postingsSummaryInput));
+            /**
+             * Reads the row ids from the given one, of all the posting lists that the reader still has.
+             */
+            private void readRemainingRowIds(TrieTermsDictionaryReader reader, int from) throws IOException
+            {
+                // The summary input serves this reader: no other posting list is open now.
+                EagerPostingsReader eagerReader = new EagerPostingsReader(postingsSummaryInput, readFrequencies());
+                SortedRowIdsBuilder rowIds = new SortedRowIdsBuilder(maxSegmentRowId);
+                int terms = 0;
+                while (reader.hasNext())
+                {
+                    long postingsOffset = nextPostingsOffset(reader);
+                    if (postingsOffset < 0)
+                        continue;
+
+                    eagerReader.readAll(postingsOffset, rowIds, from);
+                    if ((++terms & 1023) == 0)
+                        context.checkpoint();
+                }
+                listener.postingListEventListener().postingDecoded(eagerReader.postingsDecoded());
+                current = rowIds.build();
+                lastExactRowId = END_OF_STREAM;
+            }
+
+            /**
+             * Replaces the open posting lists, which miss row ids from the given one, with all the row ids from it.
+             *
+             * @return the first of them
+             */
+            private int readPastOpenPostingLists(int from) throws IOException
+            {
+                PostingList previous = current;
+                current = PostingList.EMPTY;
+                previous.close();
+
+                try (TrieTermsDictionaryReader reader = termsOfTheRange())
+                {
+                    readRemainingRowIds(reader, from);
+                }
+                return current.nextPosting();
+            }
+
+            @Override
+            public int nextPosting() throws IOException
+            {
+                int rowId = current.nextPosting();
+                return rowId <= lastExactRowId ? rowId : readPastOpenPostingLists(lastExactRowId + 1);
+            }
+
+            @Override
+            public int advance(int targetRowID) throws IOException
+            {
+                if (targetRowID > lastExactRowId)
+                    return readPastOpenPostingLists(targetRowID);
+
+                int rowId = current.advance(targetRowID);
+                return rowId <= lastExactRowId ? rowId : readPastOpenPostingLists(lastExactRowId + 1);
+            }
+
+            @Override
+            public int size()
+            {
+                return size;
+            }
+
+            @Override
+            public void close() throws IOException
+            {
+                try
+                {
+                    current.close();
+                }
+                finally
+                {
+                    FileUtils.close(postingsInput, postingsSummaryInput);
+                }
+            }
         }
 
         private PostingsReader currentReader(IndexInput postingsInput,
