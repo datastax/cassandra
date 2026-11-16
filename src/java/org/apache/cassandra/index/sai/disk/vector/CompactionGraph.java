@@ -258,6 +258,8 @@ public class CompactionGraph implements Closeable, Accountable
         writerBuilder.with(nvq != null ? new NVQ(nvq) : new InlineVectors(dimension))
                      .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
                      .withMapper(ordinalMapper);
+        if (context.version().onDiskFormat().jvectorFileFormatVersion() >= 7)
+            writerBuilder.withPageAlignment(CassandraOnHeapGraph.GRAPH_PAGE_BYTES);
         if (compressor instanceof ProductQuantization && JVectorVersionUtil.shouldWriteFused(context.version()))
             writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
         return writerBuilder.build();
