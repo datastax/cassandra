@@ -33,6 +33,7 @@ import org.junit.runners.Parameterized;
 
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
+import io.github.jbellis.jvector.vector.VectorizationProvider;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -623,9 +624,12 @@ public class VectorTypeTest extends VectorTester.VersionedWithChecksums
         var result = execute("SELECT str_val, similarity_cosine(val, ?) FROM %s ORDER BY val ANN OF ? LIMIT 2",
                 q, q);
 
+        // Expected scores computed as the function computes them, so they match whichever vectorization backend runs
+        var vts = VectorizationProvider.getInstance().getVectorTypeSupport();
+        var query = vts.createFloatVector(new float[]{ 1.5f, 2.5f, 3.5f });
         assertRowsIgnoringOrder(result,
-                row("A", 0.9987074f),
-                row("B", 0.9993764f));
+                row("A", VectorSimilarityFunction.COSINE.compare(vts.createFloatVector(new float[]{ 1.0f, 2.0f, 3.0f }), query)),
+                row("B", VectorSimilarityFunction.COSINE.compare(vts.createFloatVector(new float[]{ 2.0f, 3.0f, 4.0f }), query)));
     }
 
     @Test

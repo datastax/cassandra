@@ -32,8 +32,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.util.BitSet;
-import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.FloatArray;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -295,7 +295,7 @@ public class V2OnDiskOrdinalsMapTest
     private Map<VectorFloat<?>, VectorPostings<Integer>> generatePostingsMap(RamAwareVectorValues vectorValues)
     {
         Map<VectorFloat<?>, VectorPostings<Integer>> postingsMap = new ConcurrentSkipListMap<>((a, b) -> {
-            return Arrays.compare(((ArrayVectorFloat) a).get(), ((ArrayVectorFloat) b).get());
+            return Arrays.compare(((FloatArray) a).array(), ((FloatArray) b).array());
         });
 
         for (int ordinal = 0; ordinal < vectorValues.size(); ordinal++)

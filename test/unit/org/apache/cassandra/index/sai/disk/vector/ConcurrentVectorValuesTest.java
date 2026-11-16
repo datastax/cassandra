@@ -21,6 +21,7 @@ package org.apache.cassandra.index.sai.disk.vector;
 import org.junit.Test;
 
 import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.FloatArray;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 
 import static org.junit.Assert.assertArrayEquals;
@@ -47,6 +48,6 @@ public class ConcurrentVectorValuesTest
         vectorValues.add(2, vts.createFloatVector(new float[]{ 2.0f }));
 
         assertNull(vectorValues.getVector(0));
-        assertArrayEquals(new float[]{ 1.0f }, (float[]) vectorValues.getVector(1).get(), 0f);
+        assertArrayEquals(new float[]{ 1.0f }, ((FloatArray) vectorValues.getVector(1)).array(), 0f);
     }
 }
