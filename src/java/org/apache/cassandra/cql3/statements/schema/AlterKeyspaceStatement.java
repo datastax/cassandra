@@ -104,7 +104,7 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement implement
         if (newKeyspace.params.replication.klass.equals(LocalStrategy.class))
             throw ire("Unable to use given strategy class: LocalStrategy is reserved for internal use.");
 
-        newKeyspace.validate(state);
+        newKeyspace.validate(state, keyspace);
 
         validateNoRangeMovements();
         validateTransientReplication(keyspace.createReplicationStrategy(), newKeyspace.createReplicationStrategy());

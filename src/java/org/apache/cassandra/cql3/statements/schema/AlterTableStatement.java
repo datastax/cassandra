@@ -235,7 +235,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             TableMetadata.Builder tableBuilder = table.unbuild();
             tableBuilder.alterColumnMask(columnName, newMask);
             TableMetadata newTable = tableBuilder.build();
-            newTable.validate();
+            newTable.validate(table);
 
             // Update any reference on materialized views, so the mask is consistent among the base table and its views.
             Views.Builder viewsBuilder = keyspace.views.unbuild();
@@ -303,7 +303,7 @@ public abstract class AlterTableStatement extends AlterSchemaStatement
             Guardrails.columnsPerTable.guard(tableBuilder.numColumns(), tableName, false, state);
 
             TableMetadata tableMetadata = tableBuilder.build();
-            tableMetadata.validate();
+            tableMetadata.validate(table);
 
             return keyspace.withSwapped(keyspace.tables.withSwapped(tableMetadata))
                            .withSwapped(viewsBuilder.build());

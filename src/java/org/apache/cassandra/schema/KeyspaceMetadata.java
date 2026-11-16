@@ -393,9 +393,19 @@ public final class KeyspaceMetadata implements SchemaElement
 
     public void validate(ClientState clientState)
     {
+        validate(clientState, null);
+    }
+
+    /**
+     * @param previous the keyspace before the schema change, or {@code null} for a new keyspace; see
+     *                 {@link TableMetadata#validate(TableMetadata)}.
+     */
+    public void validate(ClientState clientState, @Nullable KeyspaceMetadata previous)
+    {
         validateKeyspaceName(name, ConfigurationException::new);
         params.validate(name, clientState);
-        tablesAndViews().forEach(TableMetadata::validate);
+        for (TableMetadata table : tablesAndViews())
+            table.validate(previous == null ? null : previous.getTableOrViewNullable(table.name));
 
         Set<String> indexNames = new HashSet<>();
         for (TableMetadata table : tables)
