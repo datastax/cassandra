@@ -46,6 +46,7 @@ import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.NodeArray;
 import io.github.jbellis.jvector.graph.OnHeapGraphIndex;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
+import io.github.jbellis.jvector.graph.RemappedRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.disk.OnDiskParallelGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.RandomAccessOnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
@@ -121,6 +122,9 @@ public class CompactionGraph implements Closeable, Accountable
                                                                             null,
                                                                             false);
 
+    /** The fewest vectors an ASH model is trained on; fewer get a random projection (as in StreamingASHIndex). */
+    private static final int MIN_ASH_TRAINING_VECTORS = 1024;
+
     @VisibleForTesting
     public static int PQ_TRAINING_SIZE = ProductQuantization.MAX_PQ_TRAINING_SET_SIZE;
 
@@ -134,7 +138,9 @@ public class CompactionGraph implements Closeable, Accountable
     private final ChronicleMap<VectorFloat<?>, CompactionVectorPostings> postingsMap;
     private final IndexComponents.ForWrite perIndexComponents;
     private final IndexContext context;
-    private final boolean unitVectors;
+    private boolean unitVectors;
+    // with no ASH model given, whether the vectors are all unit length so far (the model is trained at flush)
+    private final boolean checkUnitLength;
     private final int postingsEntriesAllocated;
     private final File postingsFile;
     private final File vectorsByOrdinalTmpFile;
@@ -161,9 +167,13 @@ public class CompactionGraph implements Closeable, Accountable
     private CompressedPQVectorsBytesTracker compressedVectorsBytes;
     // With an ASH compressor, the vectors are only collected while rows arrive (in the temporary vector file, with
     // their ordinals here); flush() then encodes them all at once into ashVectors and builds the graph over those
-    // codes in parallel, as JVector builds an ASH index. Until then builder is null.
-    private final AsymmetricHashing ash;
+    // codes in parallel, as JVector builds an ASH index. Until then builder is null. Without a model to inherit, ash
+    // is null until flush trains one on a sample of the collected vectors.
+    private final boolean ashEnabled;
+    private AsymmetricHashing ash;
     private final BitSet ashOrdinals;
+    // the number of ordinals in ashOrdinals, so size() costs nothing (it is called for every row)
+    private int ashNodeCount;
     private final long ashBytesPerNode;
     private ASHVectors ashVectors;
     private GraphIndexBuilder builder;
@@ -175,6 +185,10 @@ public class CompactionGraph implements Closeable, Accountable
         this.perIndexComponents = perIndexComponents;
         this.context = perIndexComponents.context();
         this.unitVectors = unitVectors;
+        // a model trained here reports whether this segment's vectors are unit length, as a memtable flush does
+        this.checkUnitLength = compressor == null && !context.getIndexWriterConfig().getSourceModel().hasKnownUnitLengthVectors();
+        if (compressor == null)
+            this.unitVectors = true;
         var indexConfig = context.getIndexWriterConfig();
         var termComparator = context.getValidator();
         dimension = ((VectorType<?>) termComparator).dimension;
@@ -226,6 +240,7 @@ public class CompactionGraph implements Closeable, Accountable
 
         if (compressor instanceof ProductQuantization)
         {
+            ashEnabled = false;
             ash = null;
             ashOrdinals = null;
             ashBytesPerNode = 0;
@@ -233,14 +248,15 @@ public class CompactionGraph implements Closeable, Accountable
             compressedVectorsBytes = new CompressedPQVectorsBytesTracker(compressedVectors);
             builder = newGraphBuilder(BuildScoreProvider.pqBuildScoreProvider(similarityFunction, compressedVectors));
         }
-        else if (compressor instanceof AsymmetricHashing)
+        else if (compressor instanceof AsymmetricHashing || (compressor == null && indexConfig.isAshEnabled()))
         {
-            // The model is kept, not refined; see ashVectors
+            // An inherited model is kept, not refined; see ashVectors
+            ashEnabled = true;
             ash = (AsymmetricHashing) compressor;
             ashOrdinals = new BitSet();
             // a node's code, plus its base-layer neighbors (ids and scores, with overflow), which the graph
             // allocates at flush
-            ashBytesPerNode = ash.compressedVectorSize()
+            ashBytesPerNode = (CassandraOnHeapGraph.ashEncodedBits(indexConfig, dimension) + Byte.SIZE - 1) / Byte.SIZE
                               + (long) (indexConfig.getAnnMaxDegree() * indexConfig.getNeighborhoodOverflow(1.2f)) * (Integer.BYTES + Float.BYTES);
         }
         else
@@ -279,13 +295,26 @@ public class CompactionGraph implements Closeable, Accountable
     {
         try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
         {
+            int[] nodes = ashOrdinals.stream().toArray();
             long start = nanoTime();
+            if (ash == null)
+            {
+                // with no model to inherit, train one on a sample of the vectors, as JVector does before a build;
+                // too few vectors to train on get a random projection, as a new memtable index does
+                var indexConfig = context.getIndexWriterConfig();
+                int optimizer = nodes.length < MIN_ASH_TRAINING_VECTORS ? AsymmetricHashing.RANDOM : AsymmetricHashing.ITQ;
+                ash = AsymmetricHashing.initialize(new RemappedRandomAccessVectorValues(vectorValues, nodes), optimizer,
+                                                   CassandraOnHeapGraph.ashEncodedBits(indexConfig, dimension), 1,
+                                                   CassandraOnHeapGraph.ASH_BITS_PER_DIMENSION, compactionSimdPool);
+                compressor = ash;
+                logger.info("Training the ASH model on a sample of {} vectors took {}ms", nodes.length, (nanoTime() - start) / 1_000_000);
+                start = nanoTime();
+            }
             // the temporary file holds zeros at ordinal holes; their codes are written but no node uses them
             ashVectors = ash.encodeAll(vectorValues, compactionSimdPool);
             long encoded = nanoTime();
             var bsp = BuildScoreProvider.ashBuildScoreProvider(similarityFunction, ashVectors);
             builder = newGraphBuilder(bsp);
-            int[] nodes = ashOrdinals.stream().toArray();
             compactionFjp.submit(() -> Arrays.stream(nodes)
                                              .parallel()
                                              .forEach(ordinal -> builder.addGraphNode(ordinal, bsp.searchProviderFor(ordinal))))
@@ -330,7 +359,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     public int size()
     {
-        return builder == null ? postingsMap.size() : builder.getGraph().size();
+        return builder == null ? ashNodeCount : builder.getGraph().size();
     }
 
     public boolean isEmpty()
@@ -451,10 +480,13 @@ public class CompactionGraph implements Closeable, Accountable
                 // is only needed during index build. It is a temp file.
                 onDiskVectorValuesWriter.write(ordinal, vector);
 
-                if (ash != null)
+                if (ashEnabled)
                 {
                     // collected only; encoded and inserted at flush (see ashVectors)
                     ashOrdinals.set(ordinal);
+                    ashNodeCount++;
+                    if (checkUnitLength && unitVectors && !(Math.abs(VectorUtil.dotProduct(vector, vector) - 1.0f) < 0.01))
+                        unitVectors = false;
                     return new InsertionResult(bytesUsed + postings.ramBytesUsed() + ashBytesPerNode);
                 }
 
@@ -514,7 +546,7 @@ public class CompactionGraph implements Closeable, Accountable
 
     public long addGraphNode(InsertionResult result)
     {
-        assert ash == null : "ASH nodes are inserted at flush";
+        assert !ashEnabled : "ASH nodes are inserted at flush";
         trainingLock.readLock().lock();
         try
         {
@@ -530,7 +562,7 @@ public class CompactionGraph implements Closeable, Accountable
     {
         // Close the temporary file so the reader will know it is the end of the file.
         onDiskVectorValuesWriter.close();
-        if (ash != null)
+        if (ashEnabled)
             buildAshGraph();
 
         int nInProgress = builder.insertsInProgress();
@@ -557,9 +589,9 @@ public class CompactionGraph implements Closeable, Accountable
             long pqOffset = pqOutput.getFilePointer();
             Version version = context.version();
             boolean writeFusedPQ = JVectorVersionUtil.shouldWriteFused(version);
-            var compressionType = ash != null ? VectorCompression.CompressionType.ASH : VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
+            var compressionType = ashEnabled ? VectorCompression.CompressionType.ASH : VectorCompression.CompressionType.PRODUCT_QUANTIZATION;
             CassandraOnHeapGraph.writePqHeader(pqOutput.asSequentialWriter(), unitVectors, compressionType, version);
-            if (ash != null)
+            if (ashEnabled)
                 // ASH codes carry their own format version, independent of the graph's
                 ashVectors.write(pqOutput.asSequentialWriter(), AsymmetricHashing.MIN_FORMAT_VERSION);
             else if (writeFusedPQ)
@@ -698,7 +730,7 @@ public class CompactionGraph implements Closeable, Accountable
     public long ramBytesUsed()
     {
         if (builder == null)
-            return ashBytesPerNode * ashOrdinals.cardinality();
+            return ashBytesPerNode * ashNodeCount;
         return codes().ramBytesUsed() + builder.getGraph().ramBytesUsed();
     }
 

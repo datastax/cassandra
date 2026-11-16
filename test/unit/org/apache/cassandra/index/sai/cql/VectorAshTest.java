@@ -226,6 +226,39 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
     }
 
     @Test
+    public void enableAshIndexBuildTrainsItsModel()
+    {
+        // An index created over data already on disk has no model to inherit, so its build trains one on a sample
+        // of the segment's vectors, encodes them all and builds the graph from those codes.
+        createTable("CREATE TABLE %s (pk int, vec vector<float, 64>, PRIMARY KEY(pk))");
+        disableCompaction();
+        List<float[]> vectors = new ArrayList<>();
+        for (int i = 0; i < 3000; i++)
+        {
+            float[] v = randomVector(64);
+            normalize(v);
+            vectors.add(v);
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(v));
+        }
+        flush();
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = {'enable_ash' : 'true', 'similarity_function' : 'dot_product'}");
+
+        var sai = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.listIndexes().iterator().next();
+        int segments = 0;
+        for (var index : sai.getIndexContext().getView().getIndexes())
+            for (var segment : index.getSegments())
+            {
+                segments++;
+                var searcher = (V2VectorIndexSearcher) segment.getIndexSearcher();
+                assertEquals(VectorCompression.CompressionType.ASH, searcher.getCompression().type);
+                assertEquals(JVectorVersionUtil.shouldWriteNVQ(64, version), searcher.graph.usesNVQ());
+            }
+        assertEquals(1, segments);
+        assertThat(fractionFindingThemselves(vectors)).isGreaterThanOrEqualTo(0.9);
+    }
+
+    @Test
     public void ashDimensionsSetsTheCodeSize()
     {
         // ash_dimensions sets the projected dimensions of the ASH codes, which flushed segments keep.

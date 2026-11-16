@@ -125,7 +125,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     private static final Logger logger = LoggerFactory.getLogger(CassandraOnHeapGraph.class);
     private static final VectorTypeSupport vts = VectorizationProvider.getInstance().getVectorTypeSupport();
     // ASH codes store two bits for each projected dimension; see IndexWriterConfig#getAshDimensions
-    private static final int ASH_BITS_PER_DIMENSION = 2;
+    static final int ASH_BITS_PER_DIMENSION = 2;
 
     // We use the metable reference for easier tracing.
     private final String source;
@@ -647,7 +647,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
     }
 
     /** The size of the ASH codes of an index of vectors of {@code dimension} dimensions, header included. */
-    private static int ashEncodedBits(IndexWriterConfig config, int dimension)
+    static int ashEncodedBits(IndexWriterConfig config, int dimension)
     {
         return AsymmetricHashing.HEADER_BITS + ASH_BITS_PER_DIMENSION * config.getAshDimensions(dimension);
     }
