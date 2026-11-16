@@ -47,7 +47,9 @@ import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
+import io.github.jbellis.jvector.graph.disk.OnDiskParallelGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
+import io.github.jbellis.jvector.graph.disk.RandomAccessOnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
 import io.github.jbellis.jvector.graph.disk.feature.FusedPQ;
@@ -70,6 +72,7 @@ import io.github.jbellis.jvector.vector.VectorizationProvider;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -520,13 +523,20 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
     }
 
-    private OnDiskGraphIndexWriter createIndexWriter(File indexFile, long termsOffset, IndexContext context, OrdinalMapper ordinalMapper, VectorCompressor<?> compressor, NVQuantization nvq) throws IOException
+    private RandomAccessOnDiskGraphIndexWriter createIndexWriter(File indexFile, long termsOffset, IndexContext context, OrdinalMapper ordinalMapper, VectorCompressor<?> compressor, NVQuantization nvq) throws IOException
     {
-        var indexWriterBuilder = new OnDiskGraphIndexWriter.Builder(builder.getGraph(), indexFile.toPath())
-            .withStartOffset(termsOffset)
-            .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
-            .withMapper(ordinalMapper)
-            .with(nvq != null ? new NVQ(nvq) : new InlineVectors(vectorValues.dimension()));
+        // Writes the graph with the parallel writer when compaction does (see CompactionGraph)
+        var path = indexFile.toPath();
+        var indexWriterBuilder = CompactionGraph.PARALLEL_ENCODING_WRITING
+                                 ? new OnDiskParallelGraphIndexWriter.Builder(builder.getGraph(), path)
+                                   .withStartOffset(termsOffset)
+                                   .withParallelWorkerThreads(CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_NUM_THREADS.getInt())
+                                   .withParallelDirectBuffers(CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_USE_DIRECT_BUFFERS.getBoolean())
+                                 : new OnDiskGraphIndexWriter.Builder(builder.getGraph(), path).withStartOffset(termsOffset);
+
+        indexWriterBuilder.withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
+                          .withMapper(ordinalMapper)
+                          .with(nvq != null ? new NVQ(nvq) : new InlineVectors(vectorValues.dimension()));
 
         if (compressor instanceof ProductQuantization && JVectorVersionUtil.shouldWriteFused(context.version()))
             indexWriterBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
