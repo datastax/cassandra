@@ -190,7 +190,7 @@ public enum CassandraRelevantProperties
      * the cache (concurrent reads, compactors and index builders). Ignored when
      * {@link #CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB} is set explicitly. Negative values are treated as 0.
      */
-    CHUNK_CACHE_RESERVED_POOL_SPACE_THREAD_FACTOR("cassandra.chunk_cache_reserved_pool_space_thread_factor", "0.3"),
+    CHUNK_CACHE_RESERVED_POOL_SPACE_THREAD_FACTOR("cassandra.chunk_cache_reserved_pool_space_thread_factor", "1.0"),
     CLOCK_GLOBAL("cassandra.clock"),
     CLOCK_MONOTONIC_APPROX("cassandra.monotonic_clock.approx"),
     CLOCK_MONOTONIC_PRECISE("cassandra.monotonic_clock.precise"),

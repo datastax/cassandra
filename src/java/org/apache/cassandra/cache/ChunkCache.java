@@ -354,8 +354,9 @@ public class ChunkCache
         return new BufferPoolExhaustedException(
         String.format("Chunk cache buffer pool exhausted after reclaim and %d ms wait " +
                       "(pool used=%s, overflow=%s, cache capacity=%s). " +
-                      "Increase cassandra.chunk_cache_reserved_pool_space_in_mb or reduce concurrent reads; " +
-                      "chunk cache does not allocate outside the pool.",
+                      "Increase cassandra.chunk_cache_reserved_pool_space_thread_factor or reduce concurrent reads; " +
+                      "if you set cassandra.chunk_cache_reserved_pool_space_in_mb you need to increase it." +
+                      "Chunk cache does not allocate outside the pool.",
                       waitMs, prettyUsed(), prettyOverflow(), prettyCapacity()));
     }
 
