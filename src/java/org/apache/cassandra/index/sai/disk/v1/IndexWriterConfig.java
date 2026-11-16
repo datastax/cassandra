@@ -186,8 +186,9 @@ public class IndexWriterConfig
     public int getAnnMaxDegree()
     {
         // For historical reasons (Lucene doubled the maximum node connections for its HNSW),
-        // maximumNodeConnections represents half of the graph degree, so double it
-        return 2 * maximumNodeConnections;
+        // maximumNodeConnections represents half of the graph degree, so double it. ASH indexes are new and use
+        // JVector's meaning, the graph degree itself, so the same setting builds the same graph as JVector.
+        return isAshEnabled() ? maximumNodeConnections : 2 * maximumNodeConnections;
     }
 
     /** you should probably use getAnnMaxDegree instead */

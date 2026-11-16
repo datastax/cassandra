@@ -259,6 +259,27 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
     }
 
     @Test
+    public void ashMaximumNodeConnectionsIsTheGraphDegree()
+    {
+        // For ASH indexes maximum_node_connections is the graph degree itself, as in JVector, not half of it
+        createTable("CREATE TABLE %s (pk int, vec vector<float, 64>, PRIMARY KEY(pk))");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = {'enable_ash' : 'true', 'similarity_function' : 'dot_product', 'maximum_node_connections' : '24'}");
+        for (int i = 0; i < 1000; i++)
+        {
+            float[] v = randomVector(64);
+            normalize(v);
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(v));
+        }
+        flush();
+        var sai = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.listIndexes().iterator().next();
+        assertEquals(24, sai.getIndexContext().getIndexWriterConfig().getAnnMaxDegree());
+        for (var index : sai.getIndexContext().getView().getIndexes())
+            for (var segment : index.getSegments())
+                assertEquals(24, ((V2VectorIndexSearcher) segment.getIndexSearcher()).graph.maxDegree());
+    }
+
+    @Test
     public void ashDimensionsSetsTheCodeSize()
     {
         // ash_dimensions sets the projected dimensions of the ASH codes, which flushed segments keep.
