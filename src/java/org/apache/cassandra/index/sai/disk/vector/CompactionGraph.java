@@ -251,8 +251,7 @@ public class CompactionGraph implements Closeable, Accountable
                                         compactionFjp);
 
         termsFile = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA).file();
-        termsOffset = (termsFile.exists() ? termsFile.length() : 0)
-                      + SAICodecUtils.headerSize();
+        termsOffset = CassandraOnHeapGraph.graphOffset(termsFile.exists() ? termsFile.length() : 0, context);
 
         globalMean = JVectorVersionUtil.shouldWriteNVQ(dimension, context.version()) ? vts.createFloatVector(new float[dimension])
                                                                                      : null;
@@ -274,6 +273,8 @@ public class CompactionGraph implements Closeable, Accountable
         writerBuilder.with(nvq != null ? new NVQ(nvq) : new InlineVectors(dimension))
                      .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
                      .withMapper(ordinalMapper);
+        if (context.version().onDiskFormat().jvectorFileFormatVersion() >= 7)
+            writerBuilder.withPageAlignment(CassandraOnHeapGraph.GRAPH_PAGE_BYTES);
         if (compressor instanceof ProductQuantization && JVectorVersionUtil.shouldWriteFused(context.version()))
             writerBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));
         return writerBuilder.build();
@@ -590,7 +591,7 @@ public class CompactionGraph implements Closeable, Accountable
             try(var writer = createTermsWriter(ordinalMapper.get(), nvq))
             {
                 writer.getOutput().seek(termsFile.length()); // position at the end of the previous segment before writing our own header
-                SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(writer.getOutput()), perIndexComponents.version());
+                CassandraOnHeapGraph.writeHeaderAndPad(writer.getOutput(), termsOffset, perIndexComponents.version());
                 // OnDiskVectorValues is thread safe, making it safe to close over it.
                 try (var vectorValues = new OnDiskVectorValues(vectorsByOrdinalTmpFile, dimension))
                 {

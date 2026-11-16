@@ -41,6 +41,7 @@ import org.cliffc.high_scale_lib.NonBlockingHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.jbellis.jvector.disk.RandomAccessWriter;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.ImmutableGraphIndex;
@@ -48,6 +49,8 @@ import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.SearchResult;
 import io.github.jbellis.jvector.graph.StreamingASHIndex;
 import io.github.jbellis.jvector.graph.disk.OnDiskGraphIndexWriter;
+import io.github.jbellis.jvector.graph.disk.OnDiskParallelGraphIndexWriter;
+import io.github.jbellis.jvector.graph.disk.RandomAccessOnDiskGraphIndexWriter;
 import io.github.jbellis.jvector.graph.disk.OrdinalMapper;
 import io.github.jbellis.jvector.graph.disk.feature.Feature;
 import io.github.jbellis.jvector.graph.disk.feature.FeatureId;
@@ -74,6 +77,7 @@ import io.github.jbellis.jvector.vector.types.FloatArray;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -508,9 +512,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         IndexComponent.ForWrite termsDataComponent = perIndexComponents.addOrGet(IndexComponentType.TERMS_DATA);
         var indexFile = termsDataComponent.file();
-        long termsOffset = SAICodecUtils.headerSize();
-        if (indexFile.exists())
-            termsOffset += indexFile.length();
+        long termsOffset = graphOffset(indexFile.exists() ? indexFile.length() : 0, perIndexComponents.context());
         try (var pqOutput = perIndexComponents.addOrGet(IndexComponentType.PQ).openOutput(true);
              var postingsOutput = perIndexComponents.addOrGet(IndexComponentType.POSTING_LISTS).openOutput(true))
         {
@@ -555,7 +557,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
                  var view = builder().getGraph().getView())
             {
                 indexWriter.getOutput().seek(indexFile.length()); // position at the end of the previous segment before writing our own header
-                SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(indexWriter.getOutput()), perIndexComponents.version());
+                writeHeaderAndPad(indexWriter.getOutput(), termsOffset, perIndexComponents.version());
                 assert indexWriter.getOutput().position() == termsOffset : "termsOffset " + termsOffset + " != " + indexWriter.getOutput().position();
 
                 // write the graph
@@ -575,13 +577,46 @@ public class CassandraOnHeapGraph<T> implements Accountable
         }
     }
 
-    private OnDiskGraphIndexWriter createIndexWriter(File indexFile, long termsOffset, IndexContext context, OrdinalMapper ordinalMapper, VectorCompressor<?> compressor, NVQuantization nvq) throws IOException
+    /** Page size that graph records are aligned to on JVector file format 7 and later. */
+    static final int GRAPH_PAGE_BYTES = 4096;
+
+    /**
+     * Returns where a segment's graph starts in the terms file: after the segment's header and, on JVector file
+     * format 7 and later, rounded up to a page boundary so that the page-aligned graph records line up with pages.
+     */
+    static long graphOffset(long segmentStart, IndexContext context)
     {
-        var indexWriterBuilder = new OnDiskGraphIndexWriter.Builder(builder().getGraph(), indexFile.toPath())
-            .withStartOffset(termsOffset)
-            .withVersion(context.version().onDiskFormat().jvectorFileFormatVersion())
-            .withMapper(ordinalMapper)
-            .with(nvq != null ? new NVQ(nvq) : new InlineVectors(vectorValues.dimension()));
+        long offset = segmentStart + SAICodecUtils.headerSize();
+        if (context.version().onDiskFormat().jvectorFileFormatVersion() >= 7)
+            offset = (offset + GRAPH_PAGE_BYTES - 1) / GRAPH_PAGE_BYTES * GRAPH_PAGE_BYTES;
+        return offset;
+    }
+
+    /** Writes the segment header, then zeros up to {@code graphOffset}, where the graph starts. */
+    static void writeHeaderAndPad(RandomAccessWriter out, long graphOffset, Version version) throws IOException
+    {
+        SAICodecUtils.writeHeader(SAICodecUtils.toLuceneOutput(out), version);
+        long pad = graphOffset - out.position();
+        if (pad > 0)
+            out.write(new byte[(int) pad]);
+    }
+
+    private RandomAccessOnDiskGraphIndexWriter createIndexWriter(File indexFile, long termsOffset, IndexContext context, OrdinalMapper ordinalMapper, VectorCompressor<?> compressor, NVQuantization nvq) throws IOException
+    {
+        // Writes the graph with the parallel writer when compaction does (see CompactionGraph)
+        var path = indexFile.toPath();
+        var indexWriterBuilder = CompactionGraph.PARALLEL_ENCODING_WRITING
+                                 ? new OnDiskParallelGraphIndexWriter.Builder(builder().getGraph(), path)
+                                   .withStartOffset(termsOffset)
+                                   .withParallelWorkerThreads(CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_NUM_THREADS.getInt())
+                                   .withParallelDirectBuffers(CassandraRelevantProperties.SAI_ENCODE_AND_WRITE_VECTOR_GRAPH_IN_PARALLEL_USE_DIRECT_BUFFERS.getBoolean())
+                                 : new OnDiskGraphIndexWriter.Builder(builder().getGraph(), path).withStartOffset(termsOffset);
+        int jvectorVersion = context.version().onDiskFormat().jvectorFileFormatVersion();
+        indexWriterBuilder.withVersion(jvectorVersion)
+                          .withMapper(ordinalMapper)
+                          .with(nvq != null ? new NVQ(nvq) : new InlineVectors(vectorValues.dimension()));
+        if (jvectorVersion >= 7)
+            indexWriterBuilder.withPageAlignment(GRAPH_PAGE_BYTES);
 
         if (compressor instanceof ProductQuantization && JVectorVersionUtil.shouldWriteFused(context.version()))
             indexWriterBuilder.with(new FusedPQ(context.getIndexWriterConfig().getAnnMaxDegree(), (ProductQuantization) compressor));

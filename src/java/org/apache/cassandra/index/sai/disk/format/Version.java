@@ -41,6 +41,7 @@ import org.apache.cassandra.index.sai.disk.v5.V5OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v6.V6OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v7.V7OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v8.V8OnDiskFormat;
+import org.apache.cassandra.index.sai.disk.v10.V10OnDiskFormat;
 import org.apache.cassandra.index.sai.disk.v9.V9OnDiskFormat;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
@@ -85,10 +86,12 @@ public class Version implements Comparable<Version>
     // Replaces primary key components with partition key and clustering key components and
     // uses key lookup store instead of sorted terms.
     public static final Version GA = new Version("ga", V9OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "ga"));
+    // jvector file format version 7, which reads and writes ASH feature payloads and page-aligned records
+    public static final Version GB = new Version("gb", V10OnDiskFormat.instance, (c, i, g) -> stargazerFileNameFormat(c, i, g, "gb"));
 
     // These are in reverse-chronological order so that the latest version is first. Version matching tests
     // are more likely to match the latest version, so we want to test that one first.
-    public static final List<Version> ALL = Lists.newArrayList(GA, FB, FA, ED, EC, EB, DC, DB, CA, BA, AA);
+    public static final List<Version> ALL = Lists.newArrayList(GB, GA, FB, FA, ED, EC, EB, DC, DB, CA, BA, AA);
 
     public static final Version EARLIEST = AA;
     public static final Version VECTOR_EARLIEST = BA;

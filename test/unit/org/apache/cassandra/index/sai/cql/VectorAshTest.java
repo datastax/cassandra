@@ -28,6 +28,8 @@ import org.junit.runners.Parameterized;
 import io.github.jbellis.jvector.quantization.ASHVectors;
 import io.github.jbellis.jvector.quantization.AsymmetricHashing;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.disk.format.IndexComponentType;
+import org.apache.cassandra.index.sai.disk.v1.Segment;
 import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
@@ -90,6 +92,7 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
                 assertEquals(VectorCompression.CompressionType.ASH, searcher.getCompression().type);
                 // flushed and compacted ASH segments rerank with NVQ whenever NVQ is enabled for this version
                 assertEquals(JVectorVersionUtil.shouldWriteNVQ(64, version), searcher.graph.usesNVQ());
+                assertGraphPageAligned(segment);
             }
         assertThat(fractionFindingThemselves(vectors)).isGreaterThanOrEqualTo(0.9);
     }
@@ -167,6 +170,7 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
                 assertEquals(VectorCompression.CompressionType.ASH, searcher.getCompression().type);
                 // flushed and compacted ASH segments rerank with NVQ whenever NVQ is enabled for this version
                 assertEquals(JVectorVersionUtil.shouldWriteNVQ(64, version), searcher.graph.usesNVQ());
+                assertGraphPageAligned(segment);
             }
         assertThat(fractionFindingThemselves(vectors)).isGreaterThanOrEqualTo(0.9);
     }
@@ -203,6 +207,14 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
         for (int limit : new int[]{ 1, 10, 100, 1000 })
             for (var model : VectorSourceModel.values())
                 assertEquals(24 + 2 * limit, model.rerankKFor(limit, ash));
+    }
+
+    /** On JVector file format 7 and later, a segment's graph starts on a 4096-byte page boundary. */
+    private void assertGraphPageAligned(Segment segment)
+    {
+        long graphOffset = segment.metadata.componentMetadatas.get(IndexComponentType.TERMS_DATA).offset;
+        if (version.onDiskFormat().jvectorFileFormatVersion() >= 7)
+            assertEquals("graph offset " + graphOffset, 0, graphOffset % 4096);
     }
 
     private double fractionFindingThemselves(List<float[]> vectors)
