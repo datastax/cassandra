@@ -328,8 +328,10 @@ public class Dse6StartupChecksTest
         DatabaseDescriptor.setMetadataDirectory(new File(notADirectory));
         List<String> errors = logsOf(Level.ERROR, Dse6StartupChecksTest::verifyDse6Artefacts);
         assertThat(errors).hasSize(1);
-        assertThat(errors.get(0)).contains("Unable to write the DSE 6 upgrade marker")
-                                 .contains(notADirectory.resolve(DseUpgradeMarker.FILE_NAME).toString());
+        assertThat(errors.get(0))
+        .isEqualTo("Unable to write the DSE 6 upgrade marker " + notADirectory.resolve(DseUpgradeMarker.FILE_NAME) +
+                   ": unless the file exists, a later start with internode_compatibility_mode NONE will not be " +
+                   "refused while DSE 6 peers may remain; create it by hand");
         assertThat(Files.isRegularFile(DseUpgradeMarker.path())).isFalse();
     }
 

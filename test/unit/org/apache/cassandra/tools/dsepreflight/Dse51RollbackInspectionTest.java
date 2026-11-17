@@ -719,26 +719,128 @@ public class Dse51RollbackInspectionTest
         });
     }
 
-    /** Without the marker the metadata directory read may not be HCD 2.0's: refused, as the files go unchecked. */
+    /**
+     * Without the marker the metadata directory read may not be HCD 2.0's: refused, as the files go unchecked. The
+     * rest of the rollback goes on without this check only when the logs of HCD 2.0 show its start refused before any
+     * line of the marker, never when the files show a start past the startup checks (a segment of DSE 5.1 replayed,
+     * the record HCD 2.0 writes after them, not the record of DSE 5.1 peers, which a rollback keeps); a directory that
+     * does not exist is not HCD 2.0's when the commit log shows that HCD 2.0 started (a segment it replayed or wrote),
+     * since it creates the directory first. A commit log not read is said, whether the directory exists or not.
+     */
     @Test
     public void refusesWithoutTheMarker() throws IOException
     {
         Dse51NodeFixture node = node();
         Files.delete(node.metadata.resolve(DseUpgradeMarker.DSE_51_FILE_NAME));
+        Path peersRecord = node.metadata.resolve(DsePeersRecord.DSE_51_FILE_NAME);
+        Path record = node.metadata.resolve(Dse51SystemTables.RECORD_FILE_NAME);
+        Files.delete(peersRecord);
+        Files.delete(record);
+        // the empty segment of HCD 2.0's version the drain leaves shows no start past the startup checks
         Run run = assertBlocked(node, "MARKER_NOT_FOUND");
-        assertThat(run.finding("MARKER_NOT_FOUND").message)
-        .isEqualTo("the metadata directory " + node.metadata + " holds no dse51-upgrade-in-progress, which HCD 2.0 " +
-                   "writes at its first start in DSE_5_1 mode: it is not HCD 2.0's metadata directory on this node, " +
-                   "or HCD 2.0 never completed a start in DSE_5_1 mode here, so the files of the upgrade listed from " +
-                   "it may not be this node's");
-        assertThat(run.finding("MARKER_NOT_FOUND").remedy)
-        .startsWith("pass --metadata-dir with the metadata_directory of HCD 2.0's cassandra.yaml; ");
+        String noMarker = "the metadata directory " + node.metadata + " holds no dse51-upgrade-in-progress, which " +
+                          "HCD 2.0 writes at its first start in DSE_5_1 mode, in a post-action of its startup " +
+                          "checks: it is not HCD 2.0's metadata directory on this node, or HCD 2.0 never got past " +
+                          "its startup checks in DSE_5_1 mode here, so the files of the upgrade listed from it may " +
+                          "not be this node's";
+        assertThat(run.finding("MARKER_NOT_FOUND").message).isEqualTo(noMarker);
+        String which = "pass --metadata-dir with the metadata_directory of HCD 2.0's cassandra.yaml (if HCD 2.0's " +
+                       "logs since the drain of DSE 5.1 hold a line \"Wrote the DSE 5.1 upgrade marker <path>\", the " +
+                       "directory of that path)";
+        String byHand = "create the marker by hand there (an empty file, owned by the user HCD 2.0 runs as) and run " +
+                        "this check again";
+        String never = "never start DSE 5.1 while this finding remains";
+        String unlessTheLogs = which + "; if it is that directory, the rest of the rollback applies without this " +
+                               "check only when those logs show the start of HCD 2.0 refused (the ERROR that ended " +
+                               "it) and no line \"Wrote the DSE 5.1 upgrade marker\", \"Unable to write the DSE 5.1 " +
+                               "upgrade marker\" or \"Failed to run startup check post-action on\" before it; after " +
+                               "the second or the third, " + byHand + "; otherwise " + never + " and report to the " +
+                               "upgrade owner";
+        assertThat(run.finding("MARKER_NOT_FOUND").remedy).isEqualTo(unlessTheLogs);
+        // the first words of what a start logs at the write of the marker (StartupChecks.writeUpgradeMarker and
+        // StartupChecks.verify, whose logs Dse51StartupChecksTest and Dse6StartupChecksTest assert), as quoted
+        assertThat(Dse51RollbackInspection.MARKER_WRITTEN).isEqualTo("Wrote the DSE 5.1 upgrade marker");
+        assertThat(Dse51RollbackInspection.MARKER_NOT_WRITTEN).isEqualTo("Unable to write the DSE 5.1 upgrade marker");
+        assertThat(Dse51RollbackInspection.POST_ACTION_FAILED).isEqualTo("Failed to run startup check post-action on");
+
+        String writeFailed = which + "; if it is that directory, HCD 2.0 could not write the marker there (its logs " +
+                             "show it: \"Unable to write the DSE 5.1 upgrade marker\", or \"Failed to run startup " +
+                             "check post-action on\"): " + byHand + "; " + never;
+        String pastTheChecks = "; but HCD 2.0 went past its startup checks on this node, a post-action of which " +
+                               "writes the marker, as these files show: ";
+        // the record of DSE 5.1 peers, which a rollback keeps, may be of an earlier upgrade: no sign of a start
+        Files.write(peersRecord, new byte[0]);
+        assertThat(assertBlocked(node, "MARKER_NOT_FOUND").finding("MARKER_NOT_FOUND").message).isEqualTo(noMarker);
+        // the record HCD 2.0 writes after its startup checks, which every rollback removes: a start past them, so the
+        // logs are not asked for
+        Files.write(record, new byte[0]);
+        Run records = assertBlocked(node, "MARKER_NOT_FOUND");
+        assertThat(records.finding("MARKER_NOT_FOUND").message)
+        .isEqualTo(noMarker + pastTheChecks + "dse51-system-columns (the record it writes after those checks)");
+        assertThat(records.finding("MARKER_NOT_FOUND").remedy).isEqualTo(writeFailed);
+        Files.delete(peersRecord);
+        Files.delete(record);
+
+        // a segment of DSE 5.1 replayed shows it too; a replayed one of HCD 2.0's version, which no start leaves,
+        // does not
+        Path ownReplayed = Files.write(node.commitLog.resolve("CommitLog-7-1793990000002.log.replayed"),
+                                       new byte[]{ 1 });
+        assertThat(assertBlocked(node, "MARKER_NOT_FOUND").finding("MARKER_NOT_FOUND").message).isEqualTo(noMarker);
+        Files.delete(ownReplayed);
+        String replayedName = "CommitLog-6-1793958236000.log.replayed";
+        Path replayed = Files.write(node.commitLog.resolve(replayedName), new byte[]{ 1 });
+        Run started = assertBlocked(node, "MARKER_NOT_FOUND");
+        assertThat(started.finding("MARKER_NOT_FOUND").message)
+        .isEqualTo(noMarker + pastTheChecks + replayedName + " (a segment of DSE 5.1 it replayed)");
+        assertThat(started.finding("MARKER_NOT_FOUND").remedy).isEqualTo(writeFailed);
+        // with the record too, and a second segment
+        String replayedName2 = "CommitLog-6-1793958236001.log.replayed";
+        Path replayed2 = Files.write(node.commitLog.resolve(replayedName2), new byte[]{ 1 });
+        Files.write(record, new byte[0]);
+        Run both = assertBlocked(node, "MARKER_NOT_FOUND");
+        assertThat(both.finding("MARKER_NOT_FOUND").message)
+        .isEqualTo(noMarker + pastTheChecks + replayedName + ", " + replayedName2 + ", dse51-system-columns " +
+                   "(segments of DSE 5.1 it replayed, the record it writes after those checks)");
+        assertThat(both.finding("MARKER_NOT_FOUND").remedy).isEqualTo(writeFailed);
+        Files.delete(replayed2);
+        Files.delete(record);
+
+        // a directory that does not exist: not HCD 2.0's while a segment shows that HCD 2.0 started
         deleteTree(node.metadata);
-        assertThat(assertBlocked(node, "MARKER_NOT_FOUND").finding("MARKER_NOT_FOUND").message)
-        .isEqualTo("the metadata directory " + node.metadata + " does not exist or is not a directory: HCD 2.0 " +
-                   "creates its metadata directory at its first start, and writes there dse51-upgrade-in-progress at " +
-                   "its first start in DSE_5_1 mode, so this is not HCD 2.0's metadata directory on this node, or " +
-                   "HCD 2.0 never started here");
+        String missing = "the metadata directory " + node.metadata + " does not exist or is not a directory: HCD " +
+                         "2.0 creates its metadata directory at its first start, and writes there " +
+                         "dse51-upgrade-in-progress at its first start in DSE_5_1 mode, so this is not HCD 2.0's " +
+                         "metadata directory on this node, or HCD 2.0 never started here";
+        String startedThere = "; but HCD 2.0 started on this node, which creates its metadata directory before its " +
+                              "commit log, as the commit log directory shows: it holds ";
+        String wroteOrReplayed = " HCD 2.0 wrote or replayed, ";
+        String notHcds = which + ", which this directory is not: HCD 2.0 creates it at its first start; " + never;
+        Run noDirectory = assertBlocked(node, "MARKER_NOT_FOUND");
+        assertThat(noDirectory.finding("MARKER_NOT_FOUND").message)
+        .isEqualTo(missing + startedThere + "segments" + wroteOrReplayed + replayedName + ", " + SEGMENT);
+        assertThat(noDirectory.finding("MARKER_NOT_FOUND").remedy).isEqualTo(notHcds);
+        // the segment of HCD 2.0's version alone shows it too
+        Files.delete(replayed);
+        Run ownSegment = assertBlocked(node, "MARKER_NOT_FOUND");
+        assertThat(ownSegment.finding("MARKER_NOT_FOUND").message)
+        .isEqualTo(missing + startedThere + "a segment" + wroteOrReplayed + SEGMENT);
+        assertThat(ownSegment.finding("MARKER_NOT_FOUND").remedy).isEqualTo(notHcds);
+        // no segment of HCD 2.0: the logs decide
+        Files.delete(node.commitLog.resolve(SEGMENT));
+        Run neverStarted = assertBlocked(node, "MARKER_NOT_FOUND");
+        assertThat(neverStarted.finding("MARKER_NOT_FOUND").message).isEqualTo(missing);
+        assertThat(neverStarted.finding("MARKER_NOT_FOUND").remedy).isEqualTo(unlessTheLogs);
+        // a commit log that was not read tells nothing: the message says so
+        deleteTree(node.commitLog);
+        Run noCommitLog = assertBlocked(node, "MARKER_NOT_FOUND");
+        String notRead = "; the commit log was not read, so it does not tell whether HCD 2.0 started here";
+        assertThat(noCommitLog.finding("MARKER_NOT_FOUND").message).isEqualTo(missing + notRead);
+        assertThat(noCommitLog.finding("MARKER_NOT_FOUND").remedy).isEqualTo(unlessTheLogs);
+        // the same for a metadata directory that exists
+        Files.createDirectories(node.metadata);
+        Run noCommitLogRead = assertBlocked(node, "MARKER_NOT_FOUND");
+        assertThat(noCommitLogRead.finding("MARKER_NOT_FOUND").message).isEqualTo(noMarker + notRead);
+        assertThat(noCommitLogRead.finding("MARKER_NOT_FOUND").remedy).isEqualTo(unlessTheLogs);
     }
 
     /**
