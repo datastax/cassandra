@@ -37,6 +37,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.Directories;
 import org.apache.cassandra.db.Dse51SystemTables;
@@ -53,6 +54,7 @@ import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.service.DseUpgradeMarker;
+import org.apache.cassandra.service.StartupChecks;
 
 import static org.apache.cassandra.tools.dsepreflight.Finding.blocking;
 import static org.apache.cassandra.tools.dsepreflight.Finding.info;
@@ -77,8 +79,12 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.rootCause;
  * {@code system_schema} tables with sstables of {@code system.local} and {@code system_schema.keyspaces} (the one
  * given with {@code --snapshot}, else the only complete {@code pre-hcd-<timestamp>} one; several refuse), a metadata
  * directory without the DSE 5.1 upgrade marker, which HCD 2.0 writes at its first start in {@code DSE_5_1} mode (the
- * directory read is then not HCD 2.0's), DSE's {@code cassandra.yaml} that cannot be read, and a data, commit log,
- * hints or metadata directory that cannot be listed.
+ * directory read is then not HCD 2.0's, or the start was refused before the marker was written, which only the logs
+ * of HCD 2.0 tell, unless the files show that HCD 2.0 went past its startup checks, a post-action of which writes the
+ * marker: a replayed segment of DSE 5.1, the record HCD 2.0 writes after those checks; for a metadata directory that
+ * does not exist, any segment HCD 2.0 wrote or replayed shows that it started, and so that the directory is not
+ * HCD 2.0's; a commit log not read is said), DSE's {@code cassandra.yaml} that cannot be read, and a data, commit
+ * log, hints or metadata directory that cannot be listed.
  * <p>
  * The rollback keeps the DSE 5.1 upgrade marker, as for DSE 6, and removes the record of the values of DSE 5.1's
  * columns of {@code system.local} and {@code system.peers} ({@link Dse51SystemTables#RECORD_FILE_NAME}) and its
@@ -120,6 +126,15 @@ final class Dse51RollbackInspection
     private static final String RESTART_AND_DRAIN = "start HCD 2.0 again on this node, in DSE_5_1 mode, drain it " +
                                                     "(nodetool drain exits 0 and logs DRAINED), stop it, and run " +
                                                     "this check again";
+    /** The first words of the INFO of HCD 2.0 that it wrote the DSE 5.1 upgrade marker. */
+    static final String MARKER_WRITTEN = DseUpgradeMarker.writtenText(InternodeCompatibilityMode.DSE_5_1);
+    /** The first words of the ERROR of HCD 2.0 that it could not write the DSE 5.1 upgrade marker. */
+    static final String MARKER_NOT_WRITTEN = DseUpgradeMarker.notWrittenText(InternodeCompatibilityMode.DSE_5_1);
+    /**
+     * The first words of the WARN of HCD 2.0 that a post-action of its startup checks failed, as the one that writes
+     * the marker may ({@code StartupChecks.verify}).
+     */
+    static final String POST_ACTION_FAILED = StartupChecks.POST_ACTION_FAILED;
     /** The remedy of a directory of HCD 2.0 that cannot be read. */
     private static final String RUN_AS_HCD_USER = "run the tool as the user HCD 2.0 runs as (or as root)";
 
@@ -180,6 +195,23 @@ final class Dse51RollbackInspection
     private final String snapshot;
     private final Report report = new Report();
     private final List<Finding> findings = report.findings;
+    /**
+     * The files that show HCD 2.0 past its startup checks on this node, a post-action of which writes the DSE 5.1
+     * upgrade marker (or logs that it could not): the segments of DSE 5.1's version that HCD 2.0 replayed, after those
+     * checks, and set aside ({@code .replayed}), by name, sorted; then, from the metadata directory read, the record of
+     * the values of DSE 5.1's columns, which HCD 2.0 writes after them and every rollback removes (not the record of
+     * DSE 5.1 peers, which a rollback keeps: it may be of an earlier upgrade).
+     */
+    private final List<String> filesOfAStart = new ArrayList<>();
+    /**
+     * The commit log segments that show that HCD 2.0 started on this node, which creates its metadata directory
+     * before it creates the first of them (the commit log creates every directory of the configuration): the
+     * segments of DSE 5.1's version it replayed and those of a version other than DSE 5.1's, replayed or not (DSE
+     * 5.1 writes no other); by name, sorted.
+     */
+    private final List<String> segmentsOfHcd = new ArrayList<>();
+    /** Whether every segment of the commit log directory was looked at, so that the segments listed are all. */
+    private boolean commitLogRead;
 
     Dse51RollbackInspection(NodeLayout layout, @Nullable String snapshot)
     {
@@ -198,6 +230,7 @@ final class Dse51RollbackInspection
         guarded("the commit log directory", this::checkCommitLog);
         guarded("the hints directory", this::checkHints);
         guarded("the saved caches directory", this::listSavedCaches);
+        // after the commit log, whose replayed segments the findings of the metadata directory use
         guarded("the metadata directory", this::checkMetadataDirectory);
         if (!report.toRemove.isEmpty())
             findings.add(info("ROLLBACK_REMOVES",
@@ -596,8 +629,15 @@ final class Dse51RollbackInspection
             if (!matcher.matches())
                 continue;
             report.toRemove.add(segment.toString());
+            // compared as text: a version of more digits than an int holds is no reason to stop the check
+            boolean dse51Version = String.valueOf(Dse51NodeInspector.COMMITLOG_VERSION).equals(matcher.group(1));
+            boolean replayed = matcher.group(3) != null;
+            if (replayed && dse51Version)
+                filesOfAStart.add(segment.name());
+            if (replayed || !dse51Version)
+                segmentsOfHcd.add(segment.name());
             // a segment HCD 2.0 replayed and set aside holds nothing to replay
-            if (matcher.group(3) != null)
+            if (replayed)
                 continue;
             List<String> errors = new ArrayList<>();
             int entries = countEntries(segment, errors);
@@ -606,6 +646,7 @@ final class Dse51RollbackInspection
             if (!errors.isEmpty())
                 unreadable.add(segment.name() + " (" + errors.get(0) + ')');
         }
+        commitLogRead = true;
         if (!withMutations.isEmpty())
             findings.add(blocking("COMMITLOG_UNFLUSHED",
                                   "commit log segments that hold mutations: " + list(withMutations) + "; a drain " +
@@ -847,6 +888,64 @@ final class Dse51RollbackInspection
     // ---- metadata directory ----
 
     /**
+     * What the message of {@code MARKER_NOT_FOUND} adds when the files show that HCD 2.0 went past its startup checks
+     * on this node ({@link #filesOfAStart}), or, for a metadata directory that does not exist, that it started
+     * there ({@link #segmentsOfHcd}); that the commit log was not read, when it was not; nothing otherwise.
+     *
+     * @param exists whether the metadata directory read exists
+     */
+    private String startShown(boolean exists)
+    {
+        if (!exists && !segmentsOfHcd.isEmpty())
+            return "; but HCD 2.0 started on this node, which creates its metadata directory before its commit log, " +
+                   "as the commit log directory shows: it holds " +
+                   (segmentsOfHcd.size() == 1 ? "a segment" : "segments") + " HCD 2.0 wrote or replayed, " +
+                   list(segmentsOfHcd);
+        if (!filesOfAStart.isEmpty())
+        {
+            long segments = filesOfAStart.stream().filter(f -> f.endsWith(".replayed")).count();
+            boolean record = filesOfAStart.contains(Dse51SystemTables.RECORD_FILE_NAME);
+            String replayed = (segments == 1 ? "a segment" : "segments") + " of DSE 5.1 it replayed";
+            String written = "the record it writes after those checks";
+            String what = segments > 0 && record ? replayed + ", " + written : segments > 0 ? replayed : written;
+            return "; but HCD 2.0 went past its startup checks on this node, a post-action of which writes the " +
+                   "marker, as these files show: " + list(filesOfAStart) + " (" + what + ')';
+        }
+        return commitLogRead ? "" : "; the commit log was not read, so it does not tell whether HCD 2.0 started here";
+    }
+
+    /**
+     * The remedy of {@code MARKER_NOT_FOUND}: the metadata directory to check first (the one a line of HCD 2.0's logs
+     * names when it wrote the marker); for HCD 2.0's directory, the marker created by hand when HCD 2.0 went past its
+     * startup checks, as the files show ({@link #filesOfAStart}) or its logs say, and the rest of the rollback
+     * without this check only when its logs show its start refused before any line of the marker and the files do not
+     * contradict them. A directory that does not exist is not HCD 2.0's when the commit log shows that HCD 2.0 started
+     * ({@link #segmentsOfHcd}): it would have created it. The logs are not read here: their directory is HCD 2.0's,
+     * which this check is not given.
+     *
+     * @param metadataRemedy what the remedy says of the metadata directory to pass
+     * @param exists         whether the metadata directory read exists
+     */
+    private String markerNotFoundRemedy(String metadataRemedy, boolean exists)
+    {
+        String which = metadataRemedy + " (if HCD 2.0's logs since the drain of DSE 5.1 hold a line \"" +
+                       MARKER_WRITTEN + " <path>\", the directory of that path)";
+        String byHand = "create the marker by hand there (an empty file, owned by the user HCD 2.0 runs as) and " +
+                        "run this check again";
+        String never = "never start DSE 5.1 while this finding remains";
+        if (!exists && !segmentsOfHcd.isEmpty())
+            return which + ", which this directory is not: HCD 2.0 creates it at its first start; " + never;
+        if (!filesOfAStart.isEmpty())
+            return which + "; if it is that directory, HCD 2.0 could not write the marker there (its logs show it: " +
+                   "\"" + MARKER_NOT_WRITTEN + "\", or \"" + POST_ACTION_FAILED + "\"): " + byHand + "; " + never;
+        return which + "; if it is that directory, the rest of the rollback applies without this check only when " +
+               "those logs show the start of HCD 2.0 refused (the ERROR that ended it) and no line \"" +
+               MARKER_WRITTEN + "\", \"" + MARKER_NOT_WRITTEN + "\" or \"" + POST_ACTION_FAILED + "\" before " +
+               "it; after the second or the third, " + byHand + "; otherwise " + never + " and report to the " +
+               "upgrade owner";
+    }
+
+    /**
      * The files of the upgrade HCD 2.0 writes in its metadata directory in {@code DSE_5_1} mode, by their names: the
      * DSE 5.1 upgrade marker and the record of DSE 5.1 peers, which the rollback keeps, as for DSE 6, while any node
      * runs HCD 2.0 and while the node may be upgraded again; the record of the values of DSE 5.1's columns of
@@ -868,10 +967,9 @@ final class Dse51RollbackInspection
                                   "the metadata directory " + directory + " does not exist or is not a directory: " +
                                   "HCD 2.0 creates its metadata directory at its first start, and writes there " +
                                   markerName + " at its first start in DSE_5_1 mode, so this is not HCD 2.0's " +
-                                  "metadata directory on this node, or HCD 2.0 never started here",
-                                  metadataRemedy + "; on a node where HCD 2.0 never completed a start in DSE_5_1 " +
-                                  "mode there is no file of the upgrade to check, and the rest of the rollback " +
-                                  "applies without this check"));
+                                  "metadata directory on this node, or HCD 2.0 never started here" +
+                                  startShown(false),
+                                  markerNotFoundRemedy(metadataRemedy, false)));
             return;
         }
         // decided from the names listed, so that a directory that can be listed but not searched hides nothing
@@ -889,16 +987,20 @@ final class Dse51RollbackInspection
         }
         List<File> sorted = new ArrayList<>(List.of(files));
         sorted.sort(Comparator.comparing(File::name));
+        // the record HCD 2.0 writes after its startup checks shows a start past them too: every rollback removes it,
+        // where it keeps the record of DSE 5.1 peers, which may be of an earlier upgrade
+        sorted.stream()
+              .filter(f -> f.name().equals(record))
+              .forEach(f -> filesOfAStart.add(f.name()));
         if (sorted.stream().noneMatch(f -> f.name().equals(markerName)))
         {
             findings.add(blocking("MARKER_NOT_FOUND",
                                   "the metadata directory " + directory + " holds no " + markerName + ", which HCD " +
-                                  "2.0 writes at its first start in DSE_5_1 mode: it is not HCD 2.0's metadata " +
-                                  "directory on this node, or HCD 2.0 never completed a start in DSE_5_1 mode here, " +
-                                  "so the files of the upgrade listed from it may not be this node's",
-                                  metadataRemedy + "; on a node where HCD 2.0 never completed a start in DSE_5_1 " +
-                                  "mode there is no file of the upgrade to check, and the rest of the rollback " +
-                                  "applies without this check"));
+                                  "2.0 writes at its first start in DSE_5_1 mode, in a post-action of its startup " +
+                                  "checks: it is not HCD 2.0's metadata directory on this node, or HCD 2.0 never got " +
+                                  "past its startup checks in DSE_5_1 mode here, so the files of the upgrade listed " +
+                                  "from it may not be this node's" + startShown(true),
+                                  markerNotFoundRemedy(metadataRemedy, true)));
         }
         List<String> copies = new ArrayList<>();
         File recordFile = null;

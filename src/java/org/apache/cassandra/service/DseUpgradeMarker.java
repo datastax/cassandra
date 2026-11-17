@@ -69,6 +69,24 @@ public final class DseUpgradeMarker
         return path(InternodeCompatibilityMode.DSE_6);
     }
 
+    /**
+     * The first words of the INFO a start logs when it wrote the marker of the upgrade of {@code mode}, before its
+     * path; the rollback check of the preflight tool quotes them.
+     */
+    public static String writtenText(InternodeCompatibilityMode mode)
+    {
+        return "Wrote the " + mode.source() + " upgrade marker";
+    }
+
+    /**
+     * The first words of the ERROR a start logs when it could not write the marker of the upgrade of {@code mode},
+     * before its path; the rollback check of the preflight tool quotes them.
+     */
+    public static String notWrittenText(InternodeCompatibilityMode mode)
+    {
+        return "Unable to write the " + mode.source() + " upgrade marker";
+    }
+
     /** The marker of the upgrade of {@code mode}, {@code DSE_6} or {@code DSE_5_1}. */
     public static Path path(InternodeCompatibilityMode mode)
     {

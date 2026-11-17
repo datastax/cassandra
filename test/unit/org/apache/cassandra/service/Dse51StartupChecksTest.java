@@ -724,12 +724,36 @@ public class Dse51StartupChecksTest
         Path notADirectory = Files.write(root.resolve("metadata-file"), new byte[0]);
         DatabaseDescriptor.setMetadataDirectory(new File(notADirectory));
         assertThat(logsOf(Level.ERROR, Dse51StartupChecksTest::verifyArtefacts))
-        .singleElement().asString()
-        .startsWith("Unable to write the DSE 5.1 upgrade marker " +
-                    notADirectory.resolve(DseUpgradeMarker.DSE_51_FILE_NAME) + ": unless the file exists, a later " +
-                    "start with internode_compatibility_mode NONE or DSE_6 will not be refused while DSE 5.1 peers " +
-                    "may remain; create it by hand. Until it exists, every start also discards the record of the " +
-                    "values of DSE 5.1's columns of system.local and system.peers");
+        .containsExactly("Unable to write the DSE 5.1 upgrade marker " +
+                         notADirectory.resolve(DseUpgradeMarker.DSE_51_FILE_NAME) + ": unless the file exists, a " +
+                         "later start with internode_compatibility_mode NONE or DSE_6 will not be refused while DSE " +
+                         "5.1 peers may remain; create it by hand. Until it exists, every start also discards the " +
+                         "record of the values of DSE 5.1's columns of system.local and system.peers");
+    }
+
+    /**
+     * A post-action that fails, as the one that writes the marker may, is logged at WARN with the first words the
+     * rollback check of the preflight tool quotes, then the type of its check; the start goes on.
+     */
+    @Test
+    public void aPostActionThatFailsIsLoggedWithTheWordsTheRollbackCheckQuotes() throws Exception
+    {
+        StartupCheck failing = new StartupCheck()
+        {
+            @Override
+            public void execute(StartupChecksOptions options)
+            {
+            }
+
+            @Override
+            public void postAction(StartupChecksOptions options)
+            {
+                throw new IllegalStateException("a post-action that fails");
+            }
+        };
+        assertThat(logsOf(Level.WARN, () -> new StartupChecks().withTest(failing).verify(OPTIONS)))
+        .containsExactly("Failed to run startup check post-action on non_configurable_check");
+        assertThat(StartupChecks.POST_ACTION_FAILED).isEqualTo("Failed to run startup check post-action on");
     }
 
     /**
