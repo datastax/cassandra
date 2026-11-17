@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonLocation;
@@ -100,7 +101,8 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.list;
  * {@code system_schema.tables} a failed {@code UNRESTRICT ROWS} on a view left ({@code VIEW_TABLE_ROW}) are named with
  * the nodes whose schema holds them, since DSE 5.1 keeps both on the node that ran the statement only (a view's
  * restriction until that node restarts). Reports of DSE 5.1 nodes beside reports of DSE 6 nodes block the cluster
- * ({@code MIXED_SOURCES}), the texts then naming DSE 6's files.
+ * ({@code MIXED_SOURCES}), the texts then naming DSE 6's files. The printed aggregate names the release of the nodes
+ * of its reports in its header ({@link AggregateReport#source}).
  */
 final class ClusterAggregate
 {
@@ -156,7 +158,22 @@ final class ClusterAggregate
         /** the warnings of the node reports, by code, with the nodes that have them */
         @JsonProperty("warnings_by_code")
         public Map<String, List<String>> warningsByCode = new TreeMap<>();
+        /**
+         * The release of the DSE nodes whose reports were read, as the header of the printed aggregate names it:
+         * {@link #DSE51_SOURCE} when every report is of a DSE 5.1 node, {@link #MIXED_SOURCE} beside reports of DSE 6
+         * nodes ({@code MIXED_SOURCES}), otherwise, without a report too, {@link #DSE6_SOURCE}. Not written to JSON,
+         * whose readers tell a DSE 5.1 node by the {@code dse51} section of its own report.
+         */
+        @JsonIgnore
+        public String source = DSE6_SOURCE;
     }
+
+    /** The {@link AggregateReport#source} of DSE 6 nodes. */
+    static final String DSE6_SOURCE = "DSE 6";
+    /** The {@link AggregateReport#source} of DSE 5.1 nodes. */
+    static final String DSE51_SOURCE = "DSE 5.1";
+    /** The {@link AggregateReport#source} of reports of DSE 5.1 nodes beside reports of DSE 6 nodes. */
+    static final String MIXED_SOURCE = "DSE 5.1 and DSE 6";
 
     /**
      * Where the reports aggregated took the identity of their nodes from, as the texts of the aggregate name it: DSE
@@ -305,6 +322,7 @@ final class ClusterAggregate
                                   "or DSE 6.8 or 6.9)"));
         // the texts that name the tables of the nodes' identity: DSE 5.1's when every report is of a DSE 5.1 node
         Sources sources = dse6Reports.isEmpty() && !dse51Reports.isEmpty() ? Sources.DSE51 : Sources.DSE6;
+        aggregate.source = dse51Reports.isEmpty() ? DSE6_SOURCE : dse6Reports.isEmpty() ? DSE51_SOURCE : MIXED_SOURCE;
         if (reports.isEmpty())
             findings.add(blocking("NO_REPORT", "no report in " + directory, "collect the --json report of every DSE node into one directory"));
         if (!stale.isEmpty())

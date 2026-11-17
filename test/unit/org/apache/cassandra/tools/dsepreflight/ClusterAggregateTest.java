@@ -1431,6 +1431,36 @@ public class ClusterAggregateTest
                                                                 "preferred) before the upgrade");
     }
 
+    /**
+     * The header of the printed aggregate names the release of the nodes of its reports: DSE 5.1, DSE 6, both beside
+     * {@code MIXED_SOURCES}; DSE 6, as before the reports of DSE 5.1 nodes, when no report is read.
+     */
+    @Test
+    public void theHeaderNamesTheReleaseOfTheNodes() throws IOException
+    {
+        String header = " preflight inspection, cluster aggregate (" + NodeReport.TOOL + ' ';
+        Aggregate dse51 = aggregate(dse51Cluster(2));
+        assertThat(dse51.exitCode).as(dse51.out).isEqualTo(DsePreflight.EXIT_READY);
+        assertThat(dse51.out).startsWith("DSE 5.1" + header).doesNotContain("DSE 6");
+        assertThat(dse51.json).doesNotContainKey("source");
+
+        Aggregate dse6 = aggregate(cluster(2));
+        assertThat(dse6.exitCode).as(dse6.out).isEqualTo(DsePreflight.EXIT_READY);
+        assertThat(dse6.out).startsWith("DSE 6" + header);
+        assertThat(dse6.json).doesNotContainKey("source");
+
+        Path mixed = dse51Cluster(2);
+        Files.copy(cluster(1).resolve("node1.json"), mixed.resolve("node3.json"));
+        Aggregate both = aggregate(mixed);
+        assertThat(both.codes("BLOCKING")).contains("MIXED_SOURCES");
+        assertThat(both.out).startsWith("DSE 5.1 and DSE 6" + header);
+        assertThat(both.json).doesNotContainKey("source");
+
+        Aggregate none = aggregate(temporaryFolder.newFolder().toPath());
+        assertThat(none.codes("BLOCKING")).containsExactly("NO_REPORT");
+        assertThat(none.out).startsWith("DSE 6" + header);
+    }
+
     /** The texts of an aggregate of DSE 5.1 reports name the tables DSE 5.1 keeps the identity of its nodes in. */
     @Test
     public void theTextsOfDse51ReportsNameSystemLocalAndSystemPeers() throws IOException
