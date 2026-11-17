@@ -312,6 +312,73 @@ public class ReplicaSensorsTrackingTest
         ResponseVerbHandler.instance.doVerb(builder.build());
     }
 
+    /**
+     * A failure while tracking the sensors of a response must not prevent the callback from handling the response.
+     */
+    @Test
+    public void testResponseHandledWhenSensorTrackingFails()
+    {
+        AtomicInteger handled = new AtomicInteger();
+        RequestCallback<ReadResponse> callback = new RequestCallback<ReadResponse>()
+        {
+            @Override
+            public void onResponse(Message<ReadResponse> msg)
+            {
+                handled.incrementAndGet();
+            }
+
+            @Override
+            public RequestSensors getRequestSensors()
+            {
+                throw new IllegalStateException("Simulated sensor tracking failure");
+            }
+        };
+
+        respondWithSensor(callback);
+
+        assertThat(handled.get()).isEqualTo(1);
+    }
+
+    /**
+     * A response with sensors for a callback that does not track them is handled, and its sensors are ignored.
+     */
+    @Test
+    public void testResponseHandledForCallbackWithoutSensorTracking()
+    {
+        AtomicInteger handled = new AtomicInteger();
+        RequestSensors sensors = new ActiveRequestSensors();
+        RequestCallback<ReadResponse> callback = new RequestCallback<ReadResponse>()
+        {
+            @Override
+            public void onResponse(Message<ReadResponse> msg)
+            {
+                handled.incrementAndGet();
+            }
+
+            @Override
+            public RequestSensors getRequestSensors()
+            {
+                return sensors;
+            }
+        };
+
+        respondWithSensor(callback);
+
+        assertThat(handled.get()).isEqualTo(1);
+    }
+
+    private void respondWithSensor(RequestCallback<ReadResponse> callback)
+    {
+        ReadCommand command = Util.cmd(cfs, cfs.getPartitioner().decorateKey(ByteBufferUtil.bytes("4"))).build();
+        Message<ReadCommand> request = Message.builder(Verb.READ_REQ, command).build();
+        InetAddressAndPort endpoint = targets.get(0).endpoint();
+        MessagingService.instance().callbacks.addWithExpiration(callback, request, endpoint);
+
+        Sensor sensor = new mockingSensor(Context.from(command), Type.READ_BYTES);
+        sensor.increment(5.0);
+        ResponseVerbHandler.instance.doVerb(createResponseMessageWithSensor(request, endpoint, sensor));
+    }
+
     @Test
     @BMRule(name = "signals onResponse about to start latches",
     targetClass = "org.apache.cassandra.sensors.ExecutionTimeSensorAccumulator",

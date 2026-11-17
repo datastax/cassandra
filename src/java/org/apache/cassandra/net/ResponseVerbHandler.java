@@ -76,7 +76,7 @@ public class ResponseVerbHandler implements IVerbHandler
             {
                 trackReplicaSensors(callbackInfo, message);
             }
-            catch (Throwable e)
+            catch (Exception e)
             {
                 // Do not let sensor tracking break response handling.
                 JVMStabilityInspector.inspectThrowable(e);
