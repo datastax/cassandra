@@ -724,7 +724,7 @@ public class Tracker
     @VisibleForTesting
     public void removeUnsafe(Set<SSTableReader> toRemove)
     {
-        apply(view -> updateLiveSet(toRemove, emptySet(), maybeGetSSTableIntervalTreeLatencyMetrics()).apply(view));
+        apply(current -> updateLiveSet(toRemove, emptySet(), maybeGetSSTableIntervalTreeLatencyMetrics()).apply(current));
     }
 
     @VisibleForTesting
