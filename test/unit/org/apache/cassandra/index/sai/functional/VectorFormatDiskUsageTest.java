@@ -47,6 +47,9 @@ public class VectorFormatDiskUsageTest extends VectorTester
     /// so each SSTable contains exactly one segment — asserted in [#measurePostFlushAndPostCompaction].
     private static final int NUM_FLUSHES = 2;
 
+    /// Page size that graph records are aligned to on JVector file format 7 and later.
+    private static final int GRAPH_PAGE_BYTES = 4096;
+
     /// TERMS_DATA delta from EC (jvector format 4) to FB (jvector format 6) per segment:
     /// one extra header copy + FOOTER_SIZE trailer. Independent of dimensions, number of vectors, etc.
     ///
@@ -158,6 +161,8 @@ public class VectorFormatDiskUsageTest extends VectorTester
     /// up to but not including [Version#LATEST], asserts that [Version#LATEST] uses less than
     /// 5% more disk than that older version. Catches accidental large regressions introduced
     /// by a new format version. [Version#FA] is skipped: it always has FusedPQ on and is superseded by FB.
+    /// Against a version without page-aligned graph records, the limit also allows the padding that
+    /// page alignment adds by design ([#pageAlignmentPaddingPercent]).
     @Test
     public void testDiskGrowthAcrossVersions()
     {
@@ -169,6 +174,9 @@ public class VectorFormatDiskUsageTest extends VectorTester
                 continue;
 
             DiskMeasurement[] older = measurePostFlushAndPostCompaction(version, version.toString(), null);
+            double allowedPercent = 5.0;
+            if (pageAligned(Version.LATEST) && !pageAligned(version))
+                allowedPercent += pageAlignmentPaddingPercent();
 
             for (int i = 0; i < 2; i++)
             {
@@ -179,9 +187,28 @@ public class VectorFormatDiskUsageTest extends VectorTester
                              version, Version.LATEST, phase, older[i].totalBytes, latest[i].totalBytes,
                              String.format("%.4f", diskGrowthPercent));
 
-                verifyTotalDiskGrowthUnder5Percent(diskGrowthPercent, version + " → " + Version.LATEST + ' ' + phase);
+                assertTrue(String.format("Total disk usage growth %s → %s %s must be < %.4f%% but was %.4f%%",
+                                         version, Version.LATEST, phase, allowedPercent, diskGrowthPercent),
+                           diskGrowthPercent < allowedPercent);
             }
         }
+    }
+
+    /// JVector file format 7 and later align graph records to [#GRAPH_PAGE_BYTES]-byte pages.
+    private static boolean pageAligned(Version version)
+    {
+        return version.onDiskFormat().jvectorFileFormatVersion() >= 7;
+    }
+
+    /// Padding that page alignment adds to this test's graph records, as a percentage of their unpadded size:
+    /// records never cross a page, so each page holds as many whole records as fit and leaves the rest empty.
+    /// A record holds its node id, its inline vector, its neighbor count and its neighbors.
+    private static double pageAlignmentPaddingPercent()
+    {
+        int degree = 2 * IndexWriterConfig.DEFAULT_MAXIMUM_NODE_CONNECTIONS;
+        int recordBytes = Integer.BYTES + DIMENSION * Float.BYTES + Integer.BYTES * (degree + 1);
+        int recordsPerPage = GRAPH_PAGE_BYTES / recordBytes;
+        return 100.0 * (GRAPH_PAGE_BYTES - recordsPerPage * recordBytes) / (recordsPerPage * recordBytes);
     }
 
     /// Sanity: totalBytes must equal the sum of all five components (nothing missed or double-counted).
