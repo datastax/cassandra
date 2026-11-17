@@ -545,7 +545,7 @@ public final class DsePreflight
         out.println();
         out.println("Result: " + report.result + " (" + report.count(Finding.Severity.BLOCKING) + " blocking, " +
                     report.count(Finding.Severity.WARNING) + " warnings, " + report.count(Finding.Severity.INFO) +
-                    " notes)");
+                    " notes" + resultNote(report) + ')');
         printFindings(report.findings, out);
         out.println();
         out.println("Upgrade path:");
@@ -719,7 +719,8 @@ public final class DsePreflight
                                       "with -pw, which the process list shows").build());
         options.addOption(Option.builder().longOpt("nodetool-java-home").hasArg().argName("dir")
                                 .desc("the Java installation DSE's nodetool runs on (its JAVA_HOME, first in its " +
-                                      "PATH); default the Java of this tool (its JAVA_HOME, else java on PATH)")
+                                      "PATH); default the Java of this tool (its JAVA_HOME, else java on PATH); " +
+                                      "the nodetool of DSE 5.1 runs on Java 8 only")
                                 .build());
         options.addOption(Option.builder().longOpt("nodetool-timeout").hasArg().argName("seconds")
                                 .desc("the time limit of each nodetool command; default " + DEFAULT_NODETOOL_TIMEOUT_SECONDS).build());

@@ -2183,7 +2183,7 @@ final class NodeInspector
     private void inspectLive()
     {
         report.live.putAll(live);
-        checkLiveCommands(live, findings);
+        checkLiveCommands(live, findings, "");
         checkLiveStatus(output(live, "status"), findings);
         checkLiveSchema(output(live, "describecluster"), findings);
         String nodesync = output("nodesyncservice status");
@@ -2202,8 +2202,10 @@ final class NodeInspector
     /**
      * The commands of the live state the DSE release does not have ({@code LIVE_COMMAND_UNKNOWN}) and those that did
      * not succeed ({@code LIVE_UNAVAILABLE}); moved out of DSE 6's inspection as it was, for both inspections.
+     * {@code javaNote} ends the remedy's words on the JDK of DSE's {@code nodetool}: empty for DSE 6, whose
+     * {@code nodetool} runs on the JDK of this tool.
      */
-    static void checkLiveCommands(Map<String, NodeReport.LiveCommand> live, List<Finding> findings)
+    static void checkLiveCommands(Map<String, NodeReport.LiveCommand> live, List<Finding> findings, String javaNote)
     {
         List<String> unavailable = new ArrayList<>();
         List<String> unknownCommands = new ArrayList<>();
@@ -2229,7 +2231,7 @@ final class NodeInspector
                                  "the process list shows; DSE's nodetool runs without this environment's " +
                                  "CASSANDRA_HOME, CASSANDRA_CONF, CASSANDRA_INCLUDE, JAVA_OPTS and the other " +
                                  "variables of this tool's launch, and on the Java of this tool unless " +
-                                 "--nodetool-java-home <dir> names another), then run the tool again"));
+                                 "--nodetool-java-home <dir> names another" + javaNote + "), then run the tool again"));
     }
 
     /**
