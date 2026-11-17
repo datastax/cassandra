@@ -594,6 +594,56 @@ public class IntervalTree<C extends Comparable<? super C>, D extends Comparable<
         sorted.add(-1 - idx, interval);
     }
 
+    /**
+     * Walks the min-ordered and max-ordered intervals as if merging all the endpoints, stopping after as many steps
+     * as there are intervals. Returns the number of min endpoints and max endpoints consumed, which identify the median
+     * endpoint used as the node center.
+     */
+    private static <C extends Comparable<? super C>, D extends Comparable<? super D>, I extends Interval<C, D>> int[] findMedianPosition(List<I> minOrder, List<I> maxOrder)
+    {
+        int i = 0;
+        int j = 0;
+        for (int count = 0; count < minOrder.size(); count++)
+        {
+            if (i < minOrder.size() && (j >= maxOrder.size() || minOrder.get(i).min.compareTo(maxOrder.get(j).max) <= 0))
+                i++;
+            else
+                j++;
+        }
+        return new int[] { i, j };
+    }
+
+    private static <C extends Comparable<? super C>, D extends Comparable<? super D>, I extends Interval<C, D>> void checkCenter(List<I> intervals, C center)
+    {
+        List<C> allEndpoints = new ArrayList<>(intervals.size() * 2);
+        for (I interval : intervals)
+        {
+            allEndpoints.add(interval.min);
+            allEndpoints.add(interval.max);
+        }
+
+        Collections.sort(allEndpoints);
+        C expectedCenter = allEndpoints.get(intervals.size());
+        checkState(expectedCenter.equals(center));
+    }
+
+    private static <C extends Comparable<? super C>, D extends Comparable<? super D>, I extends Interval<C, D>> void partitionAroundCenter(List<I> intervals,
+                                                                                                                                           C center,
+                                                                                                                                           List<I> leftOfCenter,
+                                                                                                                                           List<I> rightOfCenter,
+                                                                                                                                           List<I> intersectingCenter)
+    {
+        for (I candidate : intervals)
+        {
+            if (candidate.max.compareTo(center) < 0)
+                leftOfCenter.add(candidate);
+            else if (candidate.min.compareTo(center) > 0)
+                rightOfCenter.add(candidate);
+            else
+                intersectingCenter.add(candidate);
+        }
+    }
+
     private static <T extends Comparable<? super T>> T lesser(T a, T b)
     {
         return a.compareTo(b) < 0 ? a : b;
@@ -654,15 +704,9 @@ public class IntervalTree<C extends Comparable<? super C>, D extends Comparable<
             low = minOrder.get(0).min;
             high = maxOrder.get(maxOrder.size() - 1).max;
 
-            int i = 0, j = 0, count = 0;
-            while (count < minOrder.size())
-            {
-                if (i < minOrder.size() && (j >= maxOrder.size() || minOrder.get(i).min.compareTo(maxOrder.get(j).max) <= 0))
-                    i++;
-                else
-                    j++;
-                count++;
-            }
+            int[] medianPosition = findMedianPosition(minOrder, maxOrder);
+            int i = medianPosition[0];
+            int j = medianPosition[1];
 
             if (i < minOrder.size() && (j >= maxOrder.size() || minOrder.get(i).min.compareTo(maxOrder.get(j).max) < 0))
                 center = minOrder.get(i).min;
@@ -670,18 +714,7 @@ public class IntervalTree<C extends Comparable<? super C>, D extends Comparable<
                 center = maxOrder.get(j).max;
 
             if (EXPENSIVE_CHECKS)
-            {
-                List<C> allEndpoints = new ArrayList<>(minOrder.size() * 2);
-                for (I interval : minOrder)
-                {
-                    allEndpoints.add(interval.min);
-                    allEndpoints.add(interval.max);
-                }
-
-                Collections.sort(allEndpoints);
-                C expectedCenter = allEndpoints.get(minOrder.size());
-                checkState(expectedCenter.equals(center));
-            }
+                checkCenter(minOrder, center);
 
             // Separate interval in intersecting center, left of center and right of center
             int initialIntersectionSize = i - j + 1;
@@ -693,25 +726,8 @@ public class IntervalTree<C extends Comparable<? super C>, D extends Comparable<
             List<I> rightSegmentMinOrder = new ArrayList<>(initialChildSize);
             List<I> rightSegmentMaxOrder = new ArrayList<>(initialChildSize);
 
-            for (I candidate : minOrder)
-            {
-                if (candidate.max.compareTo(center) < 0)
-                    leftSegmentMinOrder.add(candidate);
-                else if (candidate.min.compareTo(center) > 0)
-                    rightSegmentMinOrder.add(candidate);
-                else
-                    intersectsLeft.add(candidate);
-            }
-
-            for (I candidate : maxOrder)
-            {
-                if (candidate.max.compareTo(center) < 0)
-                    leftSegmentMaxOrder.add(candidate);
-                else if (candidate.min.compareTo(center) > 0)
-                    rightSegmentMaxOrder.add(candidate);
-                else
-                    intersectsRight.add(candidate);
-            }
+            partitionAroundCenter(minOrder, center, leftSegmentMinOrder, rightSegmentMinOrder, intersectsLeft);
+            partitionAroundCenter(maxOrder, center, leftSegmentMaxOrder, rightSegmentMaxOrder, intersectsRight);
 
             left = leftSegmentMinOrder.isEmpty() ? null : new IntervalNode(leftSegmentMinOrder, leftSegmentMaxOrder);
             right = rightSegmentMinOrder.isEmpty() ? null : new IntervalNode(rightSegmentMinOrder, rightSegmentMaxOrder);
