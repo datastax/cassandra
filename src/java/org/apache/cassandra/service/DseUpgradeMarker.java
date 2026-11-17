@@ -111,8 +111,13 @@ public final class DseUpgradeMarker
         // like a failure to write it
         Supplier<String> content = () -> mode.source() + " in-place upgrade in progress on this node since " +
                                          FBUtilities.now() + " (" + FBUtilities.getBroadcastAddressAndPort() + "). " +
-                                         "Delete this file only after every node of the cluster runs this software, " +
-                                         "before restarting with internode_compatibility_mode: NONE.\n";
+                                         (mode.isDse51()
+                                          ? "Delete this file, with the other files of the DSE 5.1 upgrade in this " +
+                                            "directory, only after every node of the cluster runs this software, " +
+                                            "before restarting the node set to internode_compatibility_mode NONE " +
+                                            "with storage_compatibility_mode HCD_1.\n"
+                                          : "Delete this file only after every node of the cluster runs this " +
+                                            "software, before restarting with internode_compatibility_mode: NONE.\n");
         return writeIfAbsent(mode, content, (channel, bytes) -> {
             while (bytes.hasRemaining())
                 channel.write(bytes);

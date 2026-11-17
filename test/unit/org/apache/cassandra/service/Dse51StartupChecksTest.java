@@ -181,8 +181,10 @@ public class Dse51StartupChecksTest
         .containsExactly("Wrote the DSE 5.1 upgrade marker " + marker);
         String content = Files.readString(marker);
         assertThat(content).startsWith("DSE 5.1 in-place upgrade in progress on this node since ")
-                           .endsWith("). Delete this file only after every node of the cluster runs this software, " +
-                                     "before restarting with internode_compatibility_mode: NONE.\n");
+                           .endsWith("). Delete this file, with the other files of the DSE 5.1 upgrade in this " +
+                                     "directory, only after every node of the cluster runs this software, before " +
+                                     "restarting the node set to internode_compatibility_mode NONE with " +
+                                     "storage_compatibility_mode HCD_1.\n");
         // the marker of the upgrade from DSE 6 is not written
         assertThat(DseUpgradeMarker.exists()).isFalse();
 
