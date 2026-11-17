@@ -367,9 +367,14 @@ public final class Dse6NonCoreTraces
      */
     public static String searchIndexRefusal(String keyspace, String table, String index, String className)
     {
+        String drop = "drop the search index there (DROP SEARCH INDEX ON " + keyspace + '.' + table + ") and upgrade " +
+                      "it again";
         return refused() + "the schema contains the DSE Search index " + keyspace + '.' + table + '.' + index + " (" +
-               className + "); DSE Search is not supported by this software. Roll this node back to DSE, drop the " +
-               "search index there (DROP SEARCH INDEX ON " + keyspace + '.' + table + ") and upgrade it again";
+               className + "); DSE Search is not supported by this software. " +
+               (DseCompat.isDse51()
+                ? "Roll this node back to DSE 5.1; " + Dse6AccessControlCheck.IF_NO_OTHER_NODE + drop + "; " +
+                  Dse6AccessControlCheck.OTHERWISE_REPORT
+                : "Roll this node back to DSE, " + drop);
     }
 
     /**
@@ -901,8 +906,22 @@ public final class Dse6NonCoreTraces
         if (!remedies.isEmpty())
         {
             String how = onlyAlter ? "alter" : alter ? "remove or alter" : "remove";
-            sentences.add("Roll this node back to DSE, " + how + " them there (" + String.join("; ", remedies) +
-                          ") and upgrade it again");
+            String remove = how + " them there (" + String.join("; ", remedies) + ") and upgrade it again";
+            // in DSE_5_1 a schema change on DSE 5.1 only while no other node runs this software, none in the mixed
+            // phase; the restarts of nodes as plain Cassandra nodes and the deletion of solr.data are no such change
+            boolean schemaChanges = kinds.contains(Kind.SEARCH_INDEX) || kinds.contains(Kind.TABLE_COMPACTION) ||
+                                    kinds.contains(Kind.REMOVED_COMPACTION) ||
+                                    byFeature.containsKey(Feature.GRAPH) || byFeature.containsKey(Feature.ANALYTICS) ||
+                                    byFeature.containsKey(Feature.ADVANCED_REPLICATION) ||
+                                    refused.stream().anyMatch(t -> t.kind == Kind.KEYSPACE &&
+                                                                   t.feature == Feature.SEARCH);
+            if (!dse51)
+                sentences.add("Roll this node back to DSE, " + remove);
+            else if (schemaChanges)
+                sentences.add("Roll this node back to DSE 5.1, " + remove + "; make the schema changes among them " +
+                              "only if no other node runs this software; " + Dse6AccessControlCheck.OTHERWISE_REPORT);
+            else
+                sentences.add("Roll this node back to DSE 5.1, " + remove);
         }
         // this node keeps what it read of DSE 5.1's system.local and system.peers in a record of the upgrade, which
         // the next start loads while the marker of the upgrade exists: the rollback removes both

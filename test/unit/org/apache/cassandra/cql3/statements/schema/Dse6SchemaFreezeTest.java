@@ -279,8 +279,9 @@ public class Dse6SchemaFreezeTest extends CQLTester
                              "(SAI) is created, even with -Dcassandra.internode_compatibility_mode.allow_ddl=true, " +
                              "since DSE 5.1 has no SAI and this node sends its schema to no DSE 5.1 node, so the " +
                              "index would be in the schema of the nodes of this software only; create it once the " +
-                             "upgrade is complete (internode_compatibility_mode NONE on every node). A CREATE INDEX " +
-                             "without USING creates an SAI index when default_secondary_index is sai";
+                             "upgrade is complete (internode_compatibility_mode NONE with storage_compatibility_mode " +
+                             "HCD_1 on every node). A CREATE INDEX without USING creates an SAI index when " +
+                             "default_secondary_index is sai";
             String[] names = { "StorageAttachedIndex", "sai", "org.apache.cassandra.index.sai.StorageAttachedIndex" };
             for (String using : names)
             {

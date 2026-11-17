@@ -212,9 +212,15 @@ public class Dse51RlacExpressionTest
             .hasMessage("Received a row filter with a user expression (kind 4) at messaging version 11 on " +
                         "test_ks.rlac: the expression a DSE 5.1 node sends for a read of a table restricted to rows " +
                         "(RESTRICT ROWS), row-level access control this software cannot apply, so the read is " +
-                        "refused rather than answered without it; do not run RESTRICT ROWS during the upgrade, and " +
-                        "run UNRESTRICT ROWS on the DSE 5.1 nodes for the tables restricted since (never for a view: " +
-                        "on DSE 5.1.51 it fails and keeps the node from starting)");
+                        "refused rather than answered without it. The DSE 5.1 nodes hold a restriction to rows (for " +
+                        "example a RESTRICT ROWS run during the upgrade, or one dropped knowingly at the start of an " +
+                        "upgraded node with -Dcassandra.internode_compatibility_mode.ignore_dse_restrictions=true): " +
+                        "upgrade no further node and report to the upgrade owner. RESTRICT ROWS and UNRESTRICT ROWS " +
+                        "are schema changes, which the upgrade forbids, so the restriction is removed on DSE 5.1 " +
+                        "only once no node runs this software (every upgraded node rolled back), as before the " +
+                        "upgrade: for a table, UNRESTRICT ROWS, then REVOKE its rows/ grants; for a view, REVOKE its " +
+                        "rows/ grants, drop it and create it again without the restriction, never UNRESTRICT ROWS on " +
+                        "it (on DSE 5.1.51 it fails and keeps the node from starting)");
         }
         assertThat(DseCompatRefusals.count(DseCompat.REFUSED_DSE51_ROW_LEVEL_ACCESS_CONTROL)).isEqualTo(1);
 

@@ -97,11 +97,19 @@ public class Dse6NonCoreTracesTest extends CQLTester
     private static final String SOLR_INDEX = "com.datastax.bdp.search.solr.Cql3SolrSecondaryIndex";
     private static final String NO_TRACE = "DSE 6 compatibility mode: no trace of DSE Search, Graph, Analytics, DSEFS, CFS or Advanced Replication found";
     private static final String REMEDY_PREFIX = ". Roll this node back to DSE, remove them there (";
-    /** The start of the remedies when a compaction strategy, which an ALTER removes, is refused with other traces. */
-    private static final String ALTER_REMEDY_PREFIX = ". Roll this node back to DSE, remove or alter them there (";
-    /** The start of the remedies when compaction strategies alone are refused. */
-    private static final String ONLY_ALTER_REMEDY_PREFIX = ". Roll this node back to DSE, alter them there (";
     private static final String REMEDY_SUFFIX = ") and upgrade it again";
+    /** The remedies in DSE_5_1: its schema changes on DSE 5.1 only while no other node runs this software. */
+    private static final String DSE51_ROLL_BACK = ". Roll this node back to DSE 5.1, ";
+    private static final String DSE51_REMEDY_PREFIX = DSE51_ROLL_BACK + "remove them there (";
+    /** The start of the remedies when a compaction strategy, which an ALTER removes, is refused with other traces. */
+    private static final String DSE51_ALTER_REMEDY_PREFIX = DSE51_ROLL_BACK + "remove or alter them there (";
+    /** The start of the remedies when compaction strategies alone are refused. */
+    private static final String DSE51_ONLY_ALTER_REMEDY_PREFIX = DSE51_ROLL_BACK + "alter them there (";
+    private static final String DSE51_REMEDY_SUFFIX = REMEDY_SUFFIX + "; make the schema changes among them only " +
+                                                      "if no other node runs this software; otherwise, in the mixed " +
+                                                      "phase, which makes no schema or grant change (the nodes of " +
+                                                      "this software do not take DSE 5.1's schema changes), upgrade " +
+                                                      "no further node and report to the upgrade owner";
     private static final String PEER_ADVICE = ". An entry of nodes/peers is stale when that node has since been restarted as a Cassandra-only " +
                                               "node or has left the cluster: if every entry listed from nodes/peers is stale, start with -D" +
                                               OVERRIDE_KEY + "=true instead (it warns at every start; this software never rewrites " +
@@ -759,6 +767,39 @@ public class Dse6NonCoreTracesTest extends CQLTester
     }
 
     /**
+     * In DSE_5_1 the remedies are made conditional on no other node running this software only when one of them is a
+     * schema change on DSE 5.1: not for a solr.data directory alone, which the mixed phase lets be deleted, but for a
+     * keyspace of DSE Advanced Replication or the keyspaces of a graph alone, which are dropped there. The keyspace
+     * traces are built by addDse51KeyspaceTraces from the keyspaces and replication classes DSE 5.1's schema gives.
+     */
+    @Test
+    public void dse51OnlyTheSchemaChangesAreConditional()
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        Traces solrData = new Traces();
+        solrData.add(Kind.SOLR_DATA_DIRECTORY, "directory /var/lib/cassandra/data/solr.data");
+        assertThat(refusal(solrData, false))
+        .isEqualTo(FOUND_DSE51 + "DSE Search: directory /var/lib/cassandra/data/solr.data" + DSE51_REMEDY_PREFIX +
+                   "delete the solr.data directories once no search index is left" + REMEDY_SUFFIX);
+        Traces advrep = new Traces();
+        Dse6NonCoreTraces.addDse51KeyspaceTraces(advrep, Map.of("dse_advrep", SimpleStrategy.class.getName()));
+        assertThat(refusal(advrep, false))
+        .isEqualTo(FOUND_DSE51 + "DSE Advanced Replication: keyspace dse_advrep" + DSE51_REMEDY_PREFIX + "stop " +
+                   "Advanced Replication, migrate what its keyspace holds if it is needed and drop it, empty or not" +
+                   DSE51_REMEDY_SUFFIX);
+        Map<String, String> graph = new TreeMap<>();
+        graph.put("g", SimpleStrategy.class.getName());
+        graph.put("g_system", SimpleStrategy.class.getName());
+        graph.put("g_pvt", LocalStrategy.class.getName());
+        Traces graphs = new Traces();
+        Dse6NonCoreTraces.addDse51KeyspaceTraces(graphs, graph);
+        assertThat(refusal(graphs, false))
+        .isEqualTo(FOUND_DSE51 + "DSE Graph: keyspace g (a keyspace of the graph g), keyspace g_pvt (a keyspace of " +
+                   "the graph g), keyspace g_system (a keyspace of the graph g)" + DSE51_REMEDY_PREFIX + "migrate " +
+                   "the data of the graph keyspaces elsewhere and drop them" + DSE51_REMEDY_SUFFIX);
+    }
+
+    /**
      * The workloads DSE 5.1.51 stored for the Search and Graph node: in its own {@code system.local} they refuse its
      * start; in the {@code system.peers} of another node they refuse that node's start too, unless the override
      * ignores the entries of the peers, with a warning. The values are those of the fixture, read once at the first
@@ -774,8 +815,8 @@ public class Dse6NonCoreTracesTest extends CQLTester
             .isInstanceOfSatisfying(StartupException.class,
                                     e -> assertThat(e.returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG))
             .hasMessage(FOUND_DSE51 + "DSE workloads other than Cassandra: this node (system.local): " +
-                        SEARCH_GRAPH_WORKLOADS + REMEDY_PREFIX + "restart this node as a plain Cassandra node (dse " +
-                        "cassandra without -s, -k, -c or -g; for a package install, every workload of " +
+                        SEARCH_GRAPH_WORKLOADS + DSE51_REMEDY_PREFIX + "restart this node as a plain Cassandra " +
+                        "node (dse cassandra without -s, -k, -c or -g; for a package install, every workload of " +
                         "/etc/default/dse set to 0)" + REMEDY_SUFFIX + ". " + rollbackDeletes());
             assertThat(Dse6NonCoreTraces.status()).isNull();
             // the next start in the mode loads the record of the first one, with the same workloads, until the
@@ -790,8 +831,8 @@ public class Dse6NonCoreTracesTest extends CQLTester
             loadStored(cassandraColumns(), searchGraphColumns(InetAddress.getByName(SEARCH_GRAPH_NODE)));
             String entry = "peer " + SEARCH_GRAPH_NODE + " (system.peers): " + SEARCH_GRAPH_WORKLOADS;
             assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
-            .hasMessage(FOUND_DSE51 + "DSE workloads other than Cassandra: " + entry + REMEDY_PREFIX + "restart the " +
-                        "peers listed as plain Cassandra nodes while this node runs DSE 5.1, so that its " +
+            .hasMessage(FOUND_DSE51 + "DSE workloads other than Cassandra: " + entry + DSE51_REMEDY_PREFIX +
+                        "restart the peers listed as plain Cassandra nodes while this node runs DSE 5.1, so that its " +
                         "system.peers records their new workloads" + REMEDY_SUFFIX + ". " + rollbackDeletes() +
                         ". An entry of system.peers is " +
                         "stale when that node has since been restarted as a Cassandra-only node or has left the " +
@@ -875,9 +916,10 @@ public class Dse6NonCoreTracesTest extends CQLTester
                                    "TABLE or ALTER MATERIALIZED VIEW ... WITH compaction)";
             assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
             .hasMessage(FOUND_DSE51 + "DSE Search: keyspace solr_admin, " + index + ", directory " + solrData + "; " +
-                        graphs + ALTER_REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON " +
+                        graphs + DSE51_ALTER_REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON " +
                         "<keyspace>.<table>); delete the solr.data directories once no search index is left; drop " +
-                        "the keyspace solr_admin once no node runs DSE Search; " + otherRemedies + REMEDY_SUFFIX);
+                        "the keyspace solr_admin once no node runs DSE Search; " + otherRemedies +
+                        DSE51_REMEDY_SUFFIX);
 
             // without solr_admin, the search index is no reason to drop it
             DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
@@ -885,9 +927,9 @@ public class Dse6NonCoreTracesTest extends CQLTester
             DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
             assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
             .hasMessage(FOUND_DSE51 + "DSE Search: " + index + ", directory " + solrData + "; " + graphs +
-                        ALTER_REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON <keyspace>.<table>); " +
-                        "delete the solr.data directories once no search index is left; " + otherRemedies +
-                        REMEDY_SUFFIX);
+                        DSE51_ALTER_REMEDY_PREFIX + "drop the search indexes (DROP SEARCH INDEX ON " +
+                        "<keyspace>.<table>); delete the solr.data directories once no search index is left; " +
+                        otherRemedies + DSE51_REMEDY_SUFFIX);
 
             // the same keyspaces and rows are not read with NONE or DSE_6, whose check reads the loaded schema
             for (InternodeCompatibilityMode mode : List.of(InternodeCompatibilityMode.NONE,
@@ -947,8 +989,8 @@ public class Dse6NonCoreTracesTest extends CQLTester
                              "view " + KEYSPACE + '.' + view + " (compaction DateTieredCompactionStrategy)";
             assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
             .isInstanceOf(StartupException.class)
-            .hasMessage("internode_compatibility_mode DSE_5_1 refused: found " + removed + ONLY_ALTER_REMEDY_PREFIX +
-                        removedRemedy + REMEDY_SUFFIX)
+            .hasMessage("internode_compatibility_mode DSE_5_1 refused: found " + removed +
+                        DSE51_ONLY_ALTER_REMEDY_PREFIX + removedRemedy + DSE51_REMEDY_SUFFIX)
             .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
             assertThat(Dse6NonCoreTraces.status()).isNull();
 
@@ -966,7 +1008,8 @@ public class Dse6NonCoreTracesTest extends CQLTester
             assertThatThrownBy(Dse6NonCoreTraces::verifyDse51AtStartup)
             .hasMessage(FOUND_DSE51 + "DSE tiered storage and in-memory tables: table " + KEYSPACE + '.' + table +
                         " (compaction MemoryOnlyStrategy), materialized view " + KEYSPACE + '.' + view +
-                        " (compaction " + tieredClass + ')' + ONLY_ALTER_REMEDY_PREFIX + dseRemedy + REMEDY_SUFFIX);
+                        " (compaction " + tieredClass + ')' + DSE51_ONLY_ALTER_REMEDY_PREFIX + dseRemedy +
+                        DSE51_REMEDY_SUFFIX);
 
             DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
             executeOnceInternal("UPDATE system_schema.views SET compaction = {'class': 'MemoryOnlyStrategy'} " +
@@ -978,9 +1021,9 @@ public class Dse6NonCoreTracesTest extends CQLTester
             .hasMessage(FOUND_DSE51 + "DSE tiered storage and in-memory tables: materialized view " + KEYSPACE + '.' +
                         view + " (compaction MemoryOnlyStrategy). Also found tables or materialized views on a " +
                         "compaction strategy this software no longer has: table " + KEYSPACE + '.' + table +
-                        " (compaction " + dateTiered + ')' + ONLY_ALTER_REMEDY_PREFIX + dseRemedy + "; " +
+                        " (compaction " + dateTiered + ')' + DSE51_ONLY_ALTER_REMEDY_PREFIX + dseRemedy + "; " +
                         removedRemedy +
-                        REMEDY_SUFFIX);
+                        DSE51_REMEDY_SUFFIX);
 
             // the rows are not read with NONE or DSE_6
             for (InternodeCompatibilityMode mode : List.of(InternodeCompatibilityMode.NONE,

@@ -435,8 +435,11 @@ public class Dse6IndexClassesTest extends CQLTester
                                                         IndexTarget.TARGET_OPTION_NAME, "solr_query"));
             String refusal = "internode_compatibility_mode DSE_5_1 refused: the schema contains the DSE Search index " +
                              KEYSPACE + '.' + currentTable() + ".solr_index (" + className + "); DSE Search is not " +
-                             "supported by this software. Roll this node back to DSE, drop the search index there " +
-                             "(DROP SEARCH INDEX ON " + KEYSPACE + '.' + currentTable() + ") and upgrade it again";
+                             "supported by this software. Roll this node back to DSE 5.1; if no other node runs " +
+                             "this software, drop the search index there (DROP SEARCH INDEX ON " + KEYSPACE + '.' +
+                             currentTable() + ") and upgrade it again; otherwise, in the mixed phase, which makes no " +
+                             "schema or grant change (the nodes of this software do not take DSE 5.1's schema " +
+                             "changes), upgrade no further node and report to the upgrade owner";
             assertThatThrownBy(() -> cfs.indexManager.addIndex(index, true)).as(className)
             .hasMessageContaining(refusal);
             assertThatThrownBy(() -> index.validate(currentTableMetadata())).as(className).hasMessage(refusal);
