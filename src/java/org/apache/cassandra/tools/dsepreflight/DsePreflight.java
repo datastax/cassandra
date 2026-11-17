@@ -48,13 +48,19 @@ import org.apache.cassandra.utils.logging.LoggingSupportFactory;
  * when it finds a feature that forbids the upgrade.
  * <p>
  * Exit codes: {@value #EXIT_READY} ready (warnings allowed), {@value #EXIT_BLOCKED} blocking findings, {@value #EXIT_ERROR}
- * wrong usage or an error that stopped the inspection.
+ * wrong usage or an error that stopped the inspection, {@value #EXIT_INCOMPLETE} no blocking finding but the live state
+ * asked for with {@code --nodetool} not read completely (result {@link NodeReport#INCOMPLETE}).
  */
 public final class DsePreflight
 {
     public static final int EXIT_READY = 0;
     public static final int EXIT_BLOCKED = 1;
     public static final int EXIT_ERROR = 2;
+    /**
+     * No blocking finding, but the live state asked for was not read completely: a code of its own, so that a script
+     * never reads it as ready, nor as blocking findings or an error.
+     */
+    public static final int EXIT_INCOMPLETE = 3;
 
     static final long DEFAULT_NODETOOL_TIMEOUT_SECONDS = 120;
     static final String USAGE = "dsepreflight [options]   inspect this DSE node";
@@ -183,8 +189,20 @@ public final class DsePreflight
                     return EXIT_ERROR;
                 }
             }
+            String javaHome = cmd.getOptionValue("nodetool-java-home");
+            if (javaHome != null)
+            {
+                Path java = Path.of(javaHome, "bin", "java");
+                if (!Files.isRegularFile(java) || !Files.isExecutable(java))
+                {
+                    err.println("--nodetool-java-home must be a Java installation, with bin/java: " + javaHome);
+                    return EXIT_ERROR;
+                }
+                javaHome = Path.of(javaHome).toAbsolutePath().toString();
+            }
             String[] extra = cmd.getOptionValues("nodetool-arg");
-            live = LiveState.collect(cmd.getOptionValue("nodetool"), extra == null ? List.of() : List.of(extra), timeout);
+            live = LiveState.collect(cmd.getOptionValue("nodetool"), extra == null ? List.of() : List.of(extra),
+                                     timeout, javaHome);
         }
 
         NodeReport report = new NodeInspector(layout, live).inspect(hostname());
@@ -192,7 +210,29 @@ public final class DsePreflight
         printNodeReport(report, out);
         if (cmd.hasOption("json"))
             writeAtomically(Path.of(cmd.getOptionValue("json")), JsonUtils.JSON_OBJECT_PRETTY_WRITER.writeValueAsBytes(report));
-        return report.blocked() ? EXIT_BLOCKED : EXIT_READY;
+        return exitCode(report);
+    }
+
+    /**
+     * The exit code of a node report: {@link #EXIT_READY}, {@link #EXIT_INCOMPLETE}, else {@link #EXIT_BLOCKED}, so
+     * that no other result exits as ready.
+     */
+    static int exitCode(NodeReport report)
+    {
+        if (NodeReport.READY.equals(report.result))
+            return EXIT_READY;
+        return NodeReport.INCOMPLETE.equals(report.result) ? EXIT_INCOMPLETE : EXIT_BLOCKED;
+    }
+
+    /**
+     * What the result line adds to an {@link NodeReport#INCOMPLETE} result, which the counts alone do not explain;
+     * nothing to the others.
+     */
+    static String resultNote(NodeReport report)
+    {
+        return NodeReport.INCOMPLETE.equals(report.result)
+               ? "; the live state was not checked completely, see " + NodeReport.LIVE_UNAVAILABLE
+               : "";
     }
 
     static void printNodeReport(NodeReport report, PrintStream out)
@@ -205,7 +245,7 @@ public final class DsePreflight
         out.println("Peers in nodes/peers: " + report.peers.size() + (report.peers.stream().anyMatch(p -> p.upgraded) ? " (some already upgraded)" : ""));
         out.println();
         out.println("Result: " + report.result + " (" + report.count(Finding.Severity.BLOCKING) + " blocking, " + report.count(Finding.Severity.WARNING) +
-                    " warnings, " + report.count(Finding.Severity.INFO) + " notes)");
+                    " warnings, " + report.count(Finding.Severity.INFO) + " notes" + resultNote(report) + ')');
         printFindings(report.findings, out);
         out.println();
         out.println("Upgrade path:");
@@ -317,6 +357,10 @@ public final class DsePreflight
                                 .desc("an argument passed to every nodetool command before it, written --nodetool-arg=<arg> when it starts with a dash, " +
                                       "such as --nodetool-arg=-h --nodetool-arg=10.0.0.1 (repeat for each); give a password with -pwf <file>, never " +
                                       "with -pw, which the process list shows").build());
+        options.addOption(Option.builder().longOpt("nodetool-java-home").hasArg().argName("dir")
+                                .desc("the Java installation DSE's nodetool runs on (its JAVA_HOME, first in its " +
+                                      "PATH); default the Java of this tool (its JAVA_HOME, else java on PATH)")
+                                .build());
         options.addOption(Option.builder().longOpt("nodetool-timeout").hasArg().argName("seconds")
                                 .desc("the time limit of each nodetool command; default " + DEFAULT_NODETOOL_TIMEOUT_SECONDS).build());
         options.addOption(Option.builder().longOpt("json").hasArg().argName("file").desc("also write the report as JSON to this file").build());
@@ -330,7 +374,9 @@ public final class DsePreflight
         new HelpFormatter().printHelp(writer, 120, USAGE,
                                       "\nInspects a DSE 6.8/6.9 node, read-only, before its upgrade to HCD 2.0.\n\n",
                                       options, 2, 2,
-                                      "\nExit codes: 0 ready (warnings allowed), 1 blocking findings, 2 usage or inspection error.");
+                                      "\nExit codes: 0 ready (warnings allowed), 1 blocking findings, " +
+                                      "2 usage or inspection error, 3 incomplete (no blocking finding, " +
+                                      "the live state of --nodetool not read completely).");
         writer.flush();
     }
 }

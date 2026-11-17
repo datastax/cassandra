@@ -26,10 +26,12 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -58,6 +60,7 @@ import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.service.DseUpgradeMarker;
+import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
@@ -203,6 +206,17 @@ public class DsePreflightTest
         assertThat(run.report.result).isEqualTo(NodeReport.BLOCKED);
         assertThat(run.codes(Finding.Severity.BLOCKING)).as("blocking findings; output:\n%s", run.out).contains(code);
         assertThat(run.out).contains("Result: BLOCKED").contains('[' + code + ']');
+        return run;
+    }
+
+    private static Run assertIncomplete(Run run)
+    {
+        assertThat(run.exitCode).as("exit code; output:\n%s%s", run.out, run.err)
+                                .isEqualTo(DsePreflight.EXIT_INCOMPLETE);
+        assertThat(run.report.result).isEqualTo(NodeReport.INCOMPLETE);
+        assertThat(run.codes(Finding.Severity.BLOCKING)).isEmpty();
+        assertThat(run.codes(Finding.Severity.WARNING)).contains(NodeReport.LIVE_UNAVAILABLE);
+        assertThat(run.out).contains("Result: INCOMPLETE");
         return run;
     }
 
@@ -613,7 +627,7 @@ public class DsePreflightTest
         DseNodeFixture node = node();
         Path nodetool = fakeNodetool(node.root, node.root.resolve("arguments"), 0, "case \"$*\" in\n  *version*) sleep 30 ;;\nesac\n");
         long start = System.nanoTime();
-        Run run = assertReady(run(node, "--nodetool", nodetool.toString(), "--nodetool-timeout", "1"));
+        Run run = assertIncomplete(run(node, "--nodetool", nodetool.toString(), "--nodetool-timeout", "1"));
         assertThat(System.nanoTime() - start).as("the command was stopped").isLessThan(TimeUnit.SECONDS.toNanos(25));
         assertThat(run.report.live.get("version").error).isEqualTo("nodetool version did not finish within 1 s");
         assertThat(run.messages("LIVE_UNAVAILABLE")).contains("nodetool version: nodetool version did not finish within 1 s");
@@ -626,9 +640,9 @@ public class DsePreflightTest
         Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
         DseNodeFixture node = node();
         Path nodetool = fakeNodetool(node.root, node.root.resolve("arguments"), 1, "echo 'nodetool: Failed to connect to 127.0.0.1:7199'\n");
-        Run run = assertReady(run(node, "--nodetool", nodetool.toString()));
+        Run run = assertIncomplete(run(node, "--nodetool", nodetool.toString()));
         assertThat(run.messages("LIVE_UNAVAILABLE")).contains("nodetool status: exit code 1 nodetool: Failed to connect");
-        Run missing = assertReady(run(node, "--nodetool", node.root.resolve("no-such-nodetool").toString()));
+        Run missing = assertIncomplete(run(node, "--nodetool", node.root.resolve("no-such-nodetool").toString()));
         assertThat(missing.messages("LIVE_UNAVAILABLE")).contains("cannot run");
         // the nodetool of DSE 6.8.65 and 6.9.26 has no listpendinghints
         Path older = fakeNodetool(node.root, node.root.resolve("arguments"), 0,
@@ -639,6 +653,261 @@ public class DsePreflightTest
         Run unknown = assertReady(run(node, "--nodetool", older.toString()));
         assertThat(unknown.codes(Finding.Severity.WARNING)).doesNotContain("LIVE_UNAVAILABLE", "LIVE_STREAMS", "LIVE_HINTS");
         assertThat(unknown.messages("LIVE_COMMAND_UNKNOWN")).contains("nodetool listpendinghints");
+    }
+
+    /**
+     * DSE's nodetool rejects an argument it does not take with the words of an unknown command: the commands that
+     * failed so are not taken for commands the release lacks, and the live state is incomplete.
+     */
+    @Test
+    public void anArgumentNodetoolRejectsLeavesTheLiveStateIncomplete() throws IOException
+    {
+        Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
+        DseNodeFixture node = node();
+        Path nodetool = fakeNodetool(node.root, node.root.resolve("arguments"), 1,
+                                     "words=$(echo \"$*\" | sed 's/ /, /g')\n" +
+                                     "echo \"nodetool: Found unexpected parameters: [$words]\"\n");
+        Run run = assertIncomplete(run(node, "--nodetool", nodetool.toString(), "--nodetool-arg=--foo"));
+        assertThat(run.findings("LIVE_COMMAND_UNKNOWN")).isEmpty();
+        assertThat(run.messages(NodeReport.LIVE_UNAVAILABLE))
+            .contains("nodetool listpendinghints: exit code 1 nodetool: Found unexpected parameters: [--foo, " +
+                      "listpendinghints]")
+            .contains("nodetool status: exit code 1 nodetool: Found unexpected parameters: [--foo, status]");
+        // a command the release may lack is skipped only when it is the one rejected; any other command so rejected
+        // is a failure
+        NodeReport.LiveCommand rejected = new NodeReport.LiveCommand();
+        rejected.exitCode = 1;
+        rejected.output = "nodetool: Found unexpected parameters: [listpendinghints]";
+        assertThat(LiveState.unknownCommand("listpendinghints", rejected)).isTrue();
+        rejected.output = "nodetool: Found unexpected parameters: [status]";
+        assertThat(LiveState.unknownCommand("status", rejected)).isFalse();
+        rejected.output = "nodetool: Found unexpected parameters: [--foo, listpendinghints]";
+        assertThat(LiveState.unknownCommand("listpendinghints", rejected)).isFalse();
+    }
+
+    /** A command whose output only goes into the report, failing alone, still leaves the live state incomplete. */
+    @Test
+    public void aRecordedCommandThatFailsAloneLeavesTheLiveStateIncomplete() throws IOException
+    {
+        Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
+        DseNodeFixture node = node();
+        Path nodetool = fakeNodetool(node.root, node.root.resolve("arguments"), 0,
+                                     "case \"$*\" in\n" +
+                                     "  *gossipinfo*) echo 'nodetool: Failed to connect to 127.0.0.1:7199'\n" +
+                                     "                exit 1 ;;\n" +
+                                     "  *netstats*) echo 'Not sending any streams.' ;;\n" +
+                                     "esac\n");
+        Run run = assertIncomplete(run(node, "--nodetool", nodetool.toString()));
+        assertThat(run.messages(NodeReport.LIVE_UNAVAILABLE))
+            .isEqualTo("the live state could not be read completely (not every nodetool command ran), so the node " +
+                       "cannot be declared READY: nodetool gossipinfo: exit code 1 nodetool: Failed to connect to " +
+                       "127.0.0.1:7199");
+    }
+
+    /** DSE's nodetool runs on the Java installation --nodetool-java-home names, which must have a bin/java. */
+    @Test
+    public void theNodetoolRunsOnTheJavaInstallationGiven() throws IOException
+    {
+        Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
+        DseNodeFixture node = node();
+        Path javaHome = temporaryFolder.newFolder().toPath();
+        Files.createDirectories(javaHome.resolve("bin"));
+        Path java = javaHome.resolve("bin").resolve("java");
+        Files.write(java, "#!/bin/sh\nexit 0\n".getBytes(StandardCharsets.UTF_8));
+        Files.setPosixFilePermissions(java, PosixFilePermissions.fromString("rwx------"));
+        Path nodetool = fakeNodetool(node.root, node.root.resolve("arguments"), 0,
+                                     "echo \"JAVA_HOME=$JAVA_HOME\"; echo \"PATH=$PATH\"\n" +
+                                     "case \"$*\" in\n" +
+                                     "  *netstats*) echo 'Not sending any streams.' ;;\n" +
+                                     "esac\n");
+        Run run = assertReady(run(node, "--nodetool", nodetool.toString(),
+                                  "--nodetool-java-home", javaHome.toString()));
+        assertThat(run.report.live.get("version").output).contains("JAVA_HOME=" + javaHome + '\n')
+                                                        .contains("PATH=" + javaHome.resolve("bin") + ':');
+
+        Path notJava = temporaryFolder.newFolder().toPath();
+        Run refused = run(node, "--nodetool", nodetool.toString(), "--nodetool-java-home", notJava.toString());
+        assertThat(refused.exitCode).isEqualTo(DsePreflight.EXIT_ERROR);
+        assertThat(refused.err).contains("--nodetool-java-home must be a Java installation, with bin/java: " + notJava);
+        assertThat(refused.report).isNull();
+        // a relative directory is given to the nodetool as an absolute one
+        Path relative = Path.of("").toAbsolutePath().relativize(javaHome);
+        Run fromRelative = assertReady(run(node, "--nodetool", nodetool.toString(),
+                                           "--nodetool-java-home", relative.toString()));
+        assertThat(relative.isAbsolute()).isFalse();
+        assertThat(fromRelative.report.live.get("version").output).contains("JAVA_HOME=" + javaHome + '\n');
+        // a bin/java that cannot be run is no java
+        Files.setPosixFilePermissions(java, PosixFilePermissions.fromString("rw-------"));
+        Run notExecutable = run(node, "--nodetool", nodetool.toString(), "--nodetool-java-home", javaHome.toString());
+        assertThat(notExecutable.exitCode).isEqualTo(DsePreflight.EXIT_ERROR);
+        assertThat(notExecutable.err).contains("--nodetool-java-home must be a Java installation, with bin/java: " +
+                                               javaHome);
+        // a directory named bin/java is no java
+        Files.createDirectories(notJava.resolve("bin").resolve("java"));
+        Run directory = run(node, "--nodetool", nodetool.toString(), "--nodetool-java-home", notJava.toString());
+        assertThat(directory.exitCode).isEqualTo(DsePreflight.EXIT_ERROR);
+        assertThat(directory.err).contains("--nodetool-java-home must be a Java installation, with bin/java: " +
+                                           notJava);
+    }
+
+    /** A result other than READY or INCOMPLETE never exits 0 nor 3. */
+    @Test
+    public void anUnknownResultExitsAsBlocked()
+    {
+        NodeReport report = new NodeReport();
+        report.result = null;
+        assertThat(DsePreflight.exitCode(report)).isEqualTo(DsePreflight.EXIT_BLOCKED);
+        report.result = "OK";
+        assertThat(DsePreflight.exitCode(report)).isEqualTo(DsePreflight.EXIT_BLOCKED);
+        report.result = NodeReport.BLOCKED;
+        assertThat(DsePreflight.exitCode(report)).isEqualTo(DsePreflight.EXIT_BLOCKED);
+        report.result = NodeReport.INCOMPLETE;
+        assertThat(DsePreflight.exitCode(report)).isEqualTo(DsePreflight.EXIT_INCOMPLETE);
+        report.result = NodeReport.READY;
+        assertThat(DsePreflight.exitCode(report)).isEqualTo(DsePreflight.EXIT_READY);
+    }
+
+    @Test
+    public void aNodeWhoseLiveStateWasNotCheckedIsNotReady() throws IOException
+    {
+        Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
+        DseNodeFixture node = node();
+        // without --nodetool no live state is asked for: the files alone give the result
+        Run offline = assertReady(run(node));
+        assertThat(offline.report.live).isEmpty();
+        assertThat(offline.out).containsPattern("Result: READY \\(0 blocking, [0-9]+ warnings, [0-9]+ notes\\)");
+        // every command fails, as the nodetool of DSE did when it could not start
+        Path nodetool = fakeNodetool(node.root, node.root.resolve("arguments"), 1,
+                                     "echo 'dse.in.sh: line 479: jvm-dependent.sh: No such file or directory'\n");
+        Run run = assertIncomplete(run(node, "--nodetool", nodetool.toString()));
+        assertThat(run.out).containsPattern("Result: INCOMPLETE \\(0 blocking, [0-9]+ warnings, [0-9]+ notes; " +
+                                            "the live state was not checked completely, see LIVE_UNAVAILABLE\\)");
+        assertThat(run.messages(NodeReport.LIVE_UNAVAILABLE))
+            .startsWith("the live state could not be read completely (not every nodetool command ran), so the " +
+                        "node cannot be declared READY: nodetool version: exit code 1 dse.in.sh: line 479: ");
+        assertThat(run.findings(NodeReport.LIVE_UNAVAILABLE).get(0).remedy)
+            .isEqualTo("check that DSE runs and that nodetool reaches it (host, JMX port, user and password file: " +
+                       "--nodetool-arg, with -pwf <file> rather than -pw <password>, which the process list shows; " +
+                       "DSE's nodetool runs without this environment's CASSANDRA_HOME, CASSANDRA_CONF, " +
+                       "CASSANDRA_INCLUDE, JAVA_OPTS and the other variables of this tool's launch, and on the Java " +
+                       "of this tool unless --nodetool-java-home <dir> names another), then run the tool again");
+        // a blocking finding decides the result, the live state read or not
+        node.editYaml("cassandra.yaml", yaml -> yaml.put("partitioner", "com.example.NoSuchPartitioner"));
+        Run blocked = assertBlocked(run(node, "--nodetool", nodetool.toString()), "UNLOADABLE_CLASS");
+        assertThat(blocked.codes(Finding.Severity.WARNING)).contains(NodeReport.LIVE_UNAVAILABLE);
+        assertThat(blocked.out).doesNotContain("the live state was not checked completely");
+    }
+
+    @Test
+    public void theNodetoolOfDseRunsWithoutTheEnvironmentOfTheTool() throws IOException
+    {
+        Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
+        Path directory = temporaryFolder.newFolder().toPath();
+        // fails, as the nodetool of DSE does, when it is given the configuration directory of this tool's installation
+        Path nodetool = fakeNodetool(directory, directory.resolve("arguments"), 0,
+                                     "if [ -n \"$CASSANDRA_CONF\" ]; then\n" +
+                                     "  echo \"CASSANDRA_CONF=$CASSANDRA_CONF\"; exit 1\n" +
+                                     "fi\n" +
+                                     "env | sort\n");
+        Map<String, String> environment = new LinkedHashMap<>();
+        for (String variable : LiveState.TOOL_ENVIRONMENT)
+            environment.put(variable, "/hcd/" + variable);
+        environment.put("PATH", "/usr/bin:/bin");
+        environment.put("JAVA_HOME", "/jdk17");
+        environment.put("MAX_HEAP_SIZE", "1G");
+        environment.put("DSE_HOME", "/dse");
+        NodeReport.LiveCommand result = LiveState.run(nodetool.toString(), List.of(), "version", 30, null,
+                                                      environment);
+        assertThat(result.error).isNull();
+        assertThat(result.exitCode).as(result.output).isEqualTo(0);
+        assertThat(result.output).contains("JAVA_HOME=/jdk17\n", "MAX_HEAP_SIZE=1G\n", "DSE_HOME=/dse\n",
+                                           "PATH=" + environment.get("PATH") + '\n')
+                                 .doesNotContain("/hcd/");
+        assertThat(LiveState.TOOL_ENVIRONMENT).contains("CASSANDRA_CONF", "CASSANDRA_HOME", "CASSANDRA_INCLUDE",
+                                                        "CLASSPATH", "JVM_OPTS", "JAVA_OPTS", "JAVA_AGENT")
+                                              .doesNotContain("PATH", "JAVA_HOME", "MAX_HEAP_SIZE", "DSE_HOME");
+        // the environment given is left as it was
+        assertThat(environment).containsEntry("CASSANDRA_CONF", "/hcd/CASSANDRA_CONF");
+    }
+
+    /**
+     * The launcher run as the operator ran it: with CASSANDRA_HOME, CASSANDRA_CONF, CLASSPATH and JVM_OPTS (which
+     * the launcher sets for itself), CASSANDRA_INCLUDE and JAVA_OPTS exported, DSE's nodetool runs without any of them
+     * (a fake that fails when one is set) and the node is ready; with a nodetool that fails, the node is incomplete,
+     * exit 3.
+     */
+    @Test
+    public void theLauncherRunsDseNodetoolWithoutItsOwnEnvironment() throws IOException
+    {
+        Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
+        DseNodeFixture node = node();
+        Path nodetool = node.root.resolve("nodetool");
+        String script = "#!/bin/sh\n" +
+                        "for variable in CASSANDRA_HOME CASSANDRA_CONF CASSANDRA_INCLUDE CLASSPATH JVM_OPTS " +
+                        "JAVA_OPTS; do\n" +
+                        "  if env | grep -q \"^$variable=\"; then echo \"$variable is set\"; exit 1; fi\n" +
+                        "done\n" +
+                        "case \"$*\" in\n" +
+                        "  *netstats*) echo 'Not sending any streams.' ;;\n" +
+                        "esac\n" +
+                        "exit ${FAKE_NODETOOL_EXIT:-0}\n";
+        Files.write(nodetool, script.getBytes(StandardCharsets.UTF_8));
+        Files.setPosixFilePermissions(nodetool, PosixFilePermissions.fromString("rwx------"));
+        // ToolRunner exports JVM_OPTS too
+        Map<String, String> environment = Map.of("CASSANDRA_HOME", node.root.toString(),
+                                                 "CASSANDRA_CONF", node.root.toString(),
+                                                 "CASSANDRA_INCLUDE", node.root.resolve("cassandra.in.sh").toString(),
+                                                 "CLASSPATH", node.root.toString(),
+                                                 "JAVA_OPTS", "-Dexample=1");
+        Path json = temporaryFolder.getRoot().toPath().resolve("launcher.json");
+        List<String> command = new ArrayList<>(List.of("tools/bin/dsepreflight"));
+        command.addAll(List.of(node.args("--nodetool", nodetool.toString(), "--json", json.toString())));
+        ToolRunner.ToolResult ready = ToolRunner.invoke(environment, command);
+        assertThat(ready.getExitCode()).as("%s%s", ready.getStdout(), ready.getStderr())
+                                       .isEqualTo(DsePreflight.EXIT_READY);
+        NodeReport report = JsonUtils.JSON_OBJECT_MAPPER.readValue(Files.readAllBytes(json), NodeReport.class);
+        assertThat(report.result).isEqualTo(NodeReport.READY);
+        assertThat(report.live.values()).allMatch(result -> Integer.valueOf(0).equals(result.exitCode));
+
+        Map<String, String> failing = new HashMap<>(environment);
+        failing.put("FAKE_NODETOOL_EXIT", "1");
+        ToolRunner.ToolResult incomplete = ToolRunner.invoke(failing, command);
+        assertThat(incomplete.getExitCode()).as("%s%s", incomplete.getStdout(), incomplete.getStderr())
+                                            .isEqualTo(DsePreflight.EXIT_INCOMPLETE);
+        assertThat(incomplete.getStdout()).contains("Result: INCOMPLETE");
+    }
+
+    @Test
+    public void theEnvironmentRemovedHoldsEveryVariableTheScriptsOfTheToolSet() throws IOException
+    {
+        // an assignment (NAME=..., also after export or readonly) at the start of a command, after a separator
+        // (;, &&, ||, then, else, do), or the variable of a for loop or of read
+        Pattern assignment = Pattern.compile("(?:^|;|&&|\\|\\||\\bthen|\\belse|\\bdo)\\s*(?:(?:export|readonly)\\s+)?" +
+                                             "([A-Za-z_][A-Za-z0-9_]*)=|" +
+                                             "\\b(?:for\\s+([A-Za-z_][A-Za-z0-9_]*)\\s+in|read(?:\\s+-\\w+)*\\s+" +
+                                             "([A-Za-z_][A-Za-z0-9_]*))\\b");
+        Set<String> assigned = new TreeSet<>();
+        for (Path script : List.of(Path.of("tools", "bin", "dsepreflight"), Path.of("tools", "bin", "cassandra.in.sh")))
+        {
+            for (String line : Files.readAllLines(script, StandardCharsets.UTF_8))
+            {
+                if (line.trim().startsWith("#"))
+                    continue;
+                Matcher matcher = assignment.matcher(line.trim());
+                while (matcher.find())
+                    assigned.add(matcher.group(1) != null ? matcher.group(1)
+                                                          : matcher.group(2) != null ? matcher.group(2)
+                                                                                     : matcher.group(3));
+            }
+        }
+        assertThat(assigned).contains("CASSANDRA_HOME", "CASSANDRA_CONF", "CLASSPATH", "JVM_OPTS", "JAVA_AGENT",
+                                      "MAX_HEAP_SIZE");
+        // MAX_HEAP_SIZE is set only when it is empty: an exported value is the caller's
+        assigned.remove("MAX_HEAP_SIZE");
+        assertThat(LiveState.TOOL_ENVIRONMENT).containsAll(assigned);
+        Set<String> notAssigned = new TreeSet<>(LiveState.TOOL_ENVIRONMENT);
+        notAssigned.removeAll(assigned);
+        assertThat(notAssigned).containsExactly("CASSANDRA_INCLUDE", "JAVA_OPTS");
     }
 
     // ---- more blocking findings, one modified copy each ----
@@ -1962,7 +2231,10 @@ public class DsePreflightTest
         assertThat(arguments.err).contains("unexpected arguments: [unexpected]");
         Run help = run(json, "--help");
         assertThat(help.exitCode).isEqualTo(DsePreflight.EXIT_READY);
-        assertThat(help.out).contains("--nodetool").contains("Exit codes");
+        assertThat(help.out).contains("--nodetool").contains("--nodetool-java-home").contains("Exit codes");
+        assertThat(help.out.replaceAll("\\s+", " "))
+            .contains("Exit codes: 0 ready (warnings allowed), 1 blocking findings, 2 usage or inspection error, " +
+                      "3 incomplete (no blocking finding, the live state of --nodetool not read completely).");
         assertThat(json).doesNotExist();
     }
 
