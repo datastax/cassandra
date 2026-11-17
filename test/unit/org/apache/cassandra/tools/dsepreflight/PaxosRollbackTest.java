@@ -2307,6 +2307,8 @@ public class PaxosRollbackTest
             .contains("--commitlog-dir does not apply to --paxos-rollback");
         assertThat(assertExit(run(node, "--hints-dir", node.root.toString()), DsePreflight.EXIT_ERROR).err)
             .contains("--hints-dir does not apply to --paxos-rollback");
+        assertThat(assertExit(run(node, "--nodetool-java-home", node.root.toString()), DsePreflight.EXIT_ERROR).err)
+            .contains("--nodetool-java-home does not apply to --paxos-rollback");
         assertThat(assertExit(run(node, "--serial-consistency", "rf3=SERIAL", "--serial-consistency", "rf3=LOCAL_SERIAL"), DsePreflight.EXIT_ERROR).err)
             .contains("--serial-consistency names keyspace rf3 more than once");
         assertThat(assertExit(run(node, "--paxos-dir", node.root.resolve("absent").toString()), DsePreflight.EXIT_ERROR).err)
