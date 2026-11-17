@@ -58,6 +58,7 @@ import org.apache.cassandra.index.sai.disk.format.IndexComponent;
 import org.apache.cassandra.index.sai.disk.format.IndexComponents;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.metrics.IndexGroupMetrics;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.TableStateMetrics;
@@ -251,6 +252,13 @@ public class StorageAttachedIndexGroup implements Index.Group, INotificationCons
             public void rangeTombstone(RangeTombstone tombstone)
             {
                 forEach(indexer -> indexer.rangeTombstone(tombstone));
+            }
+
+            @Override
+            public void finish()
+            {
+                // the memtable has stored this write's cells, so memtable vector indexes can refer to them
+                CassandraOnHeapGraph.attachStoredCells();
             }
 
             private void forEach(Consumer<Index.Indexer> action)

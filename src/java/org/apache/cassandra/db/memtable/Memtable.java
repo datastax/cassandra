@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.db.memtable;
 
+import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.annotation.concurrent.NotThreadSafe;
 
@@ -247,6 +248,15 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource, CellSo
 
     /// Get a cell for the specified path directly.
     Cell<?> getCellForKey(DecoratedKey partitionKey, Clustering<?> clustering, ColumnMetadata column);
+
+    /// The value of a cell as this memtable stores it, read in place rather than copied, for an index that refers to
+    /// stored values instead of keeping copies. The buffer stays valid until this memtable is discarded, even if the
+    /// cell is overwritten; it must not be modified. Null if the cell is not found or this memtable does not keep
+    /// values in place.
+    default ByteBuffer getStoredCellValue(DecoratedKey partitionKey, Clustering<?> clustering, ColumnMetadata column)
+    {
+        return null;
+    }
 
     interface MemtableUnfilteredPartitionIterator extends UnfilteredPartitionIterator
     {

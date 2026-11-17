@@ -474,6 +474,23 @@ public class TrieMemtable extends AbstractShardedMemtable
                                                                    // buffer after the opOrder is closed
     }
 
+    /// Values too large for the trie's own cells, vectors among them, are stored in memory the memtable frees only when
+    /// it is discarded (see [CellDataBufferManager]), so the stored value can be read in place until then.
+    @Override
+    public ByteBuffer getStoredCellValue(DecoratedKey partitionKey, Clustering<?> clustering, ColumnMetadata column)
+    {
+        TableMetadata metadata = metadata();
+        ByteComparable key = v -> ByteSource.concat(
+            partitionKey.asComparableBytes(v),
+            metadata.comparator.asByteComparable(clustering).asComparableBytes(v),
+            TrieBackedRow.columnKey(clustering == Clustering.STATIC_CLUSTERING ? metadata.staticColumns()
+                                                                               : metadata.regularColumns(),
+                                    column));
+
+        Object cell = mergedTrie.get(key);
+        return cell instanceof TrieCellData.External ? ((TrieCellData.External) cell).value() : null;
+    }
+
     @Override
     public UnfilteredRowIterator rowIterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
     {

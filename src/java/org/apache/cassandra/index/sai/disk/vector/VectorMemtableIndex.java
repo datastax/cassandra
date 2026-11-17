@@ -39,6 +39,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.github.jbellis.jvector.graph.SearchResult;
+import io.github.jbellis.jvector.quantization.AsymmetricHashing;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
@@ -101,6 +102,18 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
         super(indexContext, mt);
         this.columnQueryMetrics = (ColumnQueryMetrics.VectorIndexMetrics) indexContext.getColumnQueryMetrics();
         this.graph = new CassandraOnHeapGraph<>(indexContext, true, mt);
+    }
+
+    /** The ASH model this index encodes with, or null without ASH or while it still scores exactly. */
+    public AsymmetricHashing ashModel()
+    {
+        return graph.ashModel();
+    }
+
+    @VisibleForTesting
+    public CassandraOnHeapGraph<PrimaryKey> getGraph()
+    {
+        return graph;
     }
 
     @Override

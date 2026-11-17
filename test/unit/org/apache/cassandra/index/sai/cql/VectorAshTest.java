@@ -37,6 +37,7 @@ import org.apache.cassandra.index.sai.disk.v2.V2VectorIndexSearcher;
 import org.apache.cassandra.index.sai.disk.vector.CassandraOnHeapGraph;
 import org.apache.cassandra.index.sai.disk.vector.JVectorVersionUtil;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression;
+import org.apache.cassandra.index.sai.disk.vector.VectorMemtableIndex;
 import org.apache.cassandra.index.sai.disk.vector.VectorSourceModel;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -152,6 +153,52 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
                 // flushed and compacted ASH segments rerank with NVQ whenever NVQ is enabled for this version
                 assertEquals(JVectorVersionUtil.shouldWriteNVQ(64, version), searcher.graph.usesNVQ());
             }
+        assertThat(fractionFindingThemselves(vectors)).isGreaterThanOrEqualTo(0.9);
+    }
+
+    @Test
+    public void memtableIndexReadsTheMemtablesStoredVectors()
+    {
+        // A trie memtable's enable_ash index keeps no full-precision copy of its vectors: once each write completes,
+        // they read the memtable's stored cells in place, except a cold index's exact-phase sample until it has a
+        // model. Searches still find every stored vector, after overwrites too, before and after the memtable is
+        // flushed.
+        createTable("CREATE TABLE %s (pk int, vec vector<float, 64>, PRIMARY KEY(pk)) WITH memtable = 'trie'");
+        createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' " +
+                    "WITH OPTIONS = {'enable_ash' : 'true', 'similarity_function' : 'dot_product'}");
+
+        List<float[]> vectors = new ArrayList<>();
+        for (int i = 0; i < 2000; i++)
+        {
+            float[] v = randomVector(64);
+            normalize(v);
+            vectors.add(v);
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(v));
+        }
+        for (int i = 0; i < 2000; i += 20)
+        {
+            float[] v = randomVector(64);
+            normalize(v);
+            vectors.set(i, v);
+            execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", i, vector(v));
+        }
+
+        var sai = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.listIndexes().iterator().next();
+        var memtableIndexes = sai.getIndexContext().getLiveMemtables().values();
+        assertEquals(1, memtableIndexes.size());
+        var graph = ((VectorMemtableIndex) memtableIndexes.iterator().next()).getGraph();
+        assertEquals(2100, graph.size());
+        // at most the vectors added before the index had a model, 20 per dimension, keep their own copies
+        assertThat(graph.vectorsHoldingCopies()).isLessThanOrEqualTo(20 * 64);
+        // one more write after the model attaches them too
+        float[] last = randomVector(64);
+        normalize(last);
+        vectors.set(0, last);
+        execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 0, vector(last));
+        assertEquals(0, graph.vectorsHoldingCopies());
+
+        assertThat(fractionFindingThemselves(vectors)).isGreaterThanOrEqualTo(0.9);
+        flush();
         assertThat(fractionFindingThemselves(vectors)).isGreaterThanOrEqualTo(0.9);
     }
 

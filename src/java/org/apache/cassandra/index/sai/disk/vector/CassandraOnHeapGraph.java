@@ -26,7 +26,10 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Queue;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.TimeUnit;
@@ -77,6 +80,7 @@ import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.config.CassandraRelevantProperties;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.compaction.CompactionSSTable;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.db.memtable.Memtable;
@@ -98,10 +102,12 @@ import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter;
 import org.apache.cassandra.index.sai.disk.v5.V5VectorPostingsWriter.Structure;
 import org.apache.cassandra.index.sai.disk.vector.VectorCompression.CompressionType;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
+import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriter;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -130,7 +136,11 @@ public class CassandraOnHeapGraph<T> implements Accountable
     // We use the metable reference for easier tracing.
     private final String source;
     private final ColumnQueryMetrics.VectorIndexMetrics columnQueryMetrics;
-    private final ConcurrentVectorValues vectorValues;
+    private final RamAwareVectorValues vectorValues;
+    // the memtable's vectors, read in place, when a memtable's ASH index keeps no full-precision copy; null otherwise
+    private final MemtableVectorValues memtableVectors;
+    private final Memtable memtable;
+    private final ColumnMetadata column;
     private final GraphIndexBuilder builder; // null when the index builds with ASH; see builder()
     private final StreamingASHIndex streamingIndex; // null unless the index builds with ASH
     private final VectorCompression searchCompression; // how graph searches score: exactly, or with ASH codes
@@ -164,7 +174,12 @@ public class CassandraOnHeapGraph<T> implements Accountable
         var termComparator = context.getValidator();
         serializer = (VectorType.VectorSerializer) termComparator.getSerializer();
         var dimension = ((VectorType<?>) termComparator).dimension;
-        vectorValues = new ConcurrentVectorValues(dimension);
+        this.memtable = memtable;
+        this.column = context.getDefinition();
+        // A memtable's ASH index reads full-precision vectors from the memtable's stored cells instead of keeping a
+        // copy (see MemtableVector); other indexes keep their own copy.
+        memtableVectors = forSearching && memtable != null && indexConfig.isAshEnabled() ? new MemtableVectorValues(dimension) : null;
+        vectorValues = memtableVectors != null ? memtableVectors : new ConcurrentVectorValues(dimension);
         similarityFunction = indexConfig.getSimilarityFunction();
         sourceModel = indexConfig.getSourceModel();
         // We need to be able to inexpensively distinguish different vectors, with a slower path
@@ -172,6 +187,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // based Map (which only needs to look at vector elements until a difference is found)
         // is thus a better option than hash-based (which has to look at all elements to compute the hash).
         postingsMap = new ConcurrentSkipListMap<>((a, b) -> {
+            // a memtable's ASH index keys every lookup with a MemtableVector, ordered by hash first so that most
+            // comparisons never read the stored vectors
+            if (a instanceof MemtableVector && b instanceof MemtableVector)
+                return MemtableVector.compare((MemtableVector) a, (MemtableVector) b);
             return Arrays.compare(((FloatArray) a).array(), ((FloatArray) b).array());
         });
         postingsByOrdinal = new DenseIntMap<>(1024);
@@ -208,10 +227,17 @@ public class CassandraOnHeapGraph<T> implements Accountable
                                                                                                     indexConfig.getNeighborhoodOverflow(1.0f),
                                                                                                     indexConfig.getAlpha(dimension > 3 ? 1.2f : 2.0f),
                                                                                                     indexConfig.isHierarchyEnabled() && jvectorVersion >= 4);
-            var ash = getAshIfPresent(context);
-            streamingIndex = ash == null
+            // The model of another live memtable's index (one still flushing, say) is the newest in this index's
+            // lineage; then the newest flushed segment's. Only an index with neither starts cold.
+            AsymmetricHashing model = forSearching ? liveMemtableAshModel(context, encodedBits) : null;
+            if (model == null)
+            {
+                var ash = getAshIfPresent(context);
+                model = ash == null ? null : ash.model;
+            }
+            streamingIndex = model == null
                              ? StreamingASHIndex.coldStart(vectorValues, similarityFunction, encodedBits, ASH_BITS_PER_DIMENSION, builders, options)
-                             : StreamingASHIndex.withModel(vectorValues, similarityFunction, ash.model, builders, options);
+                             : StreamingASHIndex.withModel(vectorValues, similarityFunction, model, builders, options);
             builder = null;
         }
         else
@@ -253,7 +279,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
      */
     public int getOrdinal(VectorFloat<?> vector)
     {
-        VectorPostings<T> postings = postingsMap.get(vector);
+        VectorPostings<T> postings = postingsMap.get(mapKey(vector));
         // There is a small race from when the postings list is created to when it is assigned an ordinal,
         // so we do not assert that the ordinal is set here
         return postings == null ? -1 : postings.getOrdinal(false);
@@ -301,17 +327,27 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         var bytesUsed = 0L;
 
+        // A memtable's ASH index keys its maps and its vector store with one MemtableVector per distinct vector, which
+        // reads the memtable's stored cell once the write completes.
+        VectorFloat<?> stored = vector;
+        if (memtableVectors != null)
+        {
+            var lookup = new MemtableVector(vector);
+            VectorFloat<?> existing = existingVector(lookup);
+            stored = existing != null ? existing : lookup;
+        }
+
         // Store a cached reference to the vector for brute force computations later. There is a small race
         // condition here: if inserts for the same PrimaryKey add different vectors, vectorsByKey might
         // become out of sync with the graph.
         if (vectorsByKey != null)
         {
-            vectorsByKey.put(key, vector);
+            vectorsByKey.put(key, stored);
             // The size of the entries themselves are counted below, so just count the two extra references
             bytesUsed += RamUsageEstimator.NUM_BYTES_OBJECT_REF * 2L;
         }
 
-        VectorPostings<T> postings = postingsMap.get(vector);
+        VectorPostings<T> postings = postingsMap.get(stored);
         // if the vector is already in the graph, all that happens is that the postings list is updated
         // otherwise, we add the vector in this order:
         // 1. to the postingsMap
@@ -323,17 +359,27 @@ public class CassandraOnHeapGraph<T> implements Accountable
         {
             postings = new VectorPostings<>(key);
             // since we are using ConcurrentSkipListMap, it is NOT correct to use computeIfAbsent here
-            if (postingsMap.putIfAbsent(vector, postings) == null)
+            if (postingsMap.putIfAbsent(stored, postings) == null)
             {
                 // we won the race to add the new entry; assign it an ordinal and add to the other structures
                 int ordinal = nextOrdinal.getAndIncrement();
                 postings.setOrdinal(ordinal);
                 bytesUsed += RamEstimation.concurrentHashMapRamUsed(1); // the new posting Map entry
-                bytesUsed += vectorValues.add(ordinal, vector);
+                if (memtableVectors != null)
+                {
+                    bytesUsed += memtableVectors.add(ordinal, (MemtableVector) stored);
+                    awaitStoredCell((MemtableVector) stored, key);
+                }
+                else
+                {
+                    bytesUsed += ((ConcurrentVectorValues) vectorValues).add(ordinal, vector);
+                }
                 bytesUsed += postings.ramBytesUsed();
                 var success = postingsByOrdinal.compareAndPut(ordinal, null, postings);
                 assert success : "postingsByOrdinal already contains an entry for ordinal " + ordinal;
                 bytesUsed += streamingIndex == null ? builder.addGraphNode(ordinal, vector) : streamingIndex.add(ordinal);
+                if (memtableVectors != null)
+                    attachColdStartCells();
 
                 // If necessary, check if the vector is unit length.
                 if (!sourceModel.hasKnownUnitLengthVectors() && allVectorsAreUnitLength)
@@ -344,7 +390,10 @@ public class CassandraOnHeapGraph<T> implements Accountable
             }
             else
             {
-                postings = postingsMap.get(vector);
+                postings = postingsMap.get(stored);
+                // another write added the same vector first; point this key at its entry
+                if (memtableVectors != null && vectorsByKey != null)
+                    vectorsByKey.put(key, existingVector(stored));
             }
         }
         // postings list already exists, just add the new key (if it's not already in the list)
@@ -356,6 +405,16 @@ public class CassandraOnHeapGraph<T> implements Accountable
         return bytesUsed;
     }
 
+    /**
+     * The number of live vectors that keep their own full-precision copy: zero for a memtable's ASH index whose
+     * memtable keeps values in place, once each write completes; every vector otherwise.
+     */
+    @VisibleForTesting
+    public int vectorsHoldingCopies()
+    {
+        return memtableVectors == null ? vectorValues.size() : memtableVectors.vectorsHoldingCopies();
+    }
+
     public Collection<T> keysFromOrdinal(int node)
     {
         return postingsByOrdinal.get(node).getPostings();
@@ -365,7 +424,8 @@ public class CassandraOnHeapGraph<T> implements Accountable
     {
         if (vectorsByKey == null)
             throw new IllegalStateException("vectorsByKey is not initialized");
-        return vectorsByKey.get(key);
+        VectorFloat<?> vector = vectorsByKey.get(key);
+        return vector instanceof MemtableVector ? ((MemtableVector) vector).vector() : vector;
     }
 
     public void remove(ByteBuffer term, T key)
@@ -374,7 +434,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
         var rawVector = serializer.deserializeFloatArray(term);
         VectorFloat<?> v = vts.createFloatVector(rawVector);
-        var postings = postingsMap.get(v);
+        var postings = postingsMap.get(mapKey(v));
         if (postings == null)
         {
             // it's possible for this to be called against a different memtable than the one
@@ -388,7 +448,90 @@ public class CassandraOnHeapGraph<T> implements Accountable
         if (vectorsByKey != null)
             // On updates to a row, we call add then remove, so we must pass the key's value to ensure we only remove
             // the deleted vector from vectorsByKey
+            removeVectorForKey(key, v);
+    }
+
+    private void removeVectorForKey(T key, VectorFloat<?> v)
+    {
+        if (memtableVectors == null)
+        {
             vectorsByKey.remove(key, v);
+            return;
+        }
+        // the map holds this index's MemtableVector, which equals v in content but not as an object
+        VectorFloat<?> current = vectorsByKey.get(key);
+        if (current != null && Arrays.equals(((FloatArray) current).array(), ((FloatArray) v).array()))
+            vectorsByKey.remove(key, current);
+    }
+
+    /** The postings map's key type for a vector: a MemtableVector for a memtable's ASH index, the vector otherwise. */
+    private VectorFloat<?> mapKey(VectorFloat<?> vector)
+    {
+        return memtableVectors == null || vector instanceof MemtableVector ? vector : new MemtableVector(vector);
+    }
+
+    /** The map key already held for a vector with the same floats, or null. */
+    private VectorFloat<?> existingVector(VectorFloat<?> vector)
+    {
+        var map = (ConcurrentSkipListMap<VectorFloat<?>, VectorPostings<T>>) postingsMap;
+        vector = mapKey(vector);
+        VectorFloat<?> candidate = map.ceilingKey(vector);
+        return candidate != null && map.comparator().compare(candidate, vector) == 0 ? candidate : null;
+    }
+
+    // Vectors added by this thread's current write, attached to the memtable's stored cells once the write completes
+    private static final ThreadLocal<List<Runnable>> pendingStoredCells = ThreadLocal.withInitial(ArrayList::new);
+    // Vectors added while this index scored exactly, attached once it has a model
+    private final Queue<Runnable> coldStartCells = new ConcurrentLinkedQueue<>();
+
+    private void awaitStoredCell(MemtableVector vector, T key)
+    {
+        if (!(key instanceof PrimaryKey))
+            return;
+        PrimaryKey primaryKey = (PrimaryKey) key;
+        Runnable attach = () -> {
+            Clustering<?> clustering = column.isStatic() ? Clustering.STATIC_CLUSTERING : primaryKey.clustering();
+            long released = memtableVectors.attach(vector, memtable.getStoredCellValue(primaryKey.partitionKey(), clustering, column));
+            // the incoming copy was charged when added; return it to the memtable's pool now that the stored copy is read
+            if (released > 0)
+                memtable.markExtraOnHeapUsed(-released, null);
+        };
+        // A cold index scores its first vectors exactly, reading each many times; they keep their own copies, a
+        // bounded sample, until it has a model, and are attached then (see attachColdStartCells).
+        if (streamingIndex != null && streamingIndex.model() == null)
+            coldStartCells.add(attach);
+        else
+            pendingStoredCells.get().add(attach);
+    }
+
+    /** Attaches the vectors a cold index added before it had a model, once it has one. */
+    private void attachColdStartCells()
+    {
+        if (coldStartCells.isEmpty() || streamingIndex.model() == null)
+            return;
+        Runnable attach;
+        while ((attach = coldStartCells.poll()) != null)
+            attach.run();
+    }
+
+    /**
+     * Points the vectors that this thread's write added to memtable ASH indexes at the memtable's stored cells. Called
+     * when the write completes, after the memtable has stored them; a vector whose cell is not found keeps its own copy.
+     */
+    public static void attachStoredCells()
+    {
+        List<Runnable> pending = pendingStoredCells.get();
+        if (pending.isEmpty())
+            return;
+        try
+        {
+            for (Runnable attach : pending)
+                attach.run();
+        }
+        finally
+        {
+            pending.clear();
+        }
     }
 
     /**
@@ -539,11 +682,16 @@ public class CassandraOnHeapGraph<T> implements Accountable
             if (V5OnDiskFormat.writeV5VectorPostings(perIndexComponents.version()))
             {
                 assert deletedOrdinals.isEmpty(); // V5 format does not support recording deleted ordinals
-                postingsPosition = new V5VectorPostingsWriter<T>(remappedPostings)
-                                   .writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap);
+                // a memtable's ASH index keys its postings by MemtableVector, which a vector read back cannot look up,
+                // so its postings are found by ordinal
+                var postingsWriter = new V5VectorPostingsWriter<T>(remappedPostings);
+                postingsPosition = memtableVectors != null
+                                   ? postingsWriter.writePostings(postingsOutput.asSequentialWriter(), postingsByOrdinal::get)
+                                   : postingsWriter.writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap);
             }
             else
             {
+                assert memtableVectors == null : "ASH indexes write V5 postings";
                 IntUnaryOperator newToOldMapper = remappedPostings.ordinalMapper::newToOld;
                 postingsPosition = new V2VectorPostingsWriter<T>(remappedPostings.structure == Structure.ONE_TO_ONE, builder().getGraph().size(), newToOldMapper)
                                    .writePostings(postingsOutput.asSequentialWriter(), vectorValues, postingsMap, deletedOrdinals);
@@ -667,6 +815,23 @@ public class CassandraOnHeapGraph<T> implements Accountable
     static int ashEncodedBits(IndexWriterConfig config, int dimension)
     {
         return AsymmetricHashing.HEADER_BITS + ASH_BITS_PER_DIMENSION * config.getAshDimensions(dimension);
+    }
+
+    /**
+     * The ASH model of another live memtable index of this index with the given code size, such as the one of a
+     * memtable still flushing, or null if none has one yet.
+     */
+    private static AsymmetricHashing liveMemtableAshModel(IndexContext indexContext, int encodedBits)
+    {
+        for (var memtableIndex : indexContext.getLiveMemtables().values())
+        {
+            if (!(memtableIndex instanceof VectorMemtableIndex))
+                continue;
+            AsymmetricHashing model = ((VectorMemtableIndex) memtableIndex).ashModel();
+            if (model != null && model.encodedBits == encodedBits)
+                return model;
+        }
+        return null;
     }
 
     /**
