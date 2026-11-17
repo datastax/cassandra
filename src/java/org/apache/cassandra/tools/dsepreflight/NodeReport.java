@@ -38,6 +38,14 @@ public final class NodeReport
     public static final int FORMAT_VERSION = 1;
     public static final String READY = "READY";
     public static final String BLOCKED = "BLOCKED";
+    /**
+     * No blocking finding, but the live state asked for with {@code --nodetool} was not read completely
+     * ({@link #LIVE_UNAVAILABLE}): not every check of the running node could be made, so the node is not declared
+     * ready.
+     */
+    public static final String INCOMPLETE = "INCOMPLETE";
+    /** The code of the warning that a {@code nodetool} command of the live state failed, timed out or could not run. */
+    public static final String LIVE_UNAVAILABLE = "LIVE_UNAVAILABLE";
     /** The {@link #kind} of a node report. */
     public static final String NODE = "node";
 
@@ -56,7 +64,7 @@ public final class NodeReport
     /** the host name the tool ran on */
     @JsonProperty("hostname")
     public String hostname;
-    /** {@link #READY} or {@link #BLOCKED} */
+    /** {@link #READY}, {@link #BLOCKED} or {@link #INCOMPLETE}, as {@link #resultOfFindings()} gives it */
     @JsonProperty("result")
     public String result;
     @JsonProperty("node")
@@ -171,5 +179,23 @@ public final class NodeReport
     public boolean blocked()
     {
         return count(Finding.Severity.BLOCKING) > 0;
+    }
+
+    /** Whether the live state was asked for and not read completely: a {@link #LIVE_UNAVAILABLE} finding. */
+    @JsonIgnore
+    public boolean liveStateIncomplete()
+    {
+        return findings.stream().anyMatch(f -> LIVE_UNAVAILABLE.equals(f.code));
+    }
+
+    /**
+     * The result the findings give: {@link #BLOCKED} with a blocking finding; else {@link #INCOMPLETE} when the live
+     * state was not read completely ({@link #liveStateIncomplete()}); else {@link #READY}. Without
+     * {@code --nodetool} no live state is asked for, and the result is that of the files alone.
+     */
+    @JsonIgnore
+    public String resultOfFindings()
+    {
+        return blocked() ? BLOCKED : liveStateIncomplete() ? INCOMPLETE : READY;
     }
 }

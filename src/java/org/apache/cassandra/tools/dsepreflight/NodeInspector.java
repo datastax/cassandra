@@ -138,8 +138,6 @@ final class NodeInspector
                                                  "delivered the hints files written before, which stay encrypted (this tool names those left, " +
                                                  "under HINTS_COMPRESSION); all of it before the first node of the cluster is upgraded; " +
                                                  SYSTEM_KEY_LOSS;
-    /** What DSE's nodetool answers for a command it does not have (DSE 6.8.65 and 6.9.26 have no listpendinghints). */
-    static final String UNKNOWN_COMMAND = "Found unexpected parameters";
     /** The longest parameters the header of a DSE hints file is taken to hold; a longer length is a damaged header. */
     static final int MAX_HINTS_PARAMETERS_BYTES = 64 * 1024;
     /** The default {@code ssl_storage_port} of DSE 6 and of HCD 2.0. */
@@ -243,7 +241,7 @@ final class NodeInspector
         guarded("the upgrade path", this::buildUpgradePath);
 
         findings.sort(Comparator.comparing(f -> f.severity));
-        report.result = report.blocked() ? NodeReport.BLOCKED : NodeReport.READY;
+        report.result = report.resultOfFindings();
         return report;
     }
 
@@ -1753,7 +1751,7 @@ final class NodeInspector
         List<String> unavailable = new ArrayList<>();
         List<String> unknownCommands = new ArrayList<>();
         live.forEach((command, result) -> {
-            if (result.error == null && result.exitCode != null && result.exitCode != 0 && result.output != null && result.output.contains(UNKNOWN_COMMAND))
+            if (LiveState.unknownCommand(command, result))
                 unknownCommands.add("nodetool " + command);
             else if (result.error != null || result.exitCode == null || result.exitCode != 0)
                 unavailable.add("nodetool " + command + ": " + (result.error != null ? result.error : "exit code " + result.exitCode + ' ' + firstLine(result.output)));
@@ -1762,9 +1760,15 @@ final class NodeInspector
             findings.add(info("LIVE_COMMAND_UNKNOWN", "commands the nodetool of this DSE release does not have, skipped: " + list(unknownCommands) +
                                                       " (the hints directory is checked on disk)"));
         if (!unavailable.isEmpty())
-            findings.add(warning("LIVE_UNAVAILABLE", "the live state could not be read completely: " + list(unavailable),
-                                 "check that DSE runs and that nodetool reaches it (host, port, user and password file: --nodetool-arg, with -pwf " +
-                                 "<file> rather than -pw <password>, which the process list shows)"));
+            findings.add(warning(NodeReport.LIVE_UNAVAILABLE,
+                                 "the live state could not be read completely (not every nodetool command ran), so " +
+                                 "the node cannot be declared READY: " + list(unavailable),
+                                 "check that DSE runs and that nodetool reaches it (host, JMX port, user and " +
+                                 "password file: --nodetool-arg, with -pwf <file> rather than -pw <password>, which " +
+                                 "the process list shows; DSE's nodetool runs without this environment's " +
+                                 "CASSANDRA_HOME, CASSANDRA_CONF, CASSANDRA_INCLUDE, JAVA_OPTS and the other " +
+                                 "variables of this tool's launch, and on the Java of this tool unless " +
+                                 "--nodetool-java-home <dir> names another), then run the tool again"));
 
         String status = output("status");
         if (status != null)
