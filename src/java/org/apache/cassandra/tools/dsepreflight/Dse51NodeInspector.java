@@ -1483,10 +1483,11 @@ final class Dse51NodeInspector
                               "the DSE 5.1 upgrade marker " + marker + " exists" + where + ": HCD 2.0 writes it at " +
                               "its first start in DSE_5_1 mode, and a rollback leaves it; keep it while any node " +
                               "runs HCD 2.0 and, after the last rollback, while the node may be upgraded again; " +
-                              "delete it, with " + record + ", once every node of the cluster runs HCD 2.0, with the " +
-                              "node stopped and set to internode_compatibility_mode NONE, or when the upgrade is " +
-                              "abandoned for good; while it exists, HCD 2.0 refuses to start on this node with NONE " +
-                              "or DSE_6; DSE 5.1 does not read it"));
+                              "delete it, with " + record + " and " + DsePeersRecord.DSE_51_FILE_NAME + ", once " +
+                              "every node of the cluster runs HCD 2.0, with the node stopped and set to " +
+                              "internode_compatibility_mode NONE with storage_compatibility_mode HCD_1, or when the " +
+                              "upgrade is abandoned for good; while it exists, HCD 2.0 refuses to start on this node " +
+                              "with NONE or DSE_6; DSE 5.1 does not read it"));
         if (new File(directory, DsePeersRecord.DSE_51_FILE_NAME).exists())
             findings.add(info("NODE_RAN_HCD",
                               "the metadata directory" + where + " holds " + DsePeersRecord.DSE_51_FILE_NAME + ", a " +
@@ -1520,7 +1521,7 @@ final class Dse51NodeInspector
                               "5.1's columns of system.local and system.peers that HCD 2.0 read at its first start " +
                               "in DSE_5_1 mode, files of the upgrade; delete them with the DSE 5.1 upgrade marker " +
                               "once every node runs HCD 2.0, with the node stopped and set to " +
-                              "internode_compatibility_mode NONE"));
+                              "internode_compatibility_mode NONE with storage_compatibility_mode HCD_1"));
     }
 
     /**

@@ -502,12 +502,17 @@ public class Dse51PreflightTest
         assertThat(run.messages("MIXED_PHASE_MARKER"))
         .startsWith("the DSE 5.1 upgrade marker " + node.metadata.resolve("dse51-upgrade-in-progress") + " exists " +
                     "(DSE 5.1 has no metadata directory: " + node.metadata + " is the one read for HCD 2.0's files, " +
-                    "given by --metadata-dir)");
+                    "given by --metadata-dir)")
+        // the flag drop sets both modes, neither of whose DSE 5.1 values a start accepts without the other
+        .contains(" with the node stopped and set to internode_compatibility_mode NONE with " +
+                  "storage_compatibility_mode HCD_1, or when the upgrade is abandoned for good; ");
         assertThat(run.findings("DSE6_UPGRADE_FILES")).isEmpty();
         assertThat(run.messages("NODE_RAN_HCD")).contains("holds dse51-peers-seen");
         assertThat(run.messages("DSE51_SYSTEM_COLUMNS"))
         .contains("holds dse51-system-columns, dse51-system-columns.tmp, " +
-                  "dse51-system-columns.unreadable-1793958236846: ");
+                  "dse51-system-columns.unreadable-1793958236846: ")
+        .endsWith(", with the node stopped and set to internode_compatibility_mode NONE with " +
+                  "storage_compatibility_mode HCD_1");
     }
 
     /** A metadata directory that can be listed but not searched: DSE 6's files may be there, as the start says. */
