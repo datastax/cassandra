@@ -186,8 +186,9 @@ public class Dse51ModeConfigTest
         String announcement = "Running in internode_compatibility_mode DSE_5_1: the node writes big me sstables, " +
                               "which DSE 5.1 reads, with numeric generations, and requires paxos_variant v1 and " +
                               "storage_compatibility_mode DSE_5_1; it speaks the pre-4.0 dialect with DSE 5.1 nodes, " +
-                              "with the schema frozen (unless allow_ddl is set; a compressor or a column type DSE " +
-                              "5.1 does not read is refused even then) and repair and topology changes refused";
+                              "with the schema frozen (unless allow_ddl is set; a compressor DSE 5.1 does not read, " +
+                              "or a column type this software does not write for it, is refused even then) and " +
+                              "repair and topology changes refused";
         assertThat(appender.list).hasSize(1)
                                  .allMatch(e -> e.getLevel() == Level.WARN &&
                                                 e.getFormattedMessage().equals(announcement));

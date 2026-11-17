@@ -221,12 +221,13 @@ public abstract class AlterSchemaStatement implements CQLStatement.SingleKeyspac
      * refuses a result that creates a table or a view, or changes its compression, with a compressor DSE 5.1 does not
      * read or with encryption ({@link Dse51Compressors#refusedStatementChanges}), so that such a table is refused when
      * the statement runs, not at the next start of the node, and one that creates or changes a table or a view so that
-     * a column has a type DSE 5.1 cannot read ({@link Dse51ColumnTypes#refusedStatementChanges}), which no sstable
-     * written for DSE 5.1 can hold. Applied by the same update handler under the same lock as the statement it wraps,
-     * which it applies in full first, so a statement that fails to apply, or that the schema freeze refuses, fails with
-     * its own error. It adds no side effect but the refusal, counted once per reason (its compression, a column type).
-     * A statement refused for both names both, after one {@link Dse51Compressors#STATEMENT_REFUSAL}. It is not a
-     * {@code CQLStatement}: the schema announcement events take the statement it wraps ({@link #statementOf}).
+     * a column has a type this software does not write for DSE 5.1 ({@link Dse51ColumnTypes#refusedStatementChanges}),
+     * which no sstable written for DSE 5.1 can hold. Applied by the same update handler under the same lock as the
+     * statement it wraps, which it applies in full first, so a statement that fails to apply, or that the schema freeze
+     * refuses, fails with its own error. It adds no side effect but the refusal, counted once per reason (its
+     * compression, a column type). A statement refused for both names both, after one
+     * {@link Dse51Compressors#STATEMENT_REFUSAL}. It is not a {@code CQLStatement}: the schema announcement events take
+     * the statement it wraps ({@link #statementOf}).
      */
     private static final class Dse51SSTableOutputCheck implements SchemaTransformation
     {

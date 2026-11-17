@@ -68,7 +68,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * The column types of the big me sstables written for DSE 5.1: the types DSE 5.1.51 reads, their names as Cassandra
  * 3.x writes them, and the refusal, in {@code internode_compatibility_mode: DSE_5_1}, of a schema statement that would
- * give a table a type DSE 5.1 cannot read.
+ * give a table a type this software does not write for DSE 5.1.
  */
 public class Dse51ColumnTypesTest extends CQLTester
 {
@@ -120,8 +120,9 @@ public class Dse51ColumnTypesTest extends CQLTester
         assertThat(Dse51ColumnTypes.unreadable(nonFrozen)).isEqualTo("non-frozen " + nonFrozen.asCQL3Type());
         assertThatThrownBy(() -> Dse51ColumnTypes.sstableTypeName(vector))
         .isInstanceOf(IllegalStateException.class)
-        .hasMessage("A big me sstable for DSE 5.1 cannot hold a column of type " + vector + ": DSE 5.1 cannot read " +
-                    vector);
+        .hasMessage("A big me sstable for DSE 5.1 cannot hold a column of type " + vector + ": " + vector + " is " +
+                    "outside the types this software writes for DSE 5.1 (those of Cassandra 3.11 and DSE's " +
+                    "geometric and date range types)");
     }
 
     @Test
@@ -191,11 +192,12 @@ public class Dse51ColumnTypesTest extends CQLTester
                                              "e vector<float, 2>)"))
             .isInstanceOf(InvalidRequestException.class)
             .hasMessage("internode_compatibility_mode DSE_5_1 refuses the statement: " + KEYSPACE + ".vectors.e (" +
-                        vector + ") is of a type DSE 5.1 cannot read, so a DSE 5.1 node could not open the sstables " +
-                        "this node writes for it");
+                        vector + ") is of a type this software does not write for DSE 5.1, so this node could " +
+                        "write no sstable a DSE 5.1 node reads for it");
             assertThatThrownBy(() -> execute("ALTER TABLE " + KEYSPACE + '.' + table + " ADD e vector<float, 2>"))
             .isInstanceOf(InvalidRequestException.class)
-            .hasMessageContaining(KEYSPACE + '.' + table + ".e (" + vector + ") is of a type DSE 5.1 cannot read");
+            .hasMessageContaining(KEYSPACE + '.' + table + ".e (" + vector + ") is of a type this software does " +
+                                  "not write for DSE 5.1");
             assertThat(Schema.instance.getTableMetadata(KEYSPACE, "vectors")).isNull();
             assertThat(Schema.instance.getTableMetadata(KEYSPACE, table).getColumn(UTF8Type.instance.decompose("e")))
             .isNull();
@@ -207,8 +209,9 @@ public class Dse51ColumnTypesTest extends CQLTester
             .isInstanceOf(InvalidRequestException.class)
             .hasMessageStartingWith("internode_compatibility_mode DSE_5_1 refuses the statement: " + KEYSPACE +
                                     ".both (ZstdCompressor)")
-            .hasMessageEndingWith("compression; " + KEYSPACE + ".both.e (" + vector + ") is of a type DSE 5.1 cannot " +
-                                  "read, so a DSE 5.1 node could not open the sstables this node writes for it")
+            .hasMessageEndingWith("compression; " + KEYSPACE + ".both.e (" + vector + ") is of a type this software " +
+                                  "does not write for DSE 5.1, so this node could write no sstable a DSE 5.1 node " +
+                                  "reads for it")
             .satisfies(e -> assertThat(e.getMessage().split("refuses the statement", -1)).hasSize(2));
             assertThat(Schema.instance.getTableMetadata(KEYSPACE, "both")).isNull();
             assertThat(DseCompatRefusals.count(Dse51ColumnTypes.REFUSED_SCHEMA_CHANGE)).isEqualTo(before + 3);
@@ -255,8 +258,8 @@ public class Dse51ColumnTypesTest extends CQLTester
             assertThatThrownBy(() -> execute("CREATE TYPE " + KEYSPACE + ".vt (a int, e vector<float, 2>)"))
             .isInstanceOf(InvalidRequestException.class)
             .hasMessage("internode_compatibility_mode DSE_5_1 refuses the statement: " + KEYSPACE + ".vt.e (" +
-                        VectorType.getInstance(FloatType.instance, 2) + ") is of a type DSE 5.1 cannot read, so a " +
-                        "DSE 5.1 node could not open the sstables this node writes for it");
+                        VectorType.getInstance(FloatType.instance, 2) + ") is of a type this software does not " +
+                        "write for DSE 5.1, so this node could write no sstable a DSE 5.1 node reads for it");
         }
         Types types = Schema.instance.getKeyspaceMetadata(KEYSPACE).types;
         assertThat(types.getNullable(UTF8Type.instance.decompose("vt"))).isNull();
@@ -297,10 +300,10 @@ public class Dse51ColumnTypesTest extends CQLTester
             SchemaPushVerbHandler.instance.doVerb(Message.builder(Verb.SCHEMA_PUSH_REQ, pushed).from(sender).build());
             assertThat(appender.list.stream().map(ILoggingEvent::getFormattedMessage))
             .contains("Not applying a schema change from " + sender + " in internode_compatibility_mode DSE_5_1: it " +
-                      "gives [" + KEYSPACE + ".pushed_vectors_handler.e (vector<float, 2>)] a type DSE 5.1 cannot " +
-                      "read. Only a node not in the mode sends such a change: this node's schema disagrees with that " +
-                      "node's, and the schema this node pulls from it is not applied either, until the change is " +
-                      "reverted there");
+                      "gives [" + KEYSPACE + ".pushed_vectors_handler.e (vector<float, 2>)] a type this software " +
+                      "does not write for DSE 5.1. Only a node not in the mode sends such a change: this node's " +
+                      "schema disagrees with that node's, and the schema this node pulls from it is not applied " +
+                      "either, until the change is reverted there");
         });
         assertThat(Schema.instance.getTableMetadata(KEYSPACE, "pushed_vectors_handler")).isNull();
         assertThat(DseCompatRefusals.count(Dse51ColumnTypes.REFUSED_SCHEMA_CHANGE)).isEqualTo(before + 1);
@@ -380,12 +383,23 @@ public class Dse51ColumnTypesTest extends CQLTester
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
         assertThatThrownBy(Dse51ColumnTypes::verifyAtStartup)
         .isInstanceOf(StartupException.class)
-        .hasMessage("internode_compatibility_mode DSE_5_1 refused: " + column + " is of a type DSE 5.1 cannot read, " +
-                    "so this node cannot write the sstables DSE 5.1 reads for it, and its rollback to DSE 5.1 is no " +
-                    "longer possible. End the mode on this node: the flag drop (internode_compatibility_mode: NONE " +
-                    "with storage_compatibility_mode: HCD_1), with " +
-                    "-Dcassandra.internode_compatibility_mode.ignore_dse_peers=true, needed while the marker of " +
-                    "the DSE 5.1 upgrade exists on this node or its record of DSE 5.1 peers lists any (or cannot be " +
-                    "read); out of the mode, the node no longer reaches the DSE 5.1 nodes that remain");
+        .hasMessage("internode_compatibility_mode DSE_5_1 refused: " + column + " is of a type this software does " +
+                    "not write for DSE 5.1, so this node cannot write the sstables DSE 5.1 reads for it. Such a " +
+                    "column comes with the schema of DSE 5.1 (a type of a class both load, such as a custom type), " +
+                    "or from a run of this node outside the mode. From DSE 5.1's schema: do not end the mode on this " +
+                    "node, which it needs to reach the DSE 5.1 nodes; roll it back to DSE 5.1, then, before the " +
+                    "first node is upgraded, drop it there and upgrade the node again, or, in the mixed phase (a " +
+                    "schema change made on DSE 5.1 since the upgrade began), upgrade no further node and report to " +
+                    "the upgrade owner. From a run of this node outside the mode (its flag drop undone): once no " +
+                    "node runs DSE 5.1, end the mode on this node again by the flag drop (stop the node, delete the " +
+                    "files of the DSE 5.1 upgrade of its metadata directory and start it set to " +
+                    "internode_compatibility_mode NONE with storage_compatibility_mode HCD_1); while DSE 5.1 nodes " +
+                    "remain, upgrade no further node and report to the upgrade owner");
+        assertThat(Dse51ColumnTypes.startRefusal(List.of("ks.t.a (x)", "ks.t.b (y)")))
+        .startsWith("internode_compatibility_mode DSE_5_1 refused: ks.t.a (x), ks.t.b (y) are of a type this " +
+                    "software does not write for DSE 5.1, so this node cannot write the sstables DSE 5.1 reads for " +
+                    "them. ")
+        .contains("; roll it back to DSE 5.1, then, before the first node is upgraded, drop them there and upgrade " +
+                  "the node again, ");
     }
 }
