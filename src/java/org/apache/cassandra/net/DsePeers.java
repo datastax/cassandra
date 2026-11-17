@@ -28,6 +28,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
@@ -467,9 +468,13 @@ public final class DsePeers
         if (DseCompat.isDse51())
             logger.warn("No DSE peers found, the mode can be dropped (internode_compatibility_mode DSE_5_1: no peer " +
                         "speaks the pre-4.0 dialect, and none is known or on record as a DSE 5.1 node): once every " +
-                        "node runs this software, delete the DSE 5.1 upgrade marker {} and restart the node with " +
-                        "internode_compatibility_mode NONE",
-                        DseUpgradeMarker.path(DseCompat.textMode()));
+                        "node runs this software, stop the node, delete the DSE 5.1 upgrade marker {}, the record of " +
+                        "DSE 5.1 peers {} and the record of DSE 5.1's columns of system.local and system.peers {}, " +
+                        "each record with its .tmp file, that of DSE 5.1's columns with its .unreadable-<time> " +
+                        "copies too, and start it set to internode_compatibility_mode NONE with " +
+                        "storage_compatibility_mode HCD_1",
+                        DseUpgradeMarker.path(DseCompat.textMode()), DsePeersRecord.path(DseCompat.textMode()),
+                        Dse51SystemTables.recordPath());
         else
             logger.warn("No DSE peers found, the mode can be dropped (internode_compatibility_mode DSE_6: no peer " +
                         "speaks the pre-4.0 dialect or gossips a DSE messaging version, and none is known or on " +
