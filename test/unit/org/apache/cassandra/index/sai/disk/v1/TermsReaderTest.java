@@ -292,9 +292,9 @@ public class TermsReaderTest extends SaiRandomizedTest
         {
             for (int i = 0; i < 200; i++)
             {
-                // The range queries open a limited number of posting lists, and read all the others when the
+                // The range queries open a limited number of posting lists, and walk the terms again when the
                 // row ids go past the open ones: here the ranges have up to 50 terms.
-                TermsReader.setMaxLazyPostingLists(new int[]{ 0, 1, 5, 20, 1024 }[randomIntBetween(0, 4)]);
+                TermsReader.setMaxLazyPostingLists(new int[]{ 1, 2, 5, 20, 8192 }[randomIntBetween(0, 4)]);
 
                 // The scans require ordered bounds. Equal bounds are covered: unless both are inclusive the range is
                 // empty, with the start of the scan after its end when the lower bound is exclusive.

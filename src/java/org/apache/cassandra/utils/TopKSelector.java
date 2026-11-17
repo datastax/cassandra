@@ -61,22 +61,29 @@ public class TopKSelector<T> extends BinaryHeap
         return comparator.compare((T) a, (T) b) < 0;
     }
 
-    public void add(T newItem)
+    /**
+     * Offers an item to the selector.
+     *
+     * @return the item that is not in the selector after this call: {@code newItem} if it was rejected, the evicted
+     * former top if it replaced one, or null if there was room (or {@code newItem} was null)
+     */
+    @SuppressWarnings("unchecked")
+    public T add(T newItem)
     {
         if (newItem == null)
-            return;
+            return null;
 
         if (size < heap.length)
         {
             heap[size] = newItem;
             if (++size == heap.length)
                 heapify();
+            return null;
         }
-        else
-        {
-            if (greaterThan(newItem, top()))
-                replaceTop(newItem);
-        }
+
+        if (greaterThan(newItem, top()))
+            return (T) replaceTop(newItem);
+        return newItem;
     }
 
     public void addAll(Iterable<? extends T> items)
