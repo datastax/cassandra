@@ -53,6 +53,7 @@ import org.apache.cassandra.schema.CQLTypeParser;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.Dse51ColumnTypes;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -193,8 +194,9 @@ final class SchemaInspector
      * What a DSE 5.1 inspection says in the mixed phase where the remedies of its other schema findings change the
      * schema on DSE 5.1, as {@link #NO_VIEW_CHANGE_IN_MIXED_PHASE} says it of the views: the remedies of the findings
      * the Schema step names ({@code COMPACT_STORAGE}, {@code SASI_INDEX}, the {@code UNLOADABLE_*} of keyspaces, types,
-     * tables and classes, {@code LEGACY_AUTH_TABLES}, the functions and the {@code TDE_TABLE} of the schema), the
-     * Schema step, the {@code ROW_LEVEL_ACCESS} of the tables restricted to rows and the Security step.
+     * tables and classes, {@code COLUMN_TYPE}, {@code LEGACY_AUTH_TABLES}, the functions and the {@code TDE_TABLE} of
+     * the schema), the Schema step, the {@code ROW_LEVEL_ACCESS} of the tables restricted to rows and the Security
+     * step.
      */
     static final String NO_SCHEMA_CHANGE_IN_MIXED_PHASE =
         MIXED_PHASE_STARTED + "no schema change is made" + MIXED_PHASE_CHANGES_NOT_TAKEN;
@@ -308,6 +310,11 @@ final class SchemaInspector
     private final Map<Pair<String, String>, List<HiddenColumn>> hiddenColumns = new HashMap<>();
     private final Set<String> graphSchemaKeyspaces = new TreeSet<>();
     private final Map<String, TableMetadata> built = new HashMap<>();
+    /**
+     * With {@link #dse51}: the columns of the tables and views built of a type this software does not write for DSE
+     * 5.1, as {@link Dse51ColumnTypes#unreadable} tells it, which an upgraded node refuses to start on.
+     */
+    private final List<String> columnsOfUnwrittenTypes = new ArrayList<>();
     private boolean hiddenColumnsTableFound;
     /** the tables of {@code system_schema} that could not be read, or that are required and absent */
     private final Set<String> schemaTablesNotRead = new TreeSet<>();
@@ -476,6 +483,8 @@ final class SchemaInspector
             // DSE 5.1 has no vector type
             if (!dse51)
                 checkVectorColumns();
+            if (dse51)
+                checkColumnTypes();
             checkDroppedColumns();
             checkFunctions();
             checkTriggers();
@@ -1729,6 +1738,8 @@ final class SchemaInspector
                 TableMetadata metadata = build(keyspace.getKey(), entry.getKey(), row, flags, params, typesByKeyspace, false, unloadableTables);
                 if (metadata != null)
                     built.put(name, metadata);
+                if (metadata != null && dse51)
+                    columnsOfUnwrittenTypes.addAll(Dse51ColumnTypes.unreadableColumns(metadata));
             }
         }
         if (!tiered.isEmpty())
@@ -1969,6 +1980,30 @@ final class SchemaInspector
                                                "upgrade is complete, if needed)")));
     }
 
+    /**
+     * With {@link #dse51}: blocks on a column of a table or a view of a type this software does not write for DSE 5.1
+     * ({@link Dse51ColumnTypes#unreadable}): a type outside those of Cassandra 3.11 and DSE's geometric and date range
+     * types, such as a custom type of a class DSE 5.1 and this software both load. An upgraded node refuses to start
+     * on such a column, by the same rule; a type HCD 2.0 cannot load at all, and a view whose base table it cannot
+     * load, are {@code UNLOADABLE_TABLE}'s instead.
+     */
+    private void checkColumnTypes()
+    {
+        if (columnsOfUnwrittenTypes.isEmpty())
+            return;
+        List<String> columns = new ArrayList<>(columnsOfUnwrittenTypes);
+        columns.sort(null);
+        findings.add(blocking(Dse51ColumnTypes.PREFLIGHT_CODE,
+                              "columns of a type HCD 2.0 does not write for DSE 5.1 in DSE_5_1 mode (a type " +
+                              "outside those of Cassandra 3.11 and DSE's geometric and date range types, such as a " +
+                              "custom type): " + list(columns) + "; an upgraded node refuses to start on them",
+                              schemaChange(DSE51_BEFORE + "drop these columns (ALTER TABLE ... DROP, once the " +
+                                           "secondary indexes on them and the materialized views that select them " +
+                                           "are dropped, the views to be created again without them), or their " +
+                                           "tables for a column of the primary key, moving their data to columns of " +
+                                           "another type first if it is needed")));
+    }
+
     // ---- views ----
 
     private void checkViews(Map<String, Types> typesByKeyspace)
@@ -1989,6 +2024,9 @@ final class SchemaInspector
                 TableMetadata base = built.get(keyspace.getKey() + '.' + row.getString("base_table_name"));
                 if (view != null && base == null)
                     unloadable.add(name + ": its base table " + keyspace.getKey() + '.' + row.getString("base_table_name") + " cannot be loaded");
+                // a view whose base cannot be loaded is UNLOADABLE_TABLE's alone
+                if (view != null && base != null && dse51)
+                    columnsOfUnwrittenTypes.addAll(Dse51ColumnTypes.unreadableColumns(view));
                 if (unloadable.size() > unloadableBefore)
                     viewsToDrop.add(name);
                 // the views of DSE 5.1 have no hidden column

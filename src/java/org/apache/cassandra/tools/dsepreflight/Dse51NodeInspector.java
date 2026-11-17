@@ -57,6 +57,7 @@ import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.nodes.DseNodeWorkloads;
+import org.apache.cassandra.schema.Dse51ColumnTypes;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspaceTables;
 import org.apache.cassandra.service.Dse6NonCoreTraces;
@@ -139,7 +140,8 @@ final class Dse51NodeInspector
     /** The codes of the blocking findings of the schema of DSE 5.1 a step of the upgrade path names. */
     static final List<String> SCHEMA_CODES = List.of("COMPACT_STORAGE", "SASI_INDEX", "UNLOADABLE_KEYSPACE",
                                                      "UNLOADABLE_TYPE", "UNLOADABLE_TABLE", "UNLOADABLE_CLASS",
-                                                     "LEGACY_AUTH_TABLES", "JAVASCRIPT_UDF", "UDF_LANGUAGE");
+                                                     "LEGACY_AUTH_TABLES", "JAVASCRIPT_UDF", "UDF_LANGUAGE",
+                                                     Dse51ColumnTypes.PREFLIGHT_CODE);
 
     static final String SSTABLE_BIG_OLDER = "big sstables older than me (written by an earlier DSE 5.1 release, by " +
                                             "DSE 5.0 or earlier, or by Apache Cassandra 3.x), which the upgrade " +
