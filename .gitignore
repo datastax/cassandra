@@ -90,6 +90,9 @@ doc/modules/cassandra/examples/TEXT/NODETOOL/
 # Python virtual environment
 venv/
 
+# jenv's local java version
+.java-version
+
 # build-scripts will put cassandra-builds into the directory
 cassandra-builds/
 cassandra-dtest/

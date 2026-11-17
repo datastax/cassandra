@@ -17,4 +17,6 @@
 
 @Library('ds-pipeline-lib') _
 
-dsCassandraPRGate()
+// This branch is 4.0-based and has no `ant check` target, so lint (DSRunLint) must be disabled.
+// Do NOT forward-merge this setting into main, where lint should stay enabled.
+dsCassandraPRGate(runLint: false)
