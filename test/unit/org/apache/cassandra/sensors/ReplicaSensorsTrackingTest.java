@@ -95,6 +95,7 @@ import org.mockito.Mockito;
 import static org.apache.cassandra.locator.ReplicaUtils.full;
 import static org.apache.cassandra.service.paxos.Ballot.Flag.NONE;
 import static org.apache.cassandra.service.paxos.BallotGenerator.Global.nextBallot;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 /**
@@ -340,6 +341,32 @@ public class ReplicaSensorsTrackingTest
     }
 
     /**
+     * Errors thrown while tracking the sensors of a response are not swallowed, so that they reach the JVM stability inspector.
+     */
+    @Test
+    public void testErrorWhileTrackingSensorsPropagates()
+    {
+        AtomicInteger handled = new AtomicInteger();
+        RequestCallback<ReadResponse> callback = new RequestCallback<ReadResponse>()
+        {
+            @Override
+            public void onResponse(Message<ReadResponse> msg)
+            {
+                handled.incrementAndGet();
+            }
+
+            @Override
+            public RequestSensors getRequestSensors()
+            {
+                throw new AssertionError("Simulated sensor tracking error");
+            }
+        };
+
+        assertThatThrownBy(() -> respondWithSensor(callback)).isInstanceOf(AssertionError.class);
+        assertThat(handled.get()).isEqualTo(0);
+    }
+
+    /**
      * A response with sensors for a callback that does not track them is handled, and its sensors are ignored.
      */
     @Test
@@ -365,6 +392,7 @@ public class ReplicaSensorsTrackingTest
         respondWithSensor(callback);
 
         assertThat(handled.get()).isEqualTo(1);
+        assertThat(sensors.getSensors(s -> true).isEmpty()).isTrue();
     }
 
     private void respondWithSensor(RequestCallback<ReadResponse> callback)
