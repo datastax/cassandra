@@ -706,6 +706,6 @@ public final class ColumnMetadata extends ColumnSpecification implements Selecta
      */
     public void validate(boolean isCounterTable, boolean allowSortedDuration)
     {
-        type.validateForColumn(name.bytes, isPrimaryKeyColumn(), isCounterTable, isDropped, false, allowSortedDuration);
+        type.validateForColumn(name.bytes, isPrimaryKeyColumn(), isCounterTable, false, allowSortedDuration);
     }
 }

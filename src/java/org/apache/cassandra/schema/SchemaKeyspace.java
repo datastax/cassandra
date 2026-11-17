@@ -1247,7 +1247,7 @@ public final class SchemaKeyspace
             type = ReversedType.getInstance(type);
 
         ByteBuffer columnNameBytes = row.getBytes("column_name_bytes");
-        type.validateForColumn(columnNameBytes, kind.isPrimaryKeyKind(), isCounterTable, false, false, true);
+        type.validateForColumn(columnNameBytes, kind.isPrimaryKeyKind(), isCounterTable, false, true);
 
         ColumnIdentifier name = new ColumnIdentifier(columnNameBytes, row.getString("column_name"));
         if (type.hasSortedDuration(kind.isPrimaryKeyKind()))
@@ -1337,7 +1337,7 @@ public final class SchemaKeyspace
 
         // Pass isForOfflineTool=true for dropped columns to allow historical types like non-frozen tuples
         // that were valid in older SSTable formats but are no longer allowed in current schema
-        type.validateForColumn(UTF8Type.instance.decompose(name), false, isCounterTable, true, true, true);
+        type.validateForColumn(UTF8Type.instance.decompose(name), false, isCounterTable, true, true);
         ColumnMetadata column = ColumnMetadata.droppedColumn(keyspace, table, ColumnIdentifier.getInterned(name, true), type, kind, null);
         long droppedTime = TimeUnit.MILLISECONDS.toMicros(row.getLong("dropped_time"));
         return new DroppedColumn(column, droppedTime);

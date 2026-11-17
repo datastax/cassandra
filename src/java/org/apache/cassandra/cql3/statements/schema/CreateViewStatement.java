@@ -157,10 +157,22 @@ public final class CreateViewStatement extends AlterSchemaStatement
             throw new AlreadyExistsException(keyspaceName, viewName);
         }
 
-        /*
-         * Base table validation
-         */
+        validateBaseTable(keyspace, table);
 
+        Set<ColumnIdentifier> selectedColumns = validateSelectedColumns(table);
+        Set<ColumnIdentifier> primaryKeyColumns = validatePrimaryKey(table, selectedColumns);
+        validateWhereClause(table, primaryKeyColumns);
+        validateWithParams();
+
+        ViewMetadata view = buildView(table, selectedColumns, primaryKeyColumns);
+        return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.views.with(view)));
+    }
+
+    /*
+     * Base table validation
+     */
+    private void validateBaseTable(KeyspaceMetadata keyspace, TableMetadata table)
+    {
         if (table.isCounter())
             throw ire("Materialized views are not supported on counter tables");
 
@@ -186,11 +198,13 @@ public final class CreateViewStatement extends AlterSchemaStatement
                       "before being replayed.",
                       viewName, tableName);
         }
+    }
 
-        /*
-         * Process SELECT clause
-         */
-
+    /*
+     * Process SELECT clause
+     */
+    private Set<ColumnIdentifier> validateSelectedColumns(TableMetadata table)
+    {
         Set<ColumnIdentifier> selectedColumns = new HashSet<>();
 
         if (rawColumns.isEmpty()) // SELECT *
@@ -217,16 +231,20 @@ public final class CreateViewStatement extends AlterSchemaStatement
                        .findAny()
                        .ifPresent(c -> { throw ire("Cannot include static column '%s' in materialized view '%s'", c, viewName); });
 
-        /*
-         * Process PRIMARY KEY columns and CLUSTERING ORDER BY clause
-         */
+        return selectedColumns;
+    }
 
+    /*
+     * Process PRIMARY KEY columns and CLUSTERING ORDER BY clause
+     */
+    private Set<ColumnIdentifier> validatePrimaryKey(TableMetadata table, Set<ColumnIdentifier> selectedColumns)
+    {
         if (partitionKeyColumns.isEmpty())
             throw ire("Must provide at least one partition key column for materialized view '%s'", viewName);
 
-        HashSet<ColumnIdentifier> primaryKeyColumns = new HashSet<>();
+        Set<ColumnIdentifier> primaryKeyColumns = new HashSet<>();
 
-        concat(partitionKeyColumns, clusteringColumns).forEach(name ->
+        for (ColumnIdentifier name : concat(partitionKeyColumns, clusteringColumns))
         {
             ColumnMetadata column = table.getColumn(name);
             if (null == column || !selectedColumns.contains(name))
@@ -235,23 +253,8 @@ public final class CreateViewStatement extends AlterSchemaStatement
             if (!primaryKeyColumns.add(name))
                 throw ire("Duplicate column '%s' in PRIMARY KEY clause for materialized view '%s'", name, viewName);
 
-            AbstractType<?> type = column.type;
-
-            if (type.isMultiCell())
-            {
-                if (type.isCollection())
-                    throw ire("Invalid non-frozen collection type '%s' for PRIMARY KEY column '%s'", type, name);
-                else
-                    throw ire("Invalid non-frozen user-defined type '%s' for PRIMARY KEY column '%s'", type, name);
-            }
-
-            if (type.isCounter())
-                throw ire("counter type is not supported for PRIMARY KEY column '%s'", name);
-
-            // A primary key column of the base table can already have a duration, see TableMetadata.validate
-            if (type.referencesDuration() && !column.isPrimaryKeyColumn())
-                throw ire("duration type is not supported for PRIMARY KEY column '%s'", name);
-        });
+            validatePrimaryKeyColumnType(name, column);
+        }
 
         // If we give a clustering order, we must explicitly do so for all aliases and in the order of the PK
         if (!clusteringOrder.isEmpty() && !clusteringColumns.equals(new ArrayList<>(clusteringOrder.keySet())))
@@ -281,9 +284,34 @@ public final class CreateViewStatement extends AlterSchemaStatement
                       join(", ", transform(regularBaseTableColumnsInViewPrimaryKey, ColumnIdentifier::toString)));
         }
 
-        /*
-         * Process WHERE clause
-         */
+        return primaryKeyColumns;
+    }
+
+    private void validatePrimaryKeyColumnType(ColumnIdentifier name, ColumnMetadata column)
+    {
+        AbstractType<?> type = column.type;
+
+        if (type.isMultiCell())
+        {
+            if (type.isCollection())
+                throw ire("Invalid non-frozen collection type '%s' for PRIMARY KEY column '%s'", type, name);
+            else
+                throw ire("Invalid non-frozen user-defined type '%s' for PRIMARY KEY column '%s'", type, name);
+        }
+
+        if (type.isCounter())
+            throw ire("counter type is not supported for PRIMARY KEY column '%s'", name);
+
+        // A primary key column of the base table can already have a duration, see TableMetadata.validate
+        if (type.referencesDuration() && !column.isPrimaryKeyColumn())
+            throw ire("duration type is not supported for PRIMARY KEY column '%s'", name);
+    }
+
+    /*
+     * Process WHERE clause
+     */
+    private void validateWhereClause(TableMetadata table, Set<ColumnIdentifier> primaryKeyColumns)
+    {
         if (whereClause.containsTokenRelations())
             throw new InvalidRequestException("Cannot use token relation when defining a materialized view");
 
@@ -318,11 +346,13 @@ public final class CreateViewStatement extends AlterSchemaStatement
             throw ire("Non-primary key columns can only be restricted with 'IS NOT NULL' (got: %s restricted illegally)",
                       join(",", transform(restrictedNonPrimaryKeyColumns, ColumnMetadata::toString)));
         }
+    }
 
-        /*
-         * Validate WITH params
-         */
-
+    /*
+     * Validate WITH params
+     */
+    private void validateWithParams()
+    {
         attrs.validate(keyspaceName);
 
         if (attrs.hasOption(TableParams.Option.DEFAULT_TIME_TO_LIVE)
@@ -332,11 +362,15 @@ public final class CreateViewStatement extends AlterSchemaStatement
                       "Data in a materialized view always expire at the same time than " +
                       "the corresponding data in the parent table.");
         }
+    }
 
-        /*
-         * Build the thing
-         */
-
+    /*
+     * Build the thing
+     */
+    private ViewMetadata buildView(TableMetadata table,
+                                   Set<ColumnIdentifier> selectedColumns,
+                                   Set<ColumnIdentifier> primaryKeyColumns)
+    {
         TableMetadata.Builder builder = TableMetadata.builder(keyspaceName, viewName);
 
         if (attrs.hasProperty(TableAttributes.ID))
@@ -360,8 +394,7 @@ public final class CreateViewStatement extends AlterSchemaStatement
 
         ViewMetadata view = new ViewMetadata(table.id, table.name, rawColumns.isEmpty(), whereClause, builder.build());
         view.metadata.validate(table);
-
-        return schema.withAddedOrUpdated(keyspace.withSwapped(keyspace.views.with(view)));
+        return view;
     }
 
     SchemaChange schemaChangeEvent(KeyspacesDiff diff)

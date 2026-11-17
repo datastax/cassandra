@@ -897,10 +897,9 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public final void validateForColumn(ByteBuffer columnName,
                                         boolean isPrimaryKeyColumn,
                                         boolean isCounterTable,
-                                        boolean isDroppedColumn,
                                         boolean isForOfflineTool)
     {
-        validateForColumn(columnName, isPrimaryKeyColumn, isCounterTable, isDroppedColumn, isForOfflineTool, false);
+        validateForColumn(columnName, isPrimaryKeyColumn, isCounterTable, isForOfflineTool, false);
     }
 
     /**
@@ -914,100 +913,122 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public void validateForColumn(ByteBuffer columnName,
                                   boolean isPrimaryKeyColumn,
                                   boolean isCounterTable,
-                                  boolean isDroppedColumn,
                                   boolean isForOfflineTool,
                                   boolean allowSortedDuration)
     {
         if (isPrimaryKeyColumn)
-        {
-            if (isMultiCell())
-                throw columnException(columnName,
-                                      "non-frozen %s are not supported for PRIMARY KEY columns", category());
-            if (referencesCounter())
-                throw columnException(columnName,
-                                      "counters are not supported within PRIMARY KEY columns");
-
-            // We don't allow durations in anything sorted (primary key here, or in the "name-comparator" part of
-            // collections below). This isn't really a technical limitation, but duration sorts in a somewhat random
-            // way, so CASSANDRA-11873 decided to reject them when sorting was involved.
-            if (!allowSortedDuration && referencesDuration())
-                throw columnException(columnName,
-                                      "duration types are not supported within PRIMARY KEY columns");
-
-            if (comparisonType == ComparisonType.NOT_COMPARABLE)
-                throw columnException(columnName,
-                                      "type %s is not comparable and cannot be used for PRIMARY KEY columns", asCQL3Type().toSchemaString());
-        }
+            validateForPrimaryKeyColumn(columnName, allowSortedDuration);
         else
+            validateForRegularColumn(columnName, isCounterTable, isForOfflineTool, allowSortedDuration);
+    }
+
+    private void validateForPrimaryKeyColumn(ByteBuffer columnName, boolean allowSortedDuration)
+    {
+        if (isMultiCell())
+            throw columnException(columnName,
+                                  "non-frozen %s are not supported for PRIMARY KEY columns", category());
+        if (referencesCounter())
+            throw columnException(columnName,
+                                  "counters are not supported within PRIMARY KEY columns");
+
+        // We don't allow durations in anything sorted (primary key here, or in the "name-comparator" part of
+        // collections below). This isn't really a technical limitation, but duration sorts in a somewhat random
+        // way, so CASSANDRA-11873 decided to reject them when sorting was involved.
+        if (!allowSortedDuration && referencesDuration())
+            throw columnException(columnName,
+                                  "duration types are not supported within PRIMARY KEY columns");
+
+        if (comparisonType == ComparisonType.NOT_COMPARABLE)
+            throw columnException(columnName,
+                                  "type %s is not comparable and cannot be used for PRIMARY KEY columns", asCQL3Type().toSchemaString());
+    }
+
+    private void validateForRegularColumn(ByteBuffer columnName,
+                                          boolean isCounterTable,
+                                          boolean isForOfflineTool,
+                                          boolean allowSortedDuration)
+    {
+        if (isMultiCell())
+            validateMultiCellColumn(columnName, isForOfflineTool, allowSortedDuration);
+
+        // Mixing counter with non counter columns is not supported (#2614)
+        if (isCounterTable)
+            validateForCounterTable(columnName);
+        else
+            validateForNonCounterTable(columnName);
+    }
+
+    private void validateMultiCellColumn(ByteBuffer columnName, boolean isForOfflineTool, boolean allowSortedDuration)
+    {
+        // Plain tuples (TupleType, not UserType) are always implicitly frozen in CQL. A multi-cell tuple in the SSTable
+        // header indicates data from an old SSTable format where tuples could be non-frozen. This
+        // triggers the tryFix path in SerializationHeader.validateAndMaybeFixColumnType(), which will
+        // fix subtypes and then use the schema's dropped column type to determine the correct
+        // isMultiCell for dropped columns.
+        if (isTuple() && !isForOfflineTool)
+            throw columnException(columnName,
+                                  "tuple type %s is not frozen, which should not have happened",
+                                  asCQL3Type().toSchemaString());
+
+        for (AbstractType<?> subType : subTypes())
         {
-            if (isMultiCell())
+            if (subType.isMultiCell())
             {
-                // Plain tuples (TupleType, not UserType) are always implicitly frozen in CQL. A multi-cell tuple in the SSTable
-                // header indicates data from an old SSTable format where tuples could be non-frozen. This
-                // triggers the tryFix path in SerializationHeader.validateAndMaybeFixColumnType(), which will
-                // fix subtypes and then use the schema's dropped column type to determine the correct
-                // isMultiCell for dropped columns.
-                if (isTuple() && !isForOfflineTool)
-                    throw columnException(columnName,
-                                          "tuple type %s is not frozen, which should not have happened",
-                                          asCQL3Type().toSchemaString());
-
-                for (AbstractType<?> subType : subTypes())
-                {
-                    if (subType.isMultiCell())
-                    {
-                        throw columnException(columnName,
-                                              "non-frozen %s are only supported at top-level: subtype %s of %s must be frozen",
-                                              subType.category(), subType.asCQL3Type().toSchemaString(), asCQL3Type().toSchemaString());
-                    }
-                }
-
-                if (this instanceof MultiCellCapableType)
-                {
-                    AbstractType<?> nameComparator = ((MultiCellCapableType<?>) this).nameComparator();
-                    // As mentioned above, CASSANDRA-11873 decided to reject durations when sorting was involved.
-                    if (!allowSortedDuration && nameComparator.referencesDuration())
-                    {
-                        // Trying to profile a more precise error message
-                        String what = this instanceof MapType
-                                      ? "map keys"
-                                      : (this instanceof SetType ? "sets" : category());
-                        throw columnException(columnName, "duration types are not supported within non-frozen %s", what);
-                    }
-                }
-            }
-
-            // Mixing counter with non counter columns is not supported (#2614)
-            if (isCounterTable)
-            {
-                // Everything within a counter table must be a counter, and we don't allow nesting (collections of
-                // counters), except for legacy backward-compatibility, in the super-column map used to support old
-                // super columns.
-                if (!isCounter() && !TableMetadata.isSuperColumnMapColumnName(columnName))
-                {
-                    // We don't allow counter inside collections, but to be fair, at least for map, it's a bit of an
-                    // arbitrary limitation (it works internally, we don't expose it mostly because counters have
-                    // their limitations, and we want to restrict how user can use them to hopefully make user think
-                    // twice about their usage). In any case, a slightly more user-friendly message is probably nice.
-                    if (referencesCounter())
-                        throw columnException(columnName, "counters are not allowed within %s", category());
-
-                    throw columnException(columnName, "Cannot mix counter and non counter columns in the same table");
-                }
-            }
-            else
-            {
-                if (isCounter())
-                    throw columnException(columnName, "Cannot mix counter and non counter columns in the same table");
-
-                // For nested counters, we prefer complaining about the nested-ness rather than this not being a counter
-                // table, because the table won't be marked as a counter one even if it has only nested counters, and so
-                // that's overall a more intuitive message.
-                if (referencesCounter())
-                    throw columnException(columnName, "counters are not allowed within %s", category());
+                throw columnException(columnName,
+                                      "non-frozen %s are only supported at top-level: subtype %s of %s must be frozen",
+                                      subType.category(), subType.asCQL3Type().toSchemaString(), asCQL3Type().toSchemaString());
             }
         }
 
+        if (!allowSortedDuration)
+            validateNoSortedDuration(columnName);
+    }
+
+    private void validateNoSortedDuration(ByteBuffer columnName)
+    {
+        if (!(this instanceof MultiCellCapableType))
+            return;
+
+        AbstractType<?> nameComparator = ((MultiCellCapableType<?>) this).nameComparator();
+        // As mentioned above, CASSANDRA-11873 decided to reject durations when sorting was involved.
+        if (nameComparator.referencesDuration())
+        {
+            // Trying to profile a more precise error message
+            String what = this instanceof MapType
+                          ? "map keys"
+                          : (this instanceof SetType ? "sets" : category());
+            throw columnException(columnName, "duration types are not supported within non-frozen %s", what);
+        }
+    }
+
+    private void validateForCounterTable(ByteBuffer columnName)
+    {
+        // Everything within a counter table must be a counter, and we don't allow nesting (collections of
+        // counters), except for legacy backward-compatibility, in the super-column map used to support old
+        // super columns.
+        if (isCounter() || TableMetadata.isSuperColumnMapColumnName(columnName))
+            return;
+
+        // We don't allow counter inside collections, but to be fair, at least for map, it's a bit of an
+        // arbitrary limitation (it works internally, we don't expose it mostly because counters have
+        // their limitations, and we want to restrict how user can use them to hopefully make user think
+        // twice about their usage). In any case, a slightly more user-friendly message is probably nice.
+        if (referencesCounter())
+            throw columnException(columnName, "counters are not allowed within %s", category());
+
+        throw columnException(columnName, "Cannot mix counter and non counter columns in the same table");
+    }
+
+    private void validateForNonCounterTable(ByteBuffer columnName)
+    {
+        if (isCounter())
+            throw columnException(columnName, "Cannot mix counter and non counter columns in the same table");
+
+        // For nested counters, we prefer complaining about the nested-ness rather than this not being a counter
+        // table, because the table won't be marked as a counter one even if it has only nested counters, and so
+        // that's overall a more intuitive message.
+        if (referencesCounter())
+            throw columnException(columnName, "counters are not allowed within %s", category());
     }
 
     private InvalidColumnTypeException columnException(ByteBuffer columnName,
