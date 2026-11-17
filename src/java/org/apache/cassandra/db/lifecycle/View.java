@@ -284,7 +284,6 @@ public class View
     // METHODS TO CONSTRUCT FUNCTIONS FOR MODIFYING A VIEW:
 
     // return a function to un/mark the provided readers compacting in a view
-    @VisibleForTesting
     public static Function<View, View> updateCompacting(final Set<? extends SSTableReader> unmark, final Iterable<? extends SSTableReader> mark)
     {
         if (unmark.isEmpty() && Iterables.isEmpty(mark))
