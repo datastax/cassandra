@@ -51,6 +51,7 @@ import org.junit.rules.TemporaryFolder;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.Dse51SystemTables;
+import org.apache.cassandra.db.marshal.LegacyTimeUUIDType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
@@ -58,6 +59,7 @@ import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.io.sstable.SSTableTxnWriter;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.schema.Dse51ColumnTypes;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.service.Dse6AccessControlCheck;
 import org.apache.cassandra.service.Dse6NonCoreTraces;
@@ -1369,6 +1371,95 @@ public class Dse51PreflightTest
                                                  .with("type", "'org.apache.cassandra.db.marshal.NoSuchType'"));
         DsePreflightTest.Run unloadable = assertBlocked(run(node), "UNLOADABLE_TABLE");
         assertThat(unloadable.messages("UNLOADABLE_TABLE")).startsWith("tables HCD 2.0 cannot load: test_ks.t: ");
+    }
+
+    /**
+     * A vector column, which DSE 5.1 cannot have, added here to the captured table test_ks.t: COLUMN_TYPE's, never the
+     * VECTOR_COLUMN of DSE 6.9's tables, which the inspection of a DSE 5.1 node does not run.
+     */
+    @Test
+    public void aVectorColumnIsColumnTypeNotVectorColumn() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                       row("test_ks", "t", "v").with("clustering_order", "none")
+                                               .with("column_name_bytes", ByteBufferUtil.bytes("v"))
+                                               .with("kind", "regular")
+                                               .with("position", -1)
+                                               .with("type", "vector<float, 2>"));
+        DsePreflightTest.Run run = assertBlocked(run(node), Dse51ColumnTypes.PREFLIGHT_CODE);
+        assertThat(run.codes(Finding.Severity.BLOCKING)).containsExactly("COLUMN_TYPE");
+        assertThat(run.messages("COLUMN_TYPE")).contains("test_ks.t.v (");
+        assertThat(run.findings(SchemaInspector.VECTOR_COLUMN)).isEmpty();
+    }
+
+    /**
+     * A column of a type HCD 2.0 loads but does not write for DSE 5.1 (a class outside the types of Cassandra 3.11
+     * and DSE's own, as a custom type of DSE 5.1 is), added here to the captured table test_ks.t, blocks before the
+     * first node: an upgraded node would refuse to start on it, by the same rule. Such a column of the base table of a
+     * materialized view, added to the captured view too, is named in both; once the base table cannot be loaded, the
+     * table and its view are UNLOADABLE_TABLE's alone; in the mixed phase no schema change is made.
+     */
+    @Test
+    public void aColumnOfATypeTheModeDoesNotWriteBlocks() throws IOException
+    {
+        Dse51NodeFixture node = thriftOff();
+        String type = LegacyTimeUUIDType.class.getName();
+        node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                       row("test_ks", "t", "custom").with("clustering_order", "none")
+                                                    .with("column_name_bytes", ByteBufferUtil.bytes("custom"))
+                                                    .with("kind", "regular")
+                                                    .with("position", -1)
+                                                    .with("type", '\'' + type + '\''));
+        assertThat(Dse51ColumnTypes.unreadable(LegacyTimeUUIDType.instance)).isEqualTo(type);
+        DsePreflightTest.Run run = assertBlocked(run(node), Dse51ColumnTypes.PREFLIGHT_CODE);
+        assertThat(run.codes(Finding.Severity.BLOCKING)).containsExactly("COLUMN_TYPE");
+        assertThat(run.messages("COLUMN_TYPE"))
+        .isEqualTo("columns of a type HCD 2.0 does not write for DSE 5.1 in DSE_5_1 mode (a type outside those of " +
+                   "Cassandra 3.11 and DSE's geometric and date range types, such as a custom type): " +
+                   "test_ks.t.custom (" + type + "); an upgraded node refuses to start on them");
+        assertThat(run.findings("COLUMN_TYPE").get(0).remedy)
+        .isEqualTo("on DSE 5.1, before the first node is upgraded: drop these columns (ALTER TABLE ... DROP, once " +
+                   "the secondary indexes on them and the materialized views that select them are dropped, the " +
+                   "views to be created again without them), or their tables for a column of the primary key, " +
+                   "moving their data to columns of another type first if it is needed");
+        assertThat(run.report.upgradePath.upgradeSteps)
+        .filteredOn(s -> s.startsWith("Schema: "))
+        .containsExactly("Schema: change on DSE 5.1, before the first node is upgraded, what COLUMN_TYPE name");
+
+        // such a column of the base table of a materialized view, which the view selects: both are named
+        for (String table : List.of("rlac", "rlac_by_v"))
+            node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                           row("test_ks", table, "custom").with("clustering_order", "none")
+                                                          .with("column_name_bytes", ByteBufferUtil.bytes("custom"))
+                                                          .with("kind", "regular")
+                                                          .with("position", -1)
+                                                          .with("type", '\'' + type + '\''));
+        assertThat(assertBlocked(run(node), "COLUMN_TYPE").messages("COLUMN_TYPE"))
+        .contains("): test_ks.rlac.custom (" + type + "), test_ks.rlac_by_v.custom (" + type + "), " +
+                  "test_ks.t.custom (" + type + "); ");
+
+        // a base table HCD 2.0 cannot load: the table and its view are UNLOADABLE_TABLE's alone
+        node.writeRows(SchemaInspector.SCHEMA, "columns", KEYSPACES_KEY, List.of("table_name", "column_name"),
+                       row("test_ks", "rlac", "bad").with("clustering_order", "none")
+                                                    .with("column_name_bytes", ByteBufferUtil.bytes("bad"))
+                                                    .with("kind", "regular")
+                                                    .with("position", -1)
+                                                    .with("type", "'org.apache.cassandra.db.marshal.NoSuchType'"));
+        DsePreflightTest.Run unloadableBase = assertBlocked(run(node), "COLUMN_TYPE");
+        assertThat(unloadableBase.messages("COLUMN_TYPE")).contains("): test_ks.t.custom (" + type + "); ")
+                                                          .doesNotContain("test_ks.rlac");
+        assertThat(unloadableBase.messages("UNLOADABLE_TABLE"))
+        .contains("test_ks.rlac: ")
+        .contains("test_ks.rlac_by_v: its base table test_ks.rlac cannot be loaded");
+
+        // in the mixed phase, a peer already on this software: no schema change
+        node.writeRows("system", "peers", List.of("peer"), List.of(),
+                       row(InetAddress.getByName("127.0.51.14")).with("release_version",
+                                                                      FBUtilities.getReleaseVersionString()));
+        DsePreflightTest.Run mixed = assertBlocked(run(node), "COLUMN_TYPE");
+        assertThat(mixed.findings("COLUMN_TYPE").get(0).remedy)
+        .isEqualTo(SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE);
     }
 
     /**

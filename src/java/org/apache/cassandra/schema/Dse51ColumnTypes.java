@@ -81,6 +81,12 @@ public final class Dse51ColumnTypes
     private static final String PARTITIONER_DEFINED_ORDER = PartitionerDefinedOrder.class.getName() + '(';
 
     /**
+     * The code of the finding of the preflight inspection of a DSE 5.1 node that blocks on a column of a type
+     * {@link #unreadable} names, before the first node is upgraded and in the mixed phase.
+     */
+    public static final String PREFLIGHT_CODE = "COLUMN_TYPE";
+
+    /**
      * The reason under which the refused statements are counted; its words, older than the rule that a custom type
      * DSE 5.1 loads is refused too, are kept: it is the key of the count in {@code nodetool compatstatus}.
      */
@@ -271,9 +277,10 @@ public final class Dse51ColumnTypes
 
     /**
      * Every column of {@code table}, a table or a view, of a type this software does not write for DSE 5.1
-     * ({@link #unreadable}), as {@code keyspace.table.column (part)}, in the order of its columns.
+     * ({@link #unreadable}), as {@code keyspace.table.column (part)}, in the order of its columns; also for the
+     * preflight inspection of a DSE 5.1 node, on the tables it builds from DSE 5.1's schema.
      */
-    static List<String> unreadableColumns(TableMetadata table)
+    public static List<String> unreadableColumns(TableMetadata table)
     {
         List<String> refused = new ArrayList<>();
         for (ColumnMetadata column : table.columns())
@@ -332,15 +339,16 @@ public final class Dse51ColumnTypes
         return "internode_compatibility_mode DSE_5_1 refused: " + String.join(", ", refused) +
                (one ? " is" : " are") + " of a type this software does not write for DSE 5.1, so this node cannot " +
                "write the sstables DSE 5.1 reads for " + them + ". Such a column comes with the schema of DSE 5.1 (a " +
-               "type of a class both load, such as a custom type), or from a run of this node outside the mode. " +
-               "From DSE 5.1's schema: do not end the mode on this node, which it needs to reach the DSE 5.1 nodes; " +
-               "roll it back to DSE 5.1, then, before the first node is upgraded, drop " + them + " there and " +
-               "upgrade the node again, or, in the mixed phase (a schema change made on DSE 5.1 since the upgrade " +
-               "began), upgrade no further node and report to the upgrade owner. From a run of " +
-               "this node outside the mode (its flag drop undone): once no node runs DSE 5.1, end the mode on this " +
-               "node again by the flag drop (stop the node, delete the files of the DSE 5.1 upgrade of its metadata " +
-               "directory and start it set to internode_compatibility_mode NONE with storage_compatibility_mode " +
-               "HCD_1); while DSE 5.1 nodes remain, upgrade no further node and report to the upgrade owner";
+               "type of a class both load, such as a custom type, which the preflight inspection of a DSE 5.1 node " +
+               "blocks on as " + PREFLIGHT_CODE + "), or from a run of this node outside the mode. From DSE 5.1's " +
+               "schema: do not end the mode on this node, which it needs to reach the DSE 5.1 nodes; roll it back to " +
+               "DSE 5.1, then, before the first node is upgraded, drop " + them + " there and upgrade the node " +
+               "again, or, in the mixed phase (a schema change made on DSE 5.1 since the upgrade began), upgrade no " +
+               "further node and report to the upgrade owner. From a run of this node outside the mode (its flag " +
+               "drop undone): once no node runs DSE 5.1, end the mode on this node again by the flag drop (stop the " +
+               "node, delete the files of the DSE 5.1 upgrade of its metadata directory and start it set to " +
+               "internode_compatibility_mode NONE with storage_compatibility_mode HCD_1); while DSE 5.1 nodes " +
+               "remain, upgrade no further node and report to the upgrade owner";
     }
 
     /**

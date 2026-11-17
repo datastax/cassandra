@@ -4237,6 +4237,28 @@ public class DsePreflightTest
         .contains("Materialized views: drop lab.no_columns, lab.orphan before the upgrade");
     }
 
+    /**
+     * A column of a type the DSE 5.1 compatibility mode does not write (COLUMN_TYPE on a DSE 5.1 node) is no finding of
+     * a DSE 6 node, whose mode writes it.
+     */
+    @Test
+    public void aColumnTypeTheDse51ModeDoesNotWriteIsNoFindingOfADse6Node() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "columns", KEYSPACES_KEY, COLUMNS_KEY,
+                       column("lab", "wide", "custom", "regular", -1,
+                              "'org.apache.cassandra.db.marshal.LegacyTimeUUIDType'"));
+        Run run = run(node);
+        assertThat(run.report.dse51).isNull();
+        assertThat(run.report.findings).noneMatch(f -> f.code.equals("UNLOADABLE_TABLE") ||
+                                                       f.code.equals("COLUMN_TYPE"));
+        // the row is read: the same column of a type this software does not have makes the table one it cannot load
+        node.writeRows("system_schema", "columns", KEYSPACES_KEY, COLUMNS_KEY,
+                       column("lab", "wide", "custom", "regular", -1, "'org.apache.cassandra.db.marshal.NoSuchType'"));
+        assertThat(assertBlocked(run(node), "UNLOADABLE_TABLE").messages("UNLOADABLE_TABLE"))
+        .startsWith("tables HCD 2.0 cannot load: lab.wide: ");
+    }
+
     @Test
     public void anIndexClassThatIsNoIndexBlocks() throws IOException
     {
