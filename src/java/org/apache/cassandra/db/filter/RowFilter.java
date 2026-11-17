@@ -41,6 +41,7 @@ import com.google.common.base.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
@@ -1721,15 +1722,27 @@ public class RowFilter
                 if (kind == Kind.USER && DseCompat.isDse51() && DseCompat.isPre40Layout(version))
                 {
                     DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_ROW_LEVEL_ACCESS_CONTROL);
+                    String ignoreRestrictions =
+                        CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS.getKey();
                     throw new DseRefusedMessageException("Received a row filter with a user expression (kind 4) at " +
                                                          "messaging version " + version + " on " + metadata + ": the " +
                                                          "expression a DSE 5.1 node sends for a read of a table " +
                                                          "restricted to rows (RESTRICT ROWS), row-level access " +
                                                          "control this software cannot apply, so the read is refused " +
-                                                         "rather than answered without it; do not run RESTRICT ROWS " +
-                                                         "during the upgrade, and run UNRESTRICT ROWS on the DSE 5.1 " +
-                                                         "nodes for the tables restricted since (never for a view: " +
-                                                         "on DSE 5.1.51 it fails and keeps the node from starting)");
+                                                         "rather than answered without it. The DSE 5.1 nodes hold a " +
+                                                         "restriction to rows (for example a RESTRICT ROWS run " +
+                                                         "during the upgrade, or one dropped knowingly at the start " +
+                                                         "of an upgraded node with -D" + ignoreRestrictions +
+                                                         "=true): upgrade no further node and report to the upgrade " +
+                                                         "owner. RESTRICT ROWS and UNRESTRICT ROWS are schema " +
+                                                         "changes, which the upgrade forbids, so the restriction is " +
+                                                         "removed on DSE 5.1 only once no node runs this software " +
+                                                         "(every upgraded node rolled back), as before the upgrade: " +
+                                                         "for a table, UNRESTRICT ROWS, then REVOKE its rows/ " +
+                                                         "grants; for a view, REVOKE its rows/ grants, drop it and " +
+                                                         "create it again without the restriction, never UNRESTRICT " +
+                                                         "ROWS on it (on DSE 5.1.51 it fails and keeps the node from " +
+                                                         "starting)");
                 }
 
                 if (kind == Kind.USER)

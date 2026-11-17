@@ -159,6 +159,17 @@ public final class Dse6AccessControlCheck
      */
     @VisibleForTesting
     static final int UNRESTRICT_ROWS_NAMED = 20;
+
+    /**
+     * In {@code DSE_5_1}, the condition of a remedy on DSE 5.1 that changes the schema or the grants there: only before
+     * the upgrade starts again, since the procedure makes none in the mixed phase, whose schema changes the nodes of
+     * this software do not take ({@link #OTHERWISE_REPORT}); also for {@code Dse6NonCoreTraces}.
+     */
+    static final String IF_NO_OTHER_NODE = "if no other node runs this software, ";
+    /** What a remedy of {@code DSE_5_1} says for the mixed phase, after {@link #IF_NO_OTHER_NODE}'s case. */
+    static final String OTHERWISE_REPORT = "otherwise, in the mixed phase, which makes no schema or grant change " +
+                                           "(the nodes of this software do not take DSE 5.1's schema changes), " +
+                                           "upgrade no further node and report to the upgrade owner";
     /** How many tables with other schema extensions the INFO line of the first startup pass names. */
     @VisibleForTesting
     static final int OTHER_EXTENSIONS_LOGGED = 20;
@@ -654,9 +665,13 @@ public final class Dse6AccessControlCheck
         List<TableMetadata> views = views(findings.rowLevelRestrictedTables);
         String tables = (withoutViews.isEmpty()
                          ? ""
-                         : "; the tables restricted to rows are in this node's schema, which DSE DDL does not reach, " +
-                           "and refuse its next start: roll it back to DSE, run " + unrestrictRows(withoutViews) +
-                           " there and upgrade it again") +
+                         : DseCompat.isDse51()
+                           ? "; the tables restricted to rows are in this node's schema, which DSE 5.1 DDL does not " +
+                             "reach, and refuse its next start: roll it back to DSE 5.1; " + IF_NO_OTHER_NODE + "run " +
+                             unrestrictRows(withoutViews) + " there and upgrade it again; " + OTHERWISE_REPORT
+                           : "; the tables restricted to rows are in this node's schema, which DSE DDL does not " +
+                             "reach, and refuse its next start: roll it back to DSE, run " +
+                             unrestrictRows(withoutViews) + " there and upgrade it again") +
                         (views.isEmpty()
                          ? ""
                          : "; the materialized views restricted to rows are in this node's schema and refuse its " +
@@ -665,12 +680,17 @@ public final class Dse6AccessControlCheck
         String statements = DseCompat.isDse51()
                             ? "GRANT, REVOKE, RESTRICT ROWS or UNRESTRICT ROWS on " + DseCompat.source() + " nodes"
                             : "GRANT, REVOKE, RESTRICT, UNRESTRICT, RESTRICT ROWS or UNRESTRICT ROWS on DSE nodes";
-        // DSE removes what role_permissions holds; the tables only as their remedy says
+        String what = findings.rowLevelRestrictedTables.isEmpty() ? "them"
+                      : "the " + (findings.rowLevelGrants.isEmpty() ? "restrictions"
+                                  : findings.restrictions.isEmpty() ? "row-level grants"
+                                  : "restrictions and row-level grants");
+        // DSE removes what role_permissions holds; the tables only as their remedy says. In DSE_5_1 the next start
+        // of this node refuses them, and a REVOKE on DSE 5.1 is made only while no other node runs this software
         String removeOnDse = !findings.permissionsWouldGrantAccessIfDropped() ? ""
-                             : findings.rowLevelRestrictedTables.isEmpty() ? "remove them on DSE, and "
-                             : "remove the " + (findings.rowLevelGrants.isEmpty() ? "restrictions"
-                                                : findings.restrictions.isEmpty() ? "row-level grants"
-                                                : "restrictions and row-level grants") + " on DSE, and ";
+                             : DseCompat.isDse51() ? "this node refuses its next start on them: roll it back to DSE " +
+                                                     "5.1; " + IF_NO_OTHER_NODE + "remove " + what + " there and " +
+                                                     "upgrade it again; " + OTHERWISE_REPORT + "; "
+                             : "remove " + what + " on DSE, and ";
         logger.error("The periodic check ({}) found DSE access controls this node does not enforce: {}; {}do not " +
                      "run {} during the upgrade{}",
                      source, describe(findings), removeOnDse, statements, tables);
@@ -826,16 +846,24 @@ public final class Dse6AccessControlCheck
     {
         // the stale-replica advice is about the rows of system_auth.role_permissions, not about the schema
         boolean staleRowsPossible = source.startsWith(LOCAL_SOURCE) && findings.permissionsWouldGrantAccessIfDropped();
+        // DSE 6's texts say "DSE", as before the DSE 5.1 mode
+        String dse = DseCompat.isDse51() ? DseCompat.source() : "DSE";
         String remedies = remedies(findings);
         List<TableMetadata> views = views(findings.rowLevelRestrictedTables);
         return refused() + "DSE access controls that this software does not enforce would grant " +
                "access if ignored (found by " + source + "): " + what + ". " +
                (staleRowsPossible ? "The rows listed from system_auth.role_permissions may be stale: the replica may hold partitions this node no " +
-                                    "longer owns (once it is rolled back to DSE, run nodetool cleanup system_auth on it), or miss a removal made on " +
-                                    "DSE while this node was down (once it is rolled back to DSE, hints or nodetool repair system_auth deliver it). " : "") +
+                                    "longer owns (once it is rolled back to " + dse + ", run nodetool cleanup " +
+                                    "system_auth on it), or miss a removal made on " + dse + " while this node was " +
+                                    "down (once it is rolled back to " + dse + ", hints or nodetool repair " +
+                                    "system_auth deliver it). "
+                                  : "") +
                (remedies.isEmpty()
                 ? ""
-                : "Roll this node back to DSE, remove them there (" + remedies + ") and upgrade it again") +
+                : DseCompat.isDse51()
+                  ? "Roll this node back to DSE 5.1; " + IF_NO_OTHER_NODE + "remove them there (" + remedies +
+                    ") and upgrade it again; " + OTHERWISE_REPORT
+                  : "Roll this node back to DSE, remove them there (" + remedies + ") and upgrade it again") +
                (views.isEmpty() ? "" : (remedies.isEmpty() ? "" : ". ") + restrictedViewsAdvice(views)) +
                "; or start with -D" +
                CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS.getKey() + "=true to drop them knowingly";
@@ -924,14 +952,13 @@ public final class Dse6AccessControlCheck
         for (TableMetadata view : views)
             names.add(view.toString());
         return "For the materialized views restricted to rows " + names + ": roll this node back to " +
-               DseCompat.source() + "; if no other node runs this software, remove the restriction there before the " +
+               DseCompat.source() + "; " + IF_NO_OTHER_NODE + "remove the restriction there before the " +
                "upgrade starts again, once a row of system_schema.tables named after the view, which a failed " +
                "UNRESTRICT ROWS on it leaves on a node, is repaired on that node (a DROP MATERIALIZED VIEW there " +
                "fails and leaves the row without columns): REVOKE the rows/ grants on each view, drop it (DROP " +
                "MATERIALIZED VIEW, which also removes the view's rows/ grants) and create it again without the " +
-               "restriction, which builds it again from its base table; otherwise, in the mixed phase, whose schema " +
-               "changes the nodes of this software do not take, upgrade no further node and report to the upgrade " +
-               "owner. " + DseCompat.source() + " keeps a RESTRICT ROWS on a view on the node that ran it only until " +
+               "restriction, which builds it again from its base table; " + OTHERWISE_REPORT + ". " +
+               DseCompat.source() + " keeps a RESTRICT ROWS on a view on the node that ran it only until " +
                "that node restarts; after it, the other nodes take it from that node's schema. Never run UNRESTRICT " +
                "ROWS on a view: on DSE 5.1.51 it fails and leaves on that node a row of system_schema.tables named " +
                "after the view, with which neither DSE 5.1.51 nor this software starts the node";

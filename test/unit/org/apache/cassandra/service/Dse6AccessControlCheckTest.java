@@ -154,9 +154,10 @@ public class Dse6AccessControlCheckTest extends CQLTester
                                                     "grants on each view, drop it (DROP MATERIALIZED VIEW, which " +
                                                     "also removes the view's rows/ grants) and create it again " +
                                                     "without the restriction, which builds it again from its base " +
-                                                    "table; otherwise, in the mixed phase, whose schema changes the " +
-                                                    "nodes of this software do not take, upgrade no further node and " +
-                                                    "report to the upgrade owner. " +
+                                                    "table; otherwise, in the mixed phase, which makes no schema or " +
+                                                    "grant change (the nodes of this software do not take DSE 5.1's " +
+                                                    "schema changes), upgrade no further node and report to the " +
+                                                    "upgrade owner. " +
                                                     "DSE 5.1 keeps a RESTRICT ROWS on a view on the node that ran it " +
                                                     "only until that node restarts; after it, the other nodes take " +
                                                     "it from that node's schema. Never run UNRESTRICT ROWS on a " +
@@ -186,6 +187,14 @@ public class Dse6AccessControlCheckTest extends CQLTester
                                                          "is repaired as the upgrade documentation describes for a " +
                                                          "node already down, then upgraded again. Never run " +
                                                          "UNRESTRICT ROWS on a view";
+    /** The advice of a refusal of DSE_5_1 that read rows of this node's replica. */
+    private static final String DSE51_STALE = STALE.replace("rolled back to DSE,", "rolled back to DSE 5.1,")
+                                                   .replace("made on DSE while", "made on DSE 5.1 while");
+    /** What a remedy of DSE_5_1 on DSE 5.1 says for the mixed phase. */
+    private static final String DSE51_MIXED_PHASE = "otherwise, in the mixed phase, which makes no schema or grant " +
+                                                    "change (the nodes of this software do not take DSE 5.1's " +
+                                                    "schema changes), upgrade no further node and report to the " +
+                                                    "upgrade owner";
     private static final String DSE51_REFUSED = "internode_compatibility_mode DSE_5_1 refused: DSE access controls " +
                                                 "that this software does not enforce would grant access if ignored " +
                                                 "(found by this node's replica): ";
@@ -1265,7 +1274,7 @@ public class Dse6AccessControlCheckTest extends CQLTester
         .hasMessageStartingWith("internode_compatibility_mode DSE_5_1 refused: DSE access controls that this " +
                                 "software does not enforce would grant access if ignored (found by this node's " +
                                 "replica only: the cluster-wide read failed (" + TIMED_OUT + ")): row-level grants " +
-                                "[role 'analyst' on rows/top_secret/data/ks1/table1: [SELECT]]. " + STALE);
+                                "[role 'analyst' on rows/top_secret/data/ks1/table1: [SELECT]]. " + DSE51_STALE);
     }
 
     /**
@@ -1461,6 +1470,38 @@ public class Dse6AccessControlCheckTest extends CQLTester
             assertThat(events(Dse6AccessControlCheck.class, Dse6AccessControlCheck::recheck))
             .noneMatch(e -> e.getLevel() == Level.ERROR || e.getLevel() == Level.WARN);
         }
+    }
+
+    /**
+     * A row-level grant added after the start, with no table restricted to rows: the periodic ERROR asks to remove it
+     * on DSE in DSE_6, and in DSE_5_1 to roll this node back first and to remove it on DSE 5.1 only while no other
+     * node runs this software. The DSE_5_1 half switches the mode of the same node after its startup passes in DSE_6,
+     * a state no node reaches, since only the text of the periodic ERROR depends on the mode here.
+     */
+    @Test
+    public void thePeriodicCheckOfAGrantAddedSinceTheStart() throws Throwable
+    {
+        String found = ") found DSE access controls this node does not enforce: row-level grants [role 'analyst' on " +
+                       "rows/top_secret/data/ks1/table1: [SELECT]]; ";
+        joinTheRing();
+        dse6();
+        Dse6AccessControlCheck.verifyAtStartup();
+        Dse6AccessControlCheck.verifyAfterJoin();
+        execute("INSERT INTO system_auth.role_permissions (role, resource, permissions) " +
+                "VALUES ('analyst', 'rows/top_secret/data/ks1/table1', {'SELECT'})");
+        assertThat(messages(Dse6AccessControlCheck.class, Level.ERROR, Dse6AccessControlCheck::recheck))
+        .singleElement().asString()
+        .startsWith("The periodic check (")
+        .endsWith(found + "remove them on DSE, and do not run GRANT, REVOKE, RESTRICT, UNRESTRICT, RESTRICT ROWS or " +
+                  "UNRESTRICT ROWS on DSE nodes during the upgrade");
+
+        dse51();
+        assertThat(messages(Dse6AccessControlCheck.class, Level.ERROR, Dse6AccessControlCheck::recheck))
+        .singleElement().asString()
+        .startsWith("The periodic check (")
+        .endsWith(found + "this node refuses its next start on them: roll it back to DSE 5.1; if no other node runs " +
+                  "this software, remove them there and upgrade it again; " + DSE51_MIXED_PHASE + "; do not run " +
+                  "GRANT, REVOKE, RESTRICT ROWS or UNRESTRICT ROWS on DSE 5.1 nodes during the upgrade");
     }
 
     /** Each property of the check that is set is logged at WARN by every start, whatever the check finds. */
@@ -1722,12 +1763,14 @@ public class Dse6AccessControlCheckTest extends CQLTester
             String views = "row-level restricted materialized views in the schema [" + DSE51_VIEW +
                            " (tenant column region)]";
             String grants = "row-level grants " + DSE51_ROW_GRANTS;
-            String remedy = ROLL_BACK + "REVOKE the row-level grants, UNRESTRICT ROWS ON " + DSE51_TABLE +
-                            ") and upgrade it again";
+            // in DSE_5_1 a remedy on DSE 5.1 only while no other node runs this software, none in the mixed phase
+            String remedy = "Roll this node back to DSE 5.1; if no other node runs this software, remove them there " +
+                            "(REVOKE the row-level grants, UNRESTRICT ROWS ON " + DSE51_TABLE + ") and upgrade it " +
+                            "again; " + DSE51_MIXED_PHASE;
             String end = "; or start with " + OVERRIDE + " to drop them knowingly";
             assertThatThrownBy(Dse6AccessControlCheck::verifyAtStartup)
             .isInstanceOf(StartupException.class)
-            .hasMessage(DSE51_REFUSED + grants + "; " + tables + "; " + views + ". " + STALE + remedy + ". " +
+            .hasMessage(DSE51_REFUSED + grants + "; " + tables + "; " + views + ". " + DSE51_STALE + remedy + ". " +
                         DSE51_VIEW_ADVICE + end);
             assertThat(Dse6AccessControlCheck.lastCheck().findings)
             .containsExactly("row-level grant " + DSE51_ROW_GRANTS.get(0), "row-level grant " + DSE51_ROW_GRANTS.get(1),
@@ -1741,10 +1784,18 @@ public class Dse6AccessControlCheckTest extends CQLTester
             // the periodic check reports them, with the statements DSE 5.1 has
             List<String> errors = messages(Dse6AccessControlCheck.class, Level.ERROR, Dse6AccessControlCheck::recheck);
             assertThat(errors).hasSize(1);
+            // the whole ERROR, but the source of the check before it
             assertThat(errors.get(0))
-            .contains("do not run GRANT, REVOKE, RESTRICT ROWS or UNRESTRICT ROWS on DSE 5.1 nodes during the upgrade")
-            .endsWith("; the materialized views restricted to rows are in this node's schema and refuse its next " +
-                      "start. " + DSE51_VIEW_ADVICE);
+            .startsWith("The periodic check (")
+            .endsWith(") found DSE access controls this node does not enforce: " + grants + "; " + tables + "; " +
+                      views + "; this node refuses its next start on them: roll it back to DSE 5.1; if no other " +
+                      "node runs this software, remove the row-level grants there and upgrade it again; " +
+                      DSE51_MIXED_PHASE + "; do not run GRANT, REVOKE, RESTRICT ROWS or UNRESTRICT " +
+                      "ROWS on DSE 5.1 nodes during the upgrade; the tables restricted to rows are in this node's " +
+                      "schema, which DSE 5.1 DDL does not reach, and refuse its next start: roll it back to DSE 5.1; " +
+                      "if no other node runs this software, run UNRESTRICT ROWS ON " + DSE51_TABLE + " there and " +
+                      "upgrade it again; " + DSE51_MIXED_PHASE + "; the materialized views restricted to rows are in " +
+                      "this node's schema and refuse its next start. " + DSE51_VIEW_ADVICE);
 
             // the view alone, as the only finding: no advice to roll back
             execute("DELETE FROM system_auth.role_permissions WHERE role = 'reader'");
@@ -1766,7 +1817,7 @@ public class Dse6AccessControlCheckTest extends CQLTester
             insertDse51RowGrants();
             dse51();
             assertThatThrownBy(Dse6AccessControlCheck::verifyAtStartup)
-            .hasMessage(DSE51_REFUSED + grants + "; " + tables + ". " + STALE + remedy + end);
+            .hasMessage(DSE51_REFUSED + grants + "; " + tables + ". " + DSE51_STALE + remedy + end);
 
             // in DSE_6 a view's key is not looked for (DSE 6's behaviour is unchanged)
             DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
