@@ -115,6 +115,11 @@ final class Dse51NodeInspector
                                                            "enable-old-dse-state");
     /** The JVM option that moves DSE Search's data directory, over {@code solr_data_dir} of {@code dse.yaml}. */
     static final String SOLR_DATA_DIR_PROPERTY = "dse.solr.data.dir";
+    /**
+     * What the remedy of {@code LIVE_UNAVAILABLE} says of the JDK of DSE 5.1's {@code nodetool}, which refuses any Java
+     * but 8 (DSE 5.1.51 refuses JDK 17 with "DSE 5.1 requires Java 8 update 40 or later").
+     */
+    static final String NODETOOL_JAVA_NOTE = "; the nodetool of DSE 5.1 runs on Java 8 only";
     /** The JMX name of the gauge of the Thrift clients connected to a DSE 5.1 node, which this tool does not read. */
     static final String CONNECTED_THRIFT_CLIENTS =
         "org.apache.cassandra.metrics:type=Client,name=connectedThriftClients";
@@ -207,7 +212,7 @@ final class Dse51NodeInspector
         guarded("the upgrade path", this::buildUpgradePath);
 
         findings.sort(Comparator.comparing(f -> f.severity));
-        report.result = report.blocked() ? NodeReport.BLOCKED : NodeReport.READY;
+        report.result = report.resultOfFindings();
         return report;
     }
 
@@ -1551,7 +1556,7 @@ final class Dse51NodeInspector
     private void inspectLive()
     {
         report.live.putAll(live);
-        NodeInspector.checkLiveCommands(live, findings);
+        NodeInspector.checkLiveCommands(live, findings, NODETOOL_JAVA_NOTE);
         NodeInspector.checkLiveStatus(NodeInspector.output(live, "status"), findings);
         NodeInspector.checkLiveSchema(NodeInspector.output(live, "describecluster"), findings);
         NodeInspector.checkLiveCompactions(NodeInspector.output(live, "compactionstats"), findings);

@@ -985,6 +985,37 @@ public class Dse51PreflightTest
     }
 
     @Test
+    public void aDse51NodeWhoseLiveStateWasNotCheckedIsNotReady() throws IOException
+    {
+        Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
+        Dse51NodeFixture node = thriftOff();
+        Path nodetool = node.root.resolve("nodetool");
+        String script = "#!/bin/sh\necho 'nodetool: Failed to connect to 127.0.0.1:7199'\nexit 1\n";
+        Files.write(nodetool, script.getBytes(StandardCharsets.UTF_8));
+        Files.setPosixFilePermissions(nodetool, PosixFilePermissions.fromString("rwx------"));
+        DsePreflightTest.Run run = run(node, "--nodetool", nodetool.toString());
+        assertThat(run.exitCode).as("exit code; output:\n%s%s", run.out, run.err)
+                                .isEqualTo(DsePreflight.EXIT_INCOMPLETE);
+        assertThat(run.report.result).isEqualTo(NodeReport.INCOMPLETE);
+        assertThat(run.codes(Finding.Severity.BLOCKING)).isEmpty();
+        assertThat(run.messages(NodeReport.LIVE_UNAVAILABLE))
+        .startsWith("the live state could not be read completely (not every nodetool command ran), so the node " +
+                    "cannot be declared READY: nodetool version: exit code 1 nodetool: Failed to connect");
+        assertThat(run.findings(NodeReport.LIVE_UNAVAILABLE).get(0).remedy)
+        .endsWith("and on the Java of this tool unless --nodetool-java-home <dir> names another; the nodetool of " +
+                  "DSE 5.1 runs on Java 8 only), then run the tool again");
+        assertThat(run.out).containsPattern("Result: INCOMPLETE \\(0 blocking, [0-9]+ warnings, [0-9]+ notes; the " +
+                                            "live state was not checked completely, see LIVE_UNAVAILABLE\\)");
+        // without --nodetool, the files alone give the result
+        assertReady(run(node));
+        // a blocking finding decides the result, the live state read or not
+        Dse51NodeFixture thriftOn = node(false, DseFixtures.dse51().systemSSTables(true));
+        DsePreflightTest.Run blocked = assertBlocked(run(thriftOn, "--nodetool", nodetool.toString()), "THRIFT");
+        assertThat(blocked.codes(Finding.Severity.WARNING)).contains(NodeReport.LIVE_UNAVAILABLE);
+        assertThat(blocked.out).doesNotContain("the live state was not checked completely");
+    }
+
+    @Test
     public void noPendingHintIsQuiet() throws IOException
     {
         Assume.assumeTrue("needs /bin/sh", Files.isExecutable(Path.of("/bin/sh")));
