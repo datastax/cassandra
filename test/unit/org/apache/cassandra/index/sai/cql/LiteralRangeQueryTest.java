@@ -405,15 +405,14 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
     }
 
     /**
-     * Above a number of terms in the range only some posting lists of a segment are opened, and the others are
-     * read into a set of row ids when the query goes past them: same results with nearly all the ranges above
-     * that number.
+     * Above a number of terms in the range only some posting lists of a segment are open, and the terms are walked
+     * again when the query goes past them: same results with nearly all the ranges above that number.
      */
     @Test
-    public void testRandomizedRangesReadingAllPostingLists()
+    public void testRandomizedRangesWithFewOpenPostingLists()
     {
         int maxLazyPostingLists = TermsReader.getMaxLazyPostingLists();
-        TermsReader.setMaxLazyPostingLists(random.nextInt(4));
+        TermsReader.setMaxLazyPostingLists(64 + random.nextInt(64));
         try
         {
             randomizedRanges();

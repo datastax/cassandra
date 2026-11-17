@@ -270,6 +270,24 @@ public class TopKSelectorTest
         assertEquals(List.of(), selector.get());
     }
 
+    @Test
+    public void testAddReturnsDisplacedItem()
+    {
+        // room for the first five
+        for (int i : new int[]{ 10, 20, 30, 40, 50 })
+            assertNull(selector.add(i));
+
+        // rejected: not smaller than the largest kept item
+        assertEquals(Integer.valueOf(60), selector.add(60));
+        assertEquals(Integer.valueOf(50), selector.add(50));
+
+        // accepted: evicts the largest kept item, then the next largest
+        assertEquals(Integer.valueOf(50), selector.add(5));
+        assertEquals(Integer.valueOf(40), selector.add(6));
+
+        assertNull(selector.add(null));
+        assertEquals(List.of(5, 6, 10, 20, 30), selector.get());
+    }
 
     @Test
     public void testGetAndRestart()

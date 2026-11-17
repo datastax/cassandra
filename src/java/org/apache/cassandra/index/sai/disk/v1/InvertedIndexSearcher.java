@@ -125,15 +125,7 @@ public class InvertedIndexSearcher extends IndexSearcher
                                  indexFiles.postingLists(),
                                  root,
                                  footerPointer,
-                                 version,
-                                 maxSegmentRowId(segmentMetadata));
-    }
-
-    private static int maxSegmentRowId(SegmentMetadata metadata)
-    {
-        // only a hint to size the buffers of the range queries: keep it in the range of the row ids whatever the metadata says
-        long max = metadata.maxSSTableRowId - metadata.segmentRowIdOffset;
-        return (int) Math.max(0, Math.min(max, PostingList.END_OF_STREAM - 1));
+                                 version);
     }
 
     @Override
