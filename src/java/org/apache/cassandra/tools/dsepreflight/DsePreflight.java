@@ -78,7 +78,9 @@ public final class DsePreflight
     /** The options of the Paxos rollback mode only. */
     static final List<String> PAXOS_ROLLBACK_ONLY = List.of("snapshot", "paxos-dir", "not-restored", "dc", "serial-consistency", "cql");
     /** The options the Paxos rollback mode does not take. */
-    static final List<String> PAXOS_ROLLBACK_EXCLUDED = List.of("aggregate", "nodetool", "nodetool-arg", "nodetool-timeout", "commitlog-dir", "hints-dir");
+    static final List<String> PAXOS_ROLLBACK_EXCLUDED = List.of("aggregate", "nodetool", "nodetool-arg",
+                                                                "nodetool-timeout", "nodetool-java-home",
+                                                                "commitlog-dir", "hints-dir");
     /** The options the aggregate mode takes; it refuses every other, so that none is silently ignored. */
     static final Set<String> AGGREGATE_OPTIONS = Set.of("aggregate", "json", "help");
 
