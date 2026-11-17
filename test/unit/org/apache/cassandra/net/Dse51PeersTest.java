@@ -36,6 +36,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.GossipState;
@@ -341,7 +342,11 @@ public class Dse51PeersTest
         assertThat(DsePeers.knownAtStartup()).contains(node1.getHostAddressAndPort(), node2.getHostAddressAndPort());
     }
 
-    /** With no DSE 5.1 peer known at startup, the WARN that the mode can be dropped names DSE 5.1 and its marker. */
+    /**
+     * With no DSE 5.1 peer known at startup, the WARN that the mode can be dropped names DSE 5.1, the files of the
+     * upgrade the flag drop deletes and both of its settings, as the procedure names them: the storage compatibility
+     * mode beside the internode one.
+     */
     @Test
     public void noDse51PeerKnownAtStartupIsWarned()
     {
@@ -350,9 +355,13 @@ public class Dse51PeersTest
         assertThat(messages(Level.WARN))
         .containsExactly("No DSE peers found, the mode can be dropped (internode_compatibility_mode DSE_5_1: no peer " +
                          "speaks the pre-4.0 dialect, and none is known or on record as a DSE 5.1 node): once every " +
-                         "node runs this software, delete the DSE 5.1 upgrade marker " +
-                         DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1) + " and restart the node with " +
-                         "internode_compatibility_mode NONE");
+                         "node runs this software, stop the node, delete the DSE 5.1 upgrade marker " +
+                         DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1) + ", the record of DSE 5.1 peers " +
+                         DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1) + " and the record of DSE 5.1's " +
+                         "columns of system.local and system.peers " + Dse51SystemTables.recordPath() + ", each " +
+                         "record with its .tmp file, that of DSE 5.1's columns with its .unreadable-<time> copies " +
+                         "too, and start it set to internode_compatibility_mode NONE with " +
+                         "storage_compatibility_mode HCD_1");
         appender.list.clear();
         MessagingService.instance().versions.set(node1, MessagingService.VERSION_3014);
         DsePeers.warnIfNoneKnownAtStartup();
