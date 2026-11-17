@@ -160,9 +160,8 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
     public void memtableIndexReadsTheMemtablesStoredVectors()
     {
         // A trie memtable's enable_ash index keeps no full-precision copy of its vectors: once each write completes,
-        // they read the memtable's stored cells in place, except a cold index's exact-phase sample until it has a
-        // model. Searches still find every stored vector, after overwrites too, before and after the memtable is
-        // flushed.
+        // they read the memtable's stored cells in place. Searches still find every stored vector, after overwrites
+        // too, before and after the memtable is flushed.
         createTable("CREATE TABLE %s (pk int, vec vector<float, 64>, PRIMARY KEY(pk)) WITH memtable = 'trie'");
         createIndex("CREATE CUSTOM INDEX ON %s(vec) USING 'StorageAttachedIndex' " +
                     "WITH OPTIONS = {'enable_ash' : 'true', 'similarity_function' : 'dot_product'}");
@@ -188,13 +187,6 @@ public class VectorAshTest extends VectorTester.VersionedWithChecksums
         assertEquals(1, memtableIndexes.size());
         var graph = ((VectorMemtableIndex) memtableIndexes.iterator().next()).getGraph();
         assertEquals(2100, graph.size());
-        // at most the vectors added before the index had a model, 20 per dimension, keep their own copies
-        assertThat(graph.vectorsHoldingCopies()).isLessThanOrEqualTo(20 * 64);
-        // one more write after the model attaches them too
-        float[] last = randomVector(64);
-        normalize(last);
-        vectors.set(0, last);
-        execute("INSERT INTO %s (pk, vec) VALUES (?, ?)", 0, vector(last));
         assertEquals(0, graph.vectorsHoldingCopies());
 
         assertThat(fractionFindingThemselves(vectors)).isGreaterThanOrEqualTo(0.9);

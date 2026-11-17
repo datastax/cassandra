@@ -28,8 +28,6 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.TimeUnit;
@@ -378,8 +376,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
                 var success = postingsByOrdinal.compareAndPut(ordinal, null, postings);
                 assert success : "postingsByOrdinal already contains an entry for ordinal " + ordinal;
                 bytesUsed += streamingIndex == null ? builder.addGraphNode(ordinal, vector) : streamingIndex.add(ordinal);
-                if (memtableVectors != null)
-                    attachColdStartCells();
 
                 // If necessary, check if the vector is unit length.
                 if (!sourceModel.hasKnownUnitLengthVectors() && allVectorsAreUnitLength)
@@ -481,8 +477,6 @@ public class CassandraOnHeapGraph<T> implements Accountable
 
     // Vectors added by this thread's current write, attached to the memtable's stored cells once the write completes
     private static final ThreadLocal<List<Runnable>> pendingStoredCells = ThreadLocal.withInitial(ArrayList::new);
-    // Vectors added while this index scored exactly, attached once it has a model
-    private final Queue<Runnable> coldStartCells = new ConcurrentLinkedQueue<>();
 
     private void awaitStoredCell(MemtableVector vector, T key)
     {
@@ -496,22 +490,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
             if (released > 0)
                 memtable.markExtraOnHeapUsed(-released, null);
         };
-        // A cold index scores its first vectors exactly, reading each many times; they keep their own copies, a
-        // bounded sample, until it has a model, and are attached then (see attachColdStartCells).
-        if (streamingIndex != null && streamingIndex.model() == null)
-            coldStartCells.add(attach);
-        else
-            pendingStoredCells.get().add(attach);
-    }
-
-    /** Attaches the vectors a cold index added before it had a model, once it has one. */
-    private void attachColdStartCells()
-    {
-        if (coldStartCells.isEmpty() || streamingIndex.model() == null)
-            return;
-        Runnable attach;
-        while ((attach = coldStartCells.poll()) != null)
-            attach.run();
+        pendingStoredCells.get().add(attach);
     }
 
     /**
@@ -550,6 +529,20 @@ public class CassandraOnHeapGraph<T> implements Accountable
             rerankK = limit;
 
         Bits bits = hasDeletions ? BitsUtil.bitsIgnoringDeleted(toAccept, postingsByOrdinal) : toAccept;
+        // A cold ASH index has no graph until its first model: it scores its recorded vectors, a training sample's
+        // worth, exactly, and returns all of them best first, so no search needs resuming.
+        if (streamingIndex != null && !streamingIndex.hasModel())
+        {
+            long start = nanoTime();
+            var result = streamingIndex.search(queryVector, Integer.MAX_VALUE, rerankK, bits);
+            long elapsed = nanoTime() - start;
+            columnQueryMetrics.onSearchResult(result, elapsed, false);
+            context.addAnnGraphSearchLatency(elapsed);
+            var nodes = Arrays.stream(result.getNodes());
+            if (threshold > 0)
+                nodes = nodes.filter(node -> node.score >= threshold);
+            return CloseableIterator.wrap(nodes.iterator());
+        }
         var graphAccessManager = searchers.get();
         var searcher = graphAccessManager.get();
         searcher.usePruning(usePruning);
