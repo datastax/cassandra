@@ -137,6 +137,15 @@ public class QueryContext
         this.queryStartTimeNanos = MonotonicClock.Global.approxTime.now();
     }
 
+    /**
+     * @return the maximum number of results the read command returns, {@code Integer.MAX_VALUE} if it is unlimited
+     * or if there is no command
+     */
+    public int rowLimit()
+    {
+        return command == null ? Integer.MAX_VALUE : command.limits().count();
+    }
+
     public long totalQueryTimeNs()
     {
         checkThreadOwnership();
