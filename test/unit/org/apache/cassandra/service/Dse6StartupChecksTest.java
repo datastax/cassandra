@@ -232,7 +232,9 @@ public class Dse6StartupChecksTest
         .containsExactly("Wrote the DSE 6 upgrade marker " + DseUpgradeMarker.path());
         assertThat(DseUpgradeMarker.exists()).isTrue();
         String content = Files.readString(DseUpgradeMarker.path());
-        assertThat(content).contains("DSE 6 in-place upgrade in progress");
+        assertThat(content).startsWith("DSE 6 in-place upgrade in progress on this node since ")
+                           .endsWith("). Delete this file only after every node of the cluster runs this software, " +
+                                     "before restarting with internode_compatibility_mode: NONE.\n");
 
         // idempotent: a second start keeps the marker as it is, and says nothing about it
         assertThat(logsOf(Level.INFO, Dse6StartupChecksTest::verifyDse6Artefacts)).isEmpty();
