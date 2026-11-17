@@ -362,9 +362,9 @@ public class Tracker
                                                                                                     LifecycleTransaction.newId(),
                                                                                                     metadata))
         {
-            Pair<View, View> result = apply(view -> {
-                Set<SSTableReader> toremove = copyOf(filter(view.sstables, and(remove, notIn(view.compacting))));
-                return updateLiveSet(toremove, emptySet(), maybeGetSSTableIntervalTreeLatencyMetrics()).apply(view);
+            Pair<View, View> result = apply(current -> {
+                Set<SSTableReader> toremove = copyOf(filter(current.sstables, and(remove, notIn(current.compacting))));
+                return updateLiveSet(toremove, emptySet(), maybeGetSSTableIntervalTreeLatencyMetrics()).apply(current);
             });
 
             Set<SSTableReader> removed = Sets.difference(result.left.sstables, result.right.sstables);
@@ -432,9 +432,9 @@ public class Tracker
 
     public Throwable unloadSSTables(@Nullable Throwable accumulate)
     {
-        Pair<View, View> result = apply(view -> {
-            Set<SSTableReader> toUnload = copyOf(filter(view.sstables, notIn(view.compacting)));
-            return updateLiveSet(toUnload, emptySet(), maybeGetSSTableIntervalTreeLatencyMetrics()).apply(view);
+        Pair<View, View> result = apply(current -> {
+            Set<SSTableReader> toUnload = copyOf(filter(current.sstables, notIn(current.compacting)));
+            return updateLiveSet(toUnload, emptySet(), maybeGetSSTableIntervalTreeLatencyMetrics()).apply(current);
         });
 
         // compacting sstables will be cleaned up by their transaction in {@link LifecycleTransaction#unmarkCompacting}
