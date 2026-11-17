@@ -1051,7 +1051,8 @@ public class ClusterAggregateTest
         editJson(reports.resolve("node4.json"), json -> ((Map<String, Object>) json.get("upgrade_path")).remove("settings"));
         Aggregate results = aggregate(reports);
         assertThat(results.messages("UNREADABLE_REPORT")).contains("node1.json (without result)")
-                                                        .contains("node2.json (result \"OK\", neither READY nor BLOCKED)")
+                                                        .contains("node2.json (result \"OK\", neither READY, " +
+                                                                  "BLOCKED nor INCOMPLETE)")
                                                         .contains("node3.json (generated_at \"yesterday\" is not a time)")
                                                         .contains("node4.json (without upgrade_path.settings)");
         assertThat(results.json).containsEntry("reports_read", 0);
@@ -1108,6 +1109,72 @@ public class ClusterAggregateTest
         Aggregate aggregate = aggregate(reports);
         assertThat(aggregate.exitCode).isEqualTo(DsePreflight.EXIT_BLOCKED);
         assertThat(aggregate.messages("NODE_BLOCKED")).isEqualTo("nodes not ready: 10.0.0.1 [SEARCH_INDEX], 10.0.0.2 (BLOCKED, without a blocking finding)");
+    }
+
+    /**
+     * A node whose live state was not checked is not ready: its report INCOMPLETE, or READY with LIVE_UNAVAILABLE (a
+     * report written before the result INCOMPLETE existed); a blocked one is named by NODE_BLOCKED only.
+     */
+    @Test
+    public void aNodeWhoseLiveStateWasNotCheckedIsNotReady() throws IOException
+    {
+        Path reports = cluster(4);
+        Finding unavailable = Finding.warning(NodeReport.LIVE_UNAVAILABLE,
+                                              "the live state could not be read completely: nodetool status: " +
+                                              "exit code 1",
+                                              "check that DSE runs");
+        rewrite(reports.resolve("node1.json"), report -> {
+            report.findings.add(unavailable);
+            report.result = report.resultOfFindings();
+        });
+        rewrite(reports.resolve("node2.json"), report -> report.findings.add(unavailable));
+        rewrite(reports.resolve("node3.json"), report -> {
+            report.findings.add(unavailable);
+            report.findings.add(Finding.blocking("SEARCH_INDEX", "DSE Search indexes: ks.t.i", "drop it"));
+            report.result = report.resultOfFindings();
+        });
+        byte[] written = Files.readAllBytes(reports.resolve("node1.json"));
+        NodeReport incomplete = JsonUtils.JSON_OBJECT_MAPPER.readValue(written, NodeReport.class);
+        assertThat(incomplete.result).isEqualTo(NodeReport.INCOMPLETE);
+        Aggregate aggregate = aggregate(reports);
+        assertThat(aggregate.exitCode).as(aggregate.out).isEqualTo(DsePreflight.EXIT_BLOCKED);
+        assertThat(aggregate.json).containsEntry("result", NodeReport.BLOCKED).containsEntry("reports_read", 4);
+        assertThat(aggregate.codes("BLOCKING")).containsExactlyInAnyOrder("NODE_INCOMPLETE", "NODE_BLOCKED");
+        assertThat(aggregate.messages("NODE_INCOMPLETE"))
+            .isEqualTo("nodes whose live state was not checked completely (LIVE_UNAVAILABLE in their reports): " +
+                       "10.0.0.1, 10.0.0.2");
+        assertThat(aggregate.findings().stream()
+                            .filter(f -> "NODE_INCOMPLETE".equals(f.get("code")))
+                            .map(f -> f.get("remedy")))
+            .containsExactly("on each of them, check that DSE runs and that nodetool reaches it (see " +
+                             "LIVE_UNAVAILABLE in its report), run the tool on it again with --nodetool, then " +
+                             "aggregate again");
+        assertThat(aggregate.messages("NODE_BLOCKED")).isEqualTo("nodes not ready: 10.0.0.3 [SEARCH_INDEX]");
+        assertThat(nodeLine(aggregate, "10.0.0.1")).containsEntry("result", NodeReport.INCOMPLETE);
+        assertThat(aggregate.out).contains("10.0.0.1 (node1.json), rack ")
+                                 .contains(": INCOMPLETE, 0 blocking, 2 warnings");
+
+        // the live state read on every node: ready
+        reports = cluster(2);
+        assertThat(aggregate(reports).exitCode).isEqualTo(DsePreflight.EXIT_READY);
+        // an incomplete report has the finding that makes it so
+        reports = cluster(2);
+        rewrite(reports.resolve("node1.json"), report -> report.result = NodeReport.INCOMPLETE);
+        Aggregate inconsistent = aggregate(reports);
+        assertThat(inconsistent.exitCode).isEqualTo(DsePreflight.EXIT_BLOCKED);
+        assertThat(inconsistent.messages("UNREADABLE_REPORT")).contains("node1.json (incomplete, but without a " +
+                                                                        "LIVE_UNAVAILABLE finding)");
+        assertThat(inconsistent.codes("BLOCKING")).doesNotContain("NODE_INCOMPLETE");
+        // an incomplete report names its node fully, as a ready one does
+        reports = cluster(2);
+        rewrite(reports.resolve("node1.json"), report -> {
+            report.findings.add(unavailable);
+            report.result = report.resultOfFindings();
+            report.node.hostId = null;
+        });
+        assertThat(aggregate(reports).messages("UNREADABLE_REPORT"))
+            .contains("node1.json (incomplete, but its node section lacks the host id, the addresses, the cluster " +
+                      "name, the release or the schema version)");
     }
 
     /**

@@ -83,6 +83,12 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.list;
  * {@code INTERNODE_TLS}, say. Every check is cluster-wide, whatever the number of data centers; the nodes are listed by
  * data center, with the rack of each (the JSON groups them by rack too).
  * <p>
+ * Nor is the cluster ready while a report is incomplete ({@code NODE_INCOMPLETE}): its node inspection asked for the
+ * live state and could not read it, a report {@code INCOMPLETE}, or {@code READY} with a {@code LIVE_UNAVAILABLE}
+ * finding (as an earlier build of the release wrote it); a blocked report with that finding is named by
+ * {@code NODE_BLOCKED} only, and an {@code INCOMPLETE} report without it is an unreadable report. The other checks
+ * take an incomplete report as a ready one ({@code NO_PEERS_RECORDED} among them, where the text above says ready).
+ * <p>
  * The files of the directory are read, and named in the texts, in the order of their paths, not in the order the file
  * system lists the directory in, which differs from one file system to another: the same reports give the same texts.
  */
@@ -278,7 +284,9 @@ final class ClusterAggregate
         Set<String> reportedHosts = new TreeSet<>();
         Set<String> reportedAddresses = new TreeSet<>();
         List<String> blockedNodes = new ArrayList<>();
-        // the nodes reported, by host id, or broadcast address, or file, and the ready ones that record no peer
+        List<String> incompleteNodes = new ArrayList<>();
+        // the nodes reported, by host id, or broadcast address, or file, and the ready or incomplete ones that record
+        // no peer
         Set<String> reportedNodes = new TreeSet<>();
         List<String> withoutPeers = new ArrayList<>();
         for (Map.Entry<Path, NodeReport> entry : reports.entrySet())
@@ -297,21 +305,29 @@ final class ClusterAggregate
             aggregate.dataCenters.computeIfAbsent(dataCenterOf(report), dc -> new TreeMap<>())
                                  .computeIfAbsent(rackOf(report), rack -> new ArrayList<>())
                                  .add(node);
-            if (report.blocked() || !NodeReport.READY.equals(report.result))
+            if (report.blocked() ||
+                !(NodeReport.READY.equals(report.result) || NodeReport.INCOMPLETE.equals(report.result)))
             {
                 Set<String> codes = new TreeSet<>();
                 report.findings.stream().filter(f -> f.severity == Finding.Severity.BLOCKING).forEach(f -> codes.add(f.code));
                 blockedNodes.add(node + (codes.isEmpty() ? " (" + report.result + ", without a blocking finding)" : " " + codes));
             }
-            else if (report.peers.isEmpty())
+            else
             {
-                // NO_PEERS_FILE tells a missing file; without it the file is DSE's empty map, or missing beside a nodes/local
-                // that records no data center (the node inspection then says nothing of it)
-                withoutPeers.add(node + (report.findings.stream().anyMatch(f -> "NO_PEERS_FILE".equals(f.code)) ? " (no nodes/peers file)"
-                                                                                                                 : " (no peer recorded)"));
+                // a ready report with LIVE_UNAVAILABLE (written before the result INCOMPLETE existed) is incomplete too
+                if (NodeReport.INCOMPLETE.equals(report.result) || report.liveStateIncomplete())
+                    incompleteNodes.add(node);
+                if (report.peers.isEmpty())
+                {
+                    // NO_PEERS_FILE tells a missing file; without it the file is DSE's empty map, or missing beside a
+                    // nodes/local that records no data center (the node inspection then says nothing of it)
+                    withoutPeers.add(node + (report.findings.stream().anyMatch(f -> "NO_PEERS_FILE".equals(f.code))
+                                             ? " (no nodes/peers file)" : " (no peer recorded)"));
+                }
             }
             // a node reported with a host id and again without one (its nodes/local unread) counts twice: that second
-            // report is blocked and named by NODE_BLOCKED; a ready copy without peers is also named by NO_PEERS_RECORDED
+            // report is blocked and named by NODE_BLOCKED; a ready or incomplete copy without peers is also named by
+            // NO_PEERS_RECORDED
             reportedNodes.add(report.node.hostId != null ? "host id " + report.node.hostId
                                                          : report.node.broadcastAddress != null ? "address " + report.node.broadcastAddress
                                                                                                 : "file " + entry.getKey());
@@ -363,6 +379,13 @@ final class ClusterAggregate
         if (!blockedNodes.isEmpty())
             findings.add(blocking("NODE_BLOCKED", "nodes not ready: " + list(blockedNodes),
                                   "resolve the blocking findings of each node report, then run the tool on those nodes again"));
+        if (!incompleteNodes.isEmpty())
+            findings.add(blocking("NODE_INCOMPLETE",
+                                  "nodes whose live state was not checked completely (" + NodeReport.LIVE_UNAVAILABLE +
+                                  " in their reports): " + list(incompleteNodes),
+                                  "on each of them, check that DSE runs and that nodetool reaches it (see " +
+                                  NodeReport.LIVE_UNAVAILABLE + " in its report), run the tool on it again with " +
+                                  "--nodetool, then aggregate again"));
         // a node that records no peer was counted alone by its report (the replication checks among others), which is
         // wrong once another node of the cluster has a report: its nodes/peers is lost or stale
         if (!withoutPeers.isEmpty() && reportedNodes.size() > 1)
@@ -501,8 +524,10 @@ final class ClusterAggregate
         if (!missing.isEmpty())
             return "without " + String.join(", ", missing);
         JsonNode result = tree.get("result");
-        if (!NodeReport.READY.equals(result.textValue()) && !NodeReport.BLOCKED.equals(result.textValue()))
-            return "result " + result + ", neither " + NodeReport.READY + " nor " + NodeReport.BLOCKED;
+        if (!NodeReport.READY.equals(result.textValue()) && !NodeReport.BLOCKED.equals(result.textValue()) &&
+            !NodeReport.INCOMPLETE.equals(result.textValue()))
+            return "result " + result + ", neither " + NodeReport.READY + ", " + NodeReport.BLOCKED + " nor " +
+                   NodeReport.INCOMPLETE;
         JsonNode generatedAt = tree.get("generated_at");
         try
         {
@@ -518,9 +543,9 @@ final class ClusterAggregate
     }
 
     /**
-     * Why a node report cannot be aggregated; null when it can. A ready report must name its node fully, as the node
-     * inspection of a node whose {@code nodes/local} it read does: host id, an address, cluster name, release and schema
-     * version.
+     * Why a node report cannot be aggregated; null when it can. An incomplete report has the finding that makes it
+     * so, {@code LIVE_UNAVAILABLE}. A ready or incomplete report must name its node fully, as the node inspection of a
+     * node whose {@code nodes/local} it read does: host id, an address, cluster name, release and schema version.
      */
     private static String problem(NodeReport report)
     {
@@ -528,10 +553,14 @@ final class ClusterAggregate
             || report.upgradePath.settings.containsValue(null))
             return "an empty entry in peers, findings or upgrade_path.settings, or a finding without a code or severity";
         NodeReport.Node node = report.node;
-        if (NodeReport.READY.equals(report.result) &&
+        boolean incomplete = NodeReport.INCOMPLETE.equals(report.result);
+        if (incomplete && !report.liveStateIncomplete())
+            return "incomplete, but without a " + NodeReport.LIVE_UNAVAILABLE + " finding";
+        if ((NodeReport.READY.equals(report.result) || incomplete) &&
             (node.hostId == null || (node.broadcastAddress == null && node.listenAddress == null) || node.clusterName == null ||
              node.releaseVersion == null || node.schemaVersion == null))
-            return "ready, but its node section lacks the host id, the addresses, the cluster name, the release or the schema version";
+            return (incomplete ? "incomplete" : "ready") + ", but its node section lacks the host id, the addresses, " +
+                   "the cluster name, the release or the schema version";
         return null;
     }
 
