@@ -262,11 +262,12 @@ public class Dse51CompressorsStartupTest extends TestBaseImpl
     }
 
     /**
-     * A column of a type DSE 5.1 cannot read refuses the start in the mode, before the compressor of its table, since
-     * its only remedy, the flag drop, ends the check of the compressors too.
+     * A column of a type the mode does not write for DSE 5.1 refuses the start in the mode, before the compressor of
+     * its table, since one of its remedies, the flag drop, ends the check of the compressors too; the other, for a
+     * column of DSE 5.1's schema, is the rollback of the node.
      */
     @Test
-    public void aColumnTypeDse51CannotReadRefusesTheStartBeforeTheCompressor() throws Throwable
+    public void aColumnTypeTheModeDoesNotWriteRefusesTheStartBeforeTheCompressor() throws Throwable
     {
         try (Cluster cluster = nodeInTheMode())
         {
@@ -283,9 +284,14 @@ public class Dse51CompressorsStartupTest extends TestBaseImpl
             node.shutdown().get();
             assertThatThrownBy(node::startup)
             .hasStackTraceContaining("internode_compatibility_mode DSE_5_1 refused: " + KEYSPACE + ".both.e (")
-            .hasStackTraceContaining(") is of a type DSE 5.1 cannot read, so this node cannot write the sstables DSE " +
-                                     "5.1 reads for it, and its rollback to DSE 5.1 is no longer possible")
-            .hasStackTraceContaining("End the mode on this node")
+            .hasStackTraceContaining(") is of a type this software does not write for DSE 5.1, so this node " +
+                                     "cannot write the sstables DSE 5.1 reads for it. Such a column comes with the " +
+                                     "schema of DSE 5.1 (")
+            .hasStackTraceContaining("From DSE 5.1's schema: do not end the mode on this node, which it needs to " +
+                                     "reach the DSE 5.1 nodes; roll it back to DSE 5.1, then, before the first node " +
+                                     "is upgraded, drop it there and upgrade the node again")
+            .hasStackTraceContaining("From a run of this node outside the mode (its flag drop undone): once no node " +
+                                     "runs DSE 5.1, end the mode on this node again by the flag drop")
             .satisfies(e -> assertThat(stackTrace(e)).doesNotContain("(ZstdCompressor) is compressed"));
         }
     }

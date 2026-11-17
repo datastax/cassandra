@@ -572,7 +572,8 @@ public enum CassandraRelevantProperties
      * Lifts the schema freeze of {@code internode_compatibility_mode: DSE_6} and {@code DSE_5_1}: schema changes are
      * refused while the mode is on unless this is set (DSE peers would not understand the schema this software writes).
      * In {@code DSE_5_1} a statement giving a table or a view a compressor DSE 5.1 does not read, encryption, a
-     * {@code min_compress_ratio} or a column of a type DSE 5.1 does not read is refused even when this is set.
+     * {@code min_compress_ratio} or a column of a type this software does not write for DSE 5.1 is refused even when
+     * this is set.
      */
     INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL("cassandra.internode_compatibility_mode.allow_ddl", "false"),
     /**

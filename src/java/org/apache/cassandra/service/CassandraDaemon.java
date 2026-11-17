@@ -343,9 +343,9 @@ public class CassandraDaemon
             exitOrFail(e.returnCode, e.getMessage(), e.getCause());
         }
 
-        // DSE 5.1 compatibility: refuse to start while a table has a column of a type DSE 5.1 does not read, or is
+        // DSE 5.1 compatibility: refuse to start while a table has a column of a type not written for DSE 5.1, or is
         // compressed with a compressor DSE 5.1 does not read, encrypted, or given a min_compress_ratio; the column
-        // types first, since their only remedy, the flag drop, ends the check of the compressors too
+        // types first, since one of their remedies, the flag drop, ends the check of the compressors too
         if (DatabaseDescriptor.isDse51CompatibilityMode())
         {
             try

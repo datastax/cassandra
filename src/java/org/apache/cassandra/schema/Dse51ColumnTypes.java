@@ -26,7 +26,6 @@ import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -81,7 +80,10 @@ public final class Dse51ColumnTypes
 
     private static final String PARTITIONER_DEFINED_ORDER = PartitionerDefinedOrder.class.getName() + '(';
 
-    /** The reason under which the refused statements are counted. */
+    /**
+     * The reason under which the refused statements are counted; its words, older than the rule that a custom type
+     * DSE 5.1 loads is refused too, are kept: it is the key of the count in {@code nodetool compatstatus}.
+     */
     public static final String REFUSED_SCHEMA_CHANGE = "schema change with a column type DSE 5.1 does not read";
 
     private Dse51ColumnTypes()
@@ -89,8 +91,10 @@ public final class Dse51ColumnTypes
     }
 
     /**
-     * The part of {@code type} DSE 5.1.51 cannot parse, named as this software names it, or null when it parses all of
-     * it: a type outside the types of Cassandra 3.11 and DSE's own, or a non-frozen tuple.
+     * The part of {@code type} this software does not write for DSE 5.1, named as this software names it, or null when
+     * it writes all of it: a type outside the types of Cassandra 3.11 and DSE's own, which DSE 5.1.51 cannot parse
+     * unless its class is on DSE's class path (a custom type), or a non-frozen tuple. Its name, and that of the methods
+     * built on it, are older than the rule that a custom type DSE 5.1 loads is refused too.
      */
     @Nullable
     public static String unreadable(AbstractType<?> type)
@@ -123,7 +127,9 @@ public final class Dse51ColumnTypes
         String unreadable = unreadable(type);
         if (unreadable != null)
             throw new IllegalStateException("A big me sstable for DSE 5.1 cannot hold a column of type " + type +
-                                            ": DSE 5.1 cannot read " + unreadable);
+                                            ": " + unreadable + " is outside the types this software writes for " +
+                                            "DSE 5.1 (those of Cassandra 3.11 and DSE's geometric and date range " +
+                                            "types)");
         return withoutPartitionKeyTypes(withoutFrozenTuples(type.toString()));
     }
 
@@ -202,9 +208,9 @@ public final class Dse51ColumnTypes
 
     /**
      * In {@code DSE_5_1}, the refusal of a schema statement that changes {@code before} into {@code after} so that a
-     * table or a view has a column, or a user type a field, of a type DSE 5.1 cannot read ({@link #unreadable}); null
-     * when there is none, or outside the mode. Only the tables, views and user types the change creates or changes
-     * are checked.
+     * table or a view has a column, or a user type a field, of a type this software does not write for DSE 5.1
+     * ({@link #unreadable}); null when there is none, or outside the mode. Only the tables, views and user types the
+     * change creates or changes are checked.
      */
     @Nullable
     public static String refusedStatementChanges(Keyspaces before, Keyspaces after)
@@ -235,14 +241,8 @@ public final class Dse51ColumnTypes
             for (TableMetadata table : keyspace.tablesAndViews())
             {
                 TableMetadata old = previous == null ? null : previous.getTableOrViewNullable(table.name);
-                if (table.equals(old))
-                    continue;
-                for (ColumnMetadata column : table.columns())
-                {
-                    String unreadable = unreadable(column.type);
-                    if (unreadable != null)
-                        refused.add(table.keyspace + '.' + table.name + '.' + column.name + " (" + unreadable + ')');
-                }
+                if (!table.equals(old))
+                    refused.addAll(unreadableColumns(table));
             }
         }
         if (refused.isEmpty())
@@ -250,12 +250,12 @@ public final class Dse51ColumnTypes
         refused.sort(null);
         DseCompatRefusals.refused(REFUSED_SCHEMA_CHANGE);
         return Dse51Compressors.STATEMENT_REFUSAL + String.join(", ", refused) +
-               (refused.size() == 1 ? " is" : " are") + " of a type DSE 5.1 cannot read, so a DSE 5.1 node could " +
-               "not open the sstables this node writes for " + (refused.size() == 1 ? "it" : "them");
+               (refused.size() == 1 ? " is" : " are") + " of a type this software does not write for DSE 5.1, so " +
+               "this node could write no sstable a DSE 5.1 node reads for " + (refused.size() == 1 ? "it" : "them");
     }
 
     /**
-     * Every column of a table or a view of {@code keyspaces} of a type DSE 5.1 cannot read, as
+     * Every column of a table or a view of {@code keyspaces} of a type this software does not write for DSE 5.1, as
      * {@code keyspace.table.column (part)}, sorted.
      */
     @VisibleForTesting
@@ -264,21 +264,32 @@ public final class Dse51ColumnTypes
         List<String> refused = new ArrayList<>();
         for (KeyspaceMetadata keyspace : keyspaces)
             for (TableMetadata table : keyspace.tablesAndViews())
-                for (ColumnMetadata column : table.columns())
-                {
-                    String unreadable = unreadable(column.type);
-                    if (unreadable != null)
-                        refused.add(table.keyspace + '.' + table.name + '.' + column.name + " (" + unreadable + ')');
-                }
+                refused.addAll(unreadableColumns(table));
         refused.sort(null);
         return refused;
     }
 
     /**
-     * In {@code DSE_5_1}, refuses to start while a table or a view of the schema has a column of a type DSE 5.1 cannot
-     * read: this node could write no sstable of it. Only a node not in the mode can have given the schema such a
-     * column, since the statements and the schema changes received in the mode are refused. Does nothing in the other
-     * modes.
+     * Every column of {@code table}, a table or a view, of a type this software does not write for DSE 5.1
+     * ({@link #unreadable}), as {@code keyspace.table.column (part)}, in the order of its columns.
+     */
+    static List<String> unreadableColumns(TableMetadata table)
+    {
+        List<String> refused = new ArrayList<>();
+        for (ColumnMetadata column : table.columns())
+        {
+            String unreadable = unreadable(column.type);
+            if (unreadable != null)
+                refused.add(table.keyspace + '.' + table.name + '.' + column.name + " (" + unreadable + ')');
+        }
+        return refused;
+    }
+
+    /**
+     * In {@code DSE_5_1}, refuses to start while a table or a view of the schema has a column of a type this software
+     * does not write for DSE 5.1 ({@link #unreadable}): this node could write no sstable of it. The statements and
+     * the schema changes received in the mode refuse such a column, so it came with the schema of DSE 5.1 or from a
+     * run of this node outside the mode ({@link #startRefusal}). Does nothing in the other modes.
      */
     public static void verifyAtStartup() throws StartupException
     {
@@ -297,35 +308,50 @@ public final class Dse51ColumnTypes
     }
 
     /**
-     * The refusal of the start while a column of the schema has a type DSE 5.1 cannot read. Its only remedy is the
-     * flag drop, where the refusal of a compressor has a start in the mode that keeps the rollback (one start with
-     * {@code ignore_dse51_compression}): such a column enters the schema only while a node of this software runs
-     * outside the mode (a statement in the mode refuses it, and a node in the mode does not apply a schema change that
-     * carries one), so the schema the node holds is no longer the one DSE 5.1 nodes hold, and the data written for the
-     * column outside the mode is in sstables DSE 5.1 does not read.
+     * The refusal of the start while a column of the schema has a type this software does not write for DSE 5.1, with
+     * no start in the mode to get past it (the refusal of a compressor has one, with {@code ignore_dse51_compression}).
+     * A statement in the mode refuses such a column, and a node in the mode applies no schema change that carries one,
+     * pushed or pulled; the files a run outside the mode writes refuse the start first
+     * ({@code StartupChecks.checkDse6Artefacts}), until they are rewritten at {@code me} or restored. So the column
+     * came from one of two places, each with its remedy:
+     * <ul>
+     *     <li>the schema of DSE 5.1, which the node held when it ran DSE 5.1 (a type this software does not write for
+     *     DSE 5.1, such as a custom type, created before the upgrade or added on DSE 5.1 during it): the node keeps the
+     *     mode, which it needs to reach the DSE 5.1 nodes, and goes back to DSE 5.1 by its rollback; the column is
+     *     dropped there before the first node is upgraded, and the upgrade stops if it is the mixed phase. The last
+     *     node of the upgrade is in this case too, though no other node runs DSE 5.1 any more;</li>
+     *     <li>a run of this node outside the mode (its flag drop undone, its files then rewritten at {@code me} or
+     *     restored): the node ends the mode again once no node runs DSE 5.1, and the upgrade stops otherwise.</li>
+     * </ul>
      */
     @VisibleForTesting
     static String startRefusal(List<String> refused)
     {
+        boolean one = refused.size() == 1;
+        String them = one ? "it" : "them";
         return "internode_compatibility_mode DSE_5_1 refused: " + String.join(", ", refused) +
-               (refused.size() == 1 ? " is" : " are") + " of a type DSE 5.1 cannot read, so this node cannot write " +
-               "the sstables DSE 5.1 reads for " + (refused.size() == 1 ? "it" : "them") + ", and its rollback " +
-               "to DSE 5.1 is no longer possible. End the mode on this node: the flag drop " +
-               "(internode_compatibility_mode: NONE with storage_compatibility_mode: HCD_1), with -D" +
-               CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS.getKey() + "=true, needed " +
-               "while the marker of the DSE 5.1 upgrade exists on this node or its record of DSE 5.1 peers lists any " +
-               "(or cannot be read); out of the mode, the node no longer reaches the DSE 5.1 nodes that remain";
+               (one ? " is" : " are") + " of a type this software does not write for DSE 5.1, so this node cannot " +
+               "write the sstables DSE 5.1 reads for " + them + ". Such a column comes with the schema of DSE 5.1 (a " +
+               "type of a class both load, such as a custom type), or from a run of this node outside the mode. " +
+               "From DSE 5.1's schema: do not end the mode on this node, which it needs to reach the DSE 5.1 nodes; " +
+               "roll it back to DSE 5.1, then, before the first node is upgraded, drop " + them + " there and " +
+               "upgrade the node again, or, in the mixed phase (a schema change made on DSE 5.1 since the upgrade " +
+               "began), upgrade no further node and report to the upgrade owner. From a run of " +
+               "this node outside the mode (its flag drop undone): once no node runs DSE 5.1, end the mode on this " +
+               "node again by the flag drop (stop the node, delete the files of the DSE 5.1 upgrade of its metadata " +
+               "directory and start it set to internode_compatibility_mode NONE with storage_compatibility_mode " +
+               "HCD_1); while DSE 5.1 nodes remain, upgrade no further node and report to the upgrade owner";
     }
 
     /**
      * In {@code DSE_5_1}, the columns and the fields of user types to which the schema {@code mutations} give a type
-     * DSE 5.1 cannot read, as {@code keyspace.table.column (type)} or {@code keyspace.type.field (type)}, sorted;
-     * empty when there is none, or outside the mode. Read from the rows of {@code system_schema.columns} and
-     * {@code system_schema.types} they carry, the types parsed with the user types the keyspace has on this node; a
-     * type that does not parse so (a user type the change itself creates) is refused when its text names a vector or
-     * is a non-frozen tuple ({@code tuple<...>} not under {@code frozen<...>}), which DSE 5.1 does not read (a user
-     * type named after {@code vector<} would be taken for one); the user type, when created, is checked through its
-     * own row.
+     * this software does not write for DSE 5.1, as {@code keyspace.table.column (type)} or
+     * {@code keyspace.type.field (type)}, sorted; empty when there is none, or outside the mode. Read from the rows of
+     * {@code system_schema.columns} and {@code system_schema.types} they carry, the types parsed with the user types
+     * the keyspace has on this node; a type that does not parse so (a user type the change itself creates) is refused
+     * when its text names a vector or is a non-frozen tuple ({@code tuple<...>} not under {@code frozen<...>}), which
+     * DSE 5.1 does not read (a user type named after {@code vector<} would be taken for one); the user type, when
+     * created, is checked through its own row.
      */
     public static List<String> refusedSchemaMutations(Collection<Mutation> mutations)
     {
@@ -388,7 +414,7 @@ public final class Dse51ColumnTypes
         return refused;
     }
 
-    /** Whether the CQL type {@code type} of a schema row is one DSE 5.1 cannot read, see refusedSchemaMutations. */
+    /** Whether the CQL type {@code type} of a schema row is one not written for DSE 5.1, see refusedSchemaMutations. */
     private static boolean isUnreadable(String keyspace, String type, Types types)
     {
         try

@@ -609,7 +609,9 @@ public class SerializationHeaderTest
             .isInstanceOf(IllegalStateException.class)
             .hasMessageStartingWith("A big me sstable for DSE 5.1 cannot hold a column of type " +
                                     "org.apache.cassandra.db.marshal.VectorType(")
-            .hasMessageContaining(": DSE 5.1 cannot read org.apache.cassandra.db.marshal.VectorType(");
+            .hasMessageContaining(": org.apache.cassandra.db.marshal.VectorType(")
+            .hasMessageEndingWith(") is outside the types this software writes for DSE 5.1 (those of Cassandra 3.11 " +
+                                  "and DSE's geometric and date range types)");
             DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
             assertThat(typeNames(header, me)).contains("VectorType");
         }

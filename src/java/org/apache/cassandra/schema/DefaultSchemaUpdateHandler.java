@@ -380,8 +380,8 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
 
     /**
      * As {@link #refusesDse51Compressors}, for the columns and the user type fields the schema {@code mutations} give a
-     * type DSE 5.1 cannot read ({@link Dse51ColumnTypes#refusedSchemaMutations}): applying them would make every flush
-     * of such a table fail in the mode, and the next start of this node refuse.
+     * type this software does not write for DSE 5.1 ({@link Dse51ColumnTypes#refusedSchemaMutations}): applying them
+     * would make every flush of such a table fail in the mode, and the next start of this node refuse.
      */
     private static boolean refusesDse51ColumnTypes(InetAddressAndPort from, Collection<Mutation> mutations)
     {
@@ -391,9 +391,9 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
         DseCompatRefusals.refused(Dse51ColumnTypes.REFUSED_SCHEMA_CHANGE);
         NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 10, TimeUnit.MINUTES,
                          "Not applying a schema change from {} in internode_compatibility_mode DSE_5_1: it gives {} " +
-                         "a type DSE 5.1 cannot read. Only a node not in the mode sends such a change: this node's " +
-                         "schema disagrees with that node's, and the schema this node pulls from it is not applied " +
-                         "either, until the change is reverted there", from, refused);
+                         "a type this software does not write for DSE 5.1. Only a node not in the mode sends such " +
+                         "a change: this node's schema disagrees with that node's, and the schema this node pulls " +
+                         "from it is not applied either, until the change is reverted there", from, refused);
         return true;
     }
 
