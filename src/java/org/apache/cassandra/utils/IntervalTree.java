@@ -259,6 +259,8 @@ public class IntervalTree<C extends Comparable<? super C>, D extends Comparable<
                     continue;
                 }
             }
+            if (resultIndex == result.length)
+                throw new IllegalStateException("Removal interval not found in the existing tree: " + removalsSorted[removalsIndex]);
             result[resultIndex++] = existing;
         }
 
