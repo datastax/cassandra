@@ -1061,6 +1061,78 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         }
     }
 
+    /**
+     * {@code IS NOT NULL} on a field of a UDT or tuple column ({@code addr.city IS NOT NULL}): the field is set (see
+     * {@link RowFilter.FieldExpression}), for a path through collections in some element. Unlike the
+     * {@code IS NOT NULL} of the materialized views, it selects rows, served by an index on the field (all its terms)
+     * or by filtering. It's never merged with the other restrictions on the field, which imply it.
+     */
+    public static final class FieldIsNotNullRestriction extends SingleColumnRestriction
+    {
+        public FieldIsNotNullRestriction(ColumnMetadata columnDef, FieldPath fieldPath)
+        {
+            super(columnDef, fieldPath);
+        }
+
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+        }
+
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            throw new UnsupportedOperationException("Cannot convert to multicolumn restriction");
+        }
+
+        @Override
+        boolean canBeConvertedToMultiColumnRestriction()
+        {
+            return false;
+        }
+
+        @Override
+        public boolean shouldMerge(SingleRestriction other)
+        {
+            return false;
+        }
+
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
+        {
+            // IS NOT has no operand
+            addExpression(filter, Operator.IS_NOT, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+        }
+
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            throw new UnsupportedOperationException("Cannot use IS NOT NULL restriction for slicing");
+        }
+
+        @Override
+        public String toString()
+        {
+            return "IS NOT NULL";
+        }
+
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            throw new AssertionError("IS NOT NULL restrictions on fields are never merged: " + targetName());
+        }
+
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            return supports(index, Operator.IS_NOT);
+        }
+    }
+
     public static final class LikeRestriction extends SingleColumnRestriction
     {
         /** The token of a {@code '%'} wildcard in {@link #tokenize}. */

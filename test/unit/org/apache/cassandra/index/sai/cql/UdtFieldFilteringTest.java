@@ -229,4 +229,31 @@ public class UdtFieldFilteringTest extends SAITester
             assertIds("k = 1 AND v > 0 AND addr.zip < 20", 1);
         });
     }
+
+    /**
+     * {@code IS NOT NULL} on a field selects the rows where the field has a value: an empty string is a value.
+     */
+    @Test
+    public void testIsNotNull() throws Throwable
+    {
+        createTables("CREATE TABLE %s (id int PRIMARY KEY, v int, addr " + udt(address) + ", t frozen<tuple<text, int>>)");
+        insertAddresses();
+
+        inAllStates(() -> {
+            assertIds("addr.city IS NOT NULL", 1, 2, 3, 4, 6, 7);
+            assertIds("addr.street IS NOT NULL", 1, 2, 3, 6);
+            assertIds("addr.zip IS NOT NULL", 1, 2, 3, 6, 7);
+            assertIds("addr.loc.lat IS NOT NULL", 1, 3);
+            assertIds("t.field1 IS NOT NULL", 1, 2, 3);
+            assertIds("v > 0 AND addr.street IS NOT NULL", 1, 2, 3, 6);
+            assertIds("v > 2 AND addr.zip IS NOT NULL AND addr.city = 'Rome'", 3);
+            assertIds("v = 5 OR addr.loc.lon IS NOT NULL", 1, 3, 5);
+            assertIds("v > 0 AND addr.zip IS NOT NULL AND addr.zip < 200", 2, 6);
+        });
+
+        assertInvalidMessage(String.format(StatementRestrictions.FIELD_REQUIRES_ALLOW_FILTERING_MESSAGE, "addr.city"),
+                             "SELECT id FROM %s WHERE v > 0 AND addr.city IS NOT NULL");
+        assertInvalidSyntaxMessage("IS NULL restrictions are not supported",
+                                   "SELECT id FROM %s WHERE addr.city IS NULL ALLOW FILTERING");
+    }
 }

@@ -691,6 +691,55 @@ public class RowFilterTest
         assertFalse(builder.build().isMutableIntersection());
     }
 
+    /**
+     * IS NOT NULL on a field (operator IS_NOT, no operand): a round trip, the CQL form, and the filtering on single and
+     * multi-valued paths, where the empty strings are set but the empty values of the other types are not.
+     */
+    @Test
+    public void testFieldIsNotNull() throws IOException
+    {
+        TableMetadata metadata = collectionFieldsTable();
+        ColumnMetadata addrs = metadata.getColumn(new ColumnIdentifier("addrs", true));
+        ColumnMetadata faddrs = metadata.getColumn(new ColumnIdentifier("faddrs", true));
+        int version = MessagingService.current_version;
+
+        RowFilter.Builder builder = RowFilter.builder(false);
+        builder.add(addrs, path(addrs.type, "city"), Operator.IS_NOT, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+        builder.add(faddrs, path(faddrs.type, "loc", "lat"), Operator.IS_NOT, ByteBufferUtil.EMPTY_BYTE_BUFFER);
+        RowFilter filter = builder.build();
+        assertThat(filter.expressions().get(0).toString()).isEqualTo("addrs.city IS NOT NULL");
+        assertThat(filter.expressions().get(1).toString()).isEqualTo("faddrs.loc.lat IS NOT NULL");
+        for (RowFilter.Expression expression : filter.expressions())
+        {
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                RowFilter.Expression.serializer.serialize(expression, out, version);
+                assertThat(out.getLength()).isEqualTo(RowFilter.Expression.serializer.serializedSize(expression, version));
+                try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
+                {
+                    RowFilter.Expression deserialized = RowFilter.Expression.serializer.deserialize(in, version, metadata, IndexHints.NONE);
+                    assertThat(deserialized).isEqualTo(expression);
+                    assertThat(deserialized.toString()).isEqualTo(expression.toString());
+                }
+            }
+        }
+
+        DecoratedKey key = Murmur3Partitioner.instance.decorateKey(Int32Type.instance.decompose(1));
+        Clustering<?> clustering = Clustering.make(ListType.getInstance(TUPLE, false).decompose(Arrays.asList()));
+        Row withCity = listRow(clustering, addrs, address(null, 1, null), address("", null, null));
+        Row withoutCity = listRow(clustering, addrs, address(null, 1, 2.0));
+        RowFilter.Expression city = filter.expressions().get(0);
+        assertTrue(city.isSatisfiedBy(metadata, key, withCity, 1));
+        assertFalse(city.isSatisfiedBy(metadata, key, withoutCity, 1));
+        assertFalse(city.isSatisfiedBy(metadata, key, BTreeRow.emptyRow(clustering), 1));
+
+        // the empty values: set for the literal types only
+        assertTrue(RowFilter.FieldExpression.isSet(UTF8Type.instance, ByteBufferUtil.EMPTY_BYTE_BUFFER));
+        assertFalse(RowFilter.FieldExpression.isSet(Int32Type.instance, ByteBufferUtil.EMPTY_BYTE_BUFFER));
+        assertTrue(RowFilter.FieldExpression.isSet(Int32Type.instance, Int32Type.instance.decompose(0)));
+        assertFalse(RowFilter.FieldExpression.isSet(UTF8Type.instance, null));
+    }
+
     private interface PathWriter
     {
         void write(DataOutputBuffer out) throws IOException;
