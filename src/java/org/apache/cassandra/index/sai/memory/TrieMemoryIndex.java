@@ -442,6 +442,14 @@ public class TrieMemoryIndex extends MemoryIndex
         if (minTerm == null || maxTerm == null)
             return 0;
 
+        ByteComparable queryLower = expression.getEncodedLowerBoundByteComparable(version);
+        ByteComparable queryUpper = expression.getEncodedUpperBoundByteComparable(version);
+        boolean lowerExclusive = expression.lower != null && !expression.lower.inclusive;
+        boolean upperExclusive = expression.upper != null && !expression.upper.inclusive;
+
+        if (isEmptyRange(queryLower, !lowerExclusive, queryUpper, !upperExclusive))
+            return 0;
+
         AbstractType<?> termType = indexContext.getValidator();
         ByteComparable minTermComparable = version.onDiskFormat().encodeForTrie(minTerm, termType);
         ByteComparable maxTermComparable = version.onDiskFormat().encodeForTrie(maxTerm, termType);
@@ -449,10 +457,10 @@ public class TrieMemoryIndex extends MemoryIndex
         BigDecimal indexUpperBound = toBigDecimal(maxTermComparable);
 
         BigDecimal queryLowerBound = expression.lower != null
-                                     ? toBigDecimal(expression.getEncodedLowerBoundByteComparable(version))
+                                     ? toBigDecimal(queryLower)
                                      : indexLowerBound;
         BigDecimal queryUpperBound = expression.upper != null
-                                     ? toBigDecimal(expression.getEncodedUpperBoundByteComparable(version))
+                                     ? toBigDecimal(queryUpper)
                                      : indexUpperBound;
 
         if (queryLowerBound.compareTo(indexUpperBound) > 0 || queryUpperBound.compareTo(indexLowerBound) < 0)
@@ -516,7 +524,27 @@ public class TrieMemoryIndex extends MemoryIndex
             upperInclusive = false;
         }
 
+        if (isEmptyRange(lowerBound, lowerInclusive, upperBound, upperInclusive))
+            return Trie.empty(data.byteComparableVersion());
+
         return data.subtrie(lowerBound, lowerInclusive, upperBound, upperInclusive);
+    }
+
+    /**
+     * Returns whether the given term range can't contain any term because its bounds are inverted
+     * (e.g. {@code v > 5 AND v < 3}) or equal with at least one exclusive side. A null bound is unbounded.
+     * <p>
+     * Trie slices reject out-of-order bounds, so this must be checked before slicing. Equal bounds with one exclusive
+     * side would make a valid empty slice, they are also reported here only because they are empty.
+     */
+    private boolean isEmptyRange(@Nullable ByteComparable lowerBound, boolean lowerInclusive,
+                                 @Nullable ByteComparable upperBound, boolean upperInclusive)
+    {
+        if (lowerBound == null || upperBound == null)
+            return false;
+
+        int cmp = ByteComparable.compare(lowerBound, upperBound, data.byteComparableVersion());
+        return cmp > 0 || (cmp == 0 && !(lowerInclusive && upperInclusive));
     }
 
     public ByteBuffer getMinTerm()
