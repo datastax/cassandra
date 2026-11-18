@@ -141,7 +141,16 @@ public class Operation
                 }
                 targetIsMultiExpression.put(target, isMultiExpression);
 
-                if (isMultiExpression)
+                if (e.operator() == Operator.IS_NOT)
+                {
+                    // IS NOT NULL on a field has no operand to analyze: all the terms of the index; combined with the
+                    // previous expression on the same single-valued target, which implies it
+                    if (perColumn.isEmpty() || op != OperationType.AND || !Iterables.getLast(perColumn).context.equals(indexContext))
+                        perColumn.add(new Expression(indexContext).add(Operator.IS_NOT, ByteBuffer.allocate(0)));
+                    else
+                        Iterables.getLast(perColumn).add(Operator.IS_NOT, ByteBuffer.allocate(0));
+                }
+                else if (isMultiExpression)
                 {
                     if (!analyzer.hasNext())
                     {
@@ -296,6 +305,12 @@ public class Operation
 
             case NEQ:
                 return 1;
+
+            // IS NOT NULL on a field is strictly last (below the other operators, also those of the default case):
+            // it's combined with the previous expression on the same single-valued field, whatever its operator
+            // (see analyzeGroup and Expression#add), which keeps its operation and bounds
+            case IS_NOT:
+                return -1;
 
             default:
                 return 0;

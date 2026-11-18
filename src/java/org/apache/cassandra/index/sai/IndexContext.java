@@ -65,6 +65,7 @@ import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
+import org.apache.cassandra.index.sai.analyzer.LuceneAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.IndexFeatureSet;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
@@ -999,8 +1000,30 @@ public class IndexContext
         return !isNonFrozenCollection() && !unpacksLeafCollection && !isAnalyzed;
     }
 
+    /**
+     * Whether the index has an {@code index_analyzer} or a {@code query_analyzer}, which may tokenize a value into
+     * several terms, or into none. The indexes with only the normalizing options ({@code case_sensitive},
+     * {@code normalize}, {@code ascii}) have exactly one term per value.
+     */
+    private boolean hasCustomAnalyzer()
+    {
+        return config != null && (config.options.containsKey(LuceneAnalyzer.INDEX_ANALYZER)
+                                  || config.options.containsKey(LuceneAnalyzer.QUERY_ANALYZER));
+    }
+
     public boolean supports(Operator op)
     {
+        // IS NOT NULL on a field: an index on the field has a term when the field is set (null and unset values are
+        // not indexed, empty values only for the literal types, as RowFilter.FieldExpression#isSet), so the scan of
+        // all its terms serves it, whatever the order of the terms. The exception is a value whose term (the analyzed
+        // value, for an index with an analyzer) exceeds the maximum term size of the index: it is skipped at index
+        // time with a warning, so the rows with such a value are missing from the results, as from those of every
+        // other operator the index serves. Not when it indexes the values of a leaf collection (an empty collection
+        // is set but has no term) nor with an index_analyzer or query_analyzer (a value may have no token). Never on whole
+        // columns, for which IS NOT NULL is only a materialized view restriction.
+        if (op == Operator.IS_NOT)
+            return fieldPath != null && !unpacksLeafCollection && !hasCustomAnalyzer();
+
         if (op.isLike())
             return supportsLikeQueries();
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
