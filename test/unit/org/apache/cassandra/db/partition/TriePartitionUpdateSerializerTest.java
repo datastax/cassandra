@@ -1498,35 +1498,6 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
     }
 
     /**
-     * A cell's flags say which of its fields follow, and its value takes what they leave of the payload, so a cell
-     * with the wrong flags can fit its payload: one with a flag that is not used is corrupt, and so is one that is both
-     * deleted and expiring, which no cell is. 0x04 is among the unused ones: on a table without counters, it once had a
-     * cell's value cleared of local counter shards, and the cell kept as a counter.
-     */
-    @Test
-    public void testInvalidCellFlagsAreRejected() throws Throwable
-    {
-        createRichTable();
-        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).ttl(60).row(1).add("v", 11)));
-        byte[] bytes = serialize(update);
-
-        // The update has no deletion branch, so the trie starts with its first live payload, the cell: its tag, its
-        // flags, the deltas of its timestamp, local deletion time and TTL from the update's smallest ones, and its value.
-        int payload = trieStart(bytes);
-        assertArrayEquals(new byte[]{ 9, 2, 0, 0, 0, 0, 0, 0, 11 }, Arrays.copyOfRange(bytes, payload, payload + 9));
-
-        for (int flag = 0x04; flag <= 0x80; flag <<= 1)
-        {
-            byte[] corrupt = bytes.clone();
-            corrupt[payload + 1] |= (byte) flag;
-            assertCorruptionRejected(corrupt, "Unknown cell flags");
-        }
-
-        bytes[payload + 1] = 3;
-        assertCorruptionRejected(bytes, "both deleted and expiring");
-    }
-
-    /**
      * A cell whose fields reach past the end of its payload, and so leave no value, is corrupt.
      */
     @Test
@@ -1618,24 +1589,17 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
     }
 
     /**
-     * The flags after the key have one flag, that the update is empty, which an update that counts a row or a
-     * tombstone is not.
+     * The flags after the key say whether the update is empty, which an update that counts a row or a tombstone is
+     * not.
      */
     @Test
-    public void testInvalidUpdateFlagsAreRejected() throws Throwable
+    public void testUpdateFlaggedEmptyThatCountsRowsIsRejected() throws Throwable
     {
         createRichTable();
         byte[] bytes = serialize(viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11))));
         // The key, key0, is written after its length, and the flags follow it.
         int flags = 5;
         assertEquals(0, bytes[flags]);
-
-        for (int flag = 0x02; flag <= 0x80; flag <<= 1)
-        {
-            byte[] corrupt = bytes.clone();
-            corrupt[flags] = (byte) flag;
-            assertDeserializationRejected(corrupt, "Unknown partition update flags: " + flag);
-        }
 
         byte[] corrupt = bytes.clone();
         corrupt[flags] = 1;
@@ -1649,42 +1613,49 @@ public class TriePartitionUpdateSerializerTest extends CQLTester
     }
 
     /**
-     * Whether an update is empty is read from its flags without deserializing it, as Paxos v2 reads a proposal it keeps,
-     * and the flags the deserializer rejects are rejected there as well, also with the empty flag set: an update taken
-     * for empty is not committed.
+     * As {@link Cell.Serializer} and the BTree encoding do, the reader ignores the bits of a cell's flags and of an
+     * update's flags that it does not know, so that a flag that adds no field can be added without a new messaging
+     * version.
      */
     @Test
-    public void testInvalidUpdateFlagsAreRejectedFromBytes() throws Throwable
+    public void testUnknownFlagsAreIgnored() throws Throwable
     {
         createRichTable();
-        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).row(1).add("v", 11)));
+        TriePartitionUpdate update = viaBTree(build(builder -> builder.timestamp(2000).nowInSec(1500).ttl(60).row(1).add("v", 11)));
         byte[] bytes = serialize(update);
-        byte[] withTableAndFormat = ByteBufferUtil.getArray(PartitionUpdate.toBytes(update, VERSION));
-        // The flags follow the key, as in testInvalidUpdateFlagsAreRejected, and the table id and the format byte come
-        // before the key there.
-        int flags = 5;
-        int flagsAfterTableAndFormat = withTableAndFormat.length - bytes.length + flags;
-        assertEquals(0, withTableAndFormat[flagsAfterTableAndFormat]);
 
+        // The update has no deletion branch, so the trie starts with its first live payload, the cell: its tag, its
+        // flags, the deltas of its timestamp, local deletion time and TTL from the update's smallest ones, and its value.
+        int payload = trieStart(bytes);
+        assertArrayEquals(new byte[]{ 9, 2, 0, 0, 0, 0, 0, 0, 11 }, Arrays.copyOfRange(bytes, payload, payload + 9));
+        for (int flag = 0x04; flag <= 0x80; flag <<= 1)
+        {
+            byte[] withFlag = bytes.clone();
+            withFlag[payload + 1] |= (byte) flag;
+            assertEquals(update, deserialize(withFlag));
+        }
+
+        TriePartitionUpdate empty = TriePartitionUpdate.asTrieUpdate(PartitionUpdate.emptyUpdate(currentTableMetadata(), update.partitionKey()));
         for (int flag = 0x02; flag <= 0x80; flag <<= 1)
         {
-            // Without and with the one flag there is, that the update is empty.
-            for (int corruptFlags : new int[]{ flag, flag | 0x01 })
-            {
-                String expectedMessage = "Unknown partition update flags: " + corruptFlags;
-                byte[] corrupt = bytes.clone();
-                corrupt[flags] = (byte) corruptFlags;
-                assertDeserializationRejected(corrupt, expectedMessage);
+            assertUpdateFlagIgnored(update, flag, false);
+            assertUpdateFlagIgnored(empty, flag, true);
+        }
+    }
 
-                byte[] corruptWithTableAndFormat = withTableAndFormat.clone();
-                corruptWithTableAndFormat[flagsAfterTableAndFormat] = (byte) corruptFlags;
-                IOException e = assertThrows(IOException.class,
-                                             () -> PartitionUpdate.PartitionUpdateSerializer.isEmpty(ByteBuffer.wrap(corruptWithTableAndFormat),
-                                                                                                     VERSION,
-                                                                                                     DeserializationHelper.Flag.LOCAL,
-                                                                                                     update.partitionKey()));
-                assertEquals(expectedMessage, e.getMessage());
-            }
+    /** With the flag set as well, the update's bytes still say whether it is empty, and read back as the update. */
+    private void assertUpdateFlagIgnored(TriePartitionUpdate update, int flag, boolean isEmpty) throws IOException
+    {
+        byte[] bytes = ByteBufferUtil.getArray(PartitionUpdate.toBytes(update, VERSION));
+        // The table id and the format byte come before the key, key0 after its length, and the flags follow it.
+        int flags = update.metadata().id.serializedSize() + 1 + 5;
+        assertEquals(isEmpty ? 1 : 0, bytes[flags]);
+        bytes[flags] |= (byte) flag;
+
+        assertEquals(isEmpty, PartitionUpdate.PartitionUpdateSerializer.isEmpty(ByteBuffer.wrap(bytes), VERSION, DeserializationHelper.Flag.LOCAL, update.partitionKey()));
+        try (DataInputBuffer in = new DataInputBuffer(bytes))
+        {
+            assertEquals(update, PartitionUpdate.serializer.deserialize(in, VERSION, DeserializationHelper.Flag.LOCAL));
         }
     }
 

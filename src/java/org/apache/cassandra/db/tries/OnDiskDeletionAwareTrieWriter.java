@@ -160,10 +160,10 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>> extends O
         long startPosition = out.position();
         try (DeletionAwareCursor<T, D> c = trie.cursor(Direction.REVERSE))
         {
-            fw.emitAt(c);
             long position = c.encodedPosition();
+            fw.emitAt(c, position);
             while (!Cursor.isExhausted(position = fw.step(c, position)))
-                fw.emitAt(c);
+                fw.emitAt(c, position);
         }
         // An empty trie leaves the stream untouched, and the position there is not a node.
         long position = out.position();
@@ -171,10 +171,8 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>> extends O
     }
 
     /// Report the content and, if present, the whole deletion branch at the cursor's position.
-    private void emitAt(DeletionAwareCursor<T, D> c) throws IOException
+    private void emitAt(DeletionAwareCursor<T, D> c, long position) throws IOException
     {
-        long position = c.encodedPosition();
-
         T content = Cursor.content(c, position);
         // The ascent-side slot is the branch pointer's (see the class documentation); live content on the return path
         // would be written into it and read back as a pointer.

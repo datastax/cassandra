@@ -219,12 +219,6 @@ public class EncodingStats implements IMeasurableMemory
             }
         }
 
-        public void update(Cell<?> cell)
-        {
-            update((CellData<?, ?>) cell);
-        }
-
-        /// As [#update(Cell)], for the data of a cell without its column and path, which the stats do not depend on.
         public void update(CellData<?, ?> cell)
         {
             updateTimestamp(cell.timestamp());

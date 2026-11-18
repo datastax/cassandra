@@ -23,6 +23,8 @@ import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
 import java.util.Objects;
 
+import org.agrona.collections.Object2IntHashMap;
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.DeletionTime;
@@ -38,6 +40,7 @@ import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.TrieBackedRow;
 import org.apache.cassandra.db.rows.TrieTombstoneMarker;
+import org.apache.cassandra.db.rows.UnfilteredRowIteratorSerializer;
 import org.apache.cassandra.db.tries.DeletionAwareTrie;
 import org.apache.cassandra.db.tries.OnDiskCursor;
 import org.apache.cassandra.db.tries.OnDiskDeletionAwareTrie;
@@ -82,17 +85,12 @@ public class TriePartitionUpdateSerializer
     /// The flags a cell's payload starts with after its tag. Its timestamp follows, then its local deletion time if it
     /// is deleted or expiring and its TTL if it is expiring, and its value takes the rest of the payload, whose length
     /// the trie records. Its column and cell path are not written: the cell's key in the trie gives them. Nor is whether
-    /// it is a counter: a cell is one if it is live and its table is a counter table, as [Cell#isCounterCell] has it. A
-    /// cell is never both deleted and expiring, and no other flag is used.
+    /// it is a counter: a cell is one if it is not deleted and its table is a counter table, all of whose columns
+    /// outside the primary key hold counters. The writer never sets both flags. The other bits are not used, and
+    /// readers ignore them, so they are free for future flags that add no field: the reader takes the rest of the
+    /// payload as the value, so a flag that adds or moves a field needs a new messaging version.
     private static final int CELL_IS_DELETED = 0x01;
     private static final int CELL_IS_EXPIRING = 0x02;
-
-    /// The flags an update starts with after its partition key. The only one is set if the update is empty, as
-    /// [TriePartitionUpdate#isEmpty] has it, so that whether a serialized update is empty can be read from its bytes
-    /// without its table or its trie ([PartitionUpdate.PartitionUpdateSerializer#isEmpty]), as Paxos does to tell
-    /// whether a proposal it keeps is empty. The row and tombstone counts do not tell: neither counts a row whose only
-    /// content is the deletion of a complex column.
-    static final int UPDATE_IS_EMPTY = 0x01;
 
     private TriePartitionUpdateSerializer()
     {
@@ -115,7 +113,14 @@ public class TriePartitionUpdateSerializer
     {
         checkVersion(version);
         ByteBufferUtil.writeWithVIntLength(trieUpdate.partitionKey().getKey(), out);
-        out.writeByte(trieUpdate.isEmpty() ? UPDATE_IS_EMPTY : 0);
+        // The flags follow the key, as in the BTree encoding, and the only one used is the same: that the update is
+        // empty, as TriePartitionUpdate#isEmpty has it, so that whether a serialized update is empty can be read from
+        // its bytes without its table or its trie (PartitionUpdateSerializer#isEmpty), as Paxos does to tell whether a
+        // proposal it keeps is empty. The row and tombstone counts do not tell: neither counts a row whose only
+        // content is the deletion of a complex column. Readers ignore the other bits, so they are free for future
+        // flags that add no field: the fields after the flags are fixed, so a flag that adds one needs a new messaging
+        // version.
+        out.writeByte(trieUpdate.isEmpty() ? UnfilteredRowIteratorSerializer.IS_EMPTY : 0);
         out.writeUnsignedVInt32(trieUpdate.rowCountIncludingStatic);
         out.writeUnsignedVInt32(trieUpdate.tombstoneCount);
         out.writeUnsignedVInt32(trieUpdate.dataSize());
@@ -133,35 +138,39 @@ public class TriePartitionUpdateSerializer
     /// the other way round -- cannot use the trie's keys as they are, and needs these to translate them.
     private static void serializeColumnIndexes(TableMetadata metadata, RegularAndStaticColumns columns, DataOutputPlus out) throws IOException
     {
+        Object2IntHashMap<ColumnIdentifier> staticIds = TrieBackedRow.columnIdsMap(metadata.regularAndStaticColumns().statics);
         for (ColumnMetadata column : columns.statics)
-            out.writeUnsignedVInt32(columnIndex(metadata, column));
+            out.writeUnsignedVInt32(columnIndex(metadata, staticIds, column));
+        Object2IntHashMap<ColumnIdentifier> regularIds = TrieBackedRow.columnIdsMap(metadata.regularAndStaticColumns().regulars);
         for (ColumnMetadata column : columns.regulars)
-            out.writeUnsignedVInt32(columnIndex(metadata, column));
+            out.writeUnsignedVInt32(columnIndex(metadata, regularIds, column));
     }
 
     private static long columnIndexesSerializedSize(TableMetadata metadata, RegularAndStaticColumns columns)
     {
         long size = 0;
+        Object2IntHashMap<ColumnIdentifier> staticIds = TrieBackedRow.columnIdsMap(metadata.regularAndStaticColumns().statics);
         for (ColumnMetadata column : columns.statics)
-            size += TypeSizes.sizeofUnsignedVInt(columnIndex(metadata, column));
+            size += TypeSizes.sizeofUnsignedVInt(columnIndex(metadata, staticIds, column));
+        Object2IntHashMap<ColumnIdentifier> regularIds = TrieBackedRow.columnIdsMap(metadata.regularAndStaticColumns().regulars);
         for (ColumnMetadata column : columns.regulars)
-            size += TypeSizes.sizeofUnsignedVInt(columnIndex(metadata, column));
+            size += TypeSizes.sizeofUnsignedVInt(columnIndex(metadata, regularIds, column));
         return size;
     }
 
-    private static int columnIndex(TableMetadata metadata, ColumnMetadata column)
+    private static int columnIndex(TableMetadata metadata, Object2IntHashMap<ColumnIdentifier> localIds, ColumnMetadata column)
     {
-        int index = localIndex(metadata, column);
+        int index = localIndex(localIds, column);
         if (index < 0)
             throw new IllegalStateException("Column " + column.name + " of a partition update is not a column of " + metadata);
         return index;
     }
 
-    /// The column's position among the static or regular columns of this node's version of the table, or a negative
-    /// number if this node does not have the column.
-    private static int localIndex(TableMetadata metadata, ColumnMetadata column)
+    /// The column's position in `localIds`, the [TrieBackedRow#columnIdsMap] of the static or regular columns of this
+    /// node's version of the table, or a negative number if this node does not have the column.
+    private static int localIndex(Object2IntHashMap<ColumnIdentifier> localIds, ColumnMetadata column)
     {
-        return TrieBackedRow.columnIdsMap(metadata.regularAndStaticColumns().columns(column.isStatic())).getValue(column.name);
+        return localIds.getValue(column.name);
     }
 
     private static int[] deserializeColumnIndexes(DataInputPlus in, Columns columns) throws IOException
@@ -174,12 +183,12 @@ public class TriePartitionUpdateSerializer
 
     /// Whether the sender keyed the given columns by the indices this node gives them, so that the trie can be read
     /// as it is. A column this node does not have, i.e. one dropped here, has no index of its own.
-    private static boolean hasLocalIndexes(TableMetadata metadata, Columns columns, int[] indexes)
+    private static boolean hasLocalIndexes(Object2IntHashMap<ColumnIdentifier> localIds, Columns columns, int[] indexes)
     {
         int i = 0;
         for (ColumnMetadata column : columns)
         {
-            if (localIndex(metadata, column) != indexes[i++])
+            if (localIndex(localIds, column) != indexes[i++])
                 return false;
         }
         return true;
@@ -192,7 +201,7 @@ public class TriePartitionUpdateSerializer
     /// writer emits the root last and pointers run backwards, so the trie is only readable once
     /// its extent is known.
     ///
-    /// An output that stops at a limit, as a mutation is written through to be kept only if it is smaller than the
+    /// An output that stops at a limit, as a mutation is written through to be kept only if it is no larger than the
     /// cacheable size, would refuse a trie too long for it only once all of it was laid out. The trie is then laid out
     /// under the room the output has, less the one byte its length takes at the least, so that the layout stops as
     /// soon as the trie cannot fit, and the output decides on one that can.
@@ -237,9 +246,7 @@ public class TriePartitionUpdateSerializer
         if (rowCountIncludingStatic < 0 || tombstoneCount < 0)
             throw new IOException(String.format("Corrupt TriePartitionUpdate header counts: rows=%d, tombstones=%d",
                                                 rowCountIncludingStatic, tombstoneCount));
-        if ((flags & ~UPDATE_IS_EMPTY) != 0)
-            throw new IOException("Unknown partition update flags: " + flags);
-        if ((flags & UPDATE_IS_EMPTY) != 0 && (rowCountIncludingStatic != 0 || tombstoneCount != 0))
+        if ((flags & UnfilteredRowIteratorSerializer.IS_EMPTY) != 0 && (rowCountIncludingStatic != 0 || tombstoneCount != 0))
             throw new IOException(String.format("Partition update flagged as empty counts rows=%d, tombstones=%d",
                                                 rowCountIncludingStatic, tombstoneCount));
 
@@ -278,8 +285,8 @@ public class TriePartitionUpdateSerializer
         // can still come between reading an update and merging it, so the memtable checks the numbering again
         // (TrieMemtable.put).
         if (mayHoldDroppedData
-            || !hasLocalIndexes(metadata, statics, staticIndexes)
-            || !hasLocalIndexes(metadata, regulars, regularIndexes))
+            || !hasLocalIndexes(TrieBackedRow.columnIdsMap(metadata.regularAndStaticColumns().statics), statics, staticIndexes)
+            || !hasLocalIndexes(TrieBackedRow.columnIdsMap(metadata.regularAndStaticColumns().regulars), regulars, regularIndexes))
         {
             TriePartitionUpdate senderKeyed = new TriePartitionUpdate(metadata, key, header.columns(), header.stats(), rowCountIncludingStatic, tombstoneCount, dataSize, trie);
             return TriePartitionUpdate.withColumnIndexes(senderKeyed,
@@ -446,12 +453,11 @@ public class TriePartitionUpdateSerializer
         private CellData<?, ?> deserializeCell(DataInputPlus in, long end) throws IOException
         {
             int flags = in.readUnsignedByte();
-            if ((flags & ~(CELL_IS_DELETED | CELL_IS_EXPIRING)) != 0)
-                throw new IOException("Unknown cell flags: " + flags);
             boolean isDeleted = (flags & CELL_IS_DELETED) != 0;
             boolean isExpiring = (flags & CELL_IS_EXPIRING) != 0;
-            if (isDeleted && isExpiring)
-                throw new IOException("Cell flagged as both deleted and expiring");
+            // Cell.Serializer asks the cell's column, which the payload does not have, but every column of a counter
+            // table outside its primary key holds counters (AbstractType#validateForColumn), and a counter cannot
+            // expire, so a cell of a counter table is a counter if it is not deleted.
             boolean isCounter = isCounterTable && !isDeleted;
 
             long timestamp = header.readTimestamp(in);

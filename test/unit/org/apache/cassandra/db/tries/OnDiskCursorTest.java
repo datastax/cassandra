@@ -45,7 +45,6 @@ import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 
@@ -231,8 +230,7 @@ public class OnDiskCursorTest
 
     /// A move that fails on corrupt bytes can leave a range cursor part way: here a skip to the return path of "b" has
     /// read the content on the way down into "b" when the content on the way back up is rejected, and the state the
-    /// cursor would work out from either is not set. Closing it must still give the buffer back without failing, and
-    /// a tail asked for afterwards must report the corruption.
+    /// cursor would work out from either is not set. Closing it must still give the buffer back without failing.
     @Test
     public void testRangeCursorClosesAfterAFailedSkip() throws IOException
     {
@@ -256,46 +254,6 @@ public class OnDiskCursorTest
             assertEquals(2, reads[0]);
             cursor.close();
             assertEquals(0, factory.outstanding);
-            assertThrows(UncheckedIOException.class, () -> cursor.tailCursor(Direction.FORWARD));
-        }
-    }
-
-    /// An advance, unlike a skip, starts from a known state, and one that fails part way must not leave that state
-    /// to be reported for wherever the cursor stopped.
-    @Test
-    public void testRangeCursorStateAfterAFailedAdvance() throws IOException
-    {
-        testRangeCursorStateAfterAFailedMove(cursor -> cursor.advance());
-        testRangeCursorStateAfterAFailedMove(cursor -> cursor.advanceMultiple(null));
-    }
-
-    private static void testRangeCursorStateAfterAFailedMove(ToLongFunction<OnDiskRangeCursor<TestRangeState>> move) throws IOException
-    {
-        RangeTrie<TestRangeState> trie = TestRangeState.fromList(TestRangeState.verify(Arrays.asList(
-            new TestRangeState(TrieUtil.directComparable("a"), -1, 1),
-            new TestRangeState(TrieUtil.directComparable("c"), 1, -1))));
-        try (DataOutputBuffer out = new DataOutputBuffer())
-        {
-            OnDiskTrieWriter.write(trie, true, TrieUtil.RANGE_SERDE, out);
-            ByteBuffer buffer = out.asNewBuffer();
-            int[] reads = new int[1];
-            OnDiskCursor.DataDeserializer<TestRangeState> deserializer = (rdr, length) -> {
-                if (++reads[0] > 1)
-                    throw new IOException("Corrupt content");
-                return TrieUtil.RANGE_SERDE.deserialize(rdr, length);
-            };
-            TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(new ByteBufferRebufferer(buffer));
-            OnDiskRangeCursor<TestRangeState> cursor = new OnDiskRangeCursor<>(deserializer, factory,
-                                                                               VERSION, Direction.FORWARD, buffer.limit());
-            move.applyAsLong(cursor);     // to "a", whose range is active until the move to "c"
-            assertNotNull(cursor.state());
-            assertThrows(UncheckedIOException.class, () -> move.applyAsLong(cursor));
-            assertEquals(2, reads[0]);
-            assertThrows(UncheckedIOException.class, cursor::state);
-            cursor.close();
-            assertEquals(0, factory.outstanding);
-            assertThrows(UncheckedIOException.class, cursor::state);
-            assertThrows(UncheckedIOException.class, () -> cursor.tailCursor(Direction.FORWARD));
         }
     }
 
@@ -469,10 +427,9 @@ public class OnDiskCursorTest
         }
     }
 
-    /// A prefix with a child whose content starts the data has its child end at position 0, where no node can end.
-    /// Rejecting it must leave the cursor reading the file: the position before the start of the data is the one at
-    /// which a range tail presents its root's return-path content, and a move after the failure must not present that
-    /// content at the prefix.
+    /// A prefix with a child whose content starts the data has its child end at position 0, where no node can end, and
+    /// a range tail must reject it rather than take that position for the one at which it presents its root's
+    /// return-path content.
     @Test
     public void testRangeTailPrefixWithChildAtStartOfDataIsRejected()
     {
@@ -503,8 +460,6 @@ public class OnDiskCursorTest
              RangeCursor<TestRangeState> cursor = parent.tailCursor(Direction.FORWARD))
         {
             assertThrows(UncheckedIOException.class, cursor::advance);
-            cursor.advance();
-            assertNotSame(rootAscentContent, cursor.content());
         }
     }
 

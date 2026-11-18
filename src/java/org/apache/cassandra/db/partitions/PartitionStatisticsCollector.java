@@ -18,14 +18,14 @@
 package org.apache.cassandra.db.partitions;
 
 import org.apache.cassandra.db.*;
-import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 
 public interface PartitionStatisticsCollector
 {
     void update(LivenessInfo info);
     void updatePartitionDeletion(DeletionTime dt);
     void update(DeletionTime deletionTime);
-    void update(Cell<?> cell);
+    void update(CellData<?, ?> cell);
     void updateColumnSetPerRow(long columnSetInRow);
     void updateHasLegacyCounterShards(boolean hasLegacyCounterShards);
 }

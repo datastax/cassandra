@@ -577,10 +577,9 @@ public interface PartitionUpdate extends Partition
             if (position >= in.limit())
                 throw new EOFException();
 
-            int format = 0;
             if (hasFormatByte(version))
             {
-                format = in.get(position++);
+                int format = in.get(position++);
                 if (format != 0 && format != 1)
                     throw new IOException("Unknown PartitionUpdate format byte: " + format);
                 if (position >= in.limit())
@@ -593,15 +592,8 @@ public interface PartitionUpdate extends Partition
             if (position >= in.limit())
                 throw new EOFException();
 
-            // Both encodings follow the key with flags, one of which says whether the update is empty.
+            // Both encodings follow the key with flags, and set the same one, IS_EMPTY, if the update is empty.
             int flags = in.get(position) & 0xff;
-            if (format == 1)
-            {
-                // As TriePartitionUpdateSerializer.deserialize does, so that corrupt flags are not taken for empty.
-                if ((flags & ~TriePartitionUpdateSerializer.UPDATE_IS_EMPTY) != 0)
-                    throw new IOException("Unknown partition update flags: " + flags);
-                return (flags & TriePartitionUpdateSerializer.UPDATE_IS_EMPTY) != 0;
-            }
             return (flags & IS_EMPTY) != 0;
         }
 

@@ -33,6 +33,7 @@ import org.apache.cassandra.db.partitions.BTreePartitionUpdate;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.TriePartitionUpdate;
 import org.apache.cassandra.io.util.CountingDataOutputPlus;
+import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.MessagingService;
@@ -43,12 +44,13 @@ import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * How {@link Mutation.MutationSerializer} serializes a mutation for the first time at a version: one smaller than
+ * How {@link Mutation.MutationSerializer} serializes a mutation for the first time at a version: one no larger than
  * the cacheable size limit is serialized once, without being sized first, and its bytes are kept; writing one that
- * reaches the limit stops at the limit, and only its size is kept.
+ * is larger stops at the limit, and only its size is kept.
  */
 @RunWith(BMUnitRunner.class)
 @BMRule(name = "Count the payloads a trie partition update lays out to keep",
@@ -125,26 +127,26 @@ public class MutationSerializationTest extends CQLTester
     }
 
     /**
-     * The limit is exclusive: a mutation of one byte less is kept, and one of the limit's size is written again for
+     * The limit is inclusive: a mutation of the limit's size is kept, and one a byte larger is written again for
      * every serialization, and is not built in memory past the limit to find out that it is that large.
      */
     @Test
-    public void testMutationReachingLimitIsSizedAndNotKept() throws Throwable
+    public void testMutationAboveLimitIsSizedAndNotKept() throws Throwable
     {
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v blob)");
         for (IntFunction<PartitionUpdate> update : updates())
         {
             for (int version : VERSIONS)
-                assertKeptOnlyBelowLimit(length -> new Mutation(update.apply(length)), version);
+                assertKeptOnlyWithinLimit(length -> new Mutation(update.apply(length)), version);
         }
     }
 
     /**
-     * The limit is that of the whole mutation, so a mutation of updates of several tables can reach it in an update
+     * The limit is that of the whole mutation, so a mutation of updates of several tables can exceed it in an update
      * other than its first, which has the room the updates before it left.
      */
     @Test
-    public void testMutationReachingLimitInItsSecondUpdateIsSizedAndNotKept() throws Throwable
+    public void testMutationAboveLimitInItsSecondUpdateIsSizedAndNotKept() throws Throwable
     {
         TableMetadata first = Schema.instance.getTableMetadata(KEYSPACE, createTable("CREATE TABLE %s (k int PRIMARY KEY, v blob)"));
         createTable("CREATE TABLE %s (k int PRIMARY KEY, v blob)");
@@ -155,11 +157,11 @@ public class MutationSerializationTest extends CQLTester
             {
                 for (int version : VERSIONS)
                 {
-                    assertKeptOnlyBelowLimit(length -> new Mutation(KEYSPACE,
-                                                                    head.partitionKey(),
-                                                                    ImmutableMap.of(head.metadata().id, head, currentTableMetadata().id, secondUpdate.apply(length)),
-                                                                    0),
-                                             version);
+                    assertKeptOnlyWithinLimit(length -> new Mutation(KEYSPACE,
+                                                                     head.partitionKey(),
+                                                                     ImmutableMap.of(head.metadata().id, head, currentTableMetadata().id, secondUpdate.apply(length)),
+                                                                     0),
+                                              version);
                 }
             }
         }
@@ -193,37 +195,56 @@ public class MutationSerializationTest extends CQLTester
     }
 
     /**
-     * A mutation one byte smaller than the limit is serialized once and kept; one of the limit's size is serialized
-     * until it reaches the limit, then sized, and only its size is kept.
+     * A mutation of the limit's size is serialized once and kept, and is kept when read back; one a byte larger is
+     * serialized until it reaches the limit, then sized, and only its size is kept, and is not kept when read back.
      */
-    private static void assertKeptOnlyBelowLimit(IntFunction<Mutation> mutation, int version) throws IOException
+    private static void assertKeptOnlyWithinLimit(IntFunction<Mutation> mutation, int version) throws IOException
     {
-        Mutation belowLimit = mutation.apply(valueLength(mutation, version, LIMIT - 1));
-        int updates = belowLimit.getPartitionUpdates().size();
-        String shape = belowLimit + " at " + version;
+        Mutation atLimit = mutation.apply(valueLength(mutation, version, LIMIT));
+        int updates = atLimit.getPartitionUpdates().size();
+        String shape = atLimit + " at " + version;
         CountingSerializer counting = new CountingSerializer();
         Mutation.MutationSerializer serializer = new Mutation.MutationSerializer(counting);
-        assertEquals(shape, LIMIT - 1, serializer.serializedSize(belowLimit, version));
-        assertArrayEquals(shape, expectedBytes(belowLimit, version), serialize(serializer, belowLimit, version));
+        assertEquals(shape, LIMIT, serializer.serializedSize(atLimit, version));
+        assertArrayEquals(shape, expectedBytes(atLimit, version), serialize(serializer, atLimit, version));
         assertEquals(shape, updates, counting.serializations);
         assertEquals(shape, 0, counting.sizings);
+        assertTrue(shape, isKeptWhenRead(expectedBytes(atLimit, version), version));
 
-        Mutation atLimit = mutation.apply(valueLength(mutation, version, LIMIT));
+        Mutation aboveLimit = mutation.apply(valueLength(mutation, version, LIMIT + 1));
         counting = new CountingSerializer();
         serializer = new Mutation.MutationSerializer(counting);
-        assertEquals(shape, LIMIT, serializer.serializedSize(atLimit, version));
+        assertEquals(shape, LIMIT + 1, serializer.serializedSize(aboveLimit, version));
         // The serialization that stopped at the limit in the last update, and the sizing that followed it.
         assertEquals(shape, updates, counting.serializations);
         assertEquals(shape, updates, counting.sizings);
         assertScratchBufferIsReusable();
 
-        byte[] expected = expectedBytes(atLimit, version);
-        assertArrayEquals(shape, expected, serialize(serializer, atLimit, version));
-        assertArrayEquals(shape, expected, serialize(serializer, atLimit, version));
+        byte[] expected = expectedBytes(aboveLimit, version);
+        assertArrayEquals(shape, expected, serialize(serializer, aboveLimit, version));
+        assertArrayEquals(shape, expected, serialize(serializer, aboveLimit, version));
         assertEquals(shape, 3 * updates, counting.serializations);
         assertEquals(shape, updates, counting.sizings);
-        assertEquals(shape, LIMIT, serializer.serializedSize(atLimit, version));
+        assertEquals(shape, LIMIT + 1, serializer.serializedSize(aboveLimit, version));
         assertEquals(shape, updates, counting.sizings);
+        assertFalse(shape, isKeptWhenRead(expected, version));
+    }
+
+    /**
+     * Whether the mutation read from the given bytes keeps them, so that it is written again as they are without being
+     * serialized. One that does not keep them is serialized from what was read, which need not give the same bytes:
+     * a table that makes trie updates reads an update of the BTree encoding into one it writes in the trie encoding.
+     */
+    private static boolean isKeptWhenRead(byte[] bytes, int version) throws IOException
+    {
+        CountingSerializer counting = new CountingSerializer();
+        Mutation.MutationSerializer serializer = new Mutation.MutationSerializer(counting);
+        Mutation read = serializer.deserialize(new DataInputBuffer(bytes), version);
+        byte[] written = serialize(serializer, read, version);
+        boolean kept = counting.serializations == 0;
+        if (kept)
+            assertArrayEquals(bytes, written);
+        return kept;
     }
 
     /** The scratch buffer the mutation was written to up to the limit holds nothing, and is not kept oversized. */

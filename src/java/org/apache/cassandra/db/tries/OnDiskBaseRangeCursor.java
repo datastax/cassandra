@@ -31,11 +31,6 @@ abstract class OnDiskBaseRangeCursor<S extends RangeState<S>> extends OnDiskCurs
     S activeRange;  // only non-null if activeIsSet
     S prevContent;  // can only be non-null if activeIsSet
 
-    /// The failure of the last move, if it failed. A move that fails can leave the cursor part way, e.g. on a node whose
-    /// content it has read without the state that follows from it, so [#state] and [#tailCursor] throw this rather
-    /// than report a state or take a tail at wherever the move stopped.
-    RuntimeException moveFailure;
-
     /// A cursor positioned at `root`, the root of a range trie.
     OnDiskBaseRangeCursor(DataDeserializer<S> deserializer, RebuffererFactory rebuffererFactory, ByteComparable.Version byteComparableVersion, Direction direction, long root)
     {
@@ -60,27 +55,13 @@ abstract class OnDiskBaseRangeCursor<S extends RangeState<S>> extends OnDiskCurs
     @Override
     public long advance()
     {
-        try
-        {
-            return updateActiveAndReturn(super.advance());
-        }
-        catch (RuntimeException e)
-        {
-            throw failed(e);
-        }
+        return updateActiveAndReturn(super.advance());
     }
 
     @Override
     public long advanceMultiple(TransitionsReceiver receiver)
     {
-        try
-        {
-            return updateActiveAndReturn(super.advanceMultiple(receiver));
-        }
-        catch (RuntimeException e)
-        {
-            throw failed(e);
-        }
+        return updateActiveAndReturn(super.advanceMultiple(receiver));
     }
 
     @Override
@@ -89,25 +70,7 @@ abstract class OnDiskBaseRangeCursor<S extends RangeState<S>> extends OnDiskCurs
         activeIsSet = false;    // since we are skipping, we have no idea where we will end up
         activeRange = null;
         prevContent = null;
-        try
-        {
-            return updateActiveAndReturn(super.skipTo(encodedSkipPosition));
-        }
-        catch (RuntimeException e)
-        {
-            throw failed(e);
-        }
-    }
-
-    /// Record a failed move in [#moveFailure], and drop the active state so that [#state] throws it too: an advance
-    /// keeps the state it starts from, which no longer applies wherever the move stopped.
-    private RuntimeException failed(RuntimeException e)
-    {
-        moveFailure = e;
-        activeIsSet = false;
-        activeRange = null;
-        prevContent = null;
-        return e;
+        return updateActiveAndReturn(super.skipTo(encodedSkipPosition));
     }
 
     @Override
@@ -115,8 +78,6 @@ abstract class OnDiskBaseRangeCursor<S extends RangeState<S>> extends OnDiskCurs
     {
         if (!activeIsSet)
         {
-            if (moveFailure != null)
-                throw moveFailure;
             // The tries made from a closed cursor make all their cursors from it and may be read from several
             // threads, so a closed cursor works the state out each time it is asked and stores nothing.
             if (rebufferer == null)
@@ -223,8 +184,6 @@ abstract class OnDiskBaseRangeCursor<S extends RangeState<S>> extends OnDiskCurs
     @Override
     public RangeCursor<S> tailCursor(Direction direction)
     {
-        if (moveFailure != null)
-            throw moveFailure;
         boolean precedingStateKnown = direction == direction() && activeIsSet && content == null;
         return new OnDiskRangeTailCursor<>(rdr.deserializer, rebuffererFactory, byteComparableVersion, direction,
                                            currentFullNodePostCodePos, currentFullNodeCode,
