@@ -312,6 +312,10 @@ public class Operation
 
         static Node buildExpression(QueryController controller, RowFilter.Expression expression, boolean isDisjunction)
         {
+            // no index serves the restrictions on the fields of a column: they only filter the rows
+            if (expression.fieldPath() != null)
+                return new RowFilterNode(controller, expression);
+
             if (expression.operator() == Operator.IN)
             {
                 OperatorNode node = new OrNode();
@@ -513,6 +517,58 @@ public class Operation
         public String toString()
         {
             return "ExpressionNode{expression=" + expression + '}';
+        }
+    }
+
+    /**
+     * An expression that the indexes don't serve and that the {@link Expression}s can't evaluate, as a restriction
+     * on a field of a UDT or tuple column (see {@link RowFilter.FieldExpression}): it doesn't restrict the keys to
+     * read, and it filters the rows as the queries without index do (see {@link FilterTree.RowFilterExpressionFilter}).
+     */
+    public static class RowFilterNode extends Node
+    {
+        private final RowFilter.Expression expression;
+        private final QueryController controller;
+
+        RowFilterNode(QueryController controller, RowFilter.Expression expression)
+        {
+            this.expression = expression;
+            this.controller = controller;
+        }
+
+        @Override
+        boolean canFilter()
+        {
+            return true;
+        }
+
+        @Override
+        RowFilter.Expression expression()
+        {
+            return expression;
+        }
+
+        @Override
+        void analyze(QueryController controller)
+        {
+        }
+
+        @Override
+        FilterTree filterTree()
+        {
+            return new FilterTree.RowFilterExpressionFilter(expression, controller.metadata(), controller.command().nowInSec());
+        }
+
+        @Override
+        Plan.KeysIteration plan(QueryController controller)
+        {
+            return controller.planFactory.everything;
+        }
+
+        @Override
+        public String toString()
+        {
+            return "RowFilterNode{expression=" + expression + '}';
         }
     }
 

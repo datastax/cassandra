@@ -35,6 +35,33 @@ import org.apache.cassandra.utils.TimeUUID;
 
 public class SelectGroupByTest extends CQLTester
 {
+    /**
+     * The selectors that are not columns: fields of UDT and tuple columns (also of primary key columns), map elements
+     * and casts are refused with an error rather than a server failure.
+     */
+    @Test
+    public void testGroupByOnSelectorsThatAreNotColumns() throws Throwable
+    {
+        String udt = createType("CREATE TYPE %s (x int, y int)");
+        createTable("CREATE TABLE %s (a int, b frozen<" + udt + ">, c int, u frozen<" + udt + ">, t tuple<int, int>, " +
+                    "m map<text, int>, PRIMARY KEY (a, b, c))");
+        execute("INSERT INTO %s (a, b, c, u, t, m) VALUES (1, {x: 1, y: 2}, 3, {x: 4, y: 5}, (6, 7), {'k': 8})");
+
+        assertInvalidMessage("Group by is not supported on the fields of columns, got u.x",
+                             "SELECT u.x, count(*) FROM %s GROUP BY u.x");
+        assertInvalidMessage("Group by is not supported on the fields of columns, got t.field1",
+                             "SELECT count(*) FROM %s GROUP BY t.field1");
+        // a field of a clustering column
+        assertInvalidMessage("Group by is not supported on the fields of columns, got b.x",
+                             "SELECT count(*) FROM %s WHERE a = 1 GROUP BY a, b.x");
+        assertInvalidMessage("Group by is currently only supported on the columns of the PRIMARY KEY, got m['k']",
+                             "SELECT count(*) FROM %s GROUP BY m['k']");
+        assertInvalidMessage("Group by is currently only supported on the columns of the PRIMARY KEY, got cast(c as text)",
+                             "SELECT count(*) FROM %s GROUP BY CAST(c AS text)");
+        // the columns of the primary key still work
+        assertRows(execute("SELECT a, count(*) FROM %s GROUP BY a"), row(1, 1L));
+    }
+
     @Test
     public void testGroupByWithoutPaging() throws Throwable
     {

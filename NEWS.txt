@@ -100,9 +100,21 @@ New features
       and uuid columns. Strings are ordered by their bytes (code points, no collation). Indexes with an analyzer
       ('case_sensitive': false, 'normalize', 'ascii', 'index_analyzer', 'query_analyzer') don't serve these
       restrictions. No index rebuild, new index version or messaging change is needed.
+    - The WHERE clause of SELECT statements can restrict the fields of UDT and tuple columns, frozen or not, at any
+      nesting depth: addr.city = 'Rome', p.home.loc.lat > 1.0, t.field2 IN (1, 2). The components of a tuple are
+      named field1, field2, ..., as in DSE Search. The operators are =, !=, <, <=, >, >=, IN, NOT IN, CONTAINS /
+      NOT CONTAINS (collection fields) and IS NOT NULL. These restrictions need ALLOW FILTERING. A field without a
+      value satisfies no restriction, != and NOT IN included.
+      Limitations: no IS NULL restriction; no map-entry restrictions (m['k'] = v) on fields; no ORDER BY or GROUP BY
+      on fields; no restrictions on the fields of the elements of collections of UDTs or tuples. Field restrictions
+      are only accepted in SELECT WHERE clauses (not in the WHERE clauses of UPDATE, DELETE or materialized views).
 
 Upgrading
 ---------
+    - During a rolling upgrade, use the restrictions on the fields of UDT and tuple columns only once all the nodes
+      are upgraded: a query with a field restriction that reaches a replica that isn't upgraded fails. The replica
+      logs "Unknown index expression kind" at ERROR and answers with a failure, and the client receives a read
+      failure ("... failures: UNKNOWN from ..."), never wrong results.
     - Breaking change in CQL LIKE patterns: every '%' is now a wildcard wherever it appears (previously only the
       leading and trailing ones), '_' is now a single-character wildcard (previously a literal character), and a
       pattern without wildcards matches only equal values. Queries whose pattern contains '_' or an inner '%' may

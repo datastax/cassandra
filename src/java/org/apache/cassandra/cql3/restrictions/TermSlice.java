@@ -19,7 +19,10 @@ package org.apache.cassandra.cql3.restrictions;
 
 import java.util.List;
 
+import javax.annotation.Nullable;
+
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.functions.Function;
@@ -158,14 +161,23 @@ final class TermSlice
      */
     public boolean isSupportedBy(ColumnMetadata column, Index index)
     {
+        return isSupportedBy(column, null, index);
+    }
+
+    /**
+     * Checks if this slice is supported by the specified index, for a restriction on the given column or, if the
+     * path isn't {@code null}, on the field of the column it designates.
+     */
+    public boolean isSupportedBy(ColumnMetadata column, @Nullable FieldPath fieldPath, Index index)
+    {
         boolean supported = false;
 
         if (hasBound(Bound.START))
-            supported |= isInclusive(Bound.START) ? index.supportsExpression(column, Operator.GTE)
-                    : index.supportsExpression(column, Operator.GT);
+            supported |= isInclusive(Bound.START) ? index.supportsExpression(column, fieldPath, Operator.GTE)
+                    : index.supportsExpression(column, fieldPath, Operator.GT);
         if (hasBound(Bound.END))
-            supported |= isInclusive(Bound.END) ? index.supportsExpression(column, Operator.LTE)
-                    : index.supportsExpression(column, Operator.LT);
+            supported |= isInclusive(Bound.END) ? index.supportsExpression(column, fieldPath, Operator.LTE)
+                    : index.supportsExpression(column, fieldPath, Operator.LT);
 
         return supported;
     }
