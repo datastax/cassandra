@@ -559,6 +559,9 @@ interface Cursor<T> extends Closeable
     /// tail's root -- leaves that read to the new tail, which opens the trie afresh for itself, and reads whatever
     /// else it still answers after close, such as the state behind [RangeCursor#precedingStateCursor], with a fresh
     /// reader of its own.
+    ///
+    /// Once any method of a cursor has thrown, the only call still allowed on it is this one: a move that fails can
+    /// leave the cursor part way, and nothing catches a cursor's exception and goes on using it.
     @Override
     void close();
 

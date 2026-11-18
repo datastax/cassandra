@@ -38,6 +38,7 @@ import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.commitlog.IntervalSet;
 import org.apache.cassandra.db.partitions.PartitionStatisticsCollector;
 import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -234,7 +235,7 @@ public class MetadataCollector implements PartitionStatisticsCollector
             updateTombstoneCount();
     }
 
-    public void update(Cell<?> cell)
+    public void update(CellData<?, ?> cell)
     {
         ++currentPartitionCells;
         updateTimestamp(cell.timestamp());

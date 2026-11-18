@@ -375,7 +375,8 @@ Corrupt input -- a damaged commit-log record or message payload -- is reported a
 an `IOException`. Besides lengths, the reader checks that every child it descends to ends at or before the start of the
 node pointing to it, so that every walk moves towards the start of the data and terminates. Terminating is all that
 is guaranteed, not work proportional to the size of the data: two pointers may legally point at the same earlier node,
-so crafted input can make a walk take a number of steps exponential in its size.
+so crafted input can make a walk take a number of steps exponential in its size. Once a cursor has thrown, the only
+call still allowed on it is `close`.
 
 ## Range and deletion-aware tries
 

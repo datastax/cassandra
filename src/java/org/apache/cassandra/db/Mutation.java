@@ -533,11 +533,11 @@ public class Mutation implements IMutation, Supplier<Mutation>
             if (serialization == null)
             {
                 // Excessively large mutation objects cause GC pressure and huge allocations when serialized.
-                // so we only cache serialized mutations when they are below the defined limit. The mutation is
+                // so we only cache serialized mutations when they are within the defined limit. The mutation is
                 // serialized up to the limit rather than sized first, as sizing a partition update can cost as much
-                // as serializing it (see TriePartitionUpdateSerializer#serializedSize), and only one that reaches
+                // as serializing it (see TriePartitionUpdateSerializer#serializedSize), and only one that exceeds
                 // the limit is sized.
-                serialization = serializeBelowLimit(mutation, version);
+                serialization = serializeWithinLimit(mutation, version);
                 if (serialization == null)
                 {
                     serialization = new SizeOnlyCacheableSerialization();
@@ -550,23 +550,24 @@ public class Mutation implements IMutation, Supplier<Mutation>
         }
 
         /**
-         * Returns the serialization of the mutation if it is smaller than {@code CACHEABLE_MUTATION_SIZE_LIMIT}, and
-         * null if it is not, in which case writing it stopped at the limit.
+         * Returns the serialization of the mutation if it is no larger than {@code CACHEABLE_MUTATION_SIZE_LIMIT}, and
+         * null if it is larger, in which case writing it stopped at the limit.
          */
-        private CachedSerialization serializeBelowLimit(Mutation mutation, int version)
+        private CachedSerialization serializeWithinLimit(Mutation mutation, int version)
         {
             try (DataOutputBuffer dob = DataOutputBuffer.scratchBuffer.get())
             {
-                // One byte less than the limit is the most a mutation that is smaller than it can take.
-                serializeInternal(partitionUpdateSerializer, mutation, new LimitedDataOutputPlus(dob, CACHEABLE_MUTATION_SIZE_LIMIT - 1), version);
+                serializeInternal(partitionUpdateSerializer, mutation, new LimitedDataOutputPlus(dob, CACHEABLE_MUTATION_SIZE_LIMIT), version);
                 return new CachedSerialization(dob.toByteArray());
             }
             catch (LimitedDataOutputPlus.LimitReachedException e)
             {
+                // Too large to cache; the caller sizes it instead.
                 return null;
             }
             catch (IOException e)
             {
+                // The output is an in-memory buffer, so the only IOException expected is the limit's, caught above.
                 throw new RuntimeException(e);
             }
         }
@@ -641,7 +642,7 @@ public class Mutation implements IMutation, Supplier<Mutation>
     /**
      * There are two implementations of this class. One that keeps the serialized representation on-heap for later
      * reuse and one that doesn't. Keeping all sized mutations around may lead to "bad" GC pressure (G1 GC) due to humongous objects.
-     * By default serialized mutations smaller than 1,000,000 bytes are kept on-heap - see {@link org.apache.cassandra.config.CassandraRelevantProperties#CACHEABLE_MUTATION_SIZE_LIMIT}.
+     * By default serialized mutations of up to 1,000,000 bytes are kept on-heap - see {@link org.apache.cassandra.config.CassandraRelevantProperties#CACHEABLE_MUTATION_SIZE_LIMIT}.
      */
     private static abstract class Serialization
     {

@@ -189,8 +189,8 @@ public class RowsTest
 
     public static class StatsCollector implements PartitionStatisticsCollector
     {
-        List<Cell<?>> cells = new LinkedList<>();
-        public void update(Cell<?> cell)
+        List<CellData<?, ?>> cells = new LinkedList<>();
+        public void update(CellData<?, ?> cell)
         {
             cells.add(cell);
         }
