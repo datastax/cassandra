@@ -25,6 +25,10 @@
 -XX:ThreadPriorityPolicy=1
 -XX:+UseThreadPriorities
 
+#
+## Workaround for CVE-2026-11398
+-XX:-UseBASE64Intrinsics
+
 #################
 #  GC SETTINGS  #
 #################

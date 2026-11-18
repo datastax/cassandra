@@ -22,6 +22,10 @@
 # See jvm-server.options. This file is specific for Java 22 and newer.    #
 ###########################################################################
 
+#
+## Workaround for CVE-2026-11398
+-XX:-UseBASE64Intrinsics
+
 #################
 #  GC SETTINGS  #
 #################
@@ -53,7 +57,6 @@
 # By default, ConcGCThreads is 1/4 of ParallelGCThreads.
 # Setting both to the same value can reduce STW durations.
 #-XX:ConcGCThreads=16
-
 
 ### JPMS
 
