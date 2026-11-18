@@ -73,7 +73,7 @@ public class ByteLimitedMaterializer
                 if (bytesCount >= IndexContext.MAX_ANALYZED_SIZE)
                 {
                     noSpamLogger.warn(indexContext.logMessage(ANALYZED_TERM_OVERSIZE_MESSAGE),
-                                      indexContext.getColumnName(),
+                                      indexContext.getTargetName(),
                                       indexContext.keyValidator().getString(primaryKey.partitionKey().getKey()),
                                       FBUtilities.prettyPrintMemory(bytesCount),
                                       FBUtilities.prettyPrintMemory(IndexContext.MAX_ANALYZED_SIZE));

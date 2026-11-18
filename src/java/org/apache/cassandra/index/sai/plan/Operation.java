@@ -20,16 +20,20 @@ package org.apache.cassandra.index.sai.plan;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -69,21 +73,28 @@ public class Operation
                                                                            OperationType op,
                                                                            List<RowFilter.Expression> expressions)
     {
-        ListMultimap<ColumnMetadata, Expression> analyzed = ArrayListMultimap.create();
-        Map<ColumnMetadata, Boolean> columnIsMultiExpression = new HashMap<>();
+        // The expressions are grouped by target: a column, or a field of a column (the expressions on different
+        // fields of a column, or on a column and on its fields, are independent: e.g. the bounds of 'addr.city >= x'
+        // and 'addr.zip <= y' must not be combined into one range). The result is keyed by column, with the
+        // expressions of each target next to each other.
+        ListMultimap<List<Object>, Expression> analyzedByTarget = ArrayListMultimap.create();
+        Map<List<Object>, Boolean> targetIsMultiExpression = new HashMap<>();
 
-        // sort all of the expressions in the operation by name and priority of the logical operator
+        // sort all of the expressions in the operation by name, field and priority of the logical operator
         // this gives us an efficient way to handle inequality and combining into ranges without extra processing
         // and converting expressions from one type to another.
         expressions.sort((a, b) -> {
             int cmp = a.column().compareTo(b.column());
+            if (cmp == 0)
+                cmp = compareFieldPaths(a.fieldPath(), b.fieldPath());
             return cmp == 0 ? -Integer.compare(getPriority(a.operator()), getPriority(b.operator())) : cmp;
         });
 
         for (final RowFilter.Expression e : expressions)
         {
             IndexContext indexContext = controller.getContext(e);
-            List<Expression> perColumn = analyzed.get(e.column());
+            List<Object> target = Arrays.asList(e.column(), e.fieldPath());
+            List<Expression> perColumn = analyzedByTarget.get(target);
 
             AbstractAnalyzer.AnalyzerFactory analyzerFactory = indexContext.getQueryAnalyzerFactory();
             AbstractAnalyzer analyzer = analyzerFactory.create();
@@ -98,7 +109,7 @@ public class Operation
                 // if there is no EQ operations and NOT_EQ is met or a single NOT_EQ expression present,
                 // in such case we know exactly that there would be no more EQ/RANGE expressions for given column
                 // since NOT_EQ has the lowest priority.
-                boolean isMultiExpression = columnIsMultiExpression.getOrDefault(e.column(), Boolean.FALSE);
+                boolean isMultiExpression = targetIsMultiExpression.getOrDefault(target, Boolean.FALSE);
                 switch (e.operator())
                 {
                     // case BM25: leave it at the default of `false`
@@ -128,9 +139,18 @@ public class Operation
                         isMultiExpression = isMultiExpression || perColumn.isEmpty();
                         break;
                 }
-                columnIsMultiExpression.put(e.column(), isMultiExpression);
+                targetIsMultiExpression.put(target, isMultiExpression);
 
-                if (isMultiExpression)
+                if (e.operator() == Operator.IS_NOT)
+                {
+                    // IS NOT NULL on a field has no operand to analyze: all the terms of the index; combined with the
+                    // previous expression on the same single-valued target, which implies it
+                    if (perColumn.isEmpty() || op != OperationType.AND || !Iterables.getLast(perColumn).context.equals(indexContext))
+                        perColumn.add(new Expression(indexContext).add(Operator.IS_NOT, ByteBuffer.allocate(0)));
+                    else
+                        Iterables.getLast(perColumn).add(Operator.IS_NOT, ByteBuffer.allocate(0));
+                }
+                else if (isMultiExpression)
                 {
                     if (!analyzer.hasNext())
                     {
@@ -222,7 +242,36 @@ public class Operation
             }
         }
 
+        ListMultimap<ColumnMetadata, Expression> analyzed = ArrayListMultimap.create();
+        for (List<Object> target : analyzedByTarget.keySet())
+            analyzed.putAll((ColumnMetadata) target.get(0), analyzedByTarget.get(target));
         return analyzed;
+    }
+
+    /**
+     * Orders the field paths of the expressions on a column: the expressions on the whole column first.
+     */
+    private static int compareFieldPaths(@Nullable FieldPath a, @Nullable FieldPath b)
+    {
+        if (Objects.equals(a, b))
+            return 0;
+        if (a == null)
+            return -1;
+        if (b == null)
+            return 1;
+        List<FieldPath.Step> stepsA = a.steps();
+        List<FieldPath.Step> stepsB = b.steps();
+        for (int i = 0; i < Math.min(stepsA.size(), stepsB.size()); i++)
+        {
+            FieldPath.Step stepA = stepsA.get(i);
+            FieldPath.Step stepB = stepsB.get(i);
+            int cmp = stepA.kind.compareTo(stepB.kind);
+            if (cmp == 0)
+                cmp = Integer.compare(stepA.position, stepB.position);
+            if (cmp != 0)
+                return cmp;
+        }
+        return Integer.compare(stepsA.size(), stepsB.size());
     }
 
     private static int getPriority(org.apache.cassandra.cql3.Operator op)
@@ -256,6 +305,12 @@ public class Operation
 
             case NEQ:
                 return 1;
+
+            // IS NOT NULL on a field is strictly last (below the other operators, also those of the default case):
+            // it's combined with the previous expression on the same single-valued field, whatever its operator
+            // (see analyzeGroup and Expression#add), which keeps its operation and bounds
+            case IS_NOT:
+                return -1;
 
             default:
                 return 0;
@@ -312,8 +367,8 @@ public class Operation
 
         static Node buildExpression(QueryController controller, RowFilter.Expression expression, boolean isDisjunction)
         {
-            // no index serves the restrictions on the fields of a column: they only filter the rows
-            if (expression.fieldPath() != null)
+            // a restriction on a field that no index serves only filters the rows
+            if (expression.fieldPath() != null && !controller.getContext(expression).isIndexed())
                 return new RowFilterNode(controller, expression);
 
             if (expression.operator() == Operator.IN)
@@ -323,13 +378,12 @@ public class Operation
                 int offset = ListSerializer.sizeOfCollectionSize();
                 for (int index = 0; index < size; index++)
                 {
-                    node.add(new ExpressionNode(new RowFilter.SimpleExpression(expression.column(),
-                                                                               Operator.EQ,
-                                                                               ListSerializer.readValue(expression.getIndexValue(),
-                                                                                                        ByteBufferAccessor.instance,
-                                                                                                        offset),
-                                                                               expression.analyzer(),
-                                                                               expression.annOptions())));
+                    ByteBuffer value = ListSerializer.readValue(expression.getIndexValue(), ByteBufferAccessor.instance, offset);
+                    // an IN on a field is an OR of EQs on the same field
+                    RowFilter.Expression eq = expression.fieldPath() == null
+                                              ? new RowFilter.SimpleExpression(expression.column(), Operator.EQ, value, expression.analyzer(), expression.annOptions())
+                                              : new RowFilter.FieldExpression(expression.column(), expression.fieldPath(), Operator.EQ, value, expression.analyzer());
+                    node.add(new ExpressionNode(eq));
                     offset += TypeSizes.INT_SIZE + ByteBufferAccessor.instance.getInt(expression.getIndexValue(), offset);
                 }
                 if (node.children().size() == 1)
@@ -521,9 +575,9 @@ public class Operation
     }
 
     /**
-     * An expression that the indexes don't serve and that the {@link Expression}s can't evaluate, as a restriction
-     * on a field of a UDT or tuple column (see {@link RowFilter.FieldExpression}): it doesn't restrict the keys to
-     * read, and it filters the rows as the queries without index do (see {@link FilterTree.RowFilterExpressionFilter}).
+     * An expression that no index serves and that is evaluated as the queries without index do, as a restriction on
+     * a field of a UDT or tuple column without an index serving it (see {@link RowFilter.FieldExpression}): it
+     * doesn't restrict the keys to read, and it filters the rows (see {@link FilterTree.RowFilterExpressionFilter}).
      */
     public static class RowFilterNode extends Node
     {

@@ -66,7 +66,8 @@ public class IndexesSystemViewTest extends SAITester
     @BeforeClass
     public static void setup() throws Exception
     {
-        VirtualKeyspaceRegistry.instance.register(new VirtualKeyspace(SchemaConstants.VIRTUAL_VIEWS, ImmutableList.of(new IndexesSystemView(SchemaConstants.VIRTUAL_VIEWS))));
+        VirtualKeyspaceRegistry.instance.register(new VirtualKeyspace(SchemaConstants.VIRTUAL_VIEWS, ImmutableList.of(new IndexesSystemView(SchemaConstants.VIRTUAL_VIEWS),
+                                                                                                                      new ColumnIndexesSystemView(SchemaConstants.VIRTUAL_VIEWS))));
 
         StorageService.instance.setStartingModeUnsafe(); // Ensure the node has advanced out of STARTING mode
     }
@@ -136,6 +137,54 @@ public class IndexesSystemViewTest extends SAITester
         // drop the base table and verify that the virtual table is empty
         dropTable("DROP TABLE %s");
         assertEmpty(execute(SELECT));
+    }
+
+    /**
+     * The indexes on the fields of UDT and tuple columns: the views give the column and, apart, the path to the field
+     * (null for the indexes on whole columns), both with the raw (unquoted) names, and the target of the index in
+     * canonical CQL form, which tells the index on the values of a collection field from the index on the whole
+     * frozen field.
+     */
+    @Test
+    public void testFieldIndexes() throws Throwable
+    {
+        String geo = createType("CREATE TYPE %s (lat double, lon double)");
+        String address = createType("CREATE TYPE %s (street text, \"City\" text, loc frozen<" + geo + ">, tags frozen<set<text>>)");
+        createTable("CREATE TABLE %s (k int PRIMARY KEY, \"Addr\" frozen<" + address + ">, addrs list<frozen<" + address + ">>, " +
+                    "t tuple<text, int>, v int, m map<text, int>)");
+        String city = createIndex("CREATE INDEX city_idx ON %s(\"Addr\".\"City\") USING 'sai'");
+        String lat = createIndex("CREATE INDEX lat_idx ON %s(\"Addr\".loc.lat) USING 'sai'");
+        String tags = createIndex("CREATE INDEX tags_idx ON %s(\"Addr\".tags) USING 'sai'");
+        String fullTags = createIndex("CREATE INDEX full_tags_idx ON %s(full(\"Addr\".tags)) USING 'sai'");
+        String cities = createIndex("CREATE INDEX cities_idx ON %s(values(addrs).\"City\") USING 'sai'");
+        String component = createIndex("CREATE INDEX component_idx ON %s(t.field2) USING 'sai'");
+        String whole = createIndex("CREATE INDEX whole_idx ON %s(\"Addr\") USING 'sai'");
+        String column = createIndex("CREATE INDEX v_idx ON %s(v) USING 'sai'");
+        String values = createIndex("CREATE INDEX m_idx ON %s(m) USING 'sai'");
+
+        String select = "SELECT %s, %s, %s, %s, %s FROM %s.%s WHERE %s = '%s'";
+        for (String view : new String[]{ IndexesSystemView.NAME, ColumnIndexesSystemView.NAME })
+        {
+            assertRowsIgnoringOrder(execute(String.format(select,
+                                                          IndexesSystemView.INDEX_NAME,
+                                                          IndexesSystemView.COLUMN_NAME,
+                                                          IndexesSystemView.FIELD_PATH,
+                                                          IndexesSystemView.TARGET,
+                                                          IndexesSystemView.IS_STRING,
+                                                          SchemaConstants.VIRTUAL_VIEWS,
+                                                          view,
+                                                          IndexesSystemView.KEYSPACE_NAME,
+                                                          KEYSPACE)),
+                                    row(city, "Addr", "City", "\"Addr\".\"City\"", true),
+                                    row(lat, "Addr", "loc.lat", "\"Addr\".loc.lat", false),
+                                    row(tags, "Addr", "tags", "values(\"Addr\".tags)", true),
+                                    row(fullTags, "Addr", "tags", "full(\"Addr\".tags)", true),
+                                    row(cities, "addrs", "City", "addrs.\"City\"", true),
+                                    row(component, "t", "field2", "t.field2", false),
+                                    row(whole, "Addr", null, "\"Addr\"", true),
+                                    row(column, "v", null, "v", false),
+                                    row(values, "m", null, "values(m)", false));
+        }
     }
 
     private Object[] row(String indexName,

@@ -1,0 +1,278 @@
+= Indexes on UDT and tuple fields
+:description: Index and query the fields of user-defined type (UDT) and tuple columns with SAI.
+
+SAI can index a single field of a user-defined type (UDT) or tuple column, at any nesting depth.
+Queries restrict the fields directly in the `WHERE` clause.
+An index on a field is an ordinary SAI index on the values of that field: it has its own name, options and analyzer, and the same on-disk format as an index on a column.
+
+The UDT column can be frozen or non-frozen: the indexes and the queries are the same.
+A non-frozen UDT also allows updating a single field, and the indexes follow such updates.
+Tuples are always frozen.
+
+Each of the following sections is a complete example: the schema, the indexes and the queries.
+They all use this type:
+
+[source,language-cql]
+----
+CREATE TYPE address (street text, city text, zip int);
+----
+
+== A frozen UDT
+
+The index target is the column name followed by the name of the field, separated by a dot:
+
+[source,language-cql]
+----
+CREATE TABLE users (id int PRIMARY KEY, addr frozen<address>);
+
+CREATE INDEX ON users (addr.city) USING 'sai';
+CREATE INDEX ON users (addr.zip) USING 'sai';
+
+INSERT INTO users (id, addr) VALUES (1, {street: '1 Main St', city: 'Rome', zip: 200});
+INSERT INTO users (id, addr) VALUES (2, {street: '2 High St', city: 'Paris', zip: 100});
+INSERT INTO users (id, addr) VALUES (3, {city: 'Rome'});
+
+SELECT * FROM users WHERE addr.city = 'Rome';                    -- rows 1 and 3
+SELECT * FROM users WHERE addr.city = 'Rome' AND addr.zip > 100; -- row 1
+SELECT * FROM users WHERE addr.zip IN (100, 300);                -- row 2
+SELECT * FROM users WHERE addr.city != 'Rome';                   -- row 2
+SELECT * FROM users WHERE addr.zip IS NOT NULL;                  -- rows 1 and 2
+SELECT * FROM users WHERE addr.city = 'Paris' OR addr.zip = 200; -- rows 1 and 2
+----
+
+A field without an index can be restricted with `ALLOW FILTERING`:
+
+[source,language-cql]
+----
+SELECT * FROM users WHERE addr.city = 'Rome' AND addr.street = '1 Main St' ALLOW FILTERING;
+----
+
+A field without a value satisfies no restriction, `!=` and `NOT IN` included: row 3 has no `zip`, so it matches neither `addr.zip = 100` nor `addr.zip != 100`.
+
+== A non-frozen UDT
+
+The targets and the queries are those of a frozen UDT.
+The indexes follow the updates of single fields:
+
+[source,language-cql]
+----
+CREATE TABLE customers (id int PRIMARY KEY, addr address);
+
+CREATE INDEX ON customers (addr.city) USING 'sai';
+
+INSERT INTO customers (id, addr) VALUES (1, {street: '1 Main St', city: 'Rome', zip: 200});
+UPDATE customers SET addr.city = 'Milan' WHERE id = 1;
+
+SELECT * FROM customers WHERE addr.city = 'Milan';  -- row 1
+SELECT * FROM customers WHERE addr.city = 'Rome';   -- no rows
+----
+
+== A UDT inside a UDT
+
+The path to a nested field has one name per level, at any depth:
+
+[source,language-cql]
+----
+CREATE TYPE person (name text, age int, home frozen<address>);
+CREATE TABLE people (id int PRIMARY KEY, p person);
+
+CREATE INDEX ON people (p.age) USING 'sai';
+CREATE INDEX ON people (p.home.city) USING 'sai';
+
+INSERT INTO people (id, p) VALUES (1, {name: 'Ann', age: 41, home: {city: 'Rome', zip: 200}});
+
+SELECT * FROM people WHERE p.home.city = 'Rome' AND p.age > 40;  -- row 1
+----
+
+== A tuple
+
+The components of a tuple have no names: they are `field1`, `field2`, ... (1-based), as in DSE Search.
+
+[source,language-cql]
+----
+CREATE TABLE points (id int PRIMARY KEY, t tuple<text, int, double>);
+
+CREATE INDEX ON points (t.field1) USING 'sai';
+CREATE INDEX ON points (t.field2) USING 'sai';
+
+INSERT INTO points (id, t) VALUES (1, ('foo', 1, 0.5));
+INSERT INTO points (id, t) VALUES (2, ('bar', 2, 1.5));
+
+SELECT * FROM points WHERE t.field1 = 'foo';      -- row 1
+SELECT * FROM points WHERE t.field2 >= 2;         -- row 2
+SELECT * FROM points WHERE t.field1 LIKE 'ba%';   -- row 2
+----
+
+== A collection inside a UDT
+
+A collection field is indexed by its values, searched with `CONTAINS`, or, with `full()`, as a whole frozen value, searched with `=`:
+
+[source,language-cql]
+----
+CREATE TYPE tagged_address (city text, tags frozen<set<text>>);
+CREATE TABLE places (id int PRIMARY KEY, addr frozen<tagged_address>);
+
+CREATE INDEX ON places (addr.tags) USING 'sai';                         -- the values of the set
+CREATE INDEX places_tags_full_idx ON places (full(addr.tags)) USING 'sai';  -- the whole set
+
+INSERT INTO places (id, addr) VALUES (1, {city: 'Rome', tags: {'x', 'y'}});
+INSERT INTO places (id, addr) VALUES (2, {city: 'Paris', tags: {'y'}});
+
+SELECT * FROM places WHERE addr.tags CONTAINS 'x';      -- row 1
+SELECT * FROM places WHERE addr.tags NOT CONTAINS 'x';  -- row 2
+SELECT * FROM places WHERE addr.tags = {'y'};           -- row 2
+----
+
+== Index targets
+
+* Names that need quotes are quoted on each step: `"Addr"."City"`.
+* The default index name is built from the table, the column and the path: `users_addr_city_idx`.
+* `DESCRIBE` shows the target in canonical form: `addr.tags` (the values of a collection field) is shown as `values(addr.tags)`.
+Drivers show the target as the column name in their index metadata.
+* The SAI system views `system_views.indexes` and `system_views.sai_column_indexes` show the column in `column_name`, the path in `field_path` (`city`, `loc.lat`; raw names, as `column_name`) and the canonical target in `target` (`addr.city`, `values(addr.tags)`, `full(addr.tags)`).
+* The usual SAI options apply: `CREATE INDEX ON users (addr.street) USING 'sai' WITH OPTIONS = {'case_sensitive': 'false'}`.
+
+Each field to search needs its own index: there is no shorthand to index all the fields of a column at once.
+Each index costs about as much as an index on a column; see the `sai_indexes_per_table` guardrails.
+
+These targets are refused:
+
+* a field of a vector or `duration` type;
+* a path through the keys of a map, and `keys()` or `entries()` on a field;
+* a field target with a legacy secondary index or a custom index class: only SAI indexes fields.
+
+`ALTER TYPE ... ADD` is supported (the values written before have no value for the new field).
+`ALTER TYPE ... RENAME` of a field used by an index target is refused: drop the index first, rename the field, and create the index again.
+
+== Operators and analyzers
+
+The supported operators are `=`, `!=`, `<`, `<=`, `>`, `>=`, `IN`, `NOT IN`, `LIKE`, `:` (with an analyzer), `CONTAINS` and `NOT CONTAINS` (on collection fields), and `IS NOT NULL`.
+They follow the rules of the same operators on columns:
+
+* An index serves `LIKE`, ranges, `!=` and `NOT IN` only without an analyzer (`case_sensitive: false`, `normalize`, `ascii`, `index_analyzer`, `query_analyzer`); `LIKE` and `:` need an index on the field.
+* The results of `LIKE`, ranges, `!=` and `NOT IN` don't depend on the analyzer of an index: they always compare the raw values of the field, with `ALLOW FILTERING` when no index serves the ranges, `!=` and `NOT IN`.
+Ranges whose lower bound is above the upper bound behave as on columns.
+* `=`, `:`, `CONTAINS` and `NOT CONTAINS` use the analyzer of the index serving them, as on columns, so their results depend on it; `IN` on a field whose index has an analyzer fails with a server error ("IN operation does not support analyzers"), as on columns.
+* `=` on a field whose index has an analyzer follows the `equals_behaviour_when_analyzed` option of the index, as on a column: with `match` (the default) it behaves as `:`, with a client warning; with `unsupported` the index doesn't serve it, and `ALLOW FILTERING` compares the raw values.
+* With an analyzed and a non-analyzed index on the same field, `=` is ambiguous and refused unless the query selects one of them with `WITH included_indexes = {...}` or `WITH excluded_indexes = {...}`.
+* A restriction that no index serves needs `ALLOW FILTERING`, which gives the same results as the index, except for the analyzer-dependent operators (`=`, `:`, `CONTAINS` and `NOT CONTAINS`, as on columns) and the values over the maximum term size of the index (see the limitations).
+
+`IS NOT NULL` selects the rows where the field has a value.
+An empty value of a literal type (`text`, `ascii`, `boolean`) is a value; an empty value of another type (for example from `blobAsInt(0x)`) is not.
+
+Bind markers take the type of the field:
+
+[source,language-cql]
+----
+SELECT * FROM users WHERE addr.city = ? AND addr.zip > ?;
+----
+
+The restrictions on the fields of partition key, clustering and static columns are supported too.
+Field restrictions are only accepted in `SELECT` statements: not in the `WHERE` clauses of `UPDATE`, `DELETE` and materialized views.
+
+== Limitations
+
+* `IS NULL` is not supported (on fields or columns).
+* No map-entry restriction on a field (`addr.m['k'] = 'v'`), no `CONTAINS KEY` on a field, no index on the keys or entries of a map field: the values of a map field can be searched with `CONTAINS`.
+* No `ORDER BY` (including ANN and BM25) and no `GROUP BY` on fields.
+* No vector or `duration` fields.
+* A value whose term is larger than the maximum term size of the index (8 KiB by default; for an index with an analyzer, the size of the analyzed value) isn't indexed: the write only logs a warning, and the queries served by the index, `IS NOT NULL` included, don't return the row, while the same queries with `ALLOW FILTERING` on a table without index do.
+This is the behaviour of the indexes on columns too.
+* During a rolling upgrade, create field indexes and use field restrictions only once all the nodes are upgraded.
+Schema changes during a rolling upgrade are discouraged but not prevented between 5.0.x versions: a field index created too early makes the nodes that aren't upgraded fail to load it ("Unable to parse targets for index ...").
+A query with a field restriction that reaches a replica that isn't upgraded fails: the replica logs "Unknown index expression kind" at `ERROR` and answers with a failure, and the client receives a read failure (`... failures: UNKNOWN from ...`), never wrong results.
+* Before downgrading to a version without this feature, drop the indexes on fields.
+
+[[dse-search-migration]]
+== Migrating from DSE Search
+
+DSE Search indexes every field of a UDT or tuple column as a search field named by its dotted path (`addr.city`, `t.field1`), and queries them with the tuple query parser (`{!tuple}`) in `solr_query`.
+The following table gives the CQL counterpart of each form.
+For `CREATE SEARCH INDEX ... WITH COLUMNS p.age`, create one SAI index per field the queries use: `CREATE INDEX ON t (p.age) USING 'sai'`.
+
+[%header, cols="2,2,1"]
+|===
+| DSE Search `solr_query` | CQL with SAI | Notes
+
+| `{!tuple}addr.city:Rome`
+| `WHERE addr.city = 'Rome'`
+|
+
+| `{!tuple}addr.loc.lat:1.0`, `{!tuple}p.home.city:Rome`, `{!tuple}nestedtuple.field3.field1:6`
+| `WHERE addr.loc.lat = 1.0`, `p.home.city = 'Rome'`, `nestedtuple.field3.field1 = 6`
+| nested fields
+
+| `{!tuple}t.field1:foo`, `{!tuple}t.field2:[2 TO *]`
+| `WHERE t.field1 = 'foo'`, `t.field2 >= 2`
+| tuple components
+
+| `{!tuple}p.age:41` after `UPDATE ... SET p.age = 41`
+| `WHERE p.age = 41`
+| single-field updates of non-frozen UDTs are indexed
+
+| `{!tuple}addr.street:b*`; `*x`, `/.*x.*/`
+| `WHERE addr.street LIKE 'b%'`; `LIKE '%x'`, `LIKE '%x%'`
+| needs an index without analyzer on the field
+
+| `{!tuple}addr.city:rome` (no match: case-sensitive)
+| `WHERE addr.city = 'rome'` (no match); with `'case_sensitive': 'false'` on the index, a match
+| DSE `lowerCase` field types; such an index normalizes `=` and `:`; it doesn't serve `LIKE`, nor ranges, `!=` and `NOT IN`, which compare the raw values (with `ALLOW FILTERING`)
+
+| `{!tuple}addr.city:[P TO S]`, `{!tuple}addr.zip:{100 TO *]`
+| `WHERE addr.city >= 'P' AND addr.city <= 'S'`, `addr.zip > 100`
+| ranges
+
+| `{!tuple}direc.name.firstname:(Bilbo OR Sam)`
+| `WHERE direc.name.firstname IN ('Bilbo', 'Sam')`
+|
+
+| `{!tuple}(x:* AND -x:23)`, `{!tuple}(x:* AND -x:(23 OR 45))` on a single field (not inside a collection)
+| `WHERE x != 23`, `x NOT IN (23, 45)`
+| as in DSE, a field without a value doesn't match; the raw values are compared, whatever the index options
+
+| `{!tuple}direc.time:"1970-01-17T15:17:11.014Z"`
+| `WHERE direc.time = '1970-01-17T15:17:11.014Z'`
+| dates
+
+| `{!tuple}addr.city:*`
+| `WHERE addr.city IS NOT NULL`
+| empty strings are values in SAI, not in DSE
+
+| `-direc.empty_field:[* TO *]`, `*:* AND NOT addr.loc.lat:*`
+| no `IS NULL`
+| not supported
+
+| `{!tuple}direc.listfield:listval1`, `{!tuple}addr.tags:y`
+| `WHERE direc.listfield CONTAINS 'listval1'`, `addr.tags CONTAINS 'y'`
+| collections inside UDTs and tuples
+
+| `{!tuple}tuplewithcollection.field3:(text1 OR text3)`
+| `WHERE tuplewithcollection.field3 CONTAINS 'text1' OR tuplewithcollection.field3 CONTAINS 'text3'`
+|
+
+| `{!tuple}direc.mapfieldkey2:dynVal2` (map entries as dynamic fields)
+| `WHERE direc.mapfield CONTAINS 'dynVal2'`
+| matches the value under any key, so it can return more rows than DSE: the application must check the key (no map-entry restriction on fields)
+
+| `WHERE skill = {name: 'masonry', type: 'bricks'}`, `WHERE skill = ('masonry', 'bricks')`
+| the same, with an SAI index on the whole frozen column (`CREATE INDEX ON t (skill) USING 'sai'`)
+| whole values
+
+| sort or facet on a field (refused by DSE)
+| no `ORDER BY` or `GROUP BY` on a field
+| same as DSE
+
+| `+{docValues}+`, `copyField`
+| not needed: every indexed field is searchable; no copy fields
+|
+
+| phrase, fuzzy and regex queries
+| `:` with an analyzer on a field; no fuzzy or regex
+| as on columns
+|===
+
+For more information, see:
+
+* xref:cassandra:developing/cql/indexing/sai/collections.adoc[SAI indexing with collections]
+* xref:cassandra:developing/cql/indexing/sai/sai-faq.adoc[SAI FAQ]
+* xref:cassandra:reference/sai-virtual-table-indexes.adoc[Virtual tables for SAI indexes and SSTables]

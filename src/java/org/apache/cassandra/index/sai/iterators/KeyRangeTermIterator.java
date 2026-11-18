@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.plan.Expression;
@@ -76,7 +77,11 @@ public class KeyRangeTermIterator extends KeyRangeIterator
     {
         final List<KeyRangeIterator> tokens = new ArrayList<>(1 + view.sstableIndexes.size());
 
-        KeyRangeIterator memtableIterator = e.context.searchMemtable(queryContext, view.memtableIndexes, e, keyRange);
+        // a non-equality subtracts the keys with an equal term only if no deletion may shadow the terms of any source,
+        // see IndexContext#hasShadowingDeletions (the sources with expired terms don't subtract them anyway)
+        boolean subtractEqualKeys = e.getOp().isNonEquality()
+                                    && !IndexContext.hasShadowingDeletions(view.memtableIndexes, view.sstableIndexes, queryContext.nowInSec());
+        KeyRangeIterator memtableIterator = e.context.searchMemtable(queryContext, view.memtableIndexes, e, keyRange, subtractEqualKeys);
         if (memtableIterator != null)
             tokens.add(memtableIterator);
 
@@ -88,7 +93,7 @@ public class KeyRangeTermIterator extends KeyRangeIterator
                 queryContext.addSstablesHit(1);
                 assert !index.isReleased();
 
-                KeyRangeIterator keyIterator = index.search(e, keyRange, queryContext, defer);
+                KeyRangeIterator keyIterator = index.search(e, keyRange, queryContext, defer, subtractEqualKeys);
 
                 if (keyIterator == null || !keyIterator.hasNext())
                     continue;

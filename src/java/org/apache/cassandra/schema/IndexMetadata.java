@@ -20,6 +20,7 @@ package org.apache.cassandra.schema;
 
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -41,6 +42,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
+import org.apache.cassandra.cql3.FieldIdentifier;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -136,9 +138,27 @@ public final class IndexMetadata
      */
     public static String generateDefaultIndexName(String table, @Nullable ColumnIdentifier column)
     {
+        return generateDefaultIndexName(table, column, Collections.emptyList());
+    }
+
+    /**
+     * Generates a default index name from the table and column names, and the names of the fields of the column
+     * that the index is on, for example {@code t_addr_city_idx} for an index on {@code addr.city} of table {@code t}.
+     * Characters other than alphanumeric and underscore are removed.
+     * Long index names are truncated to fit the length allowing constructing filenames.
+     *
+     * @param table  the table name
+     * @param column the column identifier. Can be null if the index is not column specific.
+     * @param fieldNames the names of the fields of the column that the index is on, empty for an index on the column
+     * @return the generated index name
+     */
+    public static String generateDefaultIndexName(String table, @Nullable ColumnIdentifier column, List<FieldIdentifier> fieldNames)
+    {
         String indexNameUncleaned = table;
         if (column != null)
             indexNameUncleaned += '_' + column.toString();
+        for (FieldIdentifier fieldName : fieldNames)
+            indexNameUncleaned += '_' + fieldName.toString();
         String indexNameUntrimmed = PATTERN_NON_WORD_CHAR.matcher(indexNameUncleaned).replaceAll("");
         String indexNameTrimmed = indexNameUntrimmed
                                   .substring(0,

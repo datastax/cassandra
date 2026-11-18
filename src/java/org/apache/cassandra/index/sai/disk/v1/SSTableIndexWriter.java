@@ -118,15 +118,24 @@ public class SSTableIndexWriter implements PerIndexWriter
             return;
 
         boolean addedRow = false;
-        if (indexContext.isNonFrozenCollection())
+        if (indexContext.isMultiValued())
         {
-            Iterator<ByteBuffer> valueIterator = indexContext.getValuesOf(row, nowInSec);
+            Iterator<ByteBuffer> valueIterator = indexContext.getValuesOf(key.partitionKey(), row, nowInSec);
             if (valueIterator != null)
             {
+                // the row is added if any of its terms is, and all its terms go to the same segment
+                boolean segmentChecked = false;
                 while (valueIterator.hasNext())
                 {
-                    ByteBuffer value = valueIterator.next();
-                    addedRow = addTerm(TypeUtil.asIndexBytes(value.duplicate(), indexContext.getValidator()), key, sstableRowId, indexContext.getValidator());
+                    ByteBuffer term = TypeUtil.asIndexBytes(valueIterator.next().duplicate(), indexContext.getValidator());
+                    if (!indexContext.validateMaxTermSize(key.partitionKey(), term))
+                        continue;
+                    if (!segmentChecked)
+                    {
+                        maybeStartSegment(sstableRowId);
+                        segmentChecked = true;
+                    }
+                    addedRow |= addTerm(term, key, sstableRowId, indexContext.getValidator());
                 }
             }
         }
@@ -135,7 +144,12 @@ public class SSTableIndexWriter implements PerIndexWriter
             ByteBuffer value = indexContext.getValueOf(key.partitionKey(), row, nowInSec);
             if (value != null)
             {
-                addedRow = addTerm(TypeUtil.asIndexBytes(value.duplicate(), indexContext.getValidator()), key, sstableRowId, indexContext.getValidator());
+                ByteBuffer term = TypeUtil.asIndexBytes(value.duplicate(), indexContext.getValidator());
+                if (indexContext.validateMaxTermSize(key.partitionKey(), term))
+                {
+                    maybeStartSegment(sstableRowId);
+                    addedRow = addTerm(term, key, sstableRowId, indexContext.getValidator());
+                }
             }
         }
         if (addedRow)
@@ -258,11 +272,12 @@ public class SSTableIndexWriter implements PerIndexWriter
         throw runtimeException;
     }
 
-    private boolean addTerm(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type) throws IOException
+    /**
+     * Creates the segment builder for the row with the given id, flushing the current segment first if it's full.
+     * It's called once per row, before its first term, so that all the terms of a row go to the same segment.
+     */
+    private void maybeStartSegment(long sstableRowId) throws IOException
     {
-        if (!indexContext.validateMaxTermSize(key.partitionKey(), term))
-            return false;
-
         if (currentBuilder == null)
         {
             currentBuilder = newSegmentBuilder(sstableRowId);
@@ -272,7 +287,16 @@ public class SSTableIndexWriter implements PerIndexWriter
             flushSegment();
             currentBuilder = newSegmentBuilder(sstableRowId);
         }
+    }
 
+    /**
+     * Adds a term of a row to the current segment, which {@link #maybeStartSegment} has prepared for the row, after
+     * checking the size of the term with {@link IndexContext#validateMaxTermSize}.
+     *
+     * @return whether the term was added
+     */
+    private boolean addTerm(ByteBuffer term, PrimaryKey key, long sstableRowId, AbstractType<?> type) throws IOException
+    {
         if (term.remaining() == 0 && TypeUtil.skipsEmptyValue(indexContext.getValidator()))
             return false;
 

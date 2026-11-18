@@ -37,6 +37,7 @@ import org.apache.cassandra.audit.AuditLogEntryType;
 import org.apache.cassandra.auth.Permission;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.FieldPath;
 import org.apache.cassandra.cql3.QualifiedName;
 import org.apache.cassandra.cql3.statements.RawKeyspaceAwareStatement;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget.Type;
@@ -48,6 +49,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CassandraIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
@@ -98,6 +100,10 @@ public final class CreateIndexStatement extends AlterSchemaStatement
     public static final String KEYSPACE_DOES_NOT_MATCH_TABLE = "Keyspace name '%s' doesn't match table name '%s'";
     public static final String KEYSPACE_DOES_NOT_MATCH_INDEX = "Keyspace name '%s' doesn't match index name '%s'";
     public static final String MUST_SPECIFY_INDEX_IMPLEMENTATION = "Must specify index implementation via USING";
+    public static final String FIELD_INDEX_NOT_SAI = "Cannot create index on field %s: indexes on the fields of UDTs and tuples are only supported by storage-attached indexes (USING 'sai')";
+    public static final String FIELD_INDEX_ON_VECTOR = "Cannot create index on field %s: vector fields can't be indexed";
+    public static final String FIELD_INDEX_ON_DURATION = "Cannot create index on field %s: secondary indexes are not supported on durations";
+    public static final String FIELD_INDEX_ON_DURATION_CONTAINER = "Cannot create index on field %s: secondary indexes are not supported on values containing durations";
 
     private final String indexName;
     private final String tableName;
@@ -311,6 +317,12 @@ public final class CreateIndexStatement extends AlterSchemaStatement
         if (null == column)
             throw ire(COLUMN_DOES_NOT_EXIST, target.column);
 
+        if (target.hasFieldPath())
+        {
+            validateFieldIndexTarget(table, kind, column, target);
+            return;
+        }
+
         AbstractType<?> baseType = column.type.unwrap();
 
         if (column.type.referencesDuration())
@@ -355,12 +367,66 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             throw ire(CREATE_ON_NON_FROZEN_UDT, column);
     }
 
+    /**
+     * Validates a target on a field of a UDT or tuple column (a leaf). The rules for columns are applied to the leaf,
+     * except those on frozen collections and non-frozen UDTs, which are about how the column is stored.
+     */
+    private void validateFieldIndexTarget(TableMetadata table, IndexMetadata.Kind kind, ColumnMetadata column, IndexTarget target)
+    {
+        assert target.fieldPath != null;
+        String name = target.column.toCQLString() + '.' + FieldPath.toCQLString(target.fieldNames);
+
+        String className = kind == IndexMetadata.Kind.CUSTOM ? IndexMetadata.expandAliases(attrs.customClass) : CassandraIndex.class.getName();
+        if (!StorageAttachedIndex.class.getName().equals(className))
+            throw ire(FIELD_INDEX_NOT_SAI, name);
+
+        if (table.isCompactTable())
+        {
+            TableMetadata.CompactTableMetadata compactTable = (TableMetadata.CompactTableMetadata) table;
+            if (column.isPrimaryKeyColumn())
+                throw new InvalidRequestException(PRIMARY_KEY_IN_COMPACT_STORAGE);
+            if (compactTable.compactValueColumn.equals(column))
+                throw new InvalidRequestException(COMPACT_COLUMN_IN_COMPACT_STORAGE);
+        }
+
+        if (column.isPartitionKey() && table.partitionKeyColumns().size() == 1)
+            throw ire(ONLY_PARTITION_KEY, column);
+
+        FieldPath path = target.fieldPath;
+        AbstractType<?> leafType = path.leafType(column.type).unwrap();
+
+        if (leafType.isVector())
+            throw ire(FIELD_INDEX_ON_VECTOR, name);
+
+        if (leafType.referencesDuration())
+        {
+            if (leafType.isCollection() || leafType.isTuple() || leafType.isUDT())
+                throw ire(FIELD_INDEX_ON_DURATION_CONTAINER, name);
+            throw ire(FIELD_INDEX_ON_DURATION, name);
+        }
+
+        // The collections inside UDTs and tuples are always frozen: full() indexes them as a whole, while a simple
+        // target or values() indexes their elements (the values of maps), as for non-frozen collection columns.
+        if (target.type == Type.FULL && !leafType.isCollection())
+            throw ire(FULL_ON_FROZEN_COLLECTIONS);
+
+        if (!leafType.isCollection() && target.type != Type.SIMPLE)
+            throw ire(NON_COLLECTION_SIMPLE_INDEX, target.type, name);
+
+        if (target.type == Type.KEYS || target.type == Type.KEYS_AND_VALUES)
+            throw ire(CREATE_WITH_NON_MAP_TYPE, target.type, name);
+    }
+
     private String generateIndexName(KeyspaceMetadata keyspace, List<IndexTarget> targets)
     {
         assert keyspace.name.equals(keyspaceName);
-        String baseName = targets.size() == 1
-                          ? IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column)
-                          : IndexMetadata.generateDefaultIndexName(tableName, null);
+        String baseName;
+        if (targets.size() != 1)
+            baseName = IndexMetadata.generateDefaultIndexName(tableName, null);
+        else if (targets.get(0).hasFieldPath())
+            baseName = IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column, targets.get(0).fieldNames);
+        else
+            baseName = IndexMetadata.generateDefaultIndexName(tableName, targets.get(0).column);
         return keyspace.findAvailableIndexName(baseName);
     }
 

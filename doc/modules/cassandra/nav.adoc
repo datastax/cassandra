@@ -49,6 +49,7 @@
 ***** xref:cassandra:getting-started/sai-quickstart.adoc[]
 ***** xref:cassandra:developing/cql/indexing/sai/sai-faq.adoc[]
 ***** xref:cassandra:developing/cql/indexing/sai/sai-working-with.adoc[]
+***** xref:cassandra:developing/cql/indexing/sai/udt-tuple-fields.adoc[]
 ***** xref:cassandra:developing/cql/indexing/sai/operations/sai-operations.adoc[]
 // 2i
 **** xref:cassandra:developing/cql/indexing/2i/2i-overview.adoc[]
