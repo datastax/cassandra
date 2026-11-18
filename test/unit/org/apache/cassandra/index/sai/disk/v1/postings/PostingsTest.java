@@ -18,7 +18,6 @@
 package org.apache.cassandra.index.sai.disk.v1.postings;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
@@ -334,86 +333,6 @@ public class PostingsTest extends SaiRandomizedTest
         assertTrue(summary.offsets.length() > 0);
         assertEquals(summary.offsets.length(), summary.maxValues.length());
         return summary;
-    }
-
-    /**
-     * The eager reader returns the same row ids as {@link PostingsReader}, for the lists of one or many blocks,
-     * with or without frequencies.
-     */
-    @Test
-    public void testEagerPostingsReader() throws Exception
-    {
-        for (boolean frequencies : new boolean[]{ false, true })
-        {
-            // the writer with frequencies makes blocks of 128 row ids
-            int blockSize = frequencies ? 128 : 1 << between(3, 8);
-            int[] sizes = { 1, 1, 2, blockSize - 1, blockSize, blockSize + 1, 2 * blockSize, 2 * blockSize + 1, 5000 };
-            int[][] expected = new int[sizes.length][];
-            long[] pointers = new long[sizes.length];
-
-            IndexComponents.ForWrite components = newIndexDescriptor().newPerIndexComponentsForWrite(indexContext);
-            try (PostingsWriter writer = frequencies ? new PostingsWriter(components, true) : new PostingsWriter(components, blockSize))
-            {
-                for (int i = 0; i < sizes.length; i++)
-                {
-                    // the first list is the row id zero alone, written as a block without bits
-                    expected[i] = i == 0 ? new int[]{ 0 } : randomPostings(Math.max(1, sizes[i]));
-                    pointers[i] = writer.write(new IntArrayPostingList(expected[i]));
-                }
-                writer.complete();
-            }
-
-            try (IndexInput input = components.get(IndexComponentType.POSTING_LISTS).openInput())
-            {
-                EagerPostingsReader reader = new EagerPostingsReader(input, frequencies);
-                long decoded = 0;
-                for (int round = 0; round < 3; round++)
-                {
-                    // in a random order, as the reader keeps no position
-                    for (int i : shuffle(IntStream.range(0, sizes.length).toArray()))
-                    {
-                        String message = String.format("%d row ids in blocks of %d, frequencies %s", expected[i].length, blockSize, frequencies);
-                        SortedRowIdsBuilder rowIds = new SortedRowIdsBuilder(Integer.MAX_VALUE - 1);
-                        assertEquals(message, expected[i][0], reader.firstRowId(pointers[i]));
-                        assertEquals(message, expected[i].length, reader.numPostings());
-                        reader.readAll(pointers[i], rowIds);
-                        assertEquals(message, expected[i].length, reader.numPostings());
-                        decoded += expected[i].length;
-
-                        int[] distinct = IntStream.of(expected[i]).distinct().toArray();
-                        PostingList postings = rowIds.build();
-                        assertEquals(message, distinct.length, postings.size());
-                        for (int rowId : distinct)
-                            assertEquals(message, rowId, postings.nextPosting());
-                        assertEquals(message, PostingList.END_OF_STREAM, postings.nextPosting());
-                    }
-                }
-                assertEquals(decoded, reader.postingsDecoded());
-
-                // several lists into the same builder
-                SortedRowIdsBuilder rowIds = new SortedRowIdsBuilder(Integer.MAX_VALUE - 1);
-                for (long pointer : pointers)
-                    reader.readAll(pointer, rowIds);
-                int[] union = Arrays.stream(expected).flatMapToInt(IntStream::of).sorted().distinct().toArray();
-                PostingList postings = rowIds.build();
-                assertEquals(union.length, postings.size());
-                for (int rowId : union)
-                    assertEquals(rowId, postings.nextPosting());
-
-                // only the row ids from a given one
-                for (int from : new int[]{ 0, 1, union[union.length / 2], union[union.length - 1], union[union.length - 1] + 1 })
-                {
-                    rowIds = new SortedRowIdsBuilder(Integer.MAX_VALUE - 1);
-                    for (long pointer : pointers)
-                        reader.readAll(pointer, rowIds, from);
-                    postings = rowIds.build();
-                    for (int rowId : union)
-                        if (rowId >= from)
-                            assertEquals(rowId, postings.nextPosting());
-                    assertEquals(PostingList.END_OF_STREAM, postings.nextPosting());
-                }
-            }
-        }
     }
 
     private int[] randomPostings(int numPostings)
