@@ -100,21 +100,48 @@ New features
       and uuid columns. Strings are ordered by their bytes (code points, no collation). Indexes with an analyzer
       ('case_sensitive': false, 'normalize', 'ascii', 'index_analyzer', 'query_analyzer') don't serve these
       restrictions. No index rebuild, new index version or messaging change is needed.
-    - The WHERE clause of SELECT statements can restrict the fields of UDT and tuple columns, frozen or not, at any
-      nesting depth: addr.city = 'Rome', p.home.loc.lat > 1.0, t.field2 IN (1, 2). The components of a tuple are
-      named field1, field2, ..., as in DSE Search. The operators are =, !=, <, <=, >, >=, IN, NOT IN, CONTAINS /
-      NOT CONTAINS (collection fields) and IS NOT NULL. These restrictions need ALLOW FILTERING. A field without a
-      value satisfies no restriction, != and NOT IN included.
-      Limitations: no IS NULL restriction; no map-entry restrictions (m['k'] = v) on fields; no ORDER BY or GROUP BY
-      on fields; no restrictions on the fields of the elements of collections of UDTs or tuples. Field restrictions
-      are only accepted in SELECT WHERE clauses (not in the WHERE clauses of UPDATE, DELETE or materialized views).
+    - SAI indexes on the fields of UDT and tuple columns: CREATE INDEX ON t (addr.city) USING 'sai' indexes one field
+      (leaf) of a frozen or non-frozen UDT column, at any nesting depth (p.home.loc.lat); the components of a tuple are
+      named field1, field2, ... (t.field2), as in DSE Search. Collection fields can be indexed too (addr.tags,
+      CONTAINS; full(addr.tags) for the whole frozen value). The default index name is t_addr_city_idx. Each index
+      has its own options ('case_sensitive', 'normalize', 'ascii', analyzers).
+      WHERE clauses restrict fields with =, !=, <, <=, >, >=, IN, NOT IN, LIKE, : (analyzed match), CONTAINS / NOT
+      CONTAINS (collection fields) and IS NOT NULL, served by the field indexes or with ALLOW FILTERING. A field
+      without a value satisfies no restriction, != and NOT IN included. As on columns,
+      the results of LIKE, ranges, != and NOT IN don't depend on the analyzers of the indexes (those of =, :,
+      CONTAINS and NOT CONTAINS do): indexes with an analyzer ('case_sensitive': false, 'normalize', 'ascii',
+      'index_analyzer', 'query_analyzer') don't serve LIKE, the ranges, != and NOT IN, which compare the raw
+      values.
+      The DSE Search tuple queries ({!tuple}addr.city:Rome, ...) map to these restrictions, see the SAI documentation
+      page "Indexes on UDT and tuple fields".
+      Limitations: no IS NULL restriction; no restrictions on the fields of the elements of collections of UDTs or
+      tuples; no paths through map keys, no map-entry restrictions (m['k'] = v) on
+      fields, no KEYS or ENTRIES indexes on fields; no ORDER BY, BM25 or ANN on fields, and no vector or duration
+      fields; ALTER TYPE ... RENAME of a
+      field used by an index is refused (drop the index first; ALTER TYPE ... ADD is fine); there is no shorthand to
+      index all the fields of a column, create one index per field; as on columns, a value whose term is larger than
+      the maximum term size of its index (8 KiB by default, after the analyzer for an analyzed index) isn't indexed,
+      so the queries served by the index, IS NOT NULL included, don't return its row. Field restrictions are only
+      accepted in SELECT WHERE clauses (not in the WHERE clauses of UPDATE, DELETE or materialized views).
+    - The system views system_views.indexes and system_views.sai_column_indexes have two new columns: field_path, the
+      path to the indexed field with the raw field names, as column_name (city for an index on addr.city, loc.lat for
+      addr.loc.lat), null for an index on a whole column; and target, the index target in canonical CQL form
+      (addr.city, values(addr.tags), full(addr.tags), values(m), "Addr"."City").
+    - Drivers show the target of an index on a field (addr.city) as the column name in their index metadata.
 
 Upgrading
 ---------
-    - During a rolling upgrade, use the restrictions on the fields of UDT and tuple columns only once all the nodes
-      are upgraded: a query with a field restriction that reaches a replica that isn't upgraded fails. The replica
-      logs "Unknown index expression kind" at ERROR and answers with a failure, and the client receives a read
-      failure ("... failures: UNKNOWN from ..."), never wrong results.
+    - SAI indexes on UDT and tuple fields don't change the on-disk formats or the messaging protocol, and existing
+      indexes don't need to be rebuilt. Create field indexes only once all the nodes are upgraded. Schema changes
+      during a rolling upgrade are discouraged but not enforced between 5.0.x versions: a field index created while
+      some nodes are not upgraded makes those nodes fail to load it with "Unable to parse targets for index ...", until
+      they are upgraded or the index is dropped.
+    - During a rolling upgrade, use field restrictions only once all the nodes are upgraded: a query with a field
+      restriction (with ALLOW FILTERING, as no field index can exist yet) that reaches a replica that isn't upgraded
+      fails. The replica logs "Unknown index expression kind" at ERROR and answers with a failure, and the client
+      receives a read failure ("... failures: UNKNOWN from ..."), never wrong results.
+    - Before downgrading to a version without this feature, drop the indexes on UDT and tuple fields: the older
+      version can't load them.
     - SAI NOT CONTAINS and NOT CONTAINS KEY on non-frozen collection columns no longer subtract the rows of the index
       terms that may be stale, which returned too few rows: when a source (memtable or SSTable) may hold expired cells
       (TTL), it doesn't subtract its keys, and when the table has partition deletions or range tombstones (or, for the
