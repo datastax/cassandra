@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
+
 from cassandra.metadata import maybe_escape_name
 from cqlshlib import helptopics
 from cqlshlib.cqlhandling import CqlParsingRuleSet, Hint
@@ -736,7 +738,7 @@ syntax_rules += r'''
                  ;
 <selectStatement> ::= "SELECT" ( "JSON" )? <selectClause>
                         "FROM" (cf=<columnFamilyName> | mv=<materializedViewName>)
-                          ( "WHERE" <whereClause> )?
+                          ( "WHERE" <selectWhereClause> )?
                           ( "GROUP" "BY" <groupByClause> ( "," <groupByClause> )* )?
                           ( "ORDER" "BY" <orderByClause> ( "," <orderByClause> )* )?
                           ( "PER" "PARTITION" "LIMIT" perPartitionLimit=<wholenumber> )?
@@ -752,6 +754,24 @@ syntax_rules += r'''
                              ")" ("=" | "<" | ">" | "<=" | ">=") <tokenDefinition>
              | [rel_lhs]=<cident> "IN" "(" <term> ( "," <term> )* ")"
              ;
+<selectWhereClause> ::= <selectRelation> ( "AND" <selectRelation> )*
+                      ;
+<selectRelation> ::= <relation>
+                   | [rel_lhs]=<cident> <relFieldPath> ( "=" | "<" | ">" | "<=" | ">=" | "!=" | "LIKE" | "CONTAINS" | "NOT" "CONTAINS" ) <term>
+                   | [rel_lhs]=<cident> <relFieldPath> "IS" "NOT" "NULL"
+                   | [rel_lhs]=<cident> <relFieldPath> "NOT"? "IN" "(" <term> ( "," <term> )* ")"
+                   | [rel_lhs]=<cident> <relFieldPath>? "NOT"? "CONTAINS" "ELEMENT" "(" <elementGroup> ")"
+                   ;
+<relFieldPath> ::= "." [rel_field]=<identifier> ( "." <identifier> )*
+                 ;
+<elementGroup> ::= <elementCondition> ( ( "AND" | "OR" ) <elementCondition> )*
+                 ;
+<elementCondition> ::= elem_lhs=<cident> ( "." <identifier> )*
+                           ( ( "=" | "<" | ">" | "<=" | ">=" | "!=" | "LIKE" | "CONTAINS" | "NOT" "CONTAINS" ) <term>
+                           | "IS" "NOT" "NULL"
+                           | "NOT"? "IN" "(" <term> ( "," <term> )* ")" )
+                     | "(" <elementGroup> ")"
+                     ;
 <selectClause> ::= "DISTINCT"? <selector> ("AS" <cident>)? ("," <selector> ("AS" <cident>)?)*
                  | "*"
                  ;
@@ -890,8 +910,38 @@ def relation_token_subject_completer(ctxt, cass):
     return [key.name for key in layout.partition_key]
 
 
+def _index_target_column(target):
+    """
+    Returns the name of the column of an index target, for example addr for the targets addr.city,
+    values(addrs).city and full(addr.tags), and Addr for "Addr"."City".
+    """
+    match = re.match(r'^(?:keys|values|entries|full)\((.*)\)(?:\..*)?$', target, re.IGNORECASE)
+    if match:
+        target = match.group(1)
+    if target.startswith('"'):
+        end = 1
+        while end < len(target):
+            if target[end] == '"':
+                if end + 1 < len(target) and target[end + 1] == '"':
+                    end += 2
+                    continue
+                break
+            end += 1
+        return dequote_name(target[:end + 1])
+    return target.split('.', 1)[0]
+
+
 @completer_for('relation', 'rel_lhs')
 def select_relation_lhs_completer(ctxt, cass):
+    return _relation_lhs_candidates(ctxt, cass)
+
+
+@completer_for('selectRelation', 'rel_lhs')
+def select_field_relation_lhs_completer(ctxt, cass):
+    return _relation_lhs_candidates(ctxt, cass)
+
+
+def _relation_lhs_candidates(ctxt, cass):
     layout = get_table_meta(ctxt, cass)
     filterable = set()
     already_filtered_on = list(map(dequote_name, ctxt.get_binding('rel_lhs', ())))
@@ -906,8 +956,79 @@ def select_relation_lhs_completer(ctxt, cass):
         else:
             break
     for idx in layout.indexes.values():
-        filterable.add(idx.index_options["target"])
+        filterable.add(_index_target_column(idx.index_options["target"]))
     return list(map(maybe_escape_name, filterable))
+
+
+def _strip_frozen(cql_type):
+    cql_type = cql_type.strip()
+    while cql_type.startswith('frozen<') and cql_type.endswith('>'):
+        cql_type = cql_type[len('frozen<'):-1].strip()
+    return cql_type
+
+
+def _type_arguments(cql_type):
+    """ Splits the arguments of a parameterized type: map<text, frozen<address>> gives [text, frozen<address>]. """
+    inner = cql_type[cql_type.index('<') + 1:-1]
+    args, depth, start = [], 0, 0
+    for i, c in enumerate(inner):
+        if c == '<':
+            depth += 1
+        elif c == '>':
+            depth -= 1
+        elif c == ',' and depth == 0:
+            args.append(inner[start:i].strip())
+            start = i + 1
+    args.append(inner[start:].strip())
+    return args
+
+
+def _field_names(ctxt, cass, cql_type, through_collections):
+    """
+    Returns the names of the fields of a UDT or tuple type (field1, field2, ... for a tuple), or those of the elements
+    of a list or set (the values of a map) of UDTs or tuples if through_collections is true.
+    """
+    cql_type = _strip_frozen(cql_type)
+    if through_collections:
+        if cql_type.startswith('list<') or cql_type.startswith('set<'):
+            cql_type = _strip_frozen(_type_arguments(cql_type)[0])
+        elif cql_type.startswith('map<'):
+            cql_type = _strip_frozen(_type_arguments(cql_type)[-1])
+    if cql_type.startswith('tuple<'):
+        return ['field%d' % (i + 1) for i in range(len(_type_arguments(cql_type)))]
+    if '<' in cql_type or cql_type in simple_cql_types:
+        return []
+    ks = ctxt.get_binding('ksname', None)
+    if ks is not None:
+        ks = dequote_name(ks)
+    try:
+        user_type = cass.get_usertype_layout(ks, cql_type)
+    except Exception:
+        return []
+    return [maybe_escape_name(field_name) for (field_name, field_type) in user_type]
+
+
+def _relation_column_type(ctxt, cass):
+    layout = get_table_meta(ctxt, cass)
+    column = dequote_name(ctxt.get_binding('rel_lhs', ())[-1])
+    if column not in layout.columns:
+        return None
+    return layout.columns[column].cql_type
+
+
+@completer_for('relFieldPath', 'rel_field')
+def select_relation_field_completer(ctxt, cass):
+    """ The fields of the column, or of the elements of a collection column, after "column." """
+    cql_type = _relation_column_type(ctxt, cass)
+    return [] if cql_type is None else _field_names(ctxt, cass, cql_type, True)
+
+
+@completer_for('elementCondition', 'elem_lhs')
+def element_condition_lhs_completer(ctxt, cass):
+    """ The fields of the elements of the collection column of a CONTAINS ELEMENT group. """
+    cql_type = _relation_column_type(ctxt, cass)
+    fields = [] if cql_type is None else _field_names(ctxt, cass, cql_type, True)
+    return fields if fields else [Hint('<field of the elements>')]
 
 
 explain_completion('selector', 'colname')
@@ -1324,7 +1445,7 @@ syntax_rules += r'''
 
 <createIndexStatement> ::= "CREATE" "CUSTOM"? "INDEX" ("IF" "NOT" "EXISTS")? indexname=<idxName>? "ON"
                                cf=<columnFamilyName> "(" (
-                                   col=<cident> |
+                                   col=<cident> ( "." <identifier> )* |
                                    "keys(" col=<cident> ")" |
                                    "full(" col=<cident> ")"
                                ) ")"

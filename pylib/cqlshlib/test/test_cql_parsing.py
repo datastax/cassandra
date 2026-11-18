@@ -18,7 +18,9 @@
 # and $CQL_TEST_PORT to the associated port.
 
 from unittest import TestCase
+from collections import namedtuple
 from operator import itemgetter
+from types import SimpleNamespace
 
 from cqlshlib.cql3handling import CqlRuleSet
 
@@ -707,6 +709,59 @@ class TestCqlParsing(TestCase):
 
     def test_parse_drop_index(self):
         pass
+
+    def test_complete_udt_field_paths(self):
+        # field paths in index targets and in SELECT relations, CONTAINS ELEMENT groups and IS NOT NULL on fields,
+        # with a fake connection giving the table metadata
+        column = namedtuple('column', ['name', 'cql_type'])
+        index = namedtuple('index', ['index_options'])
+        columns = [column('id', 'int'), column('addr', 'frozen<address>'), column('addrs', 'list<frozen<address>>'),
+                   column('t', 'frozen<tuple<text, int>>'), column('n', 'int')]
+        table = SimpleNamespace(partition_key=columns[:1], clustering_key=[],
+                                columns={c.name: c for c in columns},
+                                indexes={'i1': index({'target': 'addr.city'}),
+                                         'i2': index({'target': 'values(addrs).zip'}),
+                                         'i3': index({'target': 'n'})})
+        cass = SimpleNamespace(get_table_meta=lambda ks, cf: table,
+                               get_usertype_layout=lambda ks, ut: [('city', 'text'), ('zip', 'int'), ('Mixed', 'text')])
+
+        def complete(text):
+            return set(CqlRuleSet.cql_complete(text, '', cassandra_conn=cass, startsymbol='Start'))
+
+        def fields(candidates):
+            return candidates - {'', '<identifier>', '<quotedName>'}
+
+        self.assertIn('USING', complete('CREATE INDEX ON ks.tab (addr.city) '))
+        self.assertIn('USING', complete('CREATE INDEX ON ks.tab (addr.loc.lat) '))
+        # the columns of the index targets, never a dotted target as one quoted name
+        candidates = complete('SELECT * FROM ks.tab WHERE ')
+        self.assertTrue({'id', 'addr', 'addrs', 'n', 'TOKEN('} <= candidates)
+        self.assertFalse({'"addr.city"', '"values(addrs).zip"'} & candidates)
+        self.assertTrue({'id', 'addr', 'addrs', 'n', 'TOKEN('} <= complete('SELECT * FROM ks.tab WHERE id = 1 AND '))
+        self.assertTrue({'=', '!=', '<', 'IN', 'CONTAINS', 'IS', 'NOT', 'LIKE', '.'} <= complete('SELECT * FROM ks.tab WHERE addr.city '))
+        # the fields (the generic <identifier> hint may come with them)
+        self.assertEqual({'city', 'zip', '"Mixed"'}, fields(complete('SELECT * FROM ks.tab WHERE addr.')))
+        self.assertEqual({'city', 'zip', '"Mixed"'}, fields(complete('SELECT * FROM ks.tab WHERE addrs.')))
+        self.assertEqual({'field1', 'field2'}, fields(complete('SELECT * FROM ks.tab WHERE t.')))
+        self.assertEqual({'NOT NULL '}, complete('SELECT * FROM ks.tab WHERE addr.city IS '))
+        self.assertIn('IN', complete('SELECT * FROM ks.tab WHERE addr.city NOT '))
+        self.assertIn('ELEMENT', complete('SELECT * FROM ks.tab WHERE addrs CONTAINS '))
+        self.assertEqual({'CONTAINS ELEMENT ( '}, complete('SELECT * FROM ks.tab WHERE addrs NOT '))
+        # inside a group: the fields of the elements, the operators, AND / OR, nested parentheses
+        # (after "CONTAINS ELEMENT (" the terms of a plain CONTAINS are candidates too: element(...) is a function call)
+        candidates = complete('SELECT * FROM ks.tab WHERE addrs CONTAINS ELEMENT (')
+        self.assertTrue({'city', 'zip', '"Mixed"', '('} <= candidates)
+        self.assertFalse({'id', 'addrs', 'n'} & candidates)
+        self.assertEqual({'city', 'zip', '"Mixed"', '('}, fields(complete('SELECT * FROM ks.tab WHERE addrs CONTAINS ELEMENT (city = 1 OR ')))
+        self.assertTrue({'=', '!=', 'IN', 'NOT', 'IS', '.'} <= complete('SELECT * FROM ks.tab WHERE addrs CONTAINS ELEMENT (city '))
+        self.assertEqual({')', 'AND', 'OR'}, complete('SELECT * FROM ks.tab WHERE addrs CONTAINS ELEMENT (city = 1 '))
+        self.assertEqual({')', 'AND', 'OR'}, complete('SELECT * FROM ks.tab WHERE addrs CONTAINS ELEMENT (city IS NOT NULL '))
+        self.assertEqual({')', 'AND', 'OR'}, complete("SELECT * FROM ks.tab WHERE addrs CONTAINS ELEMENT (zip NOT IN (1, 2) "))
+        self.assertIn('ALLOW', complete('SELECT * FROM ks.tab WHERE addrs CONTAINS ELEMENT ((city = 1 OR zip != 2) AND zip > 0) '))
+        self.assertIn('ALLOW', complete("SELECT * FROM ks.tab WHERE t.field1 IN ('a', 'b') "))
+        # UPDATE and DELETE don't accept field restrictions: their relations are unchanged
+        self.assertEqual({'=', '<=', '>=', '>', '<', 'CONTAINS', 'IN', '['}, complete('UPDATE ks.tab SET n = 1 WHERE id '))
+        self.assertEqual({'=', '<=', '>=', '>', '<', 'CONTAINS', 'IN', '['}, complete('DELETE FROM ks.tab WHERE id '))
 
     def test_parse_select_token(self):
         pass

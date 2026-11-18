@@ -177,6 +177,31 @@ class TestCqlshCompletion(CqlshCompletionCase):
     def test_complete_in_select(self):
         pass
 
+    def test_complete_udt_fields_in_select(self):
+        # the fields of a UDT column, and of the elements of a collection of UDTs
+        self.trycompletions('SELECT * FROM songs WHERE info.',
+                            choices=['founded', 'members', 'description'],
+                            other_choices_ok=True)
+        self.trycompletions('SELECT * FROM users WHERE addresses.',
+                            choices=['city', 'address', 'zip'],
+                            other_choices_ok=True)
+        self.trycompletions('SELECT * FROM songs WHERE info.description ',
+                            choices=['=', '!=', '<', '<=', '>', '>=', 'IN', 'NOT', 'IS', 'LIKE', 'CONTAINS', '.'],
+                            other_choices_ok=True)
+        self.trycompletions('SELECT * FROM songs WHERE info.description IS ',
+                            immediate='NOT NULL ')
+        # CONTAINS ELEMENT groups: the fields of the elements, AND and OR inside
+        self.trycompletions('SELECT * FROM users WHERE addresses NOT ',
+                            immediate='CONTAINS ELEMENT ( ')
+        self.trycompletions('SELECT * FROM users WHERE addresses CONTAINS ELEMENT (',
+                            choices=['city', 'address', 'zip', '('],
+                            other_choices_ok=True)
+        self.trycompletions("SELECT * FROM users WHERE addresses CONTAINS ELEMENT (city = 'Austin' ",
+                            choices=[')', 'AND', 'OR'])
+        self.trycompletions("SELECT * FROM users WHERE addresses CONTAINS ELEMENT (city = 'Austin' AND zip IS NOT NULL) ",
+                            choices=['AND', 'ALLOW', 'GROUP', 'LIMIT', 'ORDER', 'PER', 'WITH', ';'],
+                            other_choices_ok=True)
+
     def test_complete_in_insert(self):
         self.trycompletions('INSERT INTO  ',
                             choices=('twenty_rows_table',
