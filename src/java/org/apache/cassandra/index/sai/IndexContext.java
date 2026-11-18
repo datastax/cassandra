@@ -624,7 +624,9 @@ public class IndexContext
         if (memtables.isEmpty())
             return KeyRangeIterator.empty();
 
-        Expression negExpression = expression.negated();
+        // an expression with exclusions (a NOT IN on a multi-valued field) excludes the keys matching any of its
+        // values, see Expression#negations
+        List<Expression> negations = expression.negations();
         KeyRangeIterator.Builder builder = KeyRangeUnionIterator.builder(memtables.size());
         try
         {
@@ -637,17 +639,19 @@ public class IndexContext
                     builder.add(allKeys);
                     continue;
                 }
-                KeyRangeIterator matchedKeys;
+                KeyRangeUnionIterator.Builder matched = KeyRangeUnionIterator.builder(negations.size());
                 try
                 {
-                    matchedKeys = searchMemtable(context, memtable, negExpression, keyRange);
+                    for (Expression negation : negations)
+                        matched.add(searchMemtable(context, memtable, negation, keyRange));
                 }
                 catch (Throwable t)
                 {
+                    FileUtils.closeQuietly(matched.ranges());
                     FileUtils.closeQuietly(allKeys);
                     throw t;
                 }
-                builder.add(KeyRangeAntiJoinIterator.create(allKeys, matchedKeys));
+                builder.add(KeyRangeAntiJoinIterator.create(allKeys, matched.build()));
             }
             return builder.build();
         }
@@ -1109,7 +1113,10 @@ public class IndexContext
             return !TypeUtil.isLiteral(validator) || supportsLiteralRangeQueries();
         // NOT_EQ is the union of the two scans of the terms before and after the excluded one (see
         // QueryController#buildInequalityPlan), in any order of the terms: it only needs the terms to be the values,
-        // which the terms of an analyzer are not
+        // which the terms of an analyzer are not. On a field inside collection elements it means "no element is
+        // equal", and it is served as NOT CONTAINS is on the collection columns, as all the keys minus the keys with
+        // an equal term (see getNonEqIterator): the keys subtracted with an analyzer would depend on the analyzer,
+        // while a != compares the raw values.
         if (operator == Expression.Op.NOT_EQ)
             return !isAnalyzed;
         return operator != null;

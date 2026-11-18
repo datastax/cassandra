@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.ListIterator;
 import java.util.Set;
 
+import javax.annotation.Nullable;
+
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 
@@ -32,6 +34,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.ColumnMetadata.Kind;
@@ -146,7 +149,7 @@ public class FilterTree
         return referencedIndexes.size();
     }
 
-    private void sstableIndexes(Set<SSTableIndex> indexes)
+    protected void sstableIndexes(Set<SSTableIndex> indexes)
     {
         for (Expression expression : expressions.values())
             indexes.addAll(expression.context.getView().getIndexes());
@@ -156,7 +159,8 @@ public class FilterTree
 
     /**
      * The filter of an expression that is evaluated as the queries without index evaluate it, by the expression
-     * itself (see {@link Operation.RowFilterNode}): a restriction on a field of a UDT or tuple column.
+     * itself (see {@link Operation.RowFilterNode}): a restriction on a field of a UDT or tuple column, or a
+     * {@code CONTAINS ELEMENT} group (see {@link ElementFilter}).
      */
     static class RowFilterExpressionFilter extends FilterTree
     {
@@ -187,6 +191,65 @@ public class FilterTree
 
             Row row = column.isStatic() ? staticRow : (Row) currentCluster;
             return expression.isSatisfiedBy(metadata, key, row, nowInSec);
+        }
+    }
+
+    /**
+     * The filter of a {@code CONTAINS ELEMENT} group: it evaluates the conditions of the group on each element of
+     * the collection, as {@link RowFilter.ElementMatchExpression} does (the same evaluation as the filtering without
+     * index and as the coordinator's, so that the results are the same). The indexes only select its candidate rows
+     * (see {@link Operation.ElementNode}): the rows where each positive condition is satisfied by some element, which
+     * this filter rejects when no single element satisfies the group. The rows it evaluates and rejects are counted in
+     * the {@link QueryContext} when the group's candidates are the source of the keys (no OR above the group): they
+     * approximate the false positives of the candidates (the planner may still read other keys, e.g. if it drops the
+     * candidates' index scans from an intersection, and the rows of a partition are all evaluated, the key being the
+     * partition in AA). The filter of the candidates is kept only for the indexes it references (see
+     * {@link #numSSTableIndexes()}).
+     */
+    static class ElementFilter extends RowFilterExpressionFilter
+    {
+        // the counters of the rows evaluated and rejected by the filter
+        private final QueryContext queryContext;
+        // whether to count the rows: when the group's candidates are the source of the keys of the query
+        private final boolean counts;
+        // the filter tree of the candidates, never evaluated, for the indexes it references
+        @Nullable
+        private final FilterTree candidates;
+
+        ElementFilter(RowFilter.ElementMatchExpression expression,
+                      TableMetadata metadata,
+                      QueryContext queryContext,
+                      boolean counts,
+                      @Nullable FilterTree candidates)
+        {
+            // the time of the read command, as the filtering without index and the coordinator use
+            super(expression, metadata, queryContext.nowInSec());
+            this.queryContext = queryContext;
+            this.counts = counts;
+            this.candidates = candidates;
+        }
+
+        @Override
+        protected void sstableIndexes(Set<SSTableIndex> indexes)
+        {
+            if (candidates != null)
+                candidates.sstableIndexes(indexes);
+        }
+
+        @Override
+        public boolean isSatisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow)
+        {
+            // the static row alone never satisfies a group on the clustering or regular columns, not even a
+            // NOT CONTAINS ELEMENT
+            boolean satisfied = super.isSatisfiedBy(key, currentCluster, staticRow);
+            // the rows, not the check of the static row of a partition without matching rows
+            if (counts && currentCluster != null && currentCluster.isRow() && !((Row) currentCluster).isStatic())
+            {
+                queryContext.addElementFilterCandidates(1);
+                if (!satisfied)
+                    queryContext.addElementFilterRejections(1);
+            }
+            return satisfied;
         }
     }
 }

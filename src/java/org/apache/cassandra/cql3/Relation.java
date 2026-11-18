@@ -180,7 +180,7 @@ public abstract class Relation
      * @return the <code>Restriction</code> corresponding to this <code>Relation</code>
      * @throws InvalidRequestException if this <code>Relation</code> is not valid
      */
-    public final Restriction toRestriction(TableMetadata table, VariableSpecifications boundNames, IndexHints indexHints)
+    public Restriction toRestriction(TableMetadata table, VariableSpecifications boundNames, IndexHints indexHints)
     {
         switch (relationType)
         {

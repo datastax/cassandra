@@ -792,6 +792,27 @@ public class StorageAttachedIndex implements Index
         return isOnField(column, fieldPath) && indexContext.supports(operator);
     }
 
+    /**
+     * {@inheritDoc}
+     * <p>
+     * A {@code CONTAINS ELEMENT} group is served through its candidates, the positive conditions on the absolute
+     * paths (see {@link RowFilter.ElementMatchExpression#candidates()}): this index takes part in it if it serves one
+     * of them, the query plan deciding whether the indexes serve enough of them (see
+     * {@code StorageAttachedIndexQueryPlan}).
+     */
+    @Override
+    public boolean supportsExpression(RowFilter.Expression expression)
+    {
+        if (expression instanceof RowFilter.ElementMatchExpression)
+        {
+            for (RowFilter.Expression candidate : ((RowFilter.ElementMatchExpression) expression).candidateExpressions())
+                if (supportsExpression(candidate))
+                    return true;
+            return false;
+        }
+        return Index.super.supportsExpression(expression);
+    }
+
     @Override
     public boolean filtersMultipleContains()
     {
