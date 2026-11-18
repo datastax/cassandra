@@ -49,7 +49,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * selects the rows where the field is set (DSE Search {@code {!tuple}addr.city:*}). A field is set when its value is
  * present: in a frozen value, a component that is present and not null (a value written before an
  * {@code ALTER TYPE ... ADD} doesn't have the new field); in a non-frozen UDT, a live cell. An empty string is set,
- * as for the literal columns, but the empty values of the other types are not (the indexes don't index them).
+ * as for the literal columns, but the empty values of the other types are not (the indexes don't index them). On a
+ * path through collections, some element has the field set; in a {@code CONTAINS ELEMENT} group, the element.
  * <p>
  * An index on the field serves it by the scan of all its terms. Every query on the indexed table is also run with
  * {@code ALLOW FILTERING} on a twin table without any index, which must give the same rows. The tests are run on
@@ -90,6 +91,11 @@ public class UdtFieldIsNotNullTest extends SAITester
     private String udt(String type)
     {
         return frozen ? "frozen<" + type + '>' : type;
+    }
+
+    private String list(String element)
+    {
+        return frozen ? "frozen<list<" + element + ">>" : "list<" + element + '>';
     }
 
     private void createTables(String schema)
@@ -323,20 +329,82 @@ public class UdtFieldIsNotNullTest extends SAITester
     @Test
     public void testAddedField() throws Throwable
     {
-        createTables("CREATE TABLE %s (id int PRIMARY KEY, addr " + udt(address) + ')');
+        createTables("CREATE TABLE %s (id int PRIMARY KEY, addr " + udt(address) + ", addrs " + list("frozen<" + address + '>') + ')');
         index("addr.city");
-        write("INSERT INTO %s (id, addr) VALUES (1, {city: 'Rome'})");
+        write("INSERT INTO %s (id, addr, addrs) VALUES (1, {city: 'Rome'}, [{city: 'Rome'}])");
         flush(KEYSPACE, currentTable(), plain);
 
         execute("ALTER TYPE " + KEYSPACE + '.' + address + " ADD country text");
         index("addr.country");
-        write("INSERT INTO %s (id, addr) VALUES (2, {city: 'Milan', country: 'IT'})");
-        write("INSERT INTO %s (id, addr) VALUES (3, {city: 'Paris'})");
+        index("addrs.country");
+        write("INSERT INTO %s (id, addr, addrs) VALUES (2, {city: 'Milan', country: 'IT'}, [{city: 'Milan'}, {country: 'IT'}])");
+        write("INSERT INTO %s (id, addr, addrs) VALUES (3, {city: 'Paris'}, [{city: 'Paris'}])");
 
         inAllStates(() -> {
             assertIds("addr.country IS NOT NULL", 2);
+            assertIds("addrs.country IS NOT NULL", 2);
             assertIds("addr.city IS NOT NULL", 1, 2, 3);
+            assertIds("addrs CONTAINS ELEMENT (country IS NOT NULL AND city = 'Milan') ALLOW FILTERING");
+            assertIds("addrs CONTAINS ELEMENT (country IS NOT NULL)", 2);
         });
+    }
+
+    /**
+     * IS NOT NULL on a field inside collections: some element has the field set (DSE
+     * {@code {!tuple}udtcol_list.street:*}); in a CONTAINS ELEMENT group, the element; NOT CONTAINS ELEMENT, no
+     * element (including the rows without elements).
+     */
+    @Test
+    public void testCollections() throws Throwable
+    {
+        createTables("CREATE TABLE %s (id int PRIMARY KEY, addrs " + list("frozen<" + address + '>') + ')');
+        index("addrs.city");
+        index("addrs.street");
+        index("addrs.loc.lat");
+        index("addrs.zip");
+
+        write("INSERT INTO %s (id, addrs) VALUES (1, [{street: 'a', city: 'Rome', zip: 200, loc: {lat: 1.0}}, {street: 'b', city: 'Milan', zip: 100}])");
+        write("INSERT INTO %s (id, addrs) VALUES (2, [{city: 'Rome', zip: 100, loc: {lat: 5.0}}])");
+        write("INSERT INTO %s (id, addrs) VALUES (3, [])");
+        write("INSERT INTO %s (id) VALUES (4)");
+        write("INSERT INTO %s (id, addrs) VALUES (5, [{street: '', zip: 300}, {zip: null}])");
+
+        inAllStates(() -> {
+            assertIds("addrs.city IS NOT NULL", 1, 2);
+            assertIds("addrs.street IS NOT NULL", 1, 5);                       // {!tuple}udtcol_list.street:*
+            assertIds("addrs.loc.lat IS NOT NULL", 1, 2);
+            assertIds("addrs.loc IS NOT NULL ALLOW FILTERING", 1, 2);
+            // independent elements
+            assertIds("addrs.street IS NOT NULL AND addrs.loc.lat IS NOT NULL", 1);
+            assertIds("addrs.city IS NOT NULL AND addrs.city = 'Milan'", 1);
+            // the same element
+            assertIds("addrs CONTAINS ELEMENT (loc.lat IS NOT NULL AND city = 'Rome')", 1, 2);
+            assertIds("addrs CONTAINS ELEMENT (loc.lat IS NOT NULL AND zip = 100)", 2);
+            assertIds("addrs CONTAINS ELEMENT (street IS NOT NULL AND loc.lat IS NOT NULL)", 1);
+            assertIds("addrs CONTAINS ELEMENT (street IS NOT NULL AND city IS NOT NULL AND zip = 100)", 1);
+            assertIds("addrs CONTAINS ELEMENT (street IS NOT NULL)", 1, 5);
+            assertIds("addrs CONTAINS ELEMENT (loc IS NOT NULL OR zip = 300) ALLOW FILTERING", 1, 2, 5);
+            assertIds("addrs CONTAINS ELEMENT (loc.lat IS NOT NULL OR zip = 300)", 1, 2, 5);
+            // no element
+            assertIds("addrs NOT CONTAINS ELEMENT (city IS NOT NULL) ALLOW FILTERING", 3, 4, 5);
+            assertIds("addrs NOT CONTAINS ELEMENT (street IS NOT NULL AND city IS NOT NULL) ALLOW FILTERING", 2, 3, 4, 5);
+            assertIds("addrs.zip = 300 AND addrs NOT CONTAINS ELEMENT (city IS NOT NULL) ALLOW FILTERING", 5);
+        });
+
+        assertPaging("addrs.street IS NOT NULL OR addrs.city IS NOT NULL");
+        assertPaging("addrs CONTAINS ELEMENT (loc.lat IS NOT NULL AND city = 'Rome')");
+
+        // an element added to, or removed from, a non-frozen list
+        if (!frozen)
+        {
+            write("UPDATE %s SET addrs = addrs + [{city: 'Turin'}] WHERE id = 5");
+            write("DELETE addrs[1] FROM %s WHERE id = 1");
+            inAllStates(() -> {
+                assertIds("addrs.city IS NOT NULL", 1, 2, 5);
+                assertIds("addrs CONTAINS ELEMENT (street IS NOT NULL AND city IS NOT NULL)", 1);
+                assertIds("addrs NOT CONTAINS ELEMENT (city IS NOT NULL) ALLOW FILTERING", 3, 4);
+            });
+        }
     }
 
     /**
@@ -346,15 +414,19 @@ public class UdtFieldIsNotNullTest extends SAITester
     @Test
     public void testAnalyzedFields() throws Throwable
     {
-        createTables("CREATE TABLE %s (id int PRIMARY KEY, addr " + udt(address) + ')');
+        createTables("CREATE TABLE %s (id int PRIMARY KEY, addr " + udt(address) + ", addrs " + list("frozen<" + address + '>') + ')');
         index("addr.city", " WITH OPTIONS = {'case_sensitive': 'false'}");
-        write("INSERT INTO %s (id, addr) VALUES (1, {city: 'Rome'})");
-        write("INSERT INTO %s (id, addr) VALUES (2, {city: ''})");
-        write("INSERT INTO %s (id, addr) VALUES (3, {zip: 1})");
+        index("addrs.city", " WITH OPTIONS = {'case_sensitive': 'false', 'normalize': 'true'}");
+        write("INSERT INTO %s (id, addr, addrs) VALUES (1, {city: 'Rome'}, [{city: 'ROME'}])");
+        write("INSERT INTO %s (id, addr, addrs) VALUES (2, {city: ''}, [{city: ''}, {zip: 1}])");
+        write("INSERT INTO %s (id, addr, addrs) VALUES (3, {zip: 1}, [{zip: 1}])");
 
         inAllStates(() -> {
             assertIds("addr.city IS NOT NULL", 1, 2);
+            assertIds("addrs.city IS NOT NULL", 1, 2);
             assertIndexedIds("addr.city IS NOT NULL AND addr.city = 'rome'", 1);
+            assertIndexedIds("addrs CONTAINS ELEMENT (city IS NOT NULL AND city = 'rome')", 1);
+            assertIds("addrs CONTAINS ELEMENT (city IS NOT NULL AND zip = 1) ALLOW FILTERING");
         });
     }
 
@@ -433,13 +505,14 @@ public class UdtFieldIsNotNullTest extends SAITester
     @Test
     public void testRowFilter() throws Throwable
     {
-        createTable("CREATE TABLE %s (id int PRIMARY KEY, addr " + udt(address) + ')');
+        createTable("CREATE TABLE %s (id int PRIMARY KEY, addr " + udt(address) + ", addrs " + list("frozen<" + address + '>') + ')');
         index("addr.city");
-        RowFilter filter = rowFilter("addr.city IS NOT NULL AND addr.zip > 1 ALLOW FILTERING");
+        RowFilter filter = rowFilter("addr.city IS NOT NULL AND addrs CONTAINS ELEMENT (loc.lat IS NOT NULL AND city = 'a') ALLOW FILTERING");
+        // the order of the expressions depends on the kinds of the columns
         assertThat(filter.toCQLString(org.apache.cassandra.db.marshal.Redaction.NONE))
-            .contains("addr.zip > 1")
+            .contains("addrs CONTAINS ELEMENT (loc.lat IS NOT NULL AND city = 'a')")
             .contains("addr.city IS NOT NULL");
-        RowFilter.Expression isNotNull = filter.expressions().stream().filter(e -> e.operator() == org.apache.cassandra.cql3.Operator.IS_NOT).findFirst().get();
+        RowFilter.Expression isNotNull = filter.expressions().stream().filter(e -> e.column().name.toString().equals("addr")).findFirst().get();
         assertThat(isNotNull).isInstanceOf(RowFilter.FieldExpression.class);
         assertThat(isNotNull.operator()).isEqualTo(org.apache.cassandra.cql3.Operator.IS_NOT);
         assertThat(isNotNull.analyzer()).isNull();
@@ -456,8 +529,9 @@ public class UdtFieldIsNotNullTest extends SAITester
     @Test
     public void testInvalidQueries() throws Throwable
     {
-        createTables("CREATE TABLE %s (id int PRIMARY KEY, v int, addr " + udt(address) + ')');
+        createTables("CREATE TABLE %s (id int PRIMARY KEY, v int, addr " + udt(address) + ", addrs " + list("frozen<" + address + '>') + ')');
         index("addr.tags");
+        index("addrs.city");
         write("INSERT INTO %s (id, addr) VALUES (1, {tags: {}})");
         write("INSERT INTO %s (id, addr) VALUES (2, {tags: {'x'}})");
         write("INSERT INTO %s (id, addr) VALUES (3, {city: 'Rome'})");
@@ -475,6 +549,9 @@ public class UdtFieldIsNotNullTest extends SAITester
         // unindexed fields need ALLOW FILTERING
         assertInvalidMessage(String.format(StatementRestrictions.FIELD_REQUIRES_ALLOW_FILTERING_MESSAGE, "addr.zip"),
                              "SELECT id FROM %s WHERE addr.zip IS NOT NULL");
+        // a NOT CONTAINS ELEMENT is never served by the candidates
+        assertInvalidMessage(String.format(StatementRestrictions.NOT_CONTAINS_ELEMENT_REQUIRES_ALLOW_FILTERING_MESSAGE, "addrs NOT CONTAINS ELEMENT (city IS NOT NULL)"),
+                             "SELECT id FROM %s WHERE addrs NOT CONTAINS ELEMENT (city IS NOT NULL)");
         assertInvalidMessage("Undefined field nope", "SELECT id FROM %s WHERE addr.nope IS NOT NULL ALLOW FILTERING");
         // only in SELECT
         assertInvalidMessage(String.format(StatementRestrictions.FIELD_RESTRICTIONS_ONLY_IN_SELECT_MESSAGE, "addr.city IS NOT NULL"),

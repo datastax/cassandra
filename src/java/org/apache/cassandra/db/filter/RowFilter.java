@@ -2313,6 +2313,7 @@ public class RowFilter
                 case LIKE_SUFFIX:
                 case LIKE_CONTAINS:
                 case LIKE_MATCHES:
+                case IS_NOT:
                     return true;
                 default:
                     return false;

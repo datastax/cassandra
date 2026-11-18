@@ -149,7 +149,7 @@ public class Operation
                 {
                     // IS NOT NULL on a field has no operand to analyze: all the terms of the index; combined with the
                     // previous expression on the same single-valued target, which implies it
-                    if (perColumn.isEmpty() || op != OperationType.AND || !Iterables.getLast(perColumn).context.equals(indexContext))
+                    if (perColumn.isEmpty() || op != OperationType.AND || isOnMultiValuedPath(e) || !Iterables.getLast(perColumn).context.equals(indexContext))
                         perColumn.add(new Expression(indexContext).add(Operator.IS_NOT, ByteBuffer.allocate(0)));
                     else
                         Iterables.getLast(perColumn).add(Operator.IS_NOT, ByteBuffer.allocate(0));
@@ -408,8 +408,8 @@ public class Operation
 
         static Node buildExpression(QueryController controller, RowFilter.Expression expression, boolean isDisjunction)
         {
-            if (expression instanceof RowFilter.ElementMatchExpression)
-                return new ElementNode(controller, (RowFilter.ElementMatchExpression) expression, !isDisjunction);
+            // the groups are built by buildTree, which knows whether an OR is above them
+            assert !(expression instanceof RowFilter.ElementMatchExpression) : "CONTAINS ELEMENT groups are built by buildTree: " + expression;
 
             // a restriction on a field that no index serves only filters the rows
             if (expression.fieldPath() != null && !controller.getContext(expression).isIndexed())
