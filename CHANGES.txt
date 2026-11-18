@@ -1,5 +1,6 @@
 5.0.9
  * Add support for JDK 21 as a non-default JDK: build, startup scripts, ASM 9.7.1, CI and packaging (HCD-645)
+ * Restrictions and SAI indexes on the fields of the elements of collections of UDTs and tuples, and CONTAINS ELEMENT groups (HCD-653)
  * SAI indexes on the fields of UDT and tuple columns (HCD-653)
  * Restrictions on the fields of UDT and tuple columns in SELECT statements, with ALLOW FILTERING (HCD-653)
  * Refuse GROUP BY on selectors that are not columns (fields, elements, casts) instead of failing with a ClassCastException (HCD-653)
