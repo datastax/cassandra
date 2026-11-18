@@ -25,15 +25,18 @@ import java.util.List;
 import java.util.ListIterator;
 import java.util.Set;
 
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.ListMultimap;
 
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.index.sai.SSTableIndex;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.ColumnMetadata.Kind;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.index.sai.plan.Operation.OperationType;
@@ -150,5 +153,41 @@ public class FilterTree
             indexes.addAll(expression.context.getView().getIndexes());
         for (FilterTree child : children)
             child.sstableIndexes(indexes);
+    }
+
+    /**
+     * The filter of an expression that is evaluated as the queries without index evaluate it, by the expression
+     * itself (see {@link Operation.RowFilterNode}): a restriction on a field of a UDT or tuple column.
+     */
+    static class RowFilterExpressionFilter extends FilterTree
+    {
+        private final RowFilter.Expression expression;
+        private final TableMetadata metadata;
+        // the time of the read command, as the filtering without index uses
+        private final long nowInSec;
+
+        RowFilterExpressionFilter(RowFilter.Expression expression, TableMetadata metadata, long nowInSec)
+        {
+            super(OperationType.AND, ArrayListMultimap.create());
+            this.expression = expression;
+            this.metadata = metadata;
+            this.nowInSec = nowInSec;
+        }
+
+        @Override
+        public boolean isSatisfiedBy(DecoratedKey key, Unfiltered currentCluster, Row staticRow)
+        {
+            if (currentCluster == null || !currentCluster.isRow())
+                return false;
+
+            // the static row alone (the check of a partition without matching rows) has no clustering nor regular
+            // values: it never satisfies a restriction on them
+            ColumnMetadata column = expression.column();
+            if (((Row) currentCluster).isStatic() && !column.isStatic() && !column.isPartitionKey())
+                return false;
+
+            Row row = column.isStatic() ? staticRow : (Row) currentCluster;
+            return expression.isSatisfiedBy(metadata, key, row, nowInSec);
+        }
     }
 }
