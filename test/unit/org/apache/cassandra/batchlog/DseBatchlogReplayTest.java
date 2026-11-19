@@ -1004,7 +1004,9 @@ public class DseBatchlogReplayTest extends CQLTester
     /** The end of the ERROR about a kept batch: in {@code DSE_6} the upgrade is in progress, and the repair waits for its end. */
     private String repairWhen()
     {
-        return mode == InternodeCompatibilityMode.DSE_6 ? " (once the DSE 6 upgrade is finished)" : "";
+        return mode == InternodeCompatibilityMode.DSE_6
+               ? " (once the DSE 6 upgrade is finished: repair is refused while it is in progress)"
+               : "";
     }
 
     /** Runs the rest of the test in {@code mode}. */
