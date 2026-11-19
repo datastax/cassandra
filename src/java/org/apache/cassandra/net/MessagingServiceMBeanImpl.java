@@ -23,6 +23,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
@@ -288,5 +290,39 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     public int getVersion(String address) throws UnknownHostException
     {
         return versions.get(address);
+    }
+
+    @Override
+    public String getInternodeCompatibilityMode()
+    {
+        return DatabaseDescriptor.getInternodeCompatibilityMode().name();
+    }
+
+    @Override
+    public String getStorageCompatibilityMode()
+    {
+        return DatabaseDescriptor.getStorageCompatibilityMode().name();
+    }
+
+    @Override
+    public String getSSTableFormatVersion()
+    {
+        SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
+        return format.name() + '-' + format.getLatestVersion().version;
+    }
+
+    @Override
+    public Map<String, Integer> getEndpointMessagingVersions()
+    {
+        Map<String, Integer> result = new HashMap<>();
+        for (Map.Entry<InetAddressAndPort, Integer> e : versions.snapshot().entrySet())
+            result.put(e.getKey().getHostAddressAndPort(), e.getValue());
+        return result;
+    }
+
+    @Override
+    public Map<String, Long> getDseCompatRefusals()
+    {
+        return DseCompatRefusals.snapshot();
     }
 }

@@ -25,6 +25,7 @@ import java.util.UUID;
 
 import com.clearspring.analytics.stream.cardinality.HyperLogLogPlus;
 import com.clearspring.analytics.stream.cardinality.ICardinality;
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ClusteringBoundOrBoundary;
@@ -57,8 +58,36 @@ public class MetadataCollector implements PartitionStatisticsCollector
 
     private long currentPartitionCells = 0;
 
+    /**
+     * The bucket count of the cell count histogram DSE 6 writes, the count before CASSANDRA-15164: DSE's
+     * {@code MetadataCollector.defaultCellPerPartitionCountHistogram} asks for 114 buckets, 115 entries (114 bucket
+     * offsets and the overflow bucket) in {@code Statistics.db}, in each of the 94 releases DSE 6.8.0 to 6.8.66 and
+     * 6.9.0 to 6.9.26, and CASSANDRA-15164's 118 is in none of them (the sstables DSE 6.8.65 and 6.9.26 wrote under
+     * {@code test/data/dse-compat} agree); outside {@code DSE_6} this software writes 118 buckets, 119
+     * entries. DSE adds the histograms of a table's sstables up in {@code TableMetrics.combineHistograms}, the code
+     * before CASSANDRA-16259, with no check that they have the same length: when a shorter histogram
+     * follows a longer one it fails, as DSE 6.8.65's {@code nodetool tablehistograms} and insights reporting did after
+     * a rollback with {@code Index 115 out of bounds for length 115} on a table holding sstables of both lengths; in the
+     * other order it does not fail, but the counts of the sstables between the first one and the first longer histogram
+     * are lost.
+     */
+    static final int DSE_6_CELL_COUNT_BUCKETS = 114;
+
+    /**
+     * The cell count histogram of a new sstable: in {@code internode_compatibility_mode: DSE_6}, and for a tool that
+     * reads a {@code DSE_6} configuration ({@link DatabaseDescriptor#isDse6SSTableOutput()}), with DSE 6's
+     * {@link #DSE_6_CELL_COUNT_BUCKETS} buckets, whose largest offset is 1996099046 cells: a partition with more
+     * cells is counted in the overflow bucket, as DSE counts it. When this software reads such an sstable from disk it
+     * clears that bucket with a WARN ({@link StatsMetadata}), but the reader a flush or a compaction opens keeps the
+     * stats it collected, whose mean and percentiles throw until the sstable is opened again (for that table, a
+     * tombstone compaction check, a read's estimate of its results or SAI's query planning can then fail), as with 118
+     * buckets above 4139110981 cells. With 114 buckets this happens above 1996099046 cells, just under Cassandra's
+     * documented limit of 2 billion cells per partition. With {@code NONE}, 118 buckets.
+     */
     static EstimatedHistogram defaultCellPerPartitionCountHistogram()
     {
+        if (DatabaseDescriptor.isDse6SSTableOutput())
+            return new EstimatedHistogram(DSE_6_CELL_COUNT_BUCKETS);
         // EH of 118 can track a max value of 4139110981, i.e., > 4B cells
         return new EstimatedHistogram(118);
     }
