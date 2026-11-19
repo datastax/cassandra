@@ -495,7 +495,9 @@ public class BatchlogManager implements BatchlogManagerMBean
         Throwable cause = e.getCause();
         // in DSE_6 the upgrade is in progress: the tables are repaired once it is finished
         String stored = version == null ? "stored without a messaging version" : "stored with messaging version " + version;
-        String repairWhen = DatabaseDescriptor.isDse6CompatibilityMode() ? " (once the DSE 6 upgrade is finished)" : "";
+        String repairWhen = DatabaseDescriptor.isDse6CompatibilityMode()
+                            ? " (once the DSE 6 upgrade is finished: repair is refused while it is in progress)"
+                            : "";
         String message = "Batch {} of system.batches, {}, cannot be decoded: {}. It is kept in the batchlog and not replayed; " +
                          "the other batches are replayed as usual. Its mutations may be missing on some of their replicas; they " +
                          "write to {} (the first table of each mutation). The batch is tried again at the next start of this node; " +
