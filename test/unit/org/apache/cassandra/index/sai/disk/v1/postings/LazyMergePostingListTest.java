@@ -67,7 +67,8 @@ public class LazyMergePostingListTest
             int maxCapacity = initCapacity + random.nextInt(4);
 
             TreeSet<Integer> expected = union(lists);
-            try (LazyMergePostingList merged = new LazyMergePostingList(source(lists), initCapacity, maxCapacity))
+            InstrumentedSource source = new InstrumentedSource(lists);
+            try (LazyMergePostingList merged = new LazyMergePostingList(source, initCapacity, maxCapacity))
             {
                 int target = 0;
                 while (true)
@@ -82,6 +83,7 @@ public class LazyMergePostingListTest
                     target = actual + 1;
                 }
             }
+            source.assertAllClosed();
         }
     }
 
@@ -94,12 +96,14 @@ public class LazyMergePostingListTest
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
+            // The iterator from refill(0) during construction must already be closed
+            source.assertAllIteratorsClosed();
             assertEquals(10, merged.nextPosting());
             assertEquals(20, merged.nextPosting());
             assertEquals(PostingList.END_OF_STREAM, merged.nextPosting());
         }
 
-        assertTrue(source.isClosed);
+        source.assertAllClosed();
         // The empty list should be opened and closed immediately during initialization scan
         assertTrue(source.openedLists.get(0).isClosed);
         assertTrue(source.openedLists.get(1).isClosed);
@@ -112,10 +116,11 @@ public class LazyMergePostingListTest
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
+            source.assertAllIteratorsClosed();
             assertEquals(PostingList.END_OF_STREAM, merged.nextPosting());
             assertEquals(0, merged.size());
         }
-        assertTrue(source.isClosed);
+        source.assertAllClosed();
     }
 
     @Test
@@ -130,6 +135,7 @@ public class LazyMergePostingListTest
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
+            source.assertAllIteratorsClosed();
             assertEquals(5, merged.nextPosting());
             assertEquals(10, merged.nextPosting());
             assertEquals(15, merged.nextPosting());
@@ -137,9 +143,7 @@ public class LazyMergePostingListTest
             assertEquals(PostingList.END_OF_STREAM, merged.nextPosting());
         }
 
-        assertTrue(source.isClosed);
-        for (InstrumentedPostingList list : source.openedLists)
-            assertTrue(list.isClosed);
+        source.assertAllClosed();
     }
 
     @Test
@@ -150,6 +154,8 @@ public class LazyMergePostingListTest
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
             assertEquals(1, source.walksCount);
+            assertEquals(1, source.openedIterators.size());
+            assertTrue(source.openedIterators.get(0).isClosed); // refill(0) iterator is closed
             assertEquals(3, source.openedLists.size()); // List 0, 1, 2 opened initially
             assertTrue(source.openedLists.get(2).isClosed); // List 2 displaced and closed
             assertFalse(source.openedLists.get(0).isClosed); // List 0 kept
@@ -163,6 +169,8 @@ public class LazyMergePostingListTest
             // Now read next posting, which will trigger refill(30)
             assertEquals(30, merged.nextPosting());
             assertEquals(2, source.walksCount); // Walk count incremented to 2
+            assertEquals(2, source.openedIterators.size());
+            assertTrue(source.openedIterators.get(1).isClosed); // refill(30) iterator is closed immediately
             assertEquals(4, source.openedLists.size()); // List 2 opened again
             // Lists 0 and 1 are exhausted, but the resized queue has room for them, so it keeps them
             // and the walk does not open them again.
@@ -172,9 +180,7 @@ public class LazyMergePostingListTest
 
             assertEquals(PostingList.END_OF_STREAM, merged.nextPosting());
         }
-        assertTrue(source.isClosed);
-        for (InstrumentedPostingList list : source.openedLists)
-            assertTrue(list.isClosed);
+        source.assertAllClosed();
     }
 
     @Test
@@ -184,17 +190,19 @@ public class LazyMergePostingListTest
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 2))
         {
+            source.assertAllIteratorsClosed();
             assertEquals(10, merged.nextPosting());
             assertEquals(20, merged.nextPosting());
 
             // Next posting triggers refill(30), capacity remains 2
             assertEquals(30, merged.nextPosting());
             assertEquals(2, source.walksCount);
+            source.assertAllIteratorsClosed();
 
             assertEquals(40, merged.nextPosting());
             assertEquals(PostingList.END_OF_STREAM, merged.nextPosting());
         }
-        assertTrue(source.isClosed);
+        source.assertAllClosed();
     }
 
     @Test
@@ -205,6 +213,8 @@ public class LazyMergePostingListTest
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
             assertEquals(1, source.walksCount);
+            assertEquals(1, source.openedIterators.size());
+            assertTrue(source.openedIterators.get(0).isClosed);
             // List 0, 1, 2 opened initially
             assertEquals(3, source.openedLists.size());
 
@@ -215,6 +225,8 @@ public class LazyMergePostingListTest
             // Advance to 35 (above/equal bound 30): triggers refill(35)
             assertEquals(50, merged.advance(35));
             assertEquals(2, source.walksCount);
+            assertEquals(2, source.openedIterators.size());
+            assertTrue(source.openedIterators.get(1).isClosed);
 
             // Check that List 2 was opened again (total 4 opened lists)
             assertEquals(4, source.openedLists.size());
@@ -224,9 +236,7 @@ public class LazyMergePostingListTest
             assertEquals(70, merged.nextPosting());
             assertEquals(PostingList.END_OF_STREAM, merged.nextPosting());
         }
-        assertTrue(source.isClosed);
-        for (InstrumentedPostingList list : source.openedLists)
-            assertTrue(list.isClosed);
+        source.assertAllClosed();
     }
 
     @Test
@@ -241,11 +251,15 @@ public class LazyMergePostingListTest
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 1, 4))
         {
             assertEquals(1, source.walksCount);
+            assertEquals(1, source.openedIterators.size());
+            assertTrue(source.openedIterators.get(0).isClosed);
             assertEquals(10, merged.nextPosting());
 
             // Next posting triggers refill(20)
             assertEquals(20, merged.nextPosting());
             assertEquals(2, source.walksCount);
+            assertEquals(2, source.openedIterators.size());
+            assertTrue(source.openedIterators.get(1).isClosed);
 
             // No refill for 30
             assertEquals(30, merged.nextPosting());
@@ -254,6 +268,8 @@ public class LazyMergePostingListTest
             // Next posting triggers refill(40)
             assertEquals(40, merged.nextPosting());
             assertEquals(3, source.walksCount);
+            assertEquals(3, source.openedIterators.size());
+            assertTrue(source.openedIterators.get(2).isClosed);
 
             assertEquals(50, merged.nextPosting());
             assertEquals(60, merged.nextPosting());
@@ -262,9 +278,7 @@ public class LazyMergePostingListTest
             assertEquals(90, merged.nextPosting());
             assertEquals(PostingList.END_OF_STREAM, merged.nextPosting());
         }
-        assertTrue(source.isClosed);
-        for (InstrumentedPostingList list : source.openedLists)
-            assertTrue(list.isClosed);
+        source.assertAllClosed();
     }
 
     @Test
@@ -287,7 +301,7 @@ public class LazyMergePostingListTest
         // Verify that everything already opened is properly closed on failure, and source is closed
         assertEquals(1, source.openedLists.size());
         assertTrue(source.openedLists.get(0).isClosed);
-        assertTrue(source.isClosed);
+        source.assertAllClosed();
     }
 
     @Test
@@ -311,8 +325,7 @@ public class LazyMergePostingListTest
             }
         }
         // Verify that the list and source are properly closed on merged.close()
-        assertTrue(source.isClosed);
-        assertTrue(source.openedLists.get(0).isClosed);
+        source.assertAllClosed();
     }
 
     @Test
@@ -336,8 +349,7 @@ public class LazyMergePostingListTest
             }
         }
         // Verify that the list and source are properly closed on merged.close()
-        assertTrue(source.isClosed);
-        assertTrue(source.openedLists.get(0).isClosed);
+        source.assertAllClosed();
     }
 
     @Test
@@ -364,9 +376,7 @@ public class LazyMergePostingListTest
             }
 
             // Verify that everything opened so far is closed immediately on refill failure, and source is closed
-            assertTrue(source.openedLists.get(0).isClosed);
-            assertTrue(source.openedLists.get(1).isClosed);
-            assertTrue(source.isClosed);
+            source.assertAllClosed();
         }
     }
 
@@ -386,12 +396,9 @@ public class LazyMergePostingListTest
             }
         };
 
-        try
+        try (var ignored = new LazyMergePostingList(source, 2, 4))
         {
-            try (LazyMergePostingList ignored = new LazyMergePostingList(source, 2, 4))
-            {
-                org.junit.Assert.fail("Expected IOException");
-            }
+            org.junit.Assert.fail("Expected IOException");
         }
         catch (IOException e)
         {
@@ -402,7 +409,64 @@ public class LazyMergePostingListTest
         assertEquals(2, source.openedLists.size());
         assertTrue(source.openedLists.get(0).isClosed);
         assertTrue(source.openedLists.get(1).isClosed); // Also List 1 should be closed because its nextPosting failed and Candidate constructor caught it and closed it quietly
+        source.assertAllClosed();
+    }
+
+    @Test
+    public void testFailureOnWalk()
+    {
+        int[][] lists = { { 10 }, { 20 } };
+        InstrumentedSource source = new InstrumentedSource(lists);
+        source.failOnWalk = true;
+
+        try (var ignored = new LazyMergePostingList(source, 2, 4))
+        {
+            org.junit.Assert.fail("Expected RuntimeException");
+        }
+        catch (Exception e)
+        {
+            assertEquals("Simulated walk failure", e.getMessage());
+        }
+
         assertTrue(source.isClosed);
+    }
+
+    @Test
+    public void testFailureOnIteratorHasNext()
+    {
+        int[][] lists = { { 10 }, { 20 } };
+        InstrumentedSource source = new InstrumentedSource(lists);
+        source.failOnIteratorHasNext = true;
+
+        try (var ignored = new LazyMergePostingList(source, 2, 4))
+        {
+            org.junit.Assert.fail("Expected RuntimeException");
+        }
+        catch (Exception e)
+        {
+            assertEquals("Simulated hasNext failure", e.getMessage());
+        }
+
+        source.assertAllClosed();
+    }
+
+    @Test
+    public void testFailureOnIteratorNext()
+    {
+        int[][] lists = { { 10 }, { 20 } };
+        InstrumentedSource source = new InstrumentedSource(lists);
+        source.failOnIteratorNext = true;
+
+        try (var ignored = new LazyMergePostingList(source, 2, 4))
+        {
+            org.junit.Assert.fail("Expected RuntimeException");
+        }
+        catch (Exception e)
+        {
+            assertEquals("Simulated next failure", e.getMessage());
+        }
+
+        source.assertAllClosed();
     }
 
     private static class InstrumentedPostingList implements PostingList
@@ -454,15 +518,59 @@ public class LazyMergePostingListTest
         }
     }
 
+    private static class InstrumentedCloseableIterator implements CloseableIterator<Long>
+    {
+        private final java.util.Iterator<Long> delegate;
+        boolean isClosed;
+        boolean failOnNext;
+        boolean failOnHasNext;
+
+        InstrumentedCloseableIterator(java.util.Iterator<Long> delegate)
+        {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            if (failOnHasNext)
+                throw new RuntimeException("Simulated hasNext failure");
+            return delegate.hasNext();
+        }
+
+        @Override
+        public Long next()
+        {
+            if (failOnNext)
+                throw new RuntimeException("Simulated next failure");
+            return delegate.next();
+        }
+
+        @Override
+        public void remove()
+        {
+            delegate.remove();
+        }
+
+        @Override
+        public void close()
+        {
+            isClosed = true;
+        }
+    }
+
     private static class InstrumentedSource implements LazyMergePostingList.Source
     {
         private final int[][] lists;
         final List<InstrumentedPostingList> openedLists = new ArrayList<>();
+        final List<InstrumentedCloseableIterator> openedIterators = new ArrayList<>();
         boolean isClosed;
         int walksCount;
         boolean failOnOpen;
         final LongHashSet failOnIds = new LongHashSet();
         boolean failOnWalk;
+        boolean failOnIteratorNext;
+        boolean failOnIteratorHasNext;
 
         InstrumentedSource(int[][] lists)
         {
@@ -478,7 +586,11 @@ public class LazyMergePostingListTest
             List<Long> ids = new ArrayList<>();
             for (int i = 0; i < lists.length; i++)
                 ids.add((long) i);
-            return CloseableIterator.wrap(ids.iterator());
+            InstrumentedCloseableIterator iterator = new InstrumentedCloseableIterator(ids.iterator());
+            iterator.failOnNext = failOnIteratorNext;
+            iterator.failOnHasNext = failOnIteratorHasNext;
+            openedIterators.add(iterator);
+            return iterator;
         }
 
         @Override
@@ -497,6 +609,23 @@ public class LazyMergePostingListTest
         public void close()
         {
             isClosed = true;
+        }
+
+        void assertAllClosed()
+        {
+            assertTrue("Source should be closed", isClosed);
+            for (InstrumentedPostingList list : openedLists)
+                assertTrue("Posting list should be closed", list.isClosed);
+            assertFalse("At least one iterator should have been opened", openedIterators.isEmpty());
+            for (InstrumentedCloseableIterator iter : openedIterators)
+                assertTrue("Iterator should be closed", iter.isClosed);
+        }
+
+        void assertAllIteratorsClosed()
+        {
+            assertFalse("At least one iterator should have been opened", openedIterators.isEmpty());
+            for (InstrumentedCloseableIterator iter : openedIterators)
+                assertTrue("Iterator should be closed", iter.isClosed);
         }
     }
 
@@ -526,39 +655,14 @@ public class LazyMergePostingListTest
     private static void assertMerges(int[][] lists, int initCapacity, int maxCapacity) throws IOException
     {
         List<Integer> actual = new ArrayList<>();
-        try (LazyMergePostingList merged = new LazyMergePostingList(source(lists), initCapacity, maxCapacity))
+        InstrumentedSource source = new InstrumentedSource(lists);
+        try (LazyMergePostingList merged = new LazyMergePostingList(source, initCapacity, maxCapacity))
         {
             int rowId;
             while ((rowId = merged.nextPosting()) != PostingList.END_OF_STREAM)
                 actual.add(rowId);
         }
         assertEquals(new ArrayList<>(union(lists)), actual);
-    }
-
-    private static LazyMergePostingList.Source source(int[][] lists)
-    {
-        return new LazyMergePostingList.Source()
-        {
-            @Override
-            public CloseableIterator<Long> postingListIds()
-            {
-                List<Long> ids = new ArrayList<>();
-                for (int i = 0; i < lists.length; i++)
-                    ids.add((long) i);
-                return CloseableIterator.wrap(ids.iterator());
-            }
-
-            @Override
-            public PostingList open(long postingListId)
-            {
-                return new IntArrayPostingList(lists[(int) postingListId]);
-            }
-
-            @Override
-            public void close()
-            {
-                // this is an in-memory posting list, no resources to close
-            }
-        };
+        source.assertAllClosed();
     }
 }
