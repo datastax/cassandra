@@ -484,7 +484,9 @@ final class HintsDispatchExecutor
 
             // Use the minimum of peer's messaging version and storage compatibility mode's version.
             // This ensures hints written with the storage-compatible version can be dispatched using the
-            // encoded path without deserialization, as long as the peer supports that version.
+            // encoded path without deserialization, as long as the peer supports that version. With
+            // storage_compatibility_mode DSE_5_1 the hints are written at 11: a DSE 5.1 peer, at 11, gets them as
+            // stored, a peer of this software, capped at 12, decoded and encoded again.
             int dispatchVersion = Math.min(optVersion.get(), StorageCompatibilityMode.current().storageMessagingVersion());
 
             try (HintsDispatcher dispatcher = HintsDispatcher.create(file, rateLimiter, address, descriptor.hostId, dispatchVersion, shouldAbort))

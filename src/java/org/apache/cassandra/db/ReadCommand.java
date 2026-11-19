@@ -52,6 +52,9 @@ import org.apache.cassandra.db.guardrails.Threshold;
 import org.apache.cassandra.exceptions.QueryCancelledException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.db.guardrails.Guardrails;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseCompatRefusals;
+import org.apache.cassandra.net.DseRefusedMessageException;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
@@ -78,6 +81,7 @@ import org.apache.cassandra.db.transform.RTBoundValidator;
 import org.apache.cassandra.db.transform.RTBoundValidator.Stage;
 import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
@@ -88,6 +92,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -1289,17 +1294,27 @@ public abstract class ReadCommand extends AbstractReadQuery
         public void serialize(ReadCommand command, DataOutputPlus out, int version) throws IOException
         {
             out.writeByte(command.kind.ordinal());
+            // The pre-4.0 layout a DSE peer reads (DSE modes) has no NEEDS_RECONCILIATION bit (its flags are digest,
+            // thrift and index only). Such a replica filters strictly, as every replica did before CASSANDRA-19018. Replica
+            // filtering protection still runs at the coordinator and fixes a stale match on one replica that another replica
+            // has overwritten, but it cannot recover a row whose matching values were written to different replicas by
+            // separate partial updates: no replica returns that row, so a filtered read above CL ONE that involves a DSE 6
+            // replica can miss it, as the same read does on DSE 6 itself.
+            // Nor has it the ACCEPTS_TRANSIENT bit: a DSE 6 node is never a transient replica (DSE has no transient
+            // replication, so no keyspace of a cluster with DSE 6 nodes has transient replicas).
+            boolean pre40 = DseCompat.isPre40Layout(version);
             out.writeByte(
                     digestFlag(command.isDigestQuery())
                     | indexFlag(null != command.indexQueryPlan())
-                    | acceptsTransientFlag(command.acceptsTransient())
-                    | needsReconciliationFlag(command.rowFilter().needsReconciliation())
+                    | acceptsTransientFlag(!pre40 && command.acceptsTransient())
+                    | needsReconciliationFlag(!pre40 && command.rowFilter().needsReconciliation())
             );
             if (command.isDigestQuery())
                 out.writeUnsignedVInt32(command.digestVersion());
             command.metadata().id.serialize(out);
             out.writeInt(MessagingService.Version.supportsExtendedDeletionTime(version) ? CassandraUInt.fromLong(command.nowInSec()) : (int) command.nowInSec());
-            ColumnFilter.serializer.serialize(command.columnFilter(), out, version);
+            // a read of a materialized view sent to a DSE 6 peer also fetches DSE's hidden column of the view
+            ColumnFilter.serializer.serialize(DseViewWireFormat.columnFilterFor(command, version), out, version);
             RowFilter.serializer.serialize(command.rowFilter(), out, version);
             DataLimits.serializer.serialize(command.limits(), out, version, command.metadata().comparator);
             // Using the name of one of the indexes in the plan to identify the index group because we want
@@ -1320,10 +1335,23 @@ public abstract class ReadCommand extends AbstractReadQuery
             // Shouldn't happen or it's a user error (see comment above) but
             // better complain loudly than doing the wrong thing.
             if (isForThrift(flags))
-                throw new IllegalStateException("Received a command with the thrift flag set. "
-                                               + "This means thrift is in use in a mixed 3.0/3.X and 4.0+ cluster, "
-                                               + "which is unsupported. Make sure to stop using thrift before "
-                                               + "upgrading to 4.0");
+            {
+                String refusal = "Received a command with the thrift flag set. "
+                                 + "This means thrift is in use in a mixed 3.0/3.X and 4.0+ cluster, "
+                                 + "which is unsupported. Make sure to stop using thrift before "
+                                 + "upgrading to 4.0";
+                // the DSE 5.1 compatibility mode counts it at the pre-4.0 versions, and refuses it as expected, with
+                // the remedy of the other Thrift refusals: a DSE 5.1 coordinator forwards the reads of its Thrift
+                // clients
+                if (DseCompat.isDse51() && DseCompat.isPre40Layout(version))
+                {
+                    DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_THRIFT_READ);
+                    throw new DseRefusedMessageException(refusal + ": a DSE 5.1 node forwards a query of a Thrift " +
+                                                         "client, which this software does not serve; stop the " +
+                                                         "Thrift clients (start_rpc: false on the DSE 5.1 nodes)");
+                }
+                throw new IllegalStateException(refusal);
+            }
 
             boolean hasIndex = hasIndex(flags);
             int digestVersion = isDigest ? in.readUnsignedVInt32() : 0;
@@ -1332,6 +1360,11 @@ public abstract class ReadCommand extends AbstractReadQuery
             TableMetadata metadata = schema.getExistingTableMetadata(TableId.deserialize(in));
             long nowInSec = MessagingService.Version.supportsExtendedDeletionTime(version) ? CassandraUInt.toLong(in.readInt()) : in.readInt();
             ColumnFilter columnFilter = ColumnFilter.serializer.deserialize(in, version, metadata);
+            // A DSE 6 coordinator names the hidden column DSE keeps in a materialized view: the read runs without it, and
+            // the response is serialized with the filter as sent, which the filter remembers (DseViewWireFormat)
+            ColumnMetadata dseHidden = DseViewWireFormat.hiddenColumn(metadata, version);
+            if (dseHidden != null)
+                columnFilter = columnFilter.withoutDseViewHiddenColumn(dseHidden);
 
             // add synthetic columns to the tablemetadata so we can serialize them in our response
             var tmb = metadata.unbuild();
@@ -1388,7 +1421,7 @@ public abstract class ReadCommand extends AbstractReadQuery
                    + (command.isDigestQuery() ? TypeSizes.sizeofUnsignedVInt(command.digestVersion()) : 0)
                    + command.metadata().id.serializedSize()
                    + TypeSizes.INT_SIZE // command.nowInSec() is serialized as uint
-                   + ColumnFilter.serializer.serializedSize(command.columnFilter(), version)
+                   + ColumnFilter.serializer.serializedSize(DseViewWireFormat.columnFilterFor(command, version), version)
                    + RowFilter.serializer.serializedSize(command.rowFilter(), version)
                    + DataLimits.serializer.serializedSize(command.limits(), version, command.metadata().comparator)
                    + command.selectionSerializedSize(version)

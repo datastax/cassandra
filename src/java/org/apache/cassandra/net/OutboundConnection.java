@@ -51,6 +51,7 @@ import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.concurrent.SucceededFuture;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.MessagingSuccess;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
@@ -489,12 +490,53 @@ public class OutboundConnection
      */
     private void onFailedSerialize(Message<?> message, int messagingVersion, int bytesWrittenToNetwork, Throwable t)
     {
+        boolean pre40 = DseCompat.isPre40Layout(messagingVersion);
+        if (pre40 && !message.verb().existsInPre40Dialect())
+        {
+            onRefusedForPre40Peer(message);
+            return;
+        }
         logger.warn("{} dropping message of type {} due to error", id(), message.verb(), t);
         JVMStabilityInspector.inspectThrowable(t);
         releaseCapacity(1, canonicalSize(message));
         errorCount += 1;
-        errorBytes += message.serializedSize(messagingVersion);
+        errorBytes += pre40 ? pre40SizeOrCanonical(message, messagingVersion) : message.serializedSize(messagingVersion);
         callbacks.onFailedSerialize(message, template.to, messagingVersion, bytesWrittenToNetwork, t);
+    }
+
+    /**
+     * DSE compatibility modes: a request whose verb does not exist in the pre-4.0 dialect, queued before the peer's
+     * version was known (MessagingService refuses it before queuing otherwise), fails to serialize on a connection
+     * that turned out to speak that dialect. It is dropped once, counted as a refusal, and its callback fails at once;
+     * the message cannot be sized at the connection's version, so its canonical size is accounted. Like any message
+     * that fails to serialize, it also counts in the connection's error count and bytes.
+     */
+    private void onRefusedForPre40Peer(Message<?> message)
+    {
+        noSpamLogger.warn("{} not sending {}: the verb does not exist in the pre-4.0 dialect this peer speaks ({} " +
+                          "compatibility mode)", id(), message.verb(), DseCompat.source());
+        releaseCapacity(1, canonicalSize(message));
+        errorCount += 1;
+        errorBytes += canonicalSize(message);
+        DseCompatRefusals.refused(DseCompat.refusedVerb(message.verb()));
+        callbacks.onRefused(message, template.to);
+    }
+
+    /**
+     * The size at a pre-4.0 version of a message that failed to serialize, or its canonical size when it cannot even be
+     * sized at that version: this must not throw, or the message would never leave the queue.
+     */
+    private int pre40SizeOrCanonical(Message<?> message, int messagingVersion)
+    {
+        try
+        {
+            return message.serializedSize(messagingVersion);
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            return canonicalSize(message);
+        }
     }
 
     /**
@@ -1084,6 +1126,8 @@ public class OutboundConnection
             // our connection settings, possibly updated on retry
             int messagingVersion = template.endpointToVersion().get(template.to);
             OutboundConnectionSettings settings;
+            /** DSE modes: a connection made in a superseded dialect was made again at once already. */
+            boolean remadeAfterSupersededDialect;
 
             /**
              * If we failed for any reason, try again
@@ -1111,6 +1155,25 @@ public class OutboundConnection
                 }
             }
 
+            /**
+             * DSE modes: schedules the next attempt after the current delay, as {@link #onFailure} does
+             * (the delay doubles up to a second), or none without messages, for a connection that is not a failure.
+             */
+            private void retryLater()
+            {
+                if (hasPending())
+                {
+                    Promise<Result<MessagingSuccess>> result = AsyncPromise.withExecutor(eventLoop);
+                    state = new Connecting(state.disconnected(), result, eventLoop.schedule(() -> attempt(result, false), max(100, retryRateMillis), MILLISECONDS));
+                    retryRateMillis = min(1000, retryRateMillis * 2);
+                }
+                else
+                {
+                    // this Initiate will be discarded
+                    state = Disconnected.dormant(state.disconnected().maintenance);
+                }
+            }
+
             void onCompletedHandshake(Result<MessagingSuccess> result)
             {
                 switch (result.outcome)
@@ -1120,6 +1183,25 @@ public class OutboundConnection
                         assert !state.isClosed();
 
                         MessagingSuccess success = result.success();
+                        // DSE modes: the peer's version rose to 4.0 or later while this connection was made
+                        // in the dialect; it is made again, with the 4.0-style handshake: at once the first time, then
+                        // with the delays of a failed attempt, so that a version going back and forth cannot spin
+                        if (DseCompat.enabled() && DseDialectVersions.supersededDialect(settings.to, success.messagingVersion, MessagingService.instance().versions))
+                        {
+                            success.channel.close();
+                            if (remadeAfterSupersededDialect)
+                            {
+                                noSpamLogger.info("{} made in the pre-4.0 dialect again, although {} is at messaging version 4.0 or later; retrying later",
+                                                  id(), settings.to);
+                                retryLater();
+                            }
+                            else
+                            {
+                                remadeAfterSupersededDialect = true;
+                                initiate();
+                            }
+                            break;
+                        }
                         messagingVersion = success.messagingVersion;
                         settings.endpointToVersion.set(settings.to, messagingVersion);
                         debug.onConnect(success.messagingVersion, settings);
@@ -1166,14 +1248,16 @@ public class OutboundConnection
                         // the messaging version we connected with was incorrect; try again with the one supplied by the remote host
                         messagingVersion = result.retry().withMessagingVersion;
                         settings.endpointToVersion.set(settings.to, messagingVersion);
+                        // DSE modes: a peer answering in the dialect is recorded at it by the node too
+                        if (DseCompat.enabled() && messagingVersion < MessagingService.VERSION_40)
+                            DseDialectVersions.answeredInTheDialect(settings.to, messagingVersion);
 
                         initiate();
                         break;
 
                     case INCOMPATIBLE:
                         // we cannot communicate with this peer given its messaging version; mark this as any other failure, and continue trying
-                        Throwable t = new IOException(String.format("Incompatible peer: %s, messaging version: %s",
-                                                                    settings.to, result.incompatible().maxMessagingVersion));
+                        Throwable t = new IOException(incompatiblePeerMessage(settings.to, result.incompatible().maxMessagingVersion));
                         t.fillInStackTrace();
                         onFailure(t);
                         break;
@@ -1204,6 +1288,10 @@ public class OutboundConnection
                  * port being selected if configured with legacy_ssl_storage_port_enabled=true.
                  */
                 int knownMessagingVersion = messagingVersion();
+                // DSE modes: a peer taken for a pre-4.0 node that the node now knows at 4.0 or later
+                if (DseCompat.enabled())
+                    knownMessagingVersion = DseDialectVersions.connectionVersion(template.to, knownMessagingVersion, template.endpointToVersion(),
+                                                                                 MessagingService.instance().versions);
                 if (knownMessagingVersion != messagingVersion)
                 {
                     logger.trace("Endpoint version changed from {} to {} since connection initialized, updating.",
@@ -1215,6 +1303,9 @@ public class OutboundConnection
                 if (messagingVersion > settings.acceptVersions.max)
                     messagingVersion = settings.acceptVersions.max;
 
+                // DSE compatibility modes: a DSE peer may need ssl_storage_port (DseTlsPorts; a no-op otherwise)
+                settings = settings.withLegacyPortIfNecessary(messagingVersion);
+
                 // In mixed mode operation, some nodes might be configured to use SSL for internode connections and
                 // others might be configured to not use SSL. When a node is configured in optional SSL mode, It should
                 // be able to handle SSL and Non-SSL internode connections. We take care of this when accepting NON-SSL
@@ -1224,11 +1315,15 @@ public class OutboundConnection
                 SslFallbackConnectionType[] fallBackSslFallbackConnectionTypes = SslFallbackConnectionType.values();
                 int index = sslFallbackEnabled && settings.withEncryption() && settings.encryption.getOptional() ?
                             (int) (connectionAttempts - 1) % fallBackSslFallbackConnectionTypes.length : 0;
-                if (fallBackSslFallbackConnectionTypes[index] != SslFallbackConnectionType.SERVER_CONFIG)
+                SslFallbackConnectionType sslConnectionType = fallBackSslFallbackConnectionTypes[index];
+                // DSE compatibility modes: no plain-text retry of an encrypted connection to a peer not known at 4.0 or
+                // later (DseTlsPorts; a no-op otherwise)
+                sslConnectionType = DseTlsPorts.sslFallback(settings, messagingVersion, sslConnectionType);
+                if (sslConnectionType != SslFallbackConnectionType.SERVER_CONFIG)
                 {
-                    logger.info("ConnectionId {} is falling back to {} reconnect strategy for retry", id(), fallBackSslFallbackConnectionTypes[index]);
+                    logger.info("ConnectionId {} is falling back to {} reconnect strategy for retry", id(), sslConnectionType);
                 }
-                initiateMessaging(eventLoop, type, fallBackSslFallbackConnectionTypes[index], settings, result)
+                initiateMessaging(eventLoop, type, sslConnectionType, settings, messagingVersion, result)
                 .addListener(future -> {
                     if (future.isCancelled())
                         return;
@@ -1715,6 +1810,26 @@ public class OutboundConnection
         if (a == null || b == null)
             return a == null ? b : a;
         return () -> { a.run(); b.run(); };
+    }
+
+    /**
+     * The message of the failure of a connection attempt to {@code to} that the peer's messaging version
+     * {@code maxMessagingVersion} made incompatible, as before; in the DSE 5.1 compatibility mode, for a DSE 5.1 node
+     * at 10 or a peer answering with a DSE 6 messaging version, followed by the reason the mode refuses it.
+     */
+    @VisibleForTesting
+    static String incompatiblePeerMessage(InetAddressAndPort to, int maxMessagingVersion)
+    {
+        String message = String.format("Incompatible peer: %s, messaging version: %s", to, maxMessagingVersion);
+        if (!DseCompat.isDse51())
+            return message;
+        if (maxMessagingVersion == MessagingService.VERSION_30)
+            return message + ": " + DseCompat.dse51Version10Advice();
+        if (DseCompat.isDseHandshakeVersion(maxMessagingVersion))
+            return message + ": a DSE 6 messaging version, and internode_compatibility_mode DSE_5_1 connects to " +
+                   "DSE 5.1 nodes and nodes of this software only (no DSE 6 node can be in a cluster under the DSE 5.1 " +
+                   "upgrade)";
+        return message;
     }
 
     @VisibleForTesting

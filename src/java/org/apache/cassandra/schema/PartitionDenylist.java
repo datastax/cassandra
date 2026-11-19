@@ -39,11 +39,14 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RequestExecutionException;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.reads.range.RangeCommands;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -86,6 +89,27 @@ public class PartitionDenylist
     private static final Logger logger = LoggerFactory.getLogger(PartitionDenylist.class);
     private static final NoSpamLogger AVAILABILITY_LOGGER = NoSpamLogger.getLogger(logger, 1, TimeUnit.MINUTES);
 
+    /** The reason under which the denylist operations refused in the DSE 6 and DSE 5.1 modes are counted. */
+    public static final String REFUSED_IN_DSE6 = "partition denylist";
+
+    /**
+     * Why the denylist is off in the DSE 6 compatibility mode, whatever {@code partition_denylist_enabled} says: its table
+     * is created only once the mode is dropped. Nothing is denied meanwhile, as nothing was before the upgrade: DSE 6 has
+     * no partition denylist.
+     */
+    public static final String UNAVAILABLE_IN_DSE6 = unavailable(InternodeCompatibilityMode.DSE_6);
+
+    /**
+     * Why the denylist is off in {@code mode}, {@code DSE_6} or {@code DSE_5_1}, as {@link #UNAVAILABLE_IN_DSE6} says
+     * it for the first: DSE 5.1 has no partition denylist either.
+     */
+    public static String unavailable(InternodeCompatibilityMode mode)
+    {
+        return "the partition denylist is unavailable: " +
+               DseSystemKeyspaces.deferredTable(SchemaConstants.DISTRIBUTED_KEYSPACE_NAME + '.' +
+                                                SystemDistributedKeyspace.PARTITION_DENYLIST_TABLE, mode);
+    }
+
     private final ExecutorService executor = executorFactory().pooled("DenylistCache", 2);
 
     /** We effectively don't use our initial empty cache to denylist until the {@link #load()} call which will replace it */
@@ -116,6 +140,20 @@ public class PartitionDenylist
     /** synchronized on this */
     private int loadSuccesses = 0;
 
+    /**
+     * Refuses a denylist operation (a load, adding or removing a key) in the DSE 6 or DSE 5.1 compatibility mode, where
+     * the denylist is off ({@link #unavailable}); a no-op otherwise.
+     *
+     * @throws IllegalStateException in the mode
+     */
+    private static void refuseInDse6()
+    {
+        if (!DseCompat.enabled())
+            return;
+        DseCompatRefusals.refused(REFUSED_IN_DSE6);
+        throw new IllegalStateException(unavailable(DseCompat.textMode()));
+    }
+
     public synchronized int getLoadAttempts()
     {
         return loadAttempts;
@@ -133,6 +171,12 @@ public class PartitionDenylist
     {
         if (!DatabaseDescriptor.getPartitionDenylistEnabled())
             return;
+
+        if (DseCompat.enabled())
+        {
+            logger.warn("partition_denylist_enabled is ignored ({})", unavailable(DseCompat.textMode()));
+            return;
+        }
 
         synchronized (this)
         {
@@ -221,6 +265,7 @@ public class PartitionDenylist
      */
     public void load()
     {
+        refuseInDse6();
         final long start = currentTimeMillis();
 
         final Map<TableId, DenylistEntry> allDenylists = getDenylistForAllTablesFromCQL();
@@ -244,6 +289,7 @@ public class PartitionDenylist
      */
     public boolean addKeyToDenylist(final String keyspace, final String table, final ByteBuffer key)
     {
+        refuseInDse6();
         if (!canDenylistKeyspace(keyspace))
             return false;
 
@@ -267,6 +313,7 @@ public class PartitionDenylist
      */
     public boolean removeKeyFromDenylist(final String keyspace, final String table, final ByteBuffer key)
     {
+        refuseInDse6();
         final String delete = String.format("DELETE FROM system_distributed.partition_denylist " +
                                             "WHERE ks_name = '%s' " +
                                             "AND table_name = '%s' " +
@@ -309,7 +356,7 @@ public class PartitionDenylist
         final TableMetadata tmd = Schema.instance.getTableMetadata(tid);
 
         // We have a few quick state checks to get out of the way first; this is hot path so we want to do these first if possible.
-        if (!DatabaseDescriptor.getPartitionDenylistEnabled() || tid == null || tmd == null || !canDenylistKeyspace(tmd.keyspace))
+        if (!DatabaseDescriptor.getPartitionDenylistEnabled() || DseCompat.enabled() || tid == null || tmd == null || !canDenylistKeyspace(tmd.keyspace))
             return true;
 
         try
@@ -351,7 +398,7 @@ public class PartitionDenylist
     public int getDeniedKeysInRangeCount(final TableId tid, final AbstractBounds<PartitionPosition> range)
     {
         final TableMetadata tmd = Schema.instance.getTableMetadata(tid);
-        if (!DatabaseDescriptor.getPartitionDenylistEnabled() || tid == null || tmd == null || !canDenylistKeyspace(tmd.keyspace))
+        if (!DatabaseDescriptor.getPartitionDenylistEnabled() || DseCompat.enabled() || tid == null || tmd == null || !canDenylistKeyspace(tmd.keyspace))
             return 0;
 
         try

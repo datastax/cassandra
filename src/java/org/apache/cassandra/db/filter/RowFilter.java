@@ -41,6 +41,7 @@ import com.google.common.base.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
@@ -80,14 +81,19 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.exceptions.InvalidPatternException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseCompatRefusals;
+import org.apache.cassandra.net.DseRefusedMessageException;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
@@ -1404,6 +1410,12 @@ public class RowFilter
             return kind() == Kind.USER;
         }
 
+        /** The code of this expression's kind on the wire: below 100 the kinds of Cassandra 3.0, from 100 DS-only ones. */
+        public int kindCode()
+        {
+            return kind().getVal();
+        }
+
         public ColumnMetadata column()
         {
             return column;
@@ -1630,6 +1642,14 @@ public class RowFilter
         {
             public void serialize(Expression expression, DataOutputPlus out, int version) throws IOException
             {
+                // a DSE 5.1 node reads a user expression with the deserializer it registered under the id, the one
+                // of its row-level access control for the id 0: none is sent to it, nor any byte of it. DseReadGuard
+                // refuses a user-defined expression at the coordinator first, so this is a check of that invariant
+                if (expression.kind() == Kind.USER && DseCompat.isDse51() && DseCompat.isPre40Layout(version))
+                    throw new IllegalStateException("A user expression (" + expression.getClass().getName() + ") " +
+                                                    "cannot be sent at messaging version " + version + " in " +
+                                                    "internode_compatibility_mode DSE_5_1: a DSE 5.1 node would read " +
+                                                    "it as one of its own expressions");
                 out.writeByte(expression.kind().getVal());
 
                 // Custom expressions include neither a column or operator, but all
@@ -1675,12 +1695,54 @@ public class RowFilter
             {
                 Kind kind = Kind.fromVal(in.readByte());
 
+                // Thrift's dynamic column expression of Apache Cassandra 3.x (kind 2), which a DSE 5.1 coordinator
+                // forwards for a Thrift client only: refused in the DSE 5.1 compatibility mode before its bytes are
+                // read
+                if (kind == Kind.UNUSED1 && DseCompat.isDse51() && DseCompat.isPre40Layout(version))
+                {
+                    DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_THRIFT_READ);
+                    throw new DseRefusedMessageException("Received a row filter with the Thrift dynamic column " +
+                                                         "expression (kind 2) at messaging version " + version +
+                                                         ": a DSE 5.1 node forwards a query of a Thrift client, " +
+                                                         "which this software does not serve; stop the Thrift " +
+                                                         "clients (start_rpc: false on the DSE 5.1 nodes)");
+                }
+
                 // custom expressions (3.0+ only) do not contain a column or operator, only a value
                 if (kind == Kind.CUSTOM)
                 {
                     return new CustomExpression(metadata,
                             IndexMetadata.serializer.deserialize(in, version, metadata),
                             ByteBufferUtil.readWithShortLength(in));
+                }
+
+                // DSE 5.1's expression of row-level access control (a user expression, the only one a DSE 5.1 node
+                // sends), which this software cannot apply: the read is refused before the bytes of the expression are
+                // read, rather than answered without the filter
+                if (kind == Kind.USER && DseCompat.isDse51() && DseCompat.isPre40Layout(version))
+                {
+                    DseCompatRefusals.refused(DseCompat.REFUSED_DSE51_ROW_LEVEL_ACCESS_CONTROL);
+                    String ignoreRestrictions =
+                        CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_RESTRICTIONS.getKey();
+                    throw new DseRefusedMessageException("Received a row filter with a user expression (kind 4) at " +
+                                                         "messaging version " + version + " on " + metadata + ": the " +
+                                                         "expression a DSE 5.1 node sends for a read of a table " +
+                                                         "restricted to rows (RESTRICT ROWS), row-level access " +
+                                                         "control this software cannot apply, so the read is refused " +
+                                                         "rather than answered without it. The DSE 5.1 nodes hold a " +
+                                                         "restriction to rows (for example a RESTRICT ROWS run " +
+                                                         "during the upgrade, or one dropped knowingly at the start " +
+                                                         "of an upgraded node with -D" + ignoreRestrictions +
+                                                         "=true): upgrade no further node and report to the upgrade " +
+                                                         "owner. RESTRICT ROWS and UNRESTRICT ROWS are schema " +
+                                                         "changes, which the upgrade forbids, so the restriction is " +
+                                                         "removed on DSE 5.1 only once no node runs this software " +
+                                                         "(every upgraded node rolled back), as before the upgrade: " +
+                                                         "for a table, UNRESTRICT ROWS, then REVOKE its rows/ " +
+                                                         "grants; for a view, REVOKE its rows/ grants, drop it and " +
+                                                         "create it again without the restriction, never UNRESTRICT " +
+                                                         "ROWS on it (on DSE 5.1.51 it fails and keeps the node from " +
+                                                         "starting)");
                 }
 
                 if (kind == Kind.USER)
@@ -1694,7 +1756,19 @@ public class RowFilter
                 // Compact storage tables, when used with thrift, used to allow falling through this withouot throwing an
                 // exception. However, since thrift was removed in 4.0, this behaviour was not restored in CASSANDRA-16217
                 if (column == null)
+                {
+                    // DSE 6 never filters on the hidden columns of its views, whose cells have no value; fail with a clear
+                    // error rather than drop the expression or evaluate it on a column this software does not keep
+                    if (DseViewWireFormat.translates(metadata, version) && DseViewWireFormat.resolveHiddenColumn(metadata, name) != null)
+                    {
+                        DseCompatRefusals.refused(DseViewWireFormat.REFUSED_HIDDEN_COLUMN_FILTER);
+                        throw new UnknownColumnException(String.format("A read of materialized view %s from a DSE 6 peer filters on the DSE hidden column %s, " +
+                                                                       "which this software does not keep; it refuses the message rather than " +
+                                                                       "return wrong view rows",
+                                                                       metadata, UTF8Type.instance.getString(name)));
+                    }
                     throw new RuntimeException("Unknown (or dropped) column " + UTF8Type.instance.getString(name) + " during deserialization");
+                }
 
                 switch (kind)
                 {

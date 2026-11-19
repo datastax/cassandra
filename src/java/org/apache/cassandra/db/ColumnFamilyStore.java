@@ -160,6 +160,7 @@ import org.apache.cassandra.repair.consistent.admin.PendingStat;
 import org.apache.cassandra.schema.CompactionParams;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.schema.Dse51Compressors;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -173,6 +174,7 @@ import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
+import org.apache.cassandra.service.DseUpgradeGuards;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.PaxosRepairHistory;
@@ -594,6 +596,10 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
         {
             CompressionParams params = CompressionParams.fromMap(opts);
             params.validate();
+            // DSE 5.1 compatibility mode: no compressor DSE 5.1 does not read, as for the schema statements
+            String dse51Refusal = Dse51Compressors.refusedLocalCompression(getKeyspaceName(), name, params);
+            if (dse51Refusal != null)
+                throw new IllegalArgumentException(dse51Refusal);
             metadata.setLocalOverrides(metadata().unbuild().compression(params).build());
         }
         catch (ConfigurationException e)
@@ -1083,7 +1089,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     @Override
     public void loadNewSSTables()
     {
-
+        DseUpgradeGuards.refuseWhileUpgrading("refresh");
         SSTableImporter.Options options = SSTableImporter.Options.options().resetLevel(true).build();
         sstableImporter.importNewSSTables(options);
     }

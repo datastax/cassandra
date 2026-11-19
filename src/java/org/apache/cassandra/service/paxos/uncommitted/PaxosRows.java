@@ -41,6 +41,7 @@ import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.DeserializationHelper;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -53,6 +54,7 @@ import org.apache.cassandra.service.paxos.Commit.AcceptedWithTTL;
 import org.apache.cassandra.service.paxos.Commit.Committed;
 import org.apache.cassandra.service.paxos.Commit.CommittedWithTTL;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
@@ -89,7 +91,17 @@ public class PaxosRows
         return getBallot(row, WRITE_PROMISE, Ballot.none());
     }
 
+    /**
+     * {@link #getAccepted(DecoratedKey, Row, long, long)} without the partition key, which only the error about a row this
+     * software cannot decode names; no production caller in this tree, kept for the projects built on it.
+     */
     public static Accepted getAccepted(Row row, long purgeBefore, long overrideTtlSeconds)
+    {
+        return getAccepted(null, row, purgeBefore, overrideTtlSeconds);
+    }
+
+    /** @param partitionKey the key of {@code row}, named by the error about a row this software cannot decode; may be null */
+    public static Accepted getAccepted(DecoratedKey partitionKey, Row row, long purgeBefore, long overrideTtlSeconds)
     {
         Cell ballotCell = row.getCell(PROPOSAL);
         if (ballotCell == null)
@@ -100,7 +112,7 @@ public class PaxosRows
             return null;
 
         int version = getInt(row, PROPOSAL_VERSION, MessagingService.VERSION_40);
-        PartitionUpdate update = getUpdate(row, PROPOSAL_UPDATE, version);
+        PartitionUpdate update = getUpdate(partitionKey, row, PROPOSAL_UPDATE, version);
         if (overrideTtlSeconds > 0) return new AcceptedWithTTL(ballot, update, TimeUnit.MICROSECONDS.toSeconds(ballotCell.timestamp()) + overrideTtlSeconds);
         else if (ballotCell.isExpiring()) return new AcceptedWithTTL(ballot, update, ballotCell.localDeletionTime());
         else return new Accepted(ballot, update);
@@ -117,7 +129,7 @@ public class PaxosRows
             return Committed.none(partitionKey, metadata);
 
         int version = getInt(row, COMMIT_VERSION, MessagingService.VERSION_40);
-        PartitionUpdate update = getUpdate(row, COMMIT_UPDATE, version);
+        PartitionUpdate update = getUpdate(partitionKey, row, COMMIT_UPDATE, version);
         if (overrideTtlSeconds > 0) return new CommittedWithTTL(ballot, update, TimeUnit.MICROSECONDS.toSeconds(ballotCell.timestamp()) + overrideTtlSeconds);
         else if (ballotCell.isExpiring()) return new CommittedWithTTL(ballot, update, ballotCell.localDeletionTime());
         else return new Committed(ballot, update);
@@ -141,12 +153,24 @@ public class PaxosRows
         return Int32Type.instance.compose(cell.value(), cell.accessor());
     }
 
-    private static PartitionUpdate getUpdate(Row row, ColumnMetadata cmeta, int version)
+    private static PartitionUpdate getUpdate(DecoratedKey partitionKey, Row row, ColumnMetadata cmeta, int storedVersion)
     {
         Cell cell = row.getCell(cmeta);
         if (cell == null)
             throw new IllegalStateException();
 
+        // the rows DSE 6 left in the table outlive the mode, they expire with the TTL DSE gave them from the table's
+        // gc_grace_seconds: the stored version is mapped in every mode (DseCompat.storedDecodingVersion)
+        if (DseCompat.isUnknownStoredDseVersion(storedVersion))
+            throw new IllegalStateException(String.format("Cannot decode system.paxos.%s of table %s, row_key %s: it was stored with messaging " +
+                                                          "version %d, which is not a DSE 6 version (%s). The lightweight " +
+                                                          "transactions of that partition, and its Paxos repair for a round with a serial " +
+                                                          "consistency, fail until the row expires, with the TTL DSE gave it from the " +
+                                                          "table's gc_grace_seconds, or a superuser deletes it from system.paxos on each replica",
+                                                          cmeta.name, getTableUuid(row),
+                                                          partitionKey == null ? "(not known here)" : "0x" + ByteBufferUtil.bytesToHex(partitionKey.getKey()),
+                                                          storedVersion, DseCompat.DSE_STORED_VERSIONS_TEXT));
+        int version = DseCompat.storedDecodingVersion(storedVersion);
         return PartitionUpdate.fromBytes(cell.buffer(), version);
     }
 
@@ -182,7 +206,14 @@ public class PaxosRows
             if (!proposalValue.hasRemaining())
                 return true;
 
-            return isEmpty(proposalValue, DeserializationHelper.Flag.LOCAL, key);
+            // a proposal of an unknown DSE version counts as in progress, so that the key is not taken for committed: the
+            // lightweight transactions of the partition then fail with the error of getUpdate, which names the key, and so
+            // does its Paxos repair when the ballot carries a serial consistency (Paxos repair skips it otherwise), until the
+            // row expires or is deleted
+            if (DseCompat.isUnknownStoredDseVersion(proposalVersion))
+                return false;
+
+            return isEmpty(proposalValue, DeserializationHelper.Flag.LOCAL, key, DseCompat.storedDecodingVersion(proposalVersion));
         }
         catch (IOException e)
         {
@@ -232,6 +263,11 @@ public class PaxosRows
         {
             committed = commit;
         }
+
+        // a row without any ballot (deleted by an operator, e.g. the remedy for a DSE row this software cannot decode) has
+        // nothing to track; a PaxosKeyState without a ballot would fail the flush of system.paxos and the Paxos repair iterator
+        if (inProgress == null && committed == null)
+            return null;
 
         TableId tableId = TableId.fromUUID(tableUuid);
         return inProgress != null ?

@@ -158,11 +158,29 @@ public final class HintsService implements HintsServiceMBean
      */
     public void write(Collection<UUID> hostIds, Hint hint)
     {
+        tryWrite(hostIds, hint);
+    }
+
+    /**
+     * Write a hint for a iterable of nodes, as {@link #write(Collection, Hint)}, telling whether it was stored.
+     *
+     * @param hostIds host ids of the hint's target nodes
+     * @param hint the hint to store
+     * @return false when the hint was refused, counted and logged, because the hints files of
+     * {@code storage_compatibility_mode: DSE_5_1} cannot hold it ({@link Dse51Hints}); true otherwise, with no target
+     * too
+     */
+    public boolean tryWrite(Collection<UUID> hostIds, Hint hint)
+    {
         if (isShutDown)
             throw new IllegalStateException("HintsService is shut down and can't accept new hints");
 
         if (hostIds.isEmpty())
-            return;
+            return true;
+
+        // in the DSE 5.1 mode, before the buffer sizes the hint: what the pre-4.0 codec would refuse inside the buffer
+        if (Dse51Hints.refuse(hostIds, hint, bufferPool.maxHintSize()))
+            return false;
 
         // we have to make sure that the HintsStore instances get properly initialized - otherwise dispatch will not trigger
         catalog.maybeLoadStores(hostIds);
@@ -170,6 +188,7 @@ public final class HintsService implements HintsServiceMBean
         bufferPool.write(hostIds, hint);
 
         StorageMetrics.totalHints.inc(hostIds.size());
+        return true;
     }
 
     /**
@@ -185,6 +204,8 @@ public final class HintsService implements HintsServiceMBean
 
     /**
      * Write a hint for all replicas. Used to re-dispatch hints whose destination is either missing or no longer correct.
+     * In {@code storage_compatibility_mode: DSE_5_1} a hint the mode's hints files cannot hold is refused, counted and
+     * logged by {@link #tryWrite(Collection, Hint)}, for all of them.
      */
     void writeForAllReplicas(Hint hint)
     {
@@ -219,6 +240,10 @@ public final class HintsService implements HintsServiceMBean
     {
         if (isShutDown)
             throw new IllegalStateException("HintsService is shut down and cannot be restarted");
+
+        // internode_compatibility_mode: DSE_6 only, a no-op otherwise; converts DSE's hints files on this thread, before
+        // the dispatch starts, and stops the start only for an error the stability inspector deems fatal
+        DseHintsConverter.convertAtDispatchStart(catalog);
 
         isDispatchPaused.set(false);
 

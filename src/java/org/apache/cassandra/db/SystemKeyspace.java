@@ -294,6 +294,8 @@ public final class SystemKeyspace
                 + "truncated_at map<uuid, blob>,"
                 + "PRIMARY KEY ((key)))"
                 ).recordDeprecatedSystemColumn("thrift_version", UTF8Type.instance)
+                // the columns DSE 5.1 adds, so that the sstables it wrote are read (Dse51SystemTables)
+                .recordDeprecatedSystemColumns(Dse51SystemTables.COLUMNS)
                 .build();
 
     // Used by CNDB
@@ -512,6 +514,8 @@ public final class SystemKeyspace
             + "schema_version uuid,"
             + "tokens set<varchar>,"
             + "PRIMARY KEY ((peer)))")
+            // the columns DSE 5.1 adds, so that the sstables it wrote are read (Dse51SystemTables)
+            .recordDeprecatedSystemColumns(Dse51SystemTables.COLUMNS)
             .build();
 
     /** @deprecated See CASSANDRA-7544 */
@@ -1192,7 +1196,7 @@ public final class SystemKeyspace
         if (promised.uuidTimestamp() < purgeBefore) promised = Ballot.none();
 
         // either we have both a recently accepted ballot and update or we have neither
-        Accepted accepted = PaxosRows.getAccepted(row, purgeBefore, overrideTtlSeconds);
+        Accepted accepted = PaxosRows.getAccepted(partitionKey, row, purgeBefore, overrideTtlSeconds);
         Committed committed = PaxosRows.getCommitted(metadata, partitionKey, row, purgeBefore, overrideTtlSeconds);
         // fix a race with TTL/deletion resolution, where TTL expires after equal deletion is inserted; TTL wins the resolution, and is read using an old ballot's nowInSec
         if (accepted != null && !accepted.isAfter(committed))
