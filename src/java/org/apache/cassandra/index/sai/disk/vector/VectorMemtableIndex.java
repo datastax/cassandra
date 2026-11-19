@@ -29,6 +29,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.NavigableSet;
 import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.ToIntFunction;
 import javax.annotation.Nullable;
@@ -89,8 +90,10 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     private final LongAdder overwriteCount = new LongAdder();
     private final LongAdder removedCount = new LongAdder();
 
-    private PrimaryKey minimumKey;
-    private PrimaryKey maximumKey;
+    // These keys are used for hybrid queries where we have a WHERE clause that filters keys. The bounds are only
+    // ever expanding. Primary keys for deleted vectors will not be removed from the min/max key references.
+    private final AtomicReference<PrimaryKey> minimumKey = new AtomicReference<>();
+    private final AtomicReference<PrimaryKey> maximumKey = new AtomicReference<>();
 
     private final NavigableSet<PrimaryKey> primaryKeys = new ConcurrentSkipListSet<>();
 
@@ -184,14 +187,21 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     }
 
     private void updateKeyBounds(PrimaryKey primaryKey) {
-        if (minimumKey == null)
-            minimumKey = primaryKey;
-        else if (primaryKey.compareTo(minimumKey) < 0)
-            minimumKey = primaryKey;
-        if (maximumKey == null)
-            maximumKey = primaryKey;
-        else if (primaryKey.compareTo(maximumKey) > 0)
-            maximumKey = primaryKey;
+        // Atomically update minimum key
+        PrimaryKey currentMin;
+        do {
+            currentMin = minimumKey.get();
+            if (currentMin != null && primaryKey.compareTo(currentMin) >= 0)
+                break;
+        } while (!minimumKey.compareAndSet(currentMin, primaryKey));
+
+        // Atomically update maximum key
+        PrimaryKey currentMax;
+        do {
+            currentMax = maximumKey.get();
+            if (currentMax != null && primaryKey.compareTo(currentMax) <= 0)
+                break;
+        } while (!maximumKey.compareAndSet(currentMax, primaryKey));
     }
 
     @Override
@@ -298,8 +308,9 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
     @Override
     public CloseableIterator<PrimaryKeyWithSortKey> orderResultsBy(QueryContext context, List<PrimaryKey> keys, Orderer orderer, int limit)
     {
-        if (minimumKey == null)
-            // This case implies maximumKey is empty too.
+        PrimaryKey minKey = minimumKey.get();
+        PrimaryKey maxKey = maximumKey.get();
+        if (minKey == null || maxKey == null)
             return CloseableIterator.emptyIterator();
 
         assert orderer.isANN() : "Only ANN is supported for vector search, received " + orderer;
@@ -307,7 +318,7 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
         var keysInGraph = new HashSet<PrimaryKey>();
         var relevantOrdinals = new IntHashSet();
 
-        var keysInRange = PrimaryKeyListUtil.getKeysInRange(keys, minimumKey, maximumKey);
+        var keysInRange = PrimaryKeyListUtil.getKeysInRange(keys, minKey, maxKey);
         boolean isStatic = indexContext.getDefinition().isStatic();
 
         keysInRange.forEach(k ->
@@ -548,7 +559,7 @@ public class VectorMemtableIndex extends AbstractMemtableIndex
 
         ReorderingKeyRangeIterator(SortingIterator<PrimaryKey> keyQueue, int expectedSize)
         {
-            super(minimumKey, maximumKey, expectedSize);
+            super(minimumKey.get(), maximumKey.get(), expectedSize);
             this.keyQueue = keyQueue;
         }
 
