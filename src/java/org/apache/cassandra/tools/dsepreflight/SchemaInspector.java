@@ -19,6 +19,7 @@ package org.apache.cassandra.tools.dsepreflight;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,7 @@ import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog.HiddenColumn;
 import org.apache.cassandra.db.view.DseViewHiddenColumns;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.TargetParser;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.schema.CQLTypeParser;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -108,6 +110,31 @@ final class SchemaInspector
     /** The remedy of a replication warning in the mixed phase, when the replication can no longer be changed. */
     private static final String MIXED_PHASE_NO_CHANGE = "the upgrade has started (UPGRADED_PEERS), so the replication stays as it is (no schema " +
                                                         "change and no repair in the mixed phase)";
+    /** The code of the finding on the tables with vector columns ({@link #checkVectorColumns}). */
+    static final String VECTOR_COLUMN = "VECTOR_COLUMN";
+    /** The option of a vector SAI index that names its similarity function. */
+    private static final String SIMILARITY_FUNCTION_OPTION = "similarity_function";
+    /** How the messages of {@code VECTOR_COLUMN} start. */
+    private static final String VECTOR_NOT_SUPPORTED = "ANN workloads and tables with VECTOR columns are not supported by " +
+                                                       "the in-place upgrade from DSE 6.9 to HCD 2.0";
+    /** The remedy of a blocking {@code VECTOR_COLUMN}. */
+    static final String VECTOR_REMEDY = "remove these columns or tables, or move that data by other means, before the " +
+                                        "upgrade; a vector in the primary key goes only with its table, and once a " +
+                                        "column is dropped (ALTER TABLE ... DROP, after the indexes and views on it), " +
+                                        "nodetool upgradesstables -a <keyspace> <table> on every DSE node rewrites the " +
+                                        "sstables without its data";
+    /** The remedy of a blocking {@code VECTOR_COLUMN} in the mixed phase, when the schema can no longer be changed. */
+    static final String VECTOR_MIXED_PHASE_REMEDY = "the upgrade has started (UPGRADED_PEERS), so these columns and " +
+                                                    "tables stay as they are (no schema change in the mixed phase): " +
+                                                    "upgrade no further node and report to the upgrade owner";
+    /** The remedy of the warning {@code VECTOR_COLUMN}, on dropped vector columns only. */
+    static final String VECTOR_DROPPED_REMEDY = "unless every sstable of the table was rewritten since the drop, run " +
+                                                "nodetool upgradesstables -a <keyspace> <table> on every DSE node before " +
+                                                "the upgrade, which rewrites them without the data of the dropped columns";
+    /** The remedy of the warning {@code VECTOR_COLUMN} in the mixed phase, when no sstable is rewritten. */
+    static final String VECTOR_DROPPED_MIXED_PHASE_REMEDY = "the upgrade has started (UPGRADED_PEERS), so the sstables " +
+                                                            "stay as they are (no upgradesstables in the mixed phase): " +
+                                                            "report it to the upgrade owner";
 
     private final List<File> dataDirectories;
     /** the DSEFS keyspace named in {@code dse.yaml}, when it is not DSE's default */
@@ -222,6 +249,7 @@ final class SchemaInspector
             checkTables(typesByKeyspace);
             checkIndexes();
             checkViews(typesByKeyspace);
+            checkVectorColumns();
             checkDroppedColumns();
             checkFunctions();
             checkTriggers();
@@ -1544,6 +1572,161 @@ final class SchemaInspector
             findings.add(blocking("UNLOADABLE_TABLE",
                                   "materialized views HCD 2.0 cannot load: " + list(unloadable),
                                   "drop these views on DSE before the upgrade and create them again once no node runs DSE"));
+    }
+
+    // ---- vector columns ----
+
+    /**
+     * Blocks on every table of a keyspace outside the system keyspaces and DSE core's own keyspaces that has a column
+     * of the vector type, at any depth of its declared type (in a collection, frozen or not, as a key or a value, in a
+     * tuple or in a field of a user type), whatever the kind of the column (partition key, clustering, static or
+     * regular): ANN workloads, and tables with vector columns, are not supported by the in-place upgrade from DSE 6.9
+     * to HCD 2.0. One finding per table, naming its vector columns with their declared types, the indexes on them (the
+     * vector SAI indexes of ANN queries among them), the materialized views that select them, its dropped vector
+     * columns, and its indexes whose target does not parse (which cannot be told to be on a vector column or not). A
+     * table whose only vector columns are dropped ones ({@code system_schema.dropped_columns}) gets a warning instead:
+     * the sstables written before the drop may still hold their data until they are rewritten, which no check here can
+     * see. DSE 6.9 stores the type of a vector column in its CQL form, {@code vector<float, 3>} (as DSE 6.9.26's {@code
+     * CQL3Type.Vector} writes it; read in its code, not captured from a node), which {@link CQLTypeParser} reads as
+     * {@link org.apache.cassandra.db.marshal.VectorType}; DSE 6.8 has no vector type. A table HCD 2.0 cannot load is
+     * {@code UNLOADABLE_TABLE}'s, its current columns not checked here.
+     */
+    private void checkVectorColumns()
+    {
+        Map<String, List<String>> droppedByTable = new TreeMap<>();
+        for (UntypedResultSet.Row row : droppedColumns)
+        {
+            String keyspace = row.getString("keyspace_name");
+            String type = row.has("type") ? row.getString("type") : null;
+            if (type == null || leftOutOfVectorCheck(keyspace))
+                continue;
+            try
+            {
+                if (!holdsVector(CQLTypeParser.parseDroppedType(keyspace, type)))
+                    continue;
+            }
+            catch (RuntimeException e)
+            {
+                // a dropped type HCD 2.0 cannot parse is UNLOADABLE_TABLE's
+                continue;
+            }
+            droppedByTable.computeIfAbsent(keyspace + '.' + row.getString("table_name"), k -> new ArrayList<>())
+                          .add(safe(row.getString("column_name")) + " (" + safe(type) + ')');
+        }
+        droppedByTable.values().forEach(dropped -> dropped.sort(null));
+
+        Set<String> blocked = new TreeSet<>();
+        for (Map.Entry<String, TableMetadata> entry : new TreeMap<>(built).entrySet())
+        {
+            TableMetadata table = entry.getValue();
+            if (leftOutOfVectorCheck(table.keyspace))
+                continue;
+            Set<String> vectorColumns = new TreeSet<>();
+            List<String> shown = new ArrayList<>();
+            List<UntypedResultSet.Row> columnRows = new ArrayList<>(columns.getOrDefault(table.keyspace, Map.of())
+                                                                           .getOrDefault(table.name, List.of()));
+            columnRows.sort(Comparator.comparing(row -> row.getString("column_name")));
+            for (UntypedResultSet.Row row : columnRows)
+            {
+                String name = row.getString("column_name");
+                ColumnMetadata column = table.getColumn(new ColumnIdentifier(name, true));
+                if (column == null || !holdsVector(column.type))
+                    continue;
+                vectorColumns.add(name);
+                shown.add(safe(name) + " (" + safe(row.getString("type")) + ')');
+            }
+            if (vectorColumns.isEmpty())
+                continue;
+            String them = vectorColumns.size() == 1 ? "it" : "them";
+            List<String> indexesOnThem = new ArrayList<>();
+            List<String> unparsedTargets = new ArrayList<>();
+            for (UntypedResultSet.Row row : indexes)
+            {
+                if (!table.keyspace.equals(row.getString("keyspace_name")) || !table.name.equals(row.getString("table_name")))
+                    continue;
+                Map<String, String> options = row.has("options") ? row.getFrozenTextMap("options") : Map.of();
+                String target = options.get(IndexTarget.TARGET_OPTION_NAME);
+                String index = table.keyspace + '.' + table.name + '.' + safe(row.getString("index_name"));
+                Pair<ColumnMetadata, IndexTarget.Type> parsed;
+                try
+                {
+                    parsed = target == null ? null : TargetParser.parse(table, target);
+                }
+                catch (RuntimeException e)
+                {
+                    parsed = null;
+                }
+                if (parsed == null)
+                {
+                    // an upgraded node would fail to create that index too; named, as it may be on a vector column
+                    unparsedTargets.add(index + " (target " + safe(target) + ')');
+                    continue;
+                }
+                if (!vectorColumns.contains(parsed.left.name.toString()))
+                    continue;
+                String className = options.get(IndexTarget.CUSTOM_INDEX_OPTION_NAME);
+                String similarity = options.get(SIMILARITY_FUNCTION_OPTION);
+                indexesOnThem.add(index + " (" +
+                                  (className != null ? safe(className)
+                                                     : "kind " + (row.has("kind") ? row.getString("kind") : "unknown")) +
+                                  (similarity == null ? "" : ", " + SIMILARITY_FUNCTION_OPTION + ' ' + safe(similarity)) +
+                                  ')');
+            }
+            List<String> viewsSelectingThem = new ArrayList<>();
+            for (Map.Entry<String, UntypedResultSet.Row> view : views.getOrDefault(table.keyspace, Map.of()).entrySet())
+            {
+                if (!table.name.equals(view.getValue().getString("base_table_name")))
+                    continue;
+                List<String> selected = new ArrayList<>();
+                for (UntypedResultSet.Row row : columns.getOrDefault(table.keyspace, Map.of()).getOrDefault(view.getKey(), List.of()))
+                    if (vectorColumns.contains(row.getString("column_name")))
+                        selected.add(safe(row.getString("column_name")));
+                if (!selected.isEmpty())
+                {
+                    selected.sort(null);
+                    viewsSelectingThem.add(table.keyspace + '.' + safe(view.getKey()) + " (" + String.join(", ", selected) + ')');
+                }
+            }
+            String name = table.keyspace + '.' + table.name;
+            List<String> dropped = droppedByTable.getOrDefault(name, List.of());
+            blocked.add(name);
+            findings.add(blocking(VECTOR_COLUMN,
+                                  VECTOR_NOT_SUPPORTED + ": the table " + name + " has the vector column" +
+                                  (vectorColumns.size() == 1 ? " " : "s ") + String.join(", ", shown) +
+                                  (indexesOnThem.isEmpty() ? "" : "; the indexes on " + them + ": " + String.join(", ", indexesOnThem)) +
+                                  (viewsSelectingThem.isEmpty() ? "" : "; the materialized views that select " + them + ": " +
+                                                                       String.join(", ", viewsSelectingThem)) +
+                                  (dropped.isEmpty() ? "" : "; its dropped vector column" + (dropped.size() == 1 ? ": " : "s: ") +
+                                                            String.join(", ", dropped)) +
+                                  (unparsedTargets.isEmpty() ? "" : "; its indexes whose target does not parse: " +
+                                                                    String.join(", ", unparsedTargets)),
+                                  mixedPhase ? VECTOR_MIXED_PHASE_REMEDY : VECTOR_REMEDY));
+        }
+        droppedByTable.forEach((name, dropped) -> {
+            if (!blocked.contains(name))
+                findings.add(warning(VECTOR_COLUMN,
+                                     VECTOR_NOT_SUPPORTED + ": the table " + name + " has the dropped vector column" +
+                                     (dropped.size() == 1 ? " " : "s ") + String.join(", ", dropped) + ", whose data " +
+                                     "the sstables written before the drop may still hold",
+                                     mixedPhase ? VECTOR_DROPPED_MIXED_PHASE_REMEDY : VECTOR_DROPPED_REMEDY));
+        });
+    }
+
+    /** Whether the vector check leaves the tables of {@code keyspace} out: the system keyspaces and DSE core's own. */
+    private static boolean leftOutOfVectorCheck(String keyspace)
+    {
+        return SchemaConstants.isSystemKeyspace(keyspace) || DSE_KEYSPACES.contains(keyspace);
+    }
+
+    /** Whether {@code type} is a vector or holds one, at any depth (collections, tuples, user types, reversed types). */
+    private static boolean holdsVector(AbstractType<?> type)
+    {
+        if (type.isVector())
+            return true;
+        for (AbstractType<?> subType : type.subTypes)
+            if (holdsVector(subType))
+                return true;
+        return false;
     }
 
     // ---- dropped columns ----
