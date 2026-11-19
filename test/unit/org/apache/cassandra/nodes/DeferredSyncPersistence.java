@@ -33,7 +33,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
  * would wait for the initialisation, and records whether the import was already certified (marker written) once the
  * flush ended.
  */
-class DeferredSyncPersistence extends CC4UpgradeNodesPersistence
+class DeferredSyncPersistence extends Dse6UpgradeNodesPersistence
 {
     private final Thread loadingThread = Thread.currentThread();
     private final CountDownLatch loadsReturned = new CountDownLatch(1);
