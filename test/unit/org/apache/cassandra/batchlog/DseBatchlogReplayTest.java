@@ -282,6 +282,7 @@ public class DseBatchlogReplayTest extends CQLTester
             String reason = "cannot be decoded: it was stored before Apache Cassandra 3.0 (messaging version " +
                             "10), whose layout this software does not read";
             assertTrue(errors.get(0), errors.get(0).contains(" cannot be decoded: "));
+            assertTrue(errors.get(0), errors.get(0).endsWith(") and repair the tables it writes to" + repairWhen()));
             assertEquals(version + ": " + errors.get(0), mode.isDse51() && version > 0,
                          errors.get(0).contains(reason));
         });
@@ -1148,12 +1149,21 @@ public class DseBatchlogReplayTest extends CQLTester
         assertEquals("the stack trace of the decoding failure of " + id, traced, error.getThrowableProxy() != null);
     }
 
-    /** The end of the ERROR about a kept batch: in {@code DSE_6} the upgrade is in progress, and the repair waits for its end. */
+    /**
+     * The end of the ERROR about a kept batch: in {@code DSE_6} and {@code DSE_5_1} the upgrade is in progress, and the
+     * repair waits for its end.
+     */
     private String repairWhen()
     {
-        return mode == InternodeCompatibilityMode.DSE_6
-               ? " (once the DSE 6 upgrade is finished: repair is refused while it is in progress)"
-               : "";
+        switch (mode)
+        {
+            case DSE_6:
+                return " (once the DSE 6 upgrade is finished: repair is refused while it is in progress)";
+            case DSE_5_1:
+                return " (once the DSE 5.1 upgrade is finished: repair is refused while it is in progress)";
+            default:
+                return "";
+        }
     }
 
     /** Runs the rest of the test in {@code mode}. */
