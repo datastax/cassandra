@@ -366,6 +366,15 @@ public final class AggregationQueryPager implements QueryPager
         {
             checkTimeout();
 
+            // The deadline of a read is the closer of the verb (read request) timeout and the native transport (client)
+            // timeout (see RequestTime#computeDeadline). The former is measured from the request start
+            // and the latter from the enqueue time, so both would also expire sub-pages fetched after the first
+            // one. Those are bounded by the aggregation timeout instead (see checkTimeout), so for them we replace the
+            // request time with a new one whose enqueue and start times are both the current time, which restarts both
+            // the verb and the native transport timeouts for each sub-page.
+            if (partitionIterator != null)
+                requestTime = Dispatcher.RequestTime.forImmediateExecution();
+
             return consistency != null ? subPager.fetchPage(subPageSize, consistency, clientState, requestTime)
                                        : subPager.fetchPageInternal(subPageSize, executionController);
         }
