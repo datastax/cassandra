@@ -26,6 +26,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +40,7 @@ import org.junit.Test;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.File;
@@ -70,6 +72,7 @@ public class CC4UpgradeNodesPersistenceTest extends CQLTester
     public void tearDown()
     {
         DatabaseDescriptor.setMetadataDirectory(originalMetadataDir);
+        new File(tempDir).deleteRecursive();
     }
 
     @Test
@@ -169,6 +172,48 @@ public class CC4UpgradeNodesPersistenceTest extends CQLTester
         assertThat(fromSystemTable).hasSize(2);
         assertThat(fromSystemTable.stream().map(PeerInfo::getHostId).collect(Collectors.toSet()))
             .containsExactlyInAnyOrder(hostId1, hostId2);
+
+        // the directory is archived by the load itself
+        assertThat(Files.exists(nodesDir)).isFalse();
+        assertThat(Files.exists(tempDir.resolve("nodes.migrated").resolve("peers"))).isTrue();
+    }
+
+    @Test
+    public void testLoadsNeverFlushAndArchiveInline() throws Exception
+    {
+        UUID hostId = UUID.randomUUID();
+        Map<String, Object> cc4Local = new LinkedHashMap<>();
+        cc4Local.put("host_id", serializeUUID(hostId));
+        cc4Local.put("cluster_name", "MigrateCluster");
+        writeMsgpack(nodesDir.resolve("local"), cc4Local);
+        InetAddressAndPort peer = InetAddressAndPort.getByNameOverrideDefaults("10.0.0.3", 7000);
+        Map<String, Object> cc4Peer = new LinkedHashMap<>();
+        cc4Peer.put("host_id", serializeUUID(UUID.randomUUID()));
+        cc4Peer.put("peer", serializeAddress(peer));
+        writeMsgpack(nodesDir.resolve("peers"), Collections.singletonList(cc4Peer));
+
+        // the loads run while Nodes is initialised, when no flush can end: with NONE they flush nothing at all
+        // and archive the directory themselves, as before the DSE 6 compatibility mode
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        DeferredSyncPersistence persistence = new DeferredSyncPersistence(() -> false);
+        try
+        {
+            assertThat(persistence.loadLocal().getHostId()).isEqualTo(hostId);
+            assertThat(Files.isDirectory(nodesDir)).isTrue();
+            assertThat(persistence.loadPeers().map(PeerInfo::getPeerAddressAndPort)).containsExactly(peer);
+            assertThat(Files.exists(nodesDir)).isFalse();
+            assertThat(Files.exists(tempDir.resolve("nodes.migrated").resolve("local"))).isTrue();
+        }
+        finally
+        {
+            persistence.loadsReturned();
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+            new NodesPersistence().deletePeer(peer);
+        }
+        // a completion scheduled by mistake with NONE would flush now that the loads returned: none may have run
+        CC4UpgradeNodesPersistence.awaitPendingCompletion();
+        assertThat(persistence.flushes).isEmpty();
     }
 
     @Test

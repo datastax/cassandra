@@ -71,6 +71,7 @@ import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.SystemKeyspaceMigrator41;
@@ -78,6 +79,7 @@ import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionLogger;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.memtable.AbstractAllocatorMemtable;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
 import org.apache.cassandra.db.virtual.SystemViewsKeyspace;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
@@ -98,6 +100,7 @@ import org.apache.cassandra.distributed.mock.nodetool.InternalNodeProbe;
 import org.apache.cassandra.distributed.mock.nodetool.InternalNodeProbeFactory;
 import org.apache.cassandra.distributed.shared.Metrics;
 import org.apache.cassandra.distributed.shared.ThrowingRunnable;
+import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.hints.DTestSerializer;
 import org.apache.cassandra.hints.HintsService;
@@ -119,6 +122,8 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.Dse51ColumnTypes;
+import org.apache.cassandra.schema.Dse51Compressors;
 import org.apache.cassandra.schema.MigrationCoordinator;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -128,6 +133,8 @@ import org.apache.cassandra.service.CassandraDaemon;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.service.DefaultFSErrorHandler;
+import org.apache.cassandra.service.Dse6AccessControlCheck;
+import org.apache.cassandra.service.Dse6NonCoreTraces;
 import org.apache.cassandra.service.NodeToolServerExtensions;
 import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.QueryState;
@@ -654,6 +661,30 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
 
                 CassandraDaemon.getInstanceForTesting().runStartupChecks();
 
+                // as CassandraDaemon.setup: the values DSE 5.1 wrote to its columns of system.local and
+                // system.peers, read before the first write to system.local
+                try
+                {
+                    Dse51SystemTables.loadOrReadAtStart();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
+
+                // as CassandraDaemon.setup: the DSE 5.1 checks of the DSE features this software does not support and
+                // of the row a failed UNRESTRICT ROWS on a view leaves, on the rows of system_schema before the schema
+                // is loaded
+                try
+                {
+                    Dse6NonCoreTraces.verifyDse51AtStartup();
+                    Dse6AccessControlCheck.verifyDse51SchemaRowsAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
+
                 // We need to persist this as soon as possible after startup checks.
                 // This should be the first write to SystemKeyspace (CASSANDRA-11742)
                 SystemKeyspace.persistLocalMetadata(config::hostId);
@@ -676,13 +707,60 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     throw e;
                 }
 
+                // as CassandraDaemon.setup: the DSE 6 check of the DSE features this software does not support
+                try
+                {
+                    Dse6NonCoreTraces.verifyAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
+
+                // as CassandraDaemon.setup: the DSE 5.1 checks of the column types and the compressors of the tables
+                if (DatabaseDescriptor.isDse51CompatibilityMode())
+                {
+                    try
+                    {
+                        Dse51ColumnTypes.verifyAtStartup();
+                        Dse51Compressors.verifyAtStartup();
+                    }
+                    catch (StartupException e)
+                    {
+                        throw new RuntimeException(e.getMessage(), e);
+                    }
+                }
+
                 // Start up virtual table support
                 CassandraDaemon.getInstanceForTesting().setupVirtualKeyspaces();
 
                 // clean up debris in data directories
                 CassandraDaemon.getInstanceForTesting().scrubDataDirectories();
 
+                // as CassandraDaemon.setup: the DSE 5.1 check of the sstables on disk
+                if (DatabaseDescriptor.isDse51CompatibilityMode())
+                {
+                    try
+                    {
+                        Dse51Compressors.verifySSTablesAtStartup();
+                    }
+                    catch (StartupException e)
+                    {
+                        throw new RuntimeException(e.getMessage(), e);
+                    }
+                }
+
                 Keyspace.setInitialized();
+
+                // DSE 6 compatibility mode: whether the data of each materialized view can be exchanged with DSE 6 nodes, see CassandraDaemon.setup
+                try
+                {
+                    DseViewHiddenColumnCatalog.checkViewsAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
 
                 // Replay any CommitLogSegments found on disk
                 try
@@ -709,6 +787,18 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 }
 
                 Verb.HINT_REQ.unsafeSetSerializer(DTestSerializer::new);
+
+                // as CassandraDaemon.setup: the first pass of the DSE 6 access-control check, on this node's replica, before
+                // the node joins the ring; the cluster-wide pass follows once gossip has settled (with the GOSSIP feature; the
+                // instances of the HCD 1.2 harness run without it, and Dse6AccessControlMixedTest calls that pass explicitly)
+                try
+                {
+                    Dse6AccessControlCheck.verifyAtStartup();
+                }
+                catch (StartupException e)
+                {
+                    throw new RuntimeException(e.getMessage(), e);
+                }
 
                 if (config.has(NETWORK))
                     MessagingService.instance().listen();
@@ -740,6 +830,27 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     JVMStabilityInspector.removeShutdownHooks();
 
                     Gossiper.waitToSettle();
+
+                    // as CassandraDaemon.setup: the DSE 5.1 check of the workloads the DSE 5.1 peers gossip
+                    try
+                    {
+                        Dse6NonCoreTraces.verifyDse51GossipedWorkloads();
+                    }
+                    catch (StartupException e)
+                    {
+                        throw new RuntimeException(e.getMessage(), e);
+                    }
+
+                    // as CassandraDaemon.setup: the cluster-wide pass of the DSE 6 access-control check, after the node joined (here
+                    // before the auth setup of postStartup, which the daemon runs first: the pass reads system_auth without it)
+                    try
+                    {
+                        Dse6AccessControlCheck.verifyAfterJoin();
+                    }
+                    catch (StartupException e)
+                    {
+                        throw new RuntimeException(e.getMessage(), e);
+                    }
                 }
                 else
                 {

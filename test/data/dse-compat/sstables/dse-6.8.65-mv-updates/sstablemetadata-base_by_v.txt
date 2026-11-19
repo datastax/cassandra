@@ -1,0 +1,521 @@
+=== bb-1-bti
+SSTable: test_ks/base_by_v-93a31590d30211f185d6f707637d5577/bb-1-bti
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.01
+Minimum timestamp: 1793214342999999 (10/28/2026 20:05:42)
+Maximum timestamp: 1793214343000000 (10/28/2026 20:05:43)
+SSTable min local deletion time: 1793214348 (10/28/2026 20:05:48)
+SSTable max local deletion time: 2147483647 (no tombstones)
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.5222634508348795
+TTL min: 0
+TTL max: 0
+First token: -7329697292252079701 (v3)
+Last token: 6052756843845054313 (v1)
+covered clusterings: [1:1, 6:3]
+Estimated droppable tombstones: 0.28125
+SSTable Level: 0
+Repaired at: 0
+Pending repair: --
+Replay positions covered: {CommitLogPosition(segmentId=1793214297047, position=96098)=CommitLogPosition(segmentId=1793214297047, position=111797)}
+totalColumnsSet: 110
+totalRows: 19
+Estimated tombstone drop times: 
+   Drop Time                        | Count  (%)  Histogram 
+   1793214360 (10/28/2026 20:06:00) |    36 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      1996099046 (04/03/2033 01:57:26)
+   75th      1996099046 (04/03/2033 01:57:26)
+   95th      1996099046 (04/03/2033 01:57:26)
+   98th      1996099046 (04/03/2033 01:57:26)
+   99th      1996099046 (04/03/2033 01:57:26)
+   Min       1663415873 (09/17/2022 13:57:53)
+   Max       1996099046 (04/03/2033 01:57:26)
+Partition Size: 
+   Size (bytes) | Count  (%)  Histogram 
+   42 (42 B)    |     1 ( 25) OOOOOOOOOO
+   372 (372 B)  |     3 ( 75) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      372 (372 B)
+   75th      372 (372 B)
+   95th      372 (372 B)
+   98th      372 (372 B)
+   99th      372 (372 B)
+   Min       36 (36 B)
+   Max       372 (372 B)
+Column Count: 
+   Columns | Count  (%)  Histogram 
+   2       |     1 ( 25) OOOOOOOOOO
+   42      |     3 ( 75) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      42
+   75th      42
+   95th      42
+   98th      42
+   99th      42
+   Min       2
+   Max       42
+Estimated cardinality: 4
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1793214348 (10/28/2026 20:05:48)
+EncodingStats minTimestamp: 1793214342999999 (10/28/2026 20:05:42)
+KeyType: org.apache.cassandra.db.marshal.UTF8Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type, org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: 
+RegularColumns: m:org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.Int32Type), -x:org.apache.cassandra.db.marshal.Int32Type, .v:org.apache.cassandra.db.marshal.UTF8Type, s:org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type), b:org.apache.cassandra.db.marshal.UTF8Type, a:org.apache.cassandra.db.marshal.Int32Type
+=== bb-2-bti
+SSTable: test_ks/base_by_v-93a31590d30211f185d6f707637d5577/bb-2-bti
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.01
+Minimum timestamp: 1793214343000000 (10/28/2026 20:05:43)
+Maximum timestamp: 1793214344000000 (10/28/2026 20:05:44)
+SSTable min local deletion time: 2147483647 (no tombstones)
+SSTable max local deletion time: 2147483647 (no tombstones)
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.7203791469194313
+TTL min: 0
+TTL max: 0
+First token: -7329697292252079701 (v3)
+Last token: 6052756843845054313 (v1)
+covered clusterings: [1:1, 5:5]
+Estimated droppable tombstones: 0.0
+SSTable Level: 0
+Repaired at: 0
+Pending repair: --
+Replay positions covered: {CommitLogPosition(segmentId=1793214297047, position=111797)=CommitLogPosition(segmentId=1793214297047, position=112605)}
+totalColumnsSet: 11
+totalRows: 5
+Estimated tombstone drop times: 
+   Drop Time | Count  (%)  Histogram 
+   Percentiles
+   50th      0 
+   75th      0 
+   95th      0 
+   98th      0 
+   99th      0 
+   Min       0 
+   Max       0 
+Partition Size: 
+   Size (bytes) | Count  (%)  Histogram 
+   42 (42 B)    |     3 ( 60) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   50 (50 B)    |     2 ( 40) OOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      42 (42 B)
+   75th      50 (50 B)
+   95th      50 (50 B)
+   98th      50 (50 B)
+   99th      50 (50 B)
+   Min       36 (36 B)
+   Max       50 (50 B)
+Column Count: 
+   Columns | Count  (%)  Histogram 
+   2       |     4 ( 80) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   3       |     1 ( 20) OOOOOOO.
+   Percentiles
+   50th      2
+   75th      2
+   95th      3
+   98th      3
+   99th      3
+   Min       2
+   Max       3
+Estimated cardinality: 5
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1442880000 (09/22/2015 02:00:00)
+EncodingStats minTimestamp: 1793214343000000 (10/28/2026 20:05:43)
+KeyType: org.apache.cassandra.db.marshal.UTF8Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type, org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: 
+RegularColumns: m:org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.Int32Type), -x:org.apache.cassandra.db.marshal.Int32Type, .v:org.apache.cassandra.db.marshal.UTF8Type, s:org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type), b:org.apache.cassandra.db.marshal.UTF8Type, a:org.apache.cassandra.db.marshal.Int32Type
+=== bb-3-bti
+SSTable: test_ks/base_by_v-93a31590d30211f185d6f707637d5577/bb-3-bti
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.01
+Minimum timestamp: 1793214343000000 (10/28/2026 20:05:43)
+Maximum timestamp: 1793214345000000 (10/28/2026 20:05:45)
+SSTable min local deletion time: 1793214352 (10/28/2026 20:05:52)
+SSTable max local deletion time: 2147483647 (no tombstones)
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.782608695652174
+TTL min: 0
+TTL max: 0
+First token: -7329697292252079701 (v3)
+Last token: 6052756843845054313 (v1)
+covered clusterings: [2:1, 2:3]
+Estimated droppable tombstones: 0.5
+SSTable Level: 0
+Repaired at: 0
+Pending repair: --
+Replay positions covered: {CommitLogPosition(segmentId=1793214297047, position=112605)=CommitLogPosition(segmentId=1793214297047, position=113090)}
+totalColumnsSet: 5
+totalRows: 3
+Estimated tombstone drop times: 
+   Drop Time                        | Count  (%)  Histogram 
+   1793214360 (10/28/2026 20:06:00) |     3 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      1996099046 (04/03/2033 01:57:26)
+   75th      1996099046 (04/03/2033 01:57:26)
+   95th      1996099046 (04/03/2033 01:57:26)
+   98th      1996099046 (04/03/2033 01:57:26)
+   99th      1996099046 (04/03/2033 01:57:26)
+   Min       1663415873 (09/17/2022 13:57:53)
+   Max       1996099046 (04/03/2033 01:57:26)
+Partition Size: 
+   Size (bytes) | Count  (%)  Histogram 
+   42 (42 B)    |     3 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      42 (42 B)
+   75th      42 (42 B)
+   95th      42 (42 B)
+   98th      42 (42 B)
+   99th      42 (42 B)
+   Min       36 (36 B)
+   Max       42 (42 B)
+Column Count: 
+   Columns | Count  (%)  Histogram 
+   1       |     1 ( 33) OOOOOOOOOOOOOOO
+   2       |     2 ( 66) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      2
+   75th      2
+   95th      2
+   98th      2
+   99th      2
+   Min       0
+   Max       2
+Estimated cardinality: 3
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1793214352 (10/28/2026 20:05:52)
+EncodingStats minTimestamp: 1793214343000000 (10/28/2026 20:05:43)
+KeyType: org.apache.cassandra.db.marshal.UTF8Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type, org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: 
+RegularColumns: m:org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.Int32Type), -x:org.apache.cassandra.db.marshal.Int32Type, .v:org.apache.cassandra.db.marshal.UTF8Type, s:org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type), b:org.apache.cassandra.db.marshal.UTF8Type, a:org.apache.cassandra.db.marshal.Int32Type
+=== bb-4-bti
+SSTable: test_ks/base_by_v-93a31590d30211f185d6f707637d5577/bb-4-bti
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.01
+Minimum timestamp: 1793214342999999 (10/28/2026 20:05:42)
+Maximum timestamp: 1793214346000000 (10/28/2026 20:05:46)
+SSTable min local deletion time: 1793214348 (10/28/2026 20:05:48)
+SSTable max local deletion time: 2147483647 (no tombstones)
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.6996336996336996
+TTL min: 0
+TTL max: 0
+First token: -7329697292252079701 (v3)
+Last token: 7491996189533748576 (changed)
+covered clusterings: [2:1, 3:3]
+Estimated droppable tombstones: 0.35
+SSTable Level: 0
+Repaired at: 0
+Pending repair: --
+Replay positions covered: {CommitLogPosition(segmentId=1793214297047, position=113090)=CommitLogPosition(segmentId=1793214297047, position=114002)}
+totalColumnsSet: 17
+totalRows: 6
+Estimated tombstone drop times: 
+   Drop Time                        | Count  (%)  Histogram 
+   1793214360 (10/28/2026 20:06:00) |     7 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      1996099046 (04/03/2033 01:57:26)
+   75th      1996099046 (04/03/2033 01:57:26)
+   95th      1996099046 (04/03/2033 01:57:26)
+   98th      1996099046 (04/03/2033 01:57:26)
+   99th      1996099046 (04/03/2033 01:57:26)
+   Min       1663415873 (09/17/2022 13:57:53)
+   Max       1996099046 (04/03/2033 01:57:26)
+Partition Size: 
+   Size (bytes) | Count  (%)  Histogram 
+   35 (35 B)    |     1 ( 25) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   42 (42 B)    |     1 ( 25) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   60 (60 B)    |     1 ( 25) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   149 (149 B)  |     1 ( 25) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      42 (42 B)
+   75th      60 (60 B)
+   95th      149 (149 B)
+   98th      149 (149 B)
+   99th      149 (149 B)
+   Min       30 (30 B)
+   Max       149 (149 B)
+Column Count: 
+   Columns | Count  (%)  Histogram 
+   1       |     1 ( 25) OOOOOOOOOOOOOOO
+   2       |     2 ( 50) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   14      |     1 ( 25) OOOOOOOOOOOOOOO
+   Percentiles
+   50th      2
+   75th      2
+   95th      14
+   98th      14
+   99th      14
+   Min       0
+   Max       14
+Estimated cardinality: 4
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1793214348 (10/28/2026 20:05:48)
+EncodingStats minTimestamp: 1793214342999999 (10/28/2026 20:05:42)
+KeyType: org.apache.cassandra.db.marshal.UTF8Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type, org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: 
+RegularColumns: m:org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.Int32Type), -x:org.apache.cassandra.db.marshal.Int32Type, .v:org.apache.cassandra.db.marshal.UTF8Type, s:org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type), b:org.apache.cassandra.db.marshal.UTF8Type, a:org.apache.cassandra.db.marshal.Int32Type
+=== bb-5-bti
+SSTable: test_ks/base_by_v-93a31590d30211f185d6f707637d5577/bb-5-bti
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.01
+Minimum timestamp: 1793214347000000 (10/28/2026 20:05:47)
+Maximum timestamp: 1793214347000000 (10/28/2026 20:05:47)
+SSTable min local deletion time: 1793214356 (10/28/2026 20:05:56)
+SSTable max local deletion time: 1793214356 (10/28/2026 20:05:56)
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.5673758865248227
+TTL min: 0
+TTL max: 0
+First token: -7329697292252079701 (v3)
+Last token: 6052756843845054313 (v1)
+covered clusterings: [4:1, 6:3]
+Estimated droppable tombstones: 2.0
+SSTable Level: 0
+Repaired at: 0
+Pending repair: --
+Replay positions covered: {CommitLogPosition(segmentId=1793214297047, position=114002)=CommitLogPosition(segmentId=1793214297047, position=114723)}
+totalColumnsSet: 0
+totalRows: 6
+Estimated tombstone drop times: 
+   Drop Time                        | Count  (%)  Histogram 
+   1793214360 (10/28/2026 20:06:00) |     6 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      1996099046 (04/03/2033 01:57:26)
+   75th      1996099046 (04/03/2033 01:57:26)
+   95th      1996099046 (04/03/2033 01:57:26)
+   98th      1996099046 (04/03/2033 01:57:26)
+   99th      1996099046 (04/03/2033 01:57:26)
+   Min       1663415873 (09/17/2022 13:57:53)
+   Max       1996099046 (04/03/2033 01:57:26)
+Partition Size: 
+   Size (bytes) | Count  (%)  Histogram 
+   50 (50 B)    |     3 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      50 (50 B)
+   75th      50 (50 B)
+   95th      50 (50 B)
+   98th      50 (50 B)
+   99th      50 (50 B)
+   Min       43 (43 B)
+   Max       50 (50 B)
+Column Count: 
+   Columns | Count  (%)  Histogram 
+   1       |     3 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      1
+   75th      1
+   95th      1
+   98th      1
+   99th      1
+   Min       0
+   Max       1
+Estimated cardinality: 3
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1793214356 (10/28/2026 20:05:56)
+EncodingStats minTimestamp: 1793214347000000 (10/28/2026 20:05:47)
+KeyType: org.apache.cassandra.db.marshal.UTF8Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type, org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: 
+RegularColumns: m:org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.Int32Type), -x:org.apache.cassandra.db.marshal.Int32Type, .v:org.apache.cassandra.db.marshal.UTF8Type, s:org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type), b:org.apache.cassandra.db.marshal.UTF8Type, a:org.apache.cassandra.db.marshal.Int32Type
+=== bb-6-bti
+SSTable: test_ks/base_by_v-93a31590d30211f185d6f707637d5577/bb-6-bti
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.01
+Minimum timestamp: 1793214343000000 (10/28/2026 20:05:43)
+Maximum timestamp: 1793214348000000 (10/28/2026 20:05:48)
+SSTable min local deletion time: 2147483647 (no tombstones)
+SSTable max local deletion time: 2147483647 (no tombstones)
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 1.146341463414634
+TTL min: 0
+TTL max: 0
+First token: -7068575861599686806 (v2)
+Last token: -7068575861599686806 (v2)
+covered clusterings: [1:2, 1:2]
+Estimated droppable tombstones: 0.0
+SSTable Level: 0
+Repaired at: 0
+Pending repair: --
+Replay positions covered: {CommitLogPosition(segmentId=1793214297047, position=114723)=CommitLogPosition(segmentId=1793214297047, position=115122)}
+totalColumnsSet: 2
+totalRows: 1
+Estimated tombstone drop times: 
+   Drop Time | Count  (%)  Histogram 
+   Percentiles
+   50th      0 
+   75th      0 
+   95th      0 
+   98th      0 
+   99th      0 
+   Min       0 
+   Max       0 
+Partition Size: 
+   Size (bytes) | Count  (%)  Histogram 
+   42 (42 B)    |     1 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      42 (42 B)
+   75th      42 (42 B)
+   95th      42 (42 B)
+   98th      42 (42 B)
+   99th      42 (42 B)
+   Min       36 (36 B)
+   Max       42 (42 B)
+Column Count: 
+   Columns | Count  (%)  Histogram 
+   2       |     1 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      2
+   75th      2
+   95th      2
+   98th      2
+   99th      2
+   Min       2
+   Max       2
+Estimated cardinality: 1
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1442880000 (09/22/2015 02:00:00)
+EncodingStats minTimestamp: 1793214343000000 (10/28/2026 20:05:43)
+KeyType: org.apache.cassandra.db.marshal.UTF8Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type, org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: 
+RegularColumns: m:org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.Int32Type), -x:org.apache.cassandra.db.marshal.Int32Type, .v:org.apache.cassandra.db.marshal.UTF8Type, s:org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type), b:org.apache.cassandra.db.marshal.UTF8Type, a:org.apache.cassandra.db.marshal.Int32Type
+=== bb-7-bti
+SSTable: test_ks/base_by_v-93a31590d30211f185d6f707637d5577/bb-7-bti
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.01
+Minimum timestamp: 1793214342999999 (10/28/2026 20:05:42)
+Maximum timestamp: 1793214349000000 (10/28/2026 20:05:49)
+SSTable min local deletion time: 1793214348 (10/28/2026 20:05:48)
+SSTable max local deletion time: 2147483647 (no tombstones)
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.6885644768856448
+TTL min: 0
+TTL max: 300000000 (83333 hours and 20 minutes)
+First token: -7329697292252079701 (v3)
+Last token: 7172988568011089375 (short)
+covered clusterings: [1:3, 7:2]
+Estimated droppable tombstones: 0.3035714333333343
+SSTable Level: 0
+Repaired at: 0
+Pending repair: --
+Replay positions covered: {CommitLogPosition(segmentId=1793214297047, position=115122)=CommitLogPosition(segmentId=1793214297047, position=116434)}
+totalColumnsSet: 22
+totalRows: 8
+Estimated tombstone drop times: 
+   Drop Time                        | Count  (%)  Histogram 
+   1793214360 (10/28/2026 20:06:00) |     6 ( 37) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   1793214420 (10/28/2026 20:07:00) |     5 ( 31) OOOOOOOOOOOOOOOOOOOOOOOOO
+   2093214360 (05/01/2036 02:26:00) |     5 ( 31) OOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      1996099046 (04/03/2033 01:57:26)
+   75th      2395318855 (11/26/2045 15:20:55)
+   95th      2395318855 (11/26/2045 15:20:55)
+   98th      2395318855 (11/26/2045 15:20:55)
+   99th      2395318855 (11/26/2045 15:20:55)
+   Min       1663415873 (09/17/2022 13:57:53)
+   Max       2395318855 (11/26/2045 15:20:55)
+Partition Size: 
+   Size (bytes) | Count  (%)  Histogram 
+   35 (35 B)    |     2 ( 28) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   50 (50 B)    |     1 ( 14) OOOOOOOOOOOOOOO
+   60 (60 B)    |     1 ( 14) OOOOOOOOOOOOOOO
+   86 (86 B)    |     2 ( 28) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   103 (103 B)  |     1 ( 14) OOOOOOOOOOOOOOO
+   Percentiles
+   50th      60 (60 B)
+   75th      86 (86 B)
+   95th      103 (103 B)
+   98th      103 (103 B)
+   99th      103 (103 B)
+   Min       30 (30 B)
+   Max       103 (103 B)
+Column Count: 
+   Columns | Count  (%)  Histogram 
+   1       |     2 ( 28) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   2       |     2 ( 28) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   4       |     1 ( 14) OOOOOOOOOOOOOOO
+   7       |     2 ( 28) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      2
+   75th      7
+   95th      7
+   98th      7
+   99th      7
+   Min       0
+   Max       7
+Estimated cardinality: 7
+EncodingStats minTTL: 2 (2 seconds)
+EncodingStats minLocalDeletionTime: 1793214348 (10/28/2026 20:05:48)
+EncodingStats minTimestamp: 1793214342999999 (10/28/2026 20:05:42)
+KeyType: org.apache.cassandra.db.marshal.UTF8Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type, org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: 
+RegularColumns: m:org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.Int32Type), -x:org.apache.cassandra.db.marshal.Int32Type, .v:org.apache.cassandra.db.marshal.UTF8Type, s:org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type), b:org.apache.cassandra.db.marshal.UTF8Type, a:org.apache.cassandra.db.marshal.Int32Type
+=== bb-8-bti
+SSTable: test_ks/base_by_v-93a31590d30211f185d6f707637d5577/bb-8-bti
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.01
+Minimum timestamp: 1793214350000000 (10/28/2026 20:05:50)
+Maximum timestamp: 1793214350000001 (10/28/2026 20:05:50)
+SSTable min local deletion time: 1793214367 (10/28/2026 20:06:07)
+SSTable max local deletion time: 2147483647 (no tombstones)
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 1.1578947368421053
+TTL min: 0
+TTL max: 0
+First token: 6052756843845054313 (v1)
+Last token: 6052756843845054313 (v1)
+covered clusterings: [1:1, 1:1]
+Estimated droppable tombstones: 1.0
+SSTable Level: 0
+Repaired at: 0
+Pending repair: --
+Replay positions covered: {CommitLogPosition(segmentId=1793214297047, position=116434)=CommitLogPosition(segmentId=1793214297047, position=116607)}
+totalColumnsSet: 1
+totalRows: 1
+Estimated tombstone drop times: 
+   Drop Time                        | Count  (%)  Histogram 
+   1793214420 (10/28/2026 20:07:00) |     1 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      1996099046 (04/03/2033 01:57:26)
+   75th      1996099046 (04/03/2033 01:57:26)
+   95th      1996099046 (04/03/2033 01:57:26)
+   98th      1996099046 (04/03/2033 01:57:26)
+   99th      1996099046 (04/03/2033 01:57:26)
+   Min       1663415873 (09/17/2022 13:57:53)
+   Max       1996099046 (04/03/2033 01:57:26)
+Partition Size: 
+   Size (bytes) | Count  (%)  Histogram 
+   42 (42 B)    |     1 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      42 (42 B)
+   75th      42 (42 B)
+   95th      42 (42 B)
+   98th      42 (42 B)
+   99th      42 (42 B)
+   Min       36 (36 B)
+   Max       42 (42 B)
+Column Count: 
+   Columns | Count  (%)  Histogram 
+   1       |     1 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      1
+   75th      1
+   95th      1
+   98th      1
+   99th      1
+   Min       0
+   Max       1
+Estimated cardinality: 1
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1793214367 (10/28/2026 20:06:07)
+EncodingStats minTimestamp: 1793214350000000 (10/28/2026 20:05:50)
+KeyType: org.apache.cassandra.db.marshal.UTF8Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type, org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: 
+RegularColumns: m:org.apache.cassandra.db.marshal.MapType(org.apache.cassandra.db.marshal.UTF8Type,org.apache.cassandra.db.marshal.Int32Type), -x:org.apache.cassandra.db.marshal.Int32Type, .v:org.apache.cassandra.db.marshal.UTF8Type, s:org.apache.cassandra.db.marshal.SetType(org.apache.cassandra.db.marshal.Int32Type), b:org.apache.cassandra.db.marshal.UTF8Type, a:org.apache.cassandra.db.marshal.Int32Type

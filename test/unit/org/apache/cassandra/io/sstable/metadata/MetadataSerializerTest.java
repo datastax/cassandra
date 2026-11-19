@@ -37,6 +37,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -51,11 +52,14 @@ import org.apache.cassandra.io.compress.EncryptorTest;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.compress.RotatingKeyProviderFactory;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileInputStreamPlus;
@@ -63,7 +67,10 @@ import org.apache.cassandra.io.util.FileOutputStreamPlus;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.CompressionParams;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.Throwables;
+import org.apache.cassandra.utils.streamhist.StreamingTombstoneHistogramBuilder;
+import org.apache.cassandra.utils.streamhist.TombstoneHistogram;
 import org.jboss.byteman.contrib.bmunit.BMRule;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
@@ -335,6 +342,81 @@ public class MetadataSerializerTest
             Throwable t = writer.commit(null);
             if (t != null)
                 throw new AssertionError(t);
+        }
+    }
+
+    /**
+     * The metadata of a big me sstable (DSE 5.1's version, written in the DSE 5.1 compatibility mode) has the field set
+     * of the 3.x line: no pending repair, no transient flag, the originating host id; it reads back equal. Its
+     * tombstone histogram carries the maximum bin size Cassandra 3.x and DSE 5.1 write, that of the builder, in the
+     * mode only: outside it the number of bins, as before.
+     */
+    @Test
+    public void theMetadataOfMeHasTheFieldsOfDse51() throws IOException
+    {
+        Version me = BigFormat.getInstance().getVersion("me");
+        assertFalse(me.hasPendingRepair());
+        assertFalse(me.hasIsTransient());
+        assertFalse(me.hasMetadataChecksum());
+        assertTrue(me.hasOriginatingHostId());
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            Map<MetadataType, MetadataComponent> originalMetadata = constructMetadata(false, me);
+            MetadataSerializer serializer = new MetadataSerializer();
+            Descriptor desc = new Descriptor(me, FileUtils.getTempDir(), "test", "test_me",
+                                             new SequenceBasedSSTableId(0));
+            File statsFile = serialize(originalMetadata, serializer, desc);
+            try (FileInputStreamPlus in = new FileInputStreamPlus(statsFile))
+            {
+                EnumSet<MetadataType> types = EnumSet.allOf(MetadataType.class);
+                Map<MetadataType, MetadataComponent> deserialized = serializer.deserialize(desc, in, types);
+                for (MetadataType type : EnumSet.complementOf(EnumSet.of(MetadataType.STATS)))
+                    assertEquals(type.name(), originalMetadata.get(type), deserialized.get(type));
+                StatsMetadata original = (StatsMetadata) originalMetadata.get(MetadataType.STATS);
+                StatsMetadata stats = (StatsMetadata) deserialized.get(MetadataType.STATS);
+                assertEquals(original.originatingHostId, stats.originatingHostId);
+                assertEquals(original.commitLogIntervals, stats.commitLogIntervals);
+                assertEquals(original.estimatedTombstoneDropTime, stats.estimatedTombstoneDropTime);
+                assertEquals(ActiveRepairService.NO_PENDING_REPAIR, stats.pendingRepair);
+                assertFalse(stats.isTransient);
+            }
+            finally
+            {
+                statsFile.tryDelete();
+            }
+
+            TombstoneHistogram histogram = histogramOfTwoBins();
+            assertEquals(SSTable.TOMBSTONE_HISTOGRAM_BIN_SIZE, firstIntOf(histogram, me));
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            assertEquals(2, firstIntOf(histogram, me));
+            assertEquals(2, firstIntOf(histogram, BigFormat.getInstance().getVersion("nb")));
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    private static TombstoneHistogram histogramOfTwoBins()
+    {
+        StreamingTombstoneHistogramBuilder builder =
+            new StreamingTombstoneHistogramBuilder(SSTable.TOMBSTONE_HISTOGRAM_BIN_SIZE,
+                                                   SSTable.TOMBSTONE_HISTOGRAM_SPOOL_SIZE, 1);
+        builder.update(1000);
+        builder.update(2000);
+        return builder.build();
+    }
+
+    /** The maximum bin size a histogram is serialized with for {@code version}. */
+    private static int firstIntOf(TombstoneHistogram histogram, Version version) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            TombstoneHistogram.getSerializer(version).serialize(histogram, out);
+            assertEquals(TombstoneHistogram.getSerializer(version).serializedSize(histogram), out.getLength());
+            return ByteBuffer.wrap(out.toByteArray()).getInt();
         }
     }
 
