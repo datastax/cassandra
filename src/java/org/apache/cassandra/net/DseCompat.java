@@ -258,9 +258,11 @@ public final class DseCompat
     /**
      * True for the release a DSE 6 node reports: {@code 4.0.0.<build>}, the Cassandra-compatible version with DSE's build
      * number as a fourth component: {@code 4.0.0.6012} for 6.0.12, {@code 4.0.0.678} for 6.7.8, {@code 4.0.0.6855} for
-     * 6.8.55, and {@code 4.0.0.6865} and {@code 4.0.0.6926}, what DSE 6.8.65 and 6.9.26 report ({@code system-local.json},
-     * {@code nodes-local.json} and {@code nodetool-gossipinfo.txt} under {@code test/data/dse-compat}). Apache Cassandra
-     * 4.0.0 reports three components, HCD 1.2 {@code 4.0.11.x}, this software 5.0 or later.
+     * 6.8.55, and {@code 4.0.0.6865} and {@code 4.0.0.6926}, what DSE 6.8.65 and 6.9.26 report (under
+     * {@code test/data/dse-compat}: DSE's node metadata files {@code nodes/dse-6.8.65/local} and
+     * {@code nodes/dse-6.9.26/local}, and {@code gossip/dse-6.9.26/gossipinfo.txt}, the output of
+     * {@code nodetool gossipinfo}). Apache Cassandra 4.0.0 reports three components, HCD 1.2 {@code 4.0.11.x}, this
+     * software 5.0 or later.
      */
     public static boolean isDse6ReleaseVersion(@Nullable CassandraVersion version)
     {

@@ -1880,6 +1880,11 @@ public class DatabaseDescriptor
         }
         else
         {
+            // the expected case, with nothing for the operator to change: INFO for the node as well (on the node the
+            // mode itself is announced with a WARN once the version is verified)
+            logger.info("internode_compatibility_mode DSE_6 sets {}={}, which was not set: " +
+                        "DSE 6 cannot read newer trie indexes",
+                        CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.getKey(), trieVersion);
             CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.setString(trieVersion);
         }
     }
