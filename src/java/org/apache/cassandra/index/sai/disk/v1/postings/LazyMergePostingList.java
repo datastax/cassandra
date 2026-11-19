@@ -198,10 +198,8 @@ public final class LazyMergePostingList implements PostingList
         boolean initialScan = bound == 0;
         bound = Long.MAX_VALUE;
 
-        CloseableIterator<Long> ids = null;
-        try
+        try (CloseableIterator<Long> ids = source.postingListIds())
         {
-            ids = source.postingListIds();
             while (ids.hasNext())
             {
                 long id = ids.next();
@@ -218,7 +216,6 @@ public final class LazyMergePostingList implements PostingList
         catch (Exception e)
         {
             FileUtils.closeQuietly(queue.candidates());
-            FileUtils.closeQuietly(ids);
             FileUtils.closeQuietly(source);
             throw e;
         }
