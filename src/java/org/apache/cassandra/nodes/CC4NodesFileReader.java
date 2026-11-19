@@ -289,8 +289,8 @@ final class CC4NodesFileReader
      * Renames the CC4 nodes directory to {@code nodes.migrated} so subsequent restarts
      * do not attempt migration again. In {@code internode_compatibility_mode: DSE_6} the directory is left
      * in place instead: a node rolled back to DSE restarts from these files (the import is then recorded by
-     * the marker of {@link CC4UpgradeNodesPersistence}). Its only caller already skips it in that mode; the check
-     * is a defensive guard for any future caller.
+     * the marker of {@link Dse6UpgradeNodesPersistence}). Its callers never call it in that mode ({@link Nodes} never
+     * takes {@link CC4UpgradeNodesPersistence} in it); the check is a defensive guard for any future caller.
      */
     static void archiveCC4NodesDirectory()
     {
