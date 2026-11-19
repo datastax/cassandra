@@ -61,19 +61,19 @@ public final class TracingTestImpl extends Tracing
     }
 
     @Override
-    protected UUID newSession(ClientState state, UUID sessionId, TraceType traceType, Map<String, ByteBuffer> customPayload)
+    protected UUID newSession(ClientState state, UUID sessionId, TraceType traceType, boolean wasProbabilistic, Map<String, ByteBuffer> customPayload)
     {
         if (!customPayload.isEmpty())
             logger.info("adding custom payload items {}", StringUtils.join(customPayload.keySet(), ','));
 
         payloads.putAll(customPayload);
-        return super.newSession(state, sessionId, traceType, customPayload);
+        return super.newSession(state, sessionId, traceType, wasProbabilistic, customPayload);
     }
 
     @Override
-    protected TraceState newTraceState(ClientState state, InetAddressAndPort ia, UUID uuid, TraceType tt)
+    protected TraceState newTraceState(ClientState state, InetAddressAndPort ia, UUID uuid, TraceType tt, boolean wasProbabilistic)
     {
-        return new TraceState(state, ia, uuid, tt)
+        return new TraceState(state, ia, uuid, tt, false)
         {
             protected void traceImpl(String string)
             {
@@ -82,6 +82,24 @@ public final class TracingTestImpl extends Tracing
 
             protected void waitForPendingEvents()
             {
+            }
+
+            @Override
+            public TraceStorage getStorage()
+            {
+                return null;
+            }
+
+            @Override
+            public void stopSession()
+            {
+                traces.add("stop");
+            }
+
+            @Override
+            public void begin(InetAddress client, String request, Map<String, String> parameters)
+            {
+                traces.add("begin");
             }
         };
     }
