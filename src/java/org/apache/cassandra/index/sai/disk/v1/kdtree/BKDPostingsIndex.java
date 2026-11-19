@@ -23,6 +23,7 @@ import com.carrotsearch.hppc.IntLongHashMap;
 import com.carrotsearch.hppc.IntLongMap;
 import org.apache.cassandra.index.sai.disk.io.IndexInputReader;
 import org.apache.cassandra.io.util.FileHandle;
+import org.apache.cassandra.utils.ObjectSizes;
 import org.github.jamm.MemoryLayoutSpecification;
 
 import static com.google.common.base.Preconditions.checkArgument;
@@ -55,13 +56,6 @@ class BKDPostingsIndex
                 index.put(node, filePointer);
             }
         }
-    }
-
-    public long memoryUsage()
-    {
-        // IntLongHashMap uses two arrays: one for keys, one for values.
-        return MemoryLayoutSpecification.sizeOfArray(index.size(), 4L)
-               + MemoryLayoutSpecification.sizeOfArray(index.size(), 8L);
     }
 
     /**
