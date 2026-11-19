@@ -375,29 +375,64 @@ public class Dse6ReadGuardTest extends CQLTester
      * ({@code RowFilter.REJECT_ALL}, a disjunction with no branch), which is never sent to a replica: the coordinator
      * answers the read with no rows before {@code StorageProxy}, where the guard sits, so it is neither refused as a
      * disjunction nor counted, even when it carries what the guard refuses (an OR of empty branches, a map entry
-     * compared with a range). Once its empty branches are dropped, an OR left with a single bracketed group is that
-     * group, a plain conjunction, and is served; an OR that keeps a bare condition beside them is refused as before.
+     * compared with a range, GROUP BY with a selector function). Each empty read that carries a refused feature is
+     * paired with a control, the same read with a range the row satisfies, which reaches the guard and is refused and
+     * counted. Once its empty branches are dropped, an OR left with a single bracketed group is that group, a plain
+     * conjunction, and is served; an OR that keeps a bare condition beside them is refused as before.
      */
     @Test
     public void unsatisfiableReadIsAnsweredBeforeTheGuard() throws Throwable
     {
-        createTable("CREATE TABLE %s (k int PRIMARY KEY, v int, m map<text, int>)");
-        execute("INSERT INTO %s (k, v, m) VALUES (1, 4, {'a': 4})");
+        createTable("CREATE TABLE %s (k int, t timestamp, v int, m map<text, int>, PRIMARY KEY (k, t))");
+        execute("INSERT INTO %s (k, t, v, m) VALUES (1, '2016-09-27 16:10:00 UTC', 4, {'a': 4})");
+        String groupByFunction = "read with GROUP BY with a selector function";
+        String mapEntryRange = "read with a map entry compared with >";
+        String disjunction = "read with a disjunction (OR) in the WHERE clause";
 
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
-        assertRowsNet(executeNet("SELECT k FROM %s WHERE v > 5 AND v < 3 ALLOW FILTERING"));
-        assertRowsNet(executeNet("SELECT k FROM %s WHERE v >= 4 AND v <= 4 AND v != 4 ALLOW FILTERING"));
-        // a map entry compared with > or < is refused when it reaches the guard (refusesMapEntryComparisonsAtTheCoordinator)
+        // an empty range read with GROUP BY and a selector function, which the guard refuses
+        // (refusesGroupByWithASelectorFunction)
+        assertRowsNet(executeNet(groupedByAFunction("v > 5 AND v < 3")));
+        assertEquals(0, DseCompatRefusals.total());
+        assertInvalidMessageNet("DSE 6 compatibility mode: GROUP BY with a selector function is not available",
+                                groupedByAFunction("v > 3 AND v < 5"));
+        assertEquals(1, DseCompatRefusals.count(groupByFunction));
+
+        // a single value excluded from a range of that value alone: empty too
+        assertRowsNet(executeNet(groupedByAFunction("v >= 4 AND v <= 4 AND v != 4")));
+        assertEquals(1, DseCompatRefusals.total());
+        assertInvalidMessageNet("DSE 6 compatibility mode: GROUP BY with a selector function is not available",
+                                groupedByAFunction("v >= 4 AND v <= 4 AND v != 3"));
+        assertEquals(2, DseCompatRefusals.count(groupByFunction));
+
+        // a map entry compared with > or < (refusesMapEntryComparisonsAtTheCoordinator)
         assertRowsNet(executeNet("SELECT k FROM %s WHERE m['a'] > 5 AND m['a'] < 3 ALLOW FILTERING"));
+        assertEquals(2, DseCompatRefusals.total());
+        assertInvalidMessageNet("DSE 6 compatibility mode: a map entry compared with > is not available",
+                                "SELECT k FROM %s WHERE m['a'] > 3 AND m['a'] < 5 ALLOW FILTERING");
+        assertEquals(1, DseCompatRefusals.count(mapEntryRange));
+
+        // an OR whose every branch is empty
         assertRowsNet(executeNet("SELECT k FROM %s WHERE (v > 5 AND v < 3) OR (v > 7 AND v < 6) ALLOW FILTERING"));
+        assertEquals(3, DseCompatRefusals.total());
+        assertInvalidMessageNet("DSE 6 compatibility mode: a disjunction (OR) in the WHERE clause is not available",
+                                "SELECT k FROM %s WHERE (v > 3 AND v < 5) OR (v > 7 AND v < 9) ALLOW FILTERING");
+        assertEquals(1, DseCompatRefusals.count(disjunction));
+
+        // an OR left with a single bracketed group is that group, served; with a bare condition beside it, refused
         assertRowsNet(executeNet("SELECT k FROM %s WHERE (v > 5 AND v < 3) OR (v > 3 AND v < 5) ALLOW FILTERING"), row(1));
         assertRowsNet(executeNet("SELECT k FROM %s WHERE v > 3 AND v < 5 ALLOW FILTERING"), row(1));
-        assertEquals(0, DseCompatRefusals.total());
-
+        assertEquals(4, DseCompatRefusals.total());
         assertInvalidMessageNet("DSE 6 compatibility mode: a disjunction (OR) in the WHERE clause is not available",
                                 "SELECT k FROM %s WHERE (v > 5 AND v < 3) OR v = 4 ALLOW FILTERING");
-        assertEquals(1, DseCompatRefusals.count("read with a disjunction (OR) in the WHERE clause"));
-        assertEquals(1, DseCompatRefusals.total());
+        assertEquals(2, DseCompatRefusals.count(disjunction));
+        assertEquals(5, DseCompatRefusals.total());
+    }
+
+    /** A read of the table of {@link #unsatisfiableReadIsAnsweredBeforeTheGuard} grouped by a function of a column. */
+    private static String groupedByAFunction(String where)
+    {
+        return "SELECT k, floor(t, 5m), count(v) FROM %s WHERE " + where + " GROUP BY k, floor(t, 5m) ALLOW FILTERING";
     }
 
     /** GROUP BY a primary-key prefix is Cassandra 3.10's and passes; grouping by a function of a column is not DSE's. */
