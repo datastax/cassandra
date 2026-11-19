@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.utils.logging;
 
-import java.security.AccessControlException;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -35,15 +34,11 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.LoggerContext;
 import ch.qos.logback.classic.spi.ILoggingEvent;
-import ch.qos.logback.classic.spi.TurboFilterList;
-import ch.qos.logback.classic.turbo.ReconfigureOnChangeFilter;
-import ch.qos.logback.classic.turbo.TurboFilter;
 import ch.qos.logback.classic.util.ContextInitializer;
 import ch.qos.logback.core.Appender;
 import ch.qos.logback.core.filter.Filter;
 import ch.qos.logback.core.hook.DefaultShutdownHook;
 import ch.qos.logback.core.spi.AppenderAttachable;
-import org.apache.cassandra.security.ThreadAwareSecurityManager;
 
 /**
  * Encapsulates all logback-specific implementations in a central place.
@@ -55,36 +50,6 @@ public class LogbackLoggingSupport implements LoggingSupport
 {
 
     private static final org.slf4j.Logger logger = LoggerFactory.getLogger(LogbackLoggingSupport.class);
-
-    @Override
-    public void onStartup()
-    {
-        // The default logback configuration in conf/logback.xml allows reloading the
-        // configuration when the configuration file has changed (every 60 seconds by default).
-        // This requires logback to use file I/O APIs. But file I/O is not allowed from UDFs.
-        // I.e. if logback decides to check for a modification of the config file while
-        // executing a sandbox thread, the UDF execution and therefore the whole request
-        // execution will fail with an AccessControlException.
-        // To work around this, a custom ReconfigureOnChangeFilter is installed, that simply
-        // prevents this configuration file check and possible reload of the configuration,
-        // while executing sandboxed UDF code.
-        //
-        // NOTE: this is obsolte with logback versions (at least since 1.2.3)
-        Logger logbackLogger = (Logger) LoggerFactory.getLogger(ThreadAwareSecurityManager.class);
-        LoggerContext ctx = logbackLogger.getLoggerContext();
-
-        TurboFilterList turboFilterList = ctx.getTurboFilterList();
-        for (int i = 0; i < turboFilterList.size(); i++)
-        {
-            TurboFilter turboFilter = turboFilterList.get(i);
-            if (turboFilter instanceof ReconfigureOnChangeFilter)
-            {
-                ReconfigureOnChangeFilter reconfigureOnChangeFilter = (ReconfigureOnChangeFilter) turboFilter;
-                turboFilterList.set(i, new SMAwareReconfigureOnChangeFilter(reconfigureOnChangeFilter));
-                break;
-            }
-        }
-    }
 
     @Override
     public void onShutdown()
@@ -163,34 +128,5 @@ public class LogbackLoggingSupport implements LoggingSupport
     {
         Iterator<Appender<ILoggingEvent>> it = logBackLogger.iteratorForAppenders();
         return it.hasNext();
-    }
-
-    /**
-     * The purpose of this class is to prevent logback from checking for config file change,
-     * if the current thread is executing a sandboxed thread to avoid {@link AccessControlException}s.
-     *
-     * This is obsolete with logback versions that replaced {@link ReconfigureOnChangeFilter}
-     * with {@link ch.qos.logback.classic.joran.ReconfigureOnChangeTask} (at least logback since 1.2.3).
-     */
-    private static class SMAwareReconfigureOnChangeFilter extends ReconfigureOnChangeFilter
-    {
-        SMAwareReconfigureOnChangeFilter(ReconfigureOnChangeFilter reconfigureOnChangeFilter)
-        {
-            setRefreshPeriod(reconfigureOnChangeFilter.getRefreshPeriod());
-            setName(reconfigureOnChangeFilter.getName());
-            setContext(reconfigureOnChangeFilter.getContext());
-            if (reconfigureOnChangeFilter.isStarted())
-            {
-                reconfigureOnChangeFilter.stop();
-                start();
-            }
-        }
-
-        protected boolean changeDetected(long now)
-        {
-            if (ThreadAwareSecurityManager.isSecuredThread())
-                return false;
-            return super.changeDetected(now);
-        }
     }
 }
