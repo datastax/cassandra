@@ -418,10 +418,36 @@ public class InternodeCompatibilityModeTest
         DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.HCD_1);
         // the property is absent (cleared before every test)
         assertThat(TRIE_INDEX_FORMAT_VERSION.isPresent()).isFalse();
-        DatabaseDescriptor.applyInternodeCompatibilityMode(dse6Config());
-        assertThat(DatabaseDescriptor.isDse6CompatibilityMode()).isTrue();
-        assertThat(TRIE_INDEX_FORMAT_VERSION.isPresent()).isTrue();
-        assertThat(TRIE_INDEX_FORMAT_VERSION.getString()).isEqualTo("bb");
+        Logger ddLogger = (Logger) LoggerFactory.getLogger(DatabaseDescriptor.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        ddLogger.addAppender(appender);
+        try
+        {
+            DatabaseDescriptor.applyInternodeCompatibilityMode(dse6Config());
+            assertThat(DatabaseDescriptor.isDse6CompatibilityMode()).isTrue();
+            assertThat(TRIE_INDEX_FORMAT_VERSION.isPresent()).isTrue();
+            assertThat(TRIE_INDEX_FORMAT_VERSION.getString()).isEqualTo("bb");
+            assertThat(appender.list)
+            .anyMatch(e -> e.getLevel() == Level.INFO &&
+                           e.getFormattedMessage().equals(trieVersionSetMessage()));
+
+            // already set: nothing to log
+            appender.list.clear();
+            DatabaseDescriptor.applyInternodeCompatibilityMode(dse6Config());
+            assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().contains(TRIE_INDEX_FORMAT_VERSION.getKey()));
+        }
+        finally
+        {
+            ddLogger.detachAppender(appender);
+        }
+    }
+
+    /** The INFO line of the DSE_6 mode when it sets the trie version property, which was not set. */
+    static String trieVersionSetMessage()
+    {
+        return "internode_compatibility_mode DSE_6 sets " + TRIE_INDEX_FORMAT_VERSION.getKey() +
+               "=bb, which was not set: DSE 6 cannot read newer trie indexes";
     }
 
     @Test

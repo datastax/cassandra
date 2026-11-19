@@ -61,6 +61,8 @@ public class InternodeCompatibilityModeClientTest
             assertThat(appender.list).noneMatch(e -> e.getLevel() == Level.WARN && e.getFormattedMessage().contains("internode_compatibility_mode"));
             assertThat(appender.list).anyMatch(e -> e.getLevel() == Level.INFO &&
                                                     e.getFormattedMessage().startsWith("internode_compatibility_mode DSE_6 forces uuid_sstable_identifiers_enabled off"));
+            assertThat(appender.list).anyMatch(e -> e.getLevel() == Level.INFO &&
+                                                    e.getFormattedMessage().equals(InternodeCompatibilityModeTest.trieVersionSetMessage()));
 
             assertThat(DatabaseDescriptor.getInternodeCompatibilityMode()).isEqualTo(InternodeCompatibilityMode.NONE);
             assertThat(DatabaseDescriptor.isDse6CompatibilityMode()).isFalse();

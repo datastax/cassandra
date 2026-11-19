@@ -69,6 +69,9 @@ public class InternodeCompatibilityModeToolTest
             assertThat(appender.list).noneMatch(e -> e.getFormattedMessage().startsWith("Running in internode_compatibility_mode DSE_6"));
             assertThat(appender.list).anyMatch(e -> e.getLevel() == Level.WARN &&
                                                     e.getFormattedMessage().startsWith("internode_compatibility_mode DSE_6 forces uuid_sstable_identifiers_enabled off"));
+            // setting the trie version is INFO; conf/logback-tools.xml prints WARN and above only, so tools do not show it
+            assertThat(appender.list).anyMatch(e -> e.getLevel() == Level.INFO &&
+                                                    e.getFormattedMessage().equals(InternodeCompatibilityModeTest.trieVersionSetMessage()));
 
             assertThat(DatabaseDescriptor.getInternodeCompatibilityMode()).isEqualTo(InternodeCompatibilityMode.NONE);
             assertThat(DatabaseDescriptor.isDse6CompatibilityMode()).isFalse();
