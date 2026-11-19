@@ -64,6 +64,18 @@ public class CommitLogReplayerTest
     {
         DatabaseDescriptor.daemonInitialization();
     }
+    private static CommitLogReplayer newReplayer()
+    {
+        return new CommitLogReplayer(CommitLog.instance, CommitLogPosition.NONE, null, CommitLogReplayer.ReplayFilter.create());
+    }
+
+    private static Future<Integer> initiateMutation(CommitLogReplayer.MutationInitiator mutationInitiator, CommitLogReplayer replayer, String segment)
+    {
+        CommitLogDescriptor descriptor = mock(CommitLogDescriptor.class);
+        when(descriptor.fileName()).thenReturn(segment);
+        return mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
+    }
+
     @Test
     @BMRules(rules = { @BMRule(name = "Fail applying mutation",
             targetClass = "org.apache.cassandra.concurrent.Stage",
@@ -71,12 +83,9 @@ public class CommitLogReplayerTest
             action = "return org.apache.cassandra.utils.concurrent.ImmediateFuture.failure(new RuntimeException(\"mutation failed\"));") } )
     public void testTrackingSegmentsWhenMutationFails()
     {
-        CommitLogReplayer.MutationInitiator mutationInitiator = new CommitLogReplayer.MutationInitiator();
-        CommitLogReplayer replayer = new CommitLogReplayer(CommitLog.instance, CommitLogPosition.NONE, null, CommitLogReplayer.ReplayFilter.create());
-        CommitLogDescriptor descriptor = mock(CommitLogDescriptor.class);
+        CommitLogReplayer replayer = newReplayer();
         String failedSegment = "failedSegment";
-        when(descriptor.fileName()).thenReturn(failedSegment);
-        Future<Integer> mutationFuture = mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
+        Future<Integer> mutationFuture = initiateMutation(new CommitLogReplayer.MutationInitiator(), replayer, failedSegment);
         Assert.assertThrows(ExecutionException.class, () -> mutationFuture.get());
         Assert.assertTrue(!replayer.getSegmentWithFailedMutations().isEmpty());
         Assert.assertTrue(replayer.getSegmentWithFailedMutations().contains(failedSegment));
@@ -101,10 +110,8 @@ public class CommitLogReplayerTest
                 Assert.fail("onFailedMutation must not be called when the mutation succeeds");
             }
         };
-        CommitLogReplayer replayer = new CommitLogReplayer(CommitLog.instance, CommitLogPosition.NONE, null, CommitLogReplayer.ReplayFilter.create());
-        CommitLogDescriptor descriptor = mock(CommitLogDescriptor.class);
-        when(descriptor.fileName()).thenReturn("segment");
-        Future<Integer> mutationFuture = mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
+        CommitLogReplayer replayer = newReplayer();
+        Future<Integer> mutationFuture = initiateMutation(mutationInitiator, replayer, "segment");
 
         Assert.assertEquals(Integer.valueOf(42), mutationFuture.get(5, TimeUnit.SECONDS));
         Assert.assertTrue(replayer.getSegmentWithFailedMutations().isEmpty());
@@ -129,14 +136,16 @@ public class CommitLogReplayerTest
                 throw new IllegalStateException("hook failed");
             }
         };
-        CommitLogReplayer replayer = new CommitLogReplayer(CommitLog.instance, CommitLogPosition.NONE, null, CommitLogReplayer.ReplayFilter.create());
-        CommitLogDescriptor descriptor = mock(CommitLogDescriptor.class);
+        CommitLogReplayer replayer = newReplayer();
         String failedSegment = "failedSegment";
-        when(descriptor.fileName()).thenReturn(failedSegment);
-        Future<Integer> mutationFuture = mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
+        Future<Integer> mutationFuture = initiateMutation(mutationInitiator, replayer, failedSegment);
 
         Assert.assertTrue("returned future must complete even if onFailedMutation throws", mutationFuture.awaitUninterruptibly(5, TimeUnit.SECONDS));
         Assert.assertTrue(mutationFuture.isDone());
+        Assert.assertFalse("future must be failed, not successful", mutationFuture.isSuccess());
+        Throwable cause = mutationFuture.cause();
+        Assert.assertTrue("expected the original RuntimeException but got " + cause, cause != null && cause.getClass() == RuntimeException.class);
+        Assert.assertEquals("mutation failed", cause.getMessage());
         Assert.assertTrue("segment must be recorded as failed even if the hook throws",
                           replayer.getSegmentWithFailedMutations().contains(failedSegment));
     }
@@ -151,11 +160,7 @@ public class CommitLogReplayerTest
             action = "return org.apache.cassandra.utils.concurrent.ImmediateFuture.failure(new java.lang.AssertionError(\"boom\"));") } )
     public void testOriginalErrorIsPropagatedWhenMutationFails()
     {
-        CommitLogReplayer.MutationInitiator mutationInitiator = new CommitLogReplayer.MutationInitiator();
-        CommitLogReplayer replayer = new CommitLogReplayer(CommitLog.instance, CommitLogPosition.NONE, null, CommitLogReplayer.ReplayFilter.create());
-        CommitLogDescriptor descriptor = mock(CommitLogDescriptor.class);
-        when(descriptor.fileName()).thenReturn("failedSegment");
-        Future<Integer> mutationFuture = mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
+        Future<Integer> mutationFuture = initiateMutation(new CommitLogReplayer.MutationInitiator(), newReplayer(), "failedSegment");
 
         Assert.assertTrue(mutationFuture.isDone());
         Throwable cause = mutationFuture.cause();
@@ -173,11 +178,7 @@ public class CommitLogReplayerTest
             action = "return org.apache.cassandra.utils.concurrent.ImmediateFuture.failure(new java.util.concurrent.CancellationException(\"cancelled\"));") } )
     public void testCauseIsPreservedWhenFailureHasNoCause()
     {
-        CommitLogReplayer.MutationInitiator mutationInitiator = new CommitLogReplayer.MutationInitiator();
-        CommitLogReplayer replayer = new CommitLogReplayer(CommitLog.instance, CommitLogPosition.NONE, null, CommitLogReplayer.ReplayFilter.create());
-        CommitLogDescriptor descriptor = mock(CommitLogDescriptor.class);
-        when(descriptor.fileName()).thenReturn("failedSegment");
-        Future<Integer> mutationFuture = mutationInitiator.initiateMutation(mock(Mutation.class), descriptor, 0, 0, replayer);
+        Future<Integer> mutationFuture = initiateMutation(new CommitLogReplayer.MutationInitiator(), newReplayer(), "failedSegment");
 
         Assert.assertTrue(mutationFuture.isDone());
         Throwable cause = mutationFuture.cause();

@@ -430,14 +430,15 @@ public class CommitLogReplayer implements CommitLogReadHandler
                 Throwable cause = mutationFuture.cause();
                 try
                 {
-                    noSpamLogger.warn("Failed applying mutation for keyspace {}", mutation.getKeyspaceName(), cause);
-                    // record the segment before invoking the overridable hook, so it is tracked even if the hook throws
+                    // record the segment first, so tracking never depends on the hook or on logging succeeding
                     commitLogReplayer.segmentsWithFailedMutations.add(desc.fileName());
                     onFailedMutation(mutation.getKeyspaceName(), mutation.getTableIds());
+                    noSpamLogger.warn("Failed applying mutation for keyspace {} in segment {}", mutation.getKeyspaceName(), desc.fileName(), cause);
                 }
                 catch (Exception e)
                 {
-                    noSpamLogger.error("onFailedMutation hook failed for keyspace {}", mutation.getKeyspaceName(), e);
+                    // deliberately Exception, not Throwable: Errors fall through to ExecutionFailure/JVMStabilityInspector
+                    noSpamLogger.error("onFailedMutation hook failed for keyspace {} in segment {}", mutation.getKeyspaceName(), desc.fileName(), e);
                 }
                 finally
                 {
