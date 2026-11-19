@@ -81,6 +81,7 @@ import static org.apache.cassandra.tools.dsepreflight.DseNodeFixture.row;
 import static org.apache.cassandra.tools.dsepreflight.DseNodeFixture.section;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * The preflight inspection run through its command line ({@link DsePreflight#run}) on a DSE 6.8.65 node laid out from
@@ -712,6 +713,202 @@ public class DsePreflightTest
         addTable(node, "lab", "places", stcs(), lz4(), Set.of("compound"), Map.of("location", "'com.example.marshal.NoSuchType'"));
         Run run = assertBlocked(run(node), "UNLOADABLE_TABLE");
         assertThat(run.messages("UNLOADABLE_TABLE")).contains("lab.places").contains("com.example.marshal.NoSuchType");
+    }
+
+    // ---- vector columns ----
+
+    /**
+     * How the message of {@code VECTOR_COLUMN} starts, before the table. The schema rows of these tests are shaped as
+     * DSE 6.9 writes them: the type of a vector column in its CQL form ({@code vector<float, 3>}), a vector SAI index
+     * with its {@code similarity_function} option; the release of the node does not change the check.
+     */
+    private static final String VECTOR_MESSAGE = "ANN workloads and tables with VECTOR columns are not supported by the " +
+                                                 "in-place upgrade from DSE 6.9 to HCD 2.0: the table ";
+    private static final String VECTOR_REMEDY = "remove these columns or tables, or move that data by other means, " +
+                                                "before the upgrade; a vector in the primary key goes only with its " +
+                                                "table, and once a column is dropped (ALTER TABLE ... DROP, after the " +
+                                                "indexes and views on it), nodetool upgradesstables -a <keyspace> " +
+                                                "<table> on every DSE node rewrites the sstables without its data";
+
+    @Test
+    public void aVectorColumnBlocksWithOneFindingPerTable() throws IOException
+    {
+        DseNodeFixture node = node();
+        addTable(node, "lab", "items", stcs(), lz4(), Set.of("compound"),
+                 Map.of("embedding", "vector<float, 3>", "other", "vector<float, 2>", "plain", "list<float>"));
+        addTable(node, "lab", "notes", stcs(), lz4(), Set.of("compound"), Map.of("summary", "vector<float, 8>"));
+        addTable(node, "lab", "plain", stcs(), lz4(), Set.of("compound"), Map.of("n", "list<float>"));
+        // a system keyspace and DSE core's own keyspaces are left out
+        addTable(node, "system_traces", "vectors", stcs(), lz4(), Set.of("compound"), Map.of("e", "vector<float, 2>"));
+        addTable(node, "dse_perf", "vectors", stcs(), lz4(), Set.of("compound"), Map.of("e", "vector<float, 2>"));
+        Run run = assertBlocked(run(node), SchemaInspector.VECTOR_COLUMN);
+        assertThat(run.codes(Finding.Severity.BLOCKING)).containsExactly(SchemaInspector.VECTOR_COLUMN);
+        assertThat(run.findings(SchemaInspector.VECTOR_COLUMN)).extracting(f -> f.message)
+            .containsExactly(VECTOR_MESSAGE + "lab.items has the vector columns embedding (vector<float, 3>), other " +
+                             "(vector<float, 2>)",
+                             VECTOR_MESSAGE + "lab.notes has the vector column summary (vector<float, 8>)");
+        assertThat(run.findings(SchemaInspector.VECTOR_COLUMN)).extracting(f -> f.remedy).containsOnly(VECTOR_REMEDY);
+        assertThat(SchemaInspector.VECTOR_REMEDY).isEqualTo(VECTOR_REMEDY);
+        assertThat(run.out).contains("[VECTOR_COLUMN]");
+    }
+
+    @Test
+    public void aVectorNestedInAnyTypeOfAnyColumnBlocks() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "types", KEYSPACES_KEY, List.of("type_name"),
+                       row("lab", "holder").with("field_names", List.of("name", "e")).with("field_types", List.of("text", "vector<float, 4>")),
+                       row("lab", "flat").with("field_names", List.of("name")).with("field_types", List.of("text")));
+        node.writeRows("system_schema", "tables", KEYSPACES_KEY, TABLES_KEY,
+                       withTableOptions(row("lab", "nested"), stcs(), lz4()).with("flags", Set.of("compound")));
+        node.writeRows("system_schema", "columns", KEYSPACES_KEY, COLUMNS_KEY,
+                       column("lab", "nested", "pk", "partition_key", 0, "frozen<tuple<int, vector<float, 2>>>"),
+                       column("lab", "nested", "ck", "clustering", 0, "frozen<list<vector<float, 2>>>").with("clustering_order", "desc"),
+                       column("lab", "nested", "s", "static", -1, "frozen<map<vector<float, 2>, text>>"),
+                       column("lab", "nested", "m", "regular", -1, "map<text, vector<float, 2>>"),
+                       column("lab", "nested", "u", "regular", -1, "frozen<holder>"),
+                       column("lab", "nested", "w", "regular", -1, "holder"),
+                       column("lab", "nested", "f", "regular", -1, "frozen<flat>"),
+                       column("lab", "nested", "v", "regular", -1, "text"));
+        Run run = assertBlocked(run(node), SchemaInspector.VECTOR_COLUMN);
+        assertThat(run.codes(Finding.Severity.BLOCKING)).containsExactly(SchemaInspector.VECTOR_COLUMN);
+        assertThat(run.messages(SchemaInspector.VECTOR_COLUMN))
+            .isEqualTo(VECTOR_MESSAGE + "lab.nested has the vector columns ck (frozen<list<vector<float, 2>>>), m " +
+                       "(map<text, vector<float, 2>>), pk (frozen<tuple<int, vector<float, 2>>>), s " +
+                       "(frozen<map<vector<float, 2>, text>>), u (frozen<holder>), w (holder)");
+    }
+
+    @Test
+    public void theIndexesAndViewsOfAVectorColumnAreNamed() throws IOException
+    {
+        DseNodeFixture node = node();
+        addTable(node, "lab", "docs", stcs(), lz4(), Set.of("compound"), Map.of("embedding", "vector<float, 3>"));
+        node.writeRows("system_schema", "indexes", KEYSPACES_KEY, INDEXES_KEY,
+                       row("lab", "docs", "docs_ann").with("kind", "CUSTOM")
+                                                     .with("options", Map.of("class_name", "org.apache.cassandra.index.sai.StorageAttachedIndex",
+                                                                             "target", "embedding", "similarity_function", "COSINE")),
+                       row("lab", "docs", "docs_short").with("kind", "CUSTOM")
+                                                       .with("options", Map.of("class_name", "StorageAttachedIndex", "target", "embedding")),
+                       row("lab", "docs", "docs_v").with("kind", "CUSTOM")
+                                                   .with("options", Map.of("class_name", "org.apache.cassandra.index.sai.StorageAttachedIndex",
+                                                                           "target", "v")));
+        node.writeRows("system_schema", "views", KEYSPACES_KEY, List.of("view_name"), view("lab", "docs_by_v", "docs"));
+        node.writeRows("system_schema", "columns", KEYSPACES_KEY, COLUMNS_KEY,
+                       column("lab", "docs_by_v", "v", "partition_key", 0, "text"),
+                       column("lab", "docs_by_v", "pk", "clustering", 0, "int").with("clustering_order", "asc"),
+                       column("lab", "docs_by_v", "embedding", "regular", -1, "vector<float, 3>"));
+        Run run = assertBlocked(run(node), SchemaInspector.VECTOR_COLUMN);
+        assertThat(run.codes(Finding.Severity.BLOCKING)).containsExactly(SchemaInspector.VECTOR_COLUMN);
+        assertThat(run.messages(SchemaInspector.VECTOR_COLUMN))
+            .isEqualTo(VECTOR_MESSAGE + "lab.docs has the vector column embedding (vector<float, 3>); the indexes on " +
+                       "it: lab.docs.docs_ann (org.apache.cassandra.index.sai.StorageAttachedIndex, similarity_function " +
+                       "COSINE), lab.docs.docs_short (StorageAttachedIndex); the materialized views that select it: " +
+                       "lab.docs_by_v (embedding)");
+    }
+
+    @Test
+    public void quotedNamesMapTargetsUnparsedTargetsAndUnloadableTables() throws IOException
+    {
+        DseNodeFixture node = node();
+        node.writeRows("system_schema", "tables", KEYSPACES_KEY, TABLES_KEY,
+                       withTableOptions(row("lab", "quoted"), stcs(), lz4()).with("flags", Set.of("compound")));
+        node.writeRows("system_schema", "columns", KEYSPACES_KEY, COLUMNS_KEY,
+                       column("lab", "quoted", "pk", "partition_key", 0, "int"),
+                       column("lab", "quoted", "Emb", "regular", -1, "vector<float, 2>"),
+                       column("lab", "quoted", "m", "regular", -1, "map<text, vector<float, 2>>"),
+                       column("lab", "quoted", "v", "regular", -1, "text"));
+        node.writeRows("system_schema", "indexes", KEYSPACES_KEY, INDEXES_KEY,
+                       row("lab", "quoted", "by_emb").with("kind", "CUSTOM")
+                                                     .with("options", Map.of("class_name", "org.apache.cassandra.index.sai.StorageAttachedIndex",
+                                                                             "target", "\"Emb\"", "similarity_function", "dot_product")),
+                       row("lab", "quoted", "by_m").with("kind", "COMPOSITES").with("options", Map.of("target", "values(m)")),
+                       row("lab", "quoted", "by_v").with("kind", "COMPOSITES").with("options", Map.of("target", "v")),
+                       row("lab", "quoted", "gone").with("kind", "CUSTOM")
+                                                   .with("options", Map.of("class_name", "org.apache.cassandra.index.sai.StorageAttachedIndex",
+                                                                           "target", "no_such_column")));
+        // a table HCD 2.0 cannot load is UNLOADABLE_TABLE's only, its vector column not checked
+        addTable(node, "lab", "broken", stcs(), lz4(), Set.of("compound"),
+                 Map.of("e", "vector<float, 2>", "location", "'com.example.marshal.NoSuchType'"));
+        Run run = assertBlocked(run(node), SchemaInspector.VECTOR_COLUMN);
+        assertThat(run.codes(Finding.Severity.BLOCKING)).containsExactlyInAnyOrder(SchemaInspector.VECTOR_COLUMN, "UNLOADABLE_TABLE");
+        assertThat(run.messages(SchemaInspector.VECTOR_COLUMN))
+            .isEqualTo(VECTOR_MESSAGE + "lab.quoted has the vector columns Emb (vector<float, 2>), m (map<text, " +
+                       "vector<float, 2>>); the indexes on them: lab.quoted.by_emb " +
+                       "(org.apache.cassandra.index.sai.StorageAttachedIndex, similarity_function dot_product), " +
+                       "lab.quoted.by_m (kind COMPOSITES); its indexes whose target does not parse: lab.quoted.gone " +
+                       "(target no_such_column)");
+        assertThat(run.messages("UNLOADABLE_TABLE")).contains("lab.broken");
+    }
+
+    @Test
+    public void droppedVectorColumnsAreNamedOrWarned() throws IOException
+    {
+        DseNodeFixture node = node();
+        addTable(node, "lab", "both", stcs(), lz4(), Set.of("compound"), Map.of("embedding", "vector<float, 3>"));
+        addTable(node, "lab", "was", stcs(), lz4(), Set.of("compound"), Map.of());
+        node.writeRows("system_schema", "dropped_columns", KEYSPACES_KEY, COLUMNS_KEY,
+                       row("lab", "both", "old").with("dropped_time", new Date(1)).with("kind", "regular")
+                                                .with("type", "vector<float, 2>"),
+                       row("lab", "was", "e").with("dropped_time", new Date(1)).with("kind", "regular")
+                                             .with("type", "frozen<list<vector<float, 2>>>"),
+                       row("lab", "was", "n").with("dropped_time", new Date(1)).with("kind", "regular")
+                                             .with("type", "list<float>"));
+        Run run = assertBlocked(run(node), SchemaInspector.VECTOR_COLUMN);
+        assertThat(run.findings(SchemaInspector.VECTOR_COLUMN)).extracting(f -> f.severity, f -> f.message, f -> f.remedy)
+            .containsExactly(tuple(Finding.Severity.BLOCKING,
+                                   VECTOR_MESSAGE + "lab.both has the vector column embedding (vector<float, 3>); its " +
+                                   "dropped vector column: old (vector<float, 2>)",
+                                   VECTOR_REMEDY),
+                             tuple(Finding.Severity.WARNING,
+                                   VECTOR_MESSAGE + "lab.was has the dropped vector column e (frozen<list<vector<float, " +
+                                   "2>>>), whose data the sstables written before the drop may still hold",
+                                   "unless every sstable of the table was rewritten since the drop, run nodetool " +
+                                   "upgradesstables -a <keyspace> <table> on every DSE node before the upgrade, which " +
+                                   "rewrites them without the data of the dropped columns"));
+    }
+
+    @Test
+    public void aVectorColumnInTheMixedPhaseAsksToUpgradeNoFurtherNode() throws IOException
+    {
+        DseNodeFixture node = DseNodeFixture.create(temporaryFolder.newFolder().toPath(), DseFixtures.nodesDirectoryMixed());
+        addTable(node, "lab", "items", stcs(), lz4(), Set.of("compound"), Map.of("embedding", "vector<float, 3>"));
+        addTable(node, "lab", "was", stcs(), lz4(), Set.of("compound"), Map.of());
+        node.writeRows("system_schema", "dropped_columns", KEYSPACES_KEY, COLUMNS_KEY,
+                       row("lab", "was", "e").with("dropped_time", new Date(1)).with("kind", "regular")
+                                             .with("type", "vector<float, 2>"),
+                       row("lab", "was", "f").with("dropped_time", new Date(1)).with("kind", "regular")
+                                             .with("type", "vector<float, 4>"));
+        Run run = assertBlocked(run(node), SchemaInspector.VECTOR_COLUMN);
+        assertThat(run.findings(SchemaInspector.VECTOR_COLUMN)).extracting(f -> f.severity, f -> f.message, f -> f.remedy)
+            .containsExactly(tuple(Finding.Severity.BLOCKING,
+                                   VECTOR_MESSAGE + "lab.items has the vector column embedding (vector<float, 3>)",
+                                   "the upgrade has started (UPGRADED_PEERS), so these columns and tables stay as they " +
+                                   "are (no schema change in the mixed phase): upgrade no further node and report to " +
+                                   "the upgrade owner"),
+                             tuple(Finding.Severity.WARNING,
+                                   VECTOR_MESSAGE + "lab.was has the dropped vector columns e (vector<float, 2>), f " +
+                                   "(vector<float, 4>), whose data the sstables written before the drop may still hold",
+                                   "the upgrade has started (UPGRADED_PEERS), so the sstables stay as they are (no " +
+                                   "upgradesstables in the mixed phase): report it to the upgrade owner"));
+    }
+
+    @Test
+    public void aSchemaWithoutVectorsHasNoVectorFinding() throws IOException
+    {
+        // DSE 6.8's schema of the fixtures, then tables, a user type and an SAI index of DSE 6.9 without a vector
+        DseNodeFixture node = node();
+        Run fixtures = assertReady(run(node));
+        assertThat(fixtures.findings(SchemaInspector.VECTOR_COLUMN)).isEmpty();
+        node.writeRows("system_schema", "types", KEYSPACES_KEY, List.of("type_name"),
+                       row("lab", "point").with("field_names", List.of("x", "y")).with("field_types", List.of("float", "float")));
+        addTable(node, "lab", "floats", stcs(), lz4(), Set.of("compound"),
+                 Map.of("l", "list<float>", "t", "frozen<tuple<float, float>>", "p", "frozen<point>"));
+        node.writeRows("system_schema", "indexes", KEYSPACES_KEY, INDEXES_KEY,
+                       row("lab", "floats", "floats_v").with("kind", "CUSTOM")
+                                                       .with("options", Map.of("class_name", "org.apache.cassandra.index.sai.StorageAttachedIndex",
+                                                                               "target", "v")));
+        Run run = assertReady(run(node));
+        assertThat(run.findings(SchemaInspector.VECTOR_COLUMN)).isEmpty();
     }
 
     @Test
