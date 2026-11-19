@@ -108,7 +108,7 @@ public class LazyMergePostingListTest
     @Test
     public void emptySource() throws IOException
     {
-        int[][] lists = new int[][]{};
+        int[][] lists = {};
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
@@ -122,7 +122,7 @@ public class LazyMergePostingListTest
     public void testDuplicates() throws IOException
     {
         // Duplicate row IDs across lists, and within a single list
-        int[][] lists = new int[][]{
+        int[][] lists = {
             { 5, 5, 10, 15, 15 },
             { 5, 10, 10, 20 }
         };
@@ -145,7 +145,7 @@ public class LazyMergePostingListTest
     @Test
     public void testOverCapacity() throws IOException
     {
-        int[][] lists = new int[][]{ { 10 }, { 20 }, { 30 } };
+        int[][] lists = { { 10 }, { 20 }, { 30 } };
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
@@ -180,7 +180,7 @@ public class LazyMergePostingListTest
     @Test
     public void testOverMaxCapacity() throws IOException
     {
-        int[][] lists = new int[][]{ { 10 }, { 20 }, { 30 }, { 40 } };
+        int[][] lists = { { 10 }, { 20 }, { 30 }, { 40 } };
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 2))
         {
@@ -200,7 +200,7 @@ public class LazyMergePostingListTest
     @Test
     public void testRefillOnAdvance() throws IOException
     {
-        int[][] lists = new int[][]{ { 10, 50 }, { 20, 60 }, { 30, 70 } };
+        int[][] lists = { { 10, 50 }, { 20, 60 }, { 30, 70 } };
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
@@ -232,7 +232,7 @@ public class LazyMergePostingListTest
     @Test
     public void testMultipleRefills() throws IOException
     {
-        int[][] lists = new int[][]{
+        int[][] lists = {
             { 10, 40, 70 },
             { 20, 50, 80 },
             { 30, 60, 90 }
@@ -268,9 +268,9 @@ public class LazyMergePostingListTest
     }
 
     @Test
-    public void testFailureOnOpen() throws IOException
+    public void testFailureOnOpen()
     {
-        int[][] lists = new int[][]{ { 10 }, { 20 }, { 30 } };
+        int[][] lists = { { 10 }, { 20 }, { 30 } };
         InstrumentedSource source = new InstrumentedSource(lists);
         // Fail when opening list index 1
         source.failOnIds.add(1L);
@@ -293,7 +293,7 @@ public class LazyMergePostingListTest
     @Test
     public void testFailureOnAdvance() throws IOException
     {
-        int[][] lists = new int[][]{ { 10, 20 } };
+        int[][] lists = { { 10, 20 } };
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
@@ -318,7 +318,7 @@ public class LazyMergePostingListTest
     @Test
     public void testFailureOnNextPosting() throws IOException
     {
-        int[][] lists = new int[][]{ { 10, 20 } };
+        int[][] lists = { { 10, 20 } };
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
@@ -343,7 +343,7 @@ public class LazyMergePostingListTest
     @Test
     public void testFailureDuringRefill() throws IOException
     {
-        int[][] lists = new int[][]{ { 10 }, { 20 }, { 30 } };
+        int[][] lists = { { 10 }, { 20 }, { 30 } };
         InstrumentedSource source = new InstrumentedSource(lists);
         try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4))
         {
@@ -371,9 +371,9 @@ public class LazyMergePostingListTest
     }
 
     @Test
-    public void testFailureOnInitialNextPosting() throws IOException
+    public void testFailureOnInitialNextPosting()
     {
-        int[][] lists = new int[][]{ { 10 }, { 20 } };
+        int[][] lists = { { 10 }, { 20 } };
         InstrumentedSource source = new InstrumentedSource(lists)
         {
             @Override
@@ -388,8 +388,10 @@ public class LazyMergePostingListTest
 
         try
         {
-            new LazyMergePostingList(source, 2, 4);
-            org.junit.Assert.fail("Expected IOException");
+            try (LazyMergePostingList ignored = new LazyMergePostingList(source, 2, 4))
+            {
+                org.junit.Assert.fail("Expected IOException");
+            }
         }
         catch (IOException e)
         {
