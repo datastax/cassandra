@@ -48,6 +48,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -561,6 +562,56 @@ public class ColumnFilterTest
         try
         {
             checkPre40Layouts();
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    /**
+     * CNDB-19930 with DSE 6 peers: every DSE 6 node gossips a 4.0.0 release (DSE 6.8.65 gossips 4.0.0.6865), so while one
+     * is in the cluster a coordinator that selects some of the static columns fetches all the columns, the filter
+     * Cassandra 3.0 sends for that selection. Its bytes at version 11, the dialect of DSE 6 peers, are those of the
+     * Cassandra 3.0.14 layout: the header, the fetched columns (every column of the table), the queried columns. Each
+     * group of columns is the statics, then the regulars, each a count (an unsigned vint; with no synthetic column the
+     * packed count of this software is the 3.0.14 count) followed by the names (each its length as an unsigned vint,
+     * then its UTF-8 bytes), simple columns before complex ones, then by name. Read back at version 11 the bytes give
+     * the same filter, as on Cassandra 3.0.14 and HCD 1.2. A DSE 6 replica fetches every static column for that header
+     * too, but also takes every static column as queried (answer A33, item 3), so its answer for such a selection
+     * carries the values of the other static columns as well. With the mode off version 11 keeps the 4.0 layout, the
+     * FETCH_ALL_STATICS bit included.
+     */
+    @Test
+    public void pre40LayoutOfAStaticSelectionWithDse6Peers() throws IOException
+    {
+        setMinVersion("4.0.0.6865");
+        RegularAndStaticColumns queried = RegularAndStaticColumns.builder().add(s1).build();
+        assertThat(DatabaseDescriptor.isDse6CompatibilityMode()).isFalse();
+        ColumnFilter modeOff = ColumnFilter.selection(metadata, queried, false);
+        assertThat(serialize(modeOff, MessagingService.VERSION_3014)).isEqualTo(serialize(modeOff, MessagingService.VERSION_40));
+        assertThat(serialize(modeOff, MessagingService.VERSION_3014)[0]).isEqualTo((byte) 0x0b);
+
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            byte[] expected = Hex.hexToBytes("03" +                                 // FETCH_ALL_REGULARS (0x01) | HAS_QUERIED (0x02), no FETCH_ALL_STATICS (0x08)
+                                             "02" + "027331" + "027332" +           // fetched statics: s1, s2
+                                             "03" + "0c45736361706564204e616d65" +  // fetched regulars: "Escaped Name",
+                                             "027631" + "027632" +                  // v1, then v2 (complex, after the simple)
+                                             "01" + "027331" +                      // queried statics: s1
+                                             "00");                                 // queried regulars: none
+            for (ColumnFilter filter : new ColumnFilter[]{ ColumnFilter.selection(metadata, queried, false),
+                                                           ColumnFilter.allRegularColumnsBuilder(metadata, false).add(s1).build() })
+            {
+                assertEquals("*/[s1]", filter.toString());
+                assertThat(serialize(filter, MessagingService.VERSION_3014)).isEqualTo(expected);
+                ColumnFilter received = deserialize(expected, MessagingService.VERSION_3014);
+                assertThat(received).isEqualTo(filter);
+                assertThat(received.fetchesAllColumns(true)).isTrue();
+                assertThat(received.queriedColumns()).isEqualTo(queried);
+            }
         }
         finally
         {
