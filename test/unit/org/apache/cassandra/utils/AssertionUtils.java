@@ -18,14 +18,28 @@
 
 package org.apache.cassandra.utils;
 
+import java.util.stream.Stream;
+
 import com.google.common.base.Throwables;
 
+import org.assertj.core.api.Assertions;
 import org.assertj.core.api.Condition;
 
 public class AssertionUtils
 {
     private AssertionUtils()
     {
+    }
+
+    public static <T> Condition<T> anyOf(Stream<Condition<T>> stream) {
+        Iterable<Condition<T>> it = () -> stream.iterator();
+        return Assertions.anyOf(it);
+    }
+
+    @SafeVarargs
+    public static Condition<Throwable> anyOfThrowable(Class<? extends Throwable>... klasses)
+    {
+        return anyOf(Stream.of(klasses).map(AssertionUtils::isThrowable));
     }
 
     /**
