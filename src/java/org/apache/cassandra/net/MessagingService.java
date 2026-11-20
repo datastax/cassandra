@@ -50,6 +50,7 @@ import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.FutureCombiner;
 
@@ -359,6 +360,14 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
         public static final MessagingService instance = new MessagingService(false);
     }
 
+    private static volatile boolean instantiated;
+
+    /** Whether the node's MessagingService exists; unlike {@link #instance()}, this never creates it. */
+    public static boolean isInstantiated()
+    {
+        return instantiated;
+    }
+
     public static MessagingService instance()
     {
         return MSHandle.instance;
@@ -391,7 +400,7 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     @VisibleForTesting
     MessagingService(boolean testOnly)
     {
-        this(testOnly, new EndpointMessagingVersions(),
+        this(testOnly, new EndpointMessagingVersions(!testOnly),
              CUSTOM_MESSAGING_METRICS_PROVIDER_PROPERTY.isPresent() ?
                 FBUtilities.construct(CUSTOM_MESSAGING_METRICS_PROVIDER_PROPERTY.getString(), "Messaging Metrics Provider") :
                 new MessagingMetrics());
@@ -401,6 +410,8 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
     MessagingService(boolean testOnly, EndpointMessagingVersions versions, MessagingMetrics metrics)
     {
         super(testOnly, versions, metrics);
+        if (!testOnly)
+            instantiated = true;
         if (UNUSED_CONNECTION_MONITORING)
             OutboundConnections.scheduleUnusedConnectionMonitoring(this, ScheduledExecutors.scheduledTasks, 1L, TimeUnit.HOURS);
     }
@@ -534,6 +545,12 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
 
     private void doSend(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
     {
+        if (DseCompat.enabled() && !message.verb().existsInPre40Dialect() && versions.get(to) < VERSION_40)
+        {
+            refuseForPre40Peer(message, to);
+            return;
+        }
+
         // expire the callback if the message failed to enqueue (failed to establish a connection or exceeded queue capacity)
         while (true)
         {
@@ -552,6 +569,22 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
                 channelManagers.remove(to, connections);
             }
         }
+    }
+
+    /**
+     * DSE 6 compatibility mode: a request whose verb does not exist in the pre-4.0 dialect (repair, Paxos v2, ping,
+     * multi-range reads, custom verbs...) is never queued for a peer speaking it, which would fail on the unknown verb
+     * id. The refusal is counted in {@code nodetool compatstatus} and the callback, if any, fails at once
+     * instead of timing out. A message queued before the peer's version was known is refused when it is serialized
+     * (see {@code OutboundConnection}).
+     */
+    private void refuseForPre40Peer(Message<?> message, InetAddressAndPort to)
+    {
+        DseCompatRefusals.refused(DseCompat.refusedVerb(message.verb()));
+        NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 1, MINUTES,
+                         "DSE 6 compatibility mode: not sending {} to {}: the verb does not exist in the pre-4.0 dialect that peer speaks",
+                         message.verb(), to);
+        callbacks.onRefused(message, to);
     }
 
     void markExpiredCallback(InetAddressAndPort addr)
@@ -781,7 +814,25 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
 
     public void listen()
     {
+        seedDseDialectPeers();
         inboundSockets.open();
+    }
+
+    /**
+     * DSE 6 compatibility mode: the saved peers stored with a DSE 6 release are first connected to with the pre-4.0
+     * handshake, not the 4.0-style one DSE fails to parse (see {@link DseDialectVersions}); nothing happens otherwise.
+     */
+    @VisibleForTesting
+    void seedDseDialectPeers()
+    {
+        if (DseCompat.enabled())
+            DseDialectVersions.seedFromSavedPeers(versions);
+    }
+
+    @VisibleForTesting
+    InboundSockets inboundSockets()
+    {
+        return inboundSockets;
     }
 
     public void waitUntilListening() throws InterruptedException

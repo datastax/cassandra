@@ -37,6 +37,7 @@ import com.google.common.net.HostAndPort;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -344,7 +345,15 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
 
         void serialize(byte[] address, int port, DataOutputPlus out, int version) throws IOException
         {
-            assert version >= MessagingService.VERSION_40;
+            if (version < MessagingService.VERSION_40)
+            {
+                if (!DseCompat.enabled())
+                    throw new AssertionError("pre-4.0 serialization version " + version);
+                // the pre-4.0 layout, address only: DSE 6 compatibility mode (handshake and 3.0.14-dialect messages)
+                out.writeByte(address.length);
+                out.write(address);
+                return;
+            }
             out.writeByte(address.length + 2);
             out.write(address);
             out.writeShort(port);
@@ -355,10 +364,17 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
             int size = in.readByte() & 0xFF;
             switch(size)
             {
-                //The original pre-4.0 serialiation of just an address
+                //The original pre-4.0 serialiation of just an address (DSE 6 compatibility mode): accepted whenever the
+                //mode is on, whatever the version argument, as the size alone tells the layouts apart
                 case 4:
                 case 16:
-                    throw new AssertionError("pre-4.0 serialization size " + size);
+                {
+                    if (!DseCompat.enabled())
+                        throw new AssertionError("pre-4.0 serialization size " + size);
+                    byte[] bytes = new byte[size];
+                    in.readFully(bytes, 0, bytes.length);
+                    return getByAddress(bytes);
+                }
                 //Address and one port
                 case 6:
                 case 18:
@@ -381,7 +397,14 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
         public InetAddressAndPort extract(ByteBuffer buf, int position) throws IOException
         {
             int size = buf.get(position++) & 0xFF;
-            if (size == 6 || size == 18)
+            if ((size == 4 || size == 16) && DseCompat.enabled())
+            {
+                // pre-4.0 layout, address only (DSE 6 compatibility mode; the size alone tells the layouts apart)
+                byte[] bytes = new byte[size];
+                ByteBufferUtil.copyBytes(buf, position, bytes, 0, size);
+                return getByAddress(bytes);
+            }
+            else if (size == 6 || size == 18)
             {
                 byte[] bytes = new byte[size - 2];
                 ByteBufferUtil.copyBytes(buf, position, bytes, 0, size - 2);
@@ -400,15 +423,21 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
 
         public long serializedSize(InetSocketAddress from, int version)
         {
-            assert version >= MessagingService.VERSION_40;
+            if (version < MessagingService.VERSION_40 && !DseCompat.enabled())
+                throw new AssertionError("pre-4.0 serialization version " + version);
+            int portBytes = version >= MessagingService.VERSION_40 ? 2 : 0; // pre-4.0 (DSE 6 compatibility mode): address only
             if (from.getAddress() instanceof Inet4Address)
-                return 1 + 4 + 2;
+                return 1 + 4 + portBytes;
             assert from.getAddress() instanceof Inet6Address;
-            return 1 + 16 + 2;
+            return 1 + 16 + portBytes;
         }
     }
 
-    /** Serializer for handling FWD_FRM message parameters. 
+    /** Serializer for handling FWD_FRM message parameters.
+     *
+     * Below {@link MessagingService#VERSION_40} (the pre-4.0 dialect of the DSE 6 compatibility mode) the value
+     * is the raw address, 4 or 16 bytes with no length prefix and no port (the Cassandra 3.0 layout): it can only be
+     * read with the length of the param, see {@link #pre40DeserializeWithLength(DataInputPlus, int, int)}.
      */
     public static final class FwdFrmSerializer implements IVersionedSerializer<InetAddressAndPort>
     {
@@ -417,8 +446,14 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
 
         public void serialize(InetAddressAndPort endpoint, DataOutputPlus out, int version) throws IOException
         {
-            assert version >= MessagingService.VERSION_40;
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= MessagingService.VERSION_40;
             byte[] buf = endpoint.addressBytes;
+            if (pre40)
+            {
+                out.write(buf);
+                return;
+            }
             out.writeByte(buf.length + 2);
             out.write(buf);
             out.writeShort(endpoint.getPort());
@@ -426,11 +461,13 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
 
         public long serializedSize(InetAddressAndPort from, int version)
         {
-            assert version >= MessagingService.VERSION_40;
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= MessagingService.VERSION_40;
+            int lengthAndPort = pre40 ? 0 : 1 + 2; // the pre-4.0 value is the address alone, without length nor port
             if (from.getAddress() instanceof Inet4Address)
-                return 1 + 4 + 2;
+                return 4 + lengthAndPort;
             assert from.getAddress() instanceof Inet6Address;
-            return 1 + 16 + 2;
+            return 16 + lengthAndPort;
         }
 
         @Override
@@ -455,5 +492,15 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
             }
         }
 
+        /** Reads the pre-4.0 value, a raw address of {@code length} bytes; the port is the default storage port. */
+        public InetAddressAndPort pre40DeserializeWithLength(DataInputPlus in, int version, int length) throws IOException
+        {
+            assert DseCompat.isPre40Layout(version) : "pre-4.0 FWD_FRM at version " + version;
+            if (length != 4 && length != 16)
+                throw new IOException("Unexpected pre-4.0 FWD_FRM length " + length);
+            byte[] from = new byte[length];
+            in.readFully(from, 0, length);
+            return getByAddress(from);
+        }
     }
 }

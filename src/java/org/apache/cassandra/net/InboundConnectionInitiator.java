@@ -279,6 +279,12 @@ public class InboundConnectionInitiator
         private final InboundConnectionSettings settings;
 
         private HandshakeProtocol.Initiate initiate;
+        /** The third message of a pre-4.0 handshake (DSE 6 compatibility mode), once received. */
+        private HandshakeProtocol.ConfirmOutboundPre40 confirmOutboundPre40;
+        /** True once our 4-byte answer (the dialect) to a pre-4.0 first message was queued (DSE 6 compatibility mode). */
+        private boolean pre40Answered;
+        /** True once any byte of a third pre-4.0 handshake message reached this handler, even if the socket closed since. */
+        private boolean pre40ConfirmStarted;
 
         /**
          * A future the essentially places a timeout on how long we'll wait for the peer
@@ -297,16 +303,100 @@ public class InboundConnectionInitiator
         public void handlerAdded(ChannelHandlerContext ctx) throws Exception
         {
             handshakeTimeout = ctx.executor().schedule(() -> {
-                logger.error("Timeout handshaking with {} (on {})", SocketFactory.addressId(initiate.from, (InetSocketAddress) ctx.channel().remoteAddress()), settings.bindAddress);
+                InetSocketAddress remote = (InetSocketAddress) ctx.channel().remoteAddress();
+                if (isAbandonedByDse())
+                {
+                    logger.debug("peer {} did not send the third message of the pre-4.0 handshake (requested version {}, answered {}) " +
+                                 "within {} ms of the connection (on {}): expected from a DSE 6.8.65 node, which gives up {} " +
+                                 "and reconnects at {} on a new one; closing the socket",
+                                 remote, initiate.requestMessagingVersion, DseCompat.DSE_DIALECT, HandshakeProtocol.TIMEOUT_MILLIS,
+                                 settings.bindAddress, abandonedSocketDescription(), DseCompat.DSE_DIALECT);
+                    failHandshake(ctx);
+                    return;
+                }
+                logger.error("Timeout handshaking with {} (on {})",
+                             initiate != null && initiate.from != null ? SocketFactory.addressId(initiate.from, remote) : remote,
+                             settings.bindAddress);
                 failHandshake(ctx);
             }, HandshakeProtocol.TIMEOUT_MILLIS, MILLISECONDS);
+        }
+
+        /**
+         * True when the handshake is stuck on a socket a DSE 6.8.65 node gave up on purpose (DSE 6 compatibility mode
+         * only): its pre-4.0 first message requested either 12 (a plain first message at the {@code NET_VERSION} we
+         * gossip, {@link DseCompat#NET_VERSION_PUBLISHED}) or {@link DseCompat#DSE_VERSION_BYTE} (DSE's own flagged first
+         * message), we answered the dialect (11) and no byte reached this handler since (on a TLS connection, no
+         * decrypted byte). In both cases DSE 6.8.65 gives this socket up without a third message and reconnects at 11 on a
+         * new socket, which succeeds, as observed with DSE 6.8.65: for a plain first message at 12, DSE logs "Seed gossip
+         * version is 11; will not connect with that version" as a WARN when this node is one of its seeds; for its flagged
+         * first message, DSE closes the socket it gave up at once (it never shows in {@code ss -tn} on our node),
+         * reconnects at 11 on a new one about 120 ms later and logs the reconnection. DSE 6.9.26 does not give such a
+         * socket up: it sends the third message on the same socket after either first message (every socket an upgraded
+         * node accepted from a DSE 6.9.26 node reached an established connection), so this case is not expected with
+         * it. A socket closed before the timeout is handled by {@link #channelInactive}; a socket left
+         * open reaches the handshake timeout, which closes it.
+         * <p>
+         * A request at 10 or 11 does not qualify (no DSE node requests 10 from us, and after a request at 11 DSE sends the
+         * third message on the same socket), nor does a third message of which some bytes arrived, even if the peer closed
+         * the socket since: those keep the upstream error.
+         */
+        private boolean isAbandonedByDse()
+        {
+            return DseCompat.enabled()
+                   && pre40Answered
+                   && confirmOutboundPre40 == null
+                   && (initiate.requestMessagingVersion == DseCompat.NET_VERSION_PUBLISHED
+                       || initiate.requestMessagingVersion == DseCompat.DSE_VERSION_BYTE)
+                   && !pre40ConfirmStarted;
+        }
+
+        /** What a DSE 6.8.65 node gives up in the case {@link #isAbandonedByDse} recognises, for the debug lines. */
+        private String abandonedSocketDescription()
+        {
+            return initiate.requestMessagingVersion == DseCompat.DSE_VERSION_BYTE
+                   ? "the socket of its own flagged first message once answered with a plain pre-4.0 version"
+                   : "a socket answered below the version it stored for us";
+        }
+
+        /**
+         * The upstream handler does not cancel the handshake timeout when the channel closes, so a socket the peer closed
+         * before the handshake completed still logs {@code Timeout handshaking with ...} when the timeout fires, and this
+         * stays so for every case but the one {@link #isAbandonedByDse} recognises (DSE 6 compatibility mode only): such a
+         * socket that closes cancels the timeout with a debug line, since a DSE 6.8.65 node closes it to reconnect at 11.
+         * <p>
+         * Our handshake failures ({@link #failHandshake}, also run by the timeout) remove this handler before closing and
+         * a completed handshake removes it, so neither gets here; the close of every accepted socket when the inbound
+         * sockets shut down does, which is why the debug line does not say who closed the connection. On a TLS connection
+         * {@code SslHandler} passes the close on to this handler; that case is reasoned from netty's code, not covered by
+         * a test.
+         */
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) throws Exception
+        {
+            super.channelInactive(ctx);
+            if (isAbandonedByDse() && handshakeTimeout != null && handshakeTimeout.cancel(true))
+            {
+                logger.debug("the connection from peer {} (on {}) closed without the third message of the pre-4.0 handshake " +
+                             "(requested version {}, answered {}): expected from a DSE 6.8.65 node, which gives up {} " +
+                             "and reconnects at {} on a new one; handshake timeout cancelled",
+                             ctx.channel().remoteAddress(), settings.bindAddress, initiate.requestMessagingVersion, DseCompat.DSE_DIALECT,
+                             abandonedSocketDescription(), DseCompat.DSE_DIALECT);
+            }
         }
 
         @Override
         protected void decode(ChannelHandlerContext ctx, ByteBuf in, List<Object> out) throws Exception
         {
-            if (initiate == null) initiate(ctx, in);
-            else throw new IllegalStateException("Should no longer be on pipeline");
+            if (initiate == null)
+                initiate(ctx, in);
+            else if (initiate.isPre40() && confirmOutboundPre40 == null)
+            {
+                if (in.isReadable())
+                    pre40ConfirmStarted = true;
+                confirmPre40(ctx, in);
+            }
+            else
+                throw new IllegalStateException("Should no longer be on pipeline");
         }
 
         void initiate(ChannelHandlerContext ctx, ByteBuf in) throws IOException
@@ -316,6 +406,12 @@ public class InboundConnectionInitiator
                 return;
 
             logger.trace("Received handshake initiation message from peer {}, message = {}", ctx.channel().remoteAddress(), initiate);
+
+            if (initiate.isPre40())
+            {
+                initiatePre40(ctx);
+                return;
+            }
 
             if (isEncryptionRequired(initiate.from) && !isChannelEncrypted(ctx))
             {
@@ -360,6 +456,115 @@ public class InboundConnectionInitiator
                 else
                     setupMessagingPipeline(initiate.from, useMessagingVersion, initiate.acceptVersions.max, ctx.pipeline());
             }
+        }
+
+        /**
+         * A pre-4.0 first message, only decoded in DSE 6 compatibility mode: DSE's own first message (0xFF plus its
+         * relative version) or a plain pre-4.0 one. We answer with the 3.0.14 dialect at once, whatever was
+         * requested, and wait for the third message. DSE 6.9.26 sends it on the same socket, after its own first message
+         * and after a plain first message at 12, as DSE's source has it; DSE 6.8.65 gives the socket up after either and
+         * reconnects at 11 on a new one instead (see {@link #isAbandonedByDse}).
+         * <p>
+         * Everything that can refuse the connection before the third message is checked before we answer, so a refused
+         * peer gets no second message: streaming, an obsolete version (below 3.0, which DSE also closes without an
+         * answer) and the encryption requirement, evaluated here on the socket's remote IP address with the
+         * default storage port (see {@link #pre40EncryptionCheckAddress}). The peer's broadcast address is only known
+         * from the third message, where the encryption requirement is checked again.
+         */
+        private void initiatePre40(ChannelHandlerContext ctx)
+        {
+            int requested = initiate.requestMessagingVersion;
+            InetSocketAddress remote = (InetSocketAddress) ctx.channel().remoteAddress();
+            // each refusal is logged at every attempt, as the refusals of the 4.0-style handshake are: a misconfigured
+            // peer stays visible while it retries, at the pace of its reconnection delay
+            if (initiate.type.isStreaming())
+            {
+                logger.warn("peer {} attempted a pre-4.0 streaming connection (requested version {}): streaming with DSE 6 peers is not supported in internode_compatibility_mode DSE_6",
+                            remote, requested);
+                failHandshake(ctx);
+                return;
+            }
+
+            if (requested != DseCompat.DSE_VERSION_BYTE && requested < DseCompat.OLDEST_PRE40_VERSION)
+            {
+                logger.warn("peer {} requested the obsolete messaging version {}; the earliest version supported is 3.0.0 (10), closing",
+                            remote, requested);
+                failHandshake(ctx);
+                return;
+            }
+
+            if (isEncryptionRequired(pre40EncryptionCheckAddress(remote)) && !isChannelEncrypted(ctx))
+            {
+                logger.warn("peer {} attempted to establish an unencrypted pre-4.0 connection", remote);
+                failHandshake(ctx);
+                return;
+            }
+
+            logger.debug("peer {} sent a pre-4.0 handshake (requested version {}); answering {}", remote, requested, DseCompat.DSE_DIALECT);
+            ByteBuf response = HandshakeProtocol.Accept.respondPre40(DseCompat.DSE_DIALECT, ctx.alloc());
+            AsyncChannelPromise.writeAndFlush(ctx, response, (ChannelFutureListener) future -> {
+                if (!future.isSuccess())
+                    exceptionCaught(future.channel(), future.cause());
+            });
+            pre40Answered = true;
+
+            // the pipeline is set up once the third message arrives (confirmPre40)
+        }
+
+        /**
+         * The address the encryption requirement of a pre-4.0 first message is evaluated on: the socket's source port is
+         * ephemeral, so the peer is looked up by IP address with the default storage port, as the snitch knows it
+         * ({@code internode_encryption: dc} or {@code rack}).
+         */
+        @VisibleForTesting
+        static InetAddressAndPort pre40EncryptionCheckAddress(InetSocketAddress remote)
+        {
+            return InetAddressAndPort.getByAddress(remote.getAddress());
+        }
+
+        /**
+         * The third (and last) message of the pre-4.0 handshake: the peer's version and address. Only the dialect we
+         * answered with is accepted.
+         */
+        @VisibleForTesting
+        void confirmPre40(ChannelHandlerContext ctx, ByteBuf in)
+        {
+            try
+            {
+                confirmOutboundPre40 = HandshakeProtocol.ConfirmOutboundPre40.maybeDecode(in);
+            }
+            catch (HandshakeProtocol.InvalidPre40Address e)
+            {
+                logger.warn("peer {} sent a third message of the pre-4.0 handshake with an address of {} bytes, neither IPv4 nor IPv6; closing",
+                            ctx.channel().remoteAddress(), e.size);
+                failHandshake(ctx);
+                return;
+            }
+            if (confirmOutboundPre40 == null)
+                return;
+
+            logger.trace("Received third handshake message from peer {}, message = {}", ctx.channel().remoteAddress(), confirmOutboundPre40);
+            if (confirmOutboundPre40.maxMessagingVersion != DseCompat.DSE_DIALECT)
+            {
+                logger.warn("peer {} ({}) confirmed the pre-4.0 handshake with version {} instead of the {} we answered; closing",
+                            ctx.channel().remoteAddress(), confirmOutboundPre40.from, confirmOutboundPre40.maxMessagingVersion, DseCompat.DSE_DIALECT);
+                failHandshake(ctx);
+                return;
+            }
+            if (isEncryptionRequired(confirmOutboundPre40.from) && !isChannelEncrypted(ctx))
+            {
+                logger.warn("peer {} attempted to establish an unencrypted connection (broadcast address {})",
+                            ctx.channel().remoteAddress(), confirmOutboundPre40.from);
+                failHandshake(ctx);
+                return;
+            }
+            // the first message may have been one only DSE sends, which identifies the peer the third message names as a
+            // DSE node, for the ordinals of gossip (DsePeers): DSE 6.9.26 sends this third message after either such first
+            // message (every connection of a DSE 6.9.26 node to an upgraded node was seen to open with the flagged one);
+            // DSE 6.8.65 sends none after them (it reconnects at 11, see isAbandonedByDse), so with it this only sees plain
+            // requests at 10 or 11
+            DsePeers.fromPre40Initiate(confirmOutboundPre40.from, initiate.requestMessagingVersion);
+            setupMessagingPipeline(confirmOutboundPre40.from, DseCompat.DSE_DIALECT, DseCompat.DSE_DIALECT, ctx.pipeline());
         }
 
         private boolean isEncryptionRequired(InetAddressAndPort peer)
@@ -470,7 +675,11 @@ public class InboundConnectionInitiator
         {
             handshakeTimeout.cancel(true);
             // record the "true" endpoint, i.e. the one the peer is identified with, as opposed to the socket it connected over
-            instance().versions.set(from, maxMessagingVersion);
+            if (DseCompat.enabled())
+                // not lowered to the dialect for a peer gossiping 12..255, unless only DSE sends its first message
+                DseDialectVersions.recordHandshakeVersion(from, maxMessagingVersion, initiate.requestMessagingVersion);
+            else
+                instance().versions.set(from, maxMessagingVersion);
 
             BufferPools.forNetworking().setRecycleWhenFreeForCurrentThread(false);
             BufferPoolAllocator allocator = GlobalBufferPoolAllocator.instance;
@@ -482,21 +691,23 @@ public class InboundConnectionInitiator
             }
 
             FrameDecoder frameDecoder;
+            boolean pre40 = useMessagingVersion < VERSION_40; // DSE 6 compatibility mode: unframed, or the pre-4.0 LZ4 block stream
             switch (initiate.framing)
             {
                 case LZ4:
                 {
-                    frameDecoder = FrameDecoderLZ4.fast(allocator);
+                    frameDecoder = pre40 ? new FrameDecoderLegacyLZ4(allocator, useMessagingVersion) : FrameDecoderLZ4.fast(allocator);
                     break;
                 }
                 case CRC:
                 {
-                    frameDecoder = FrameDecoderCrc.create(allocator);
+                    // pre-4.0 peers never CRC their frames
+                    frameDecoder = pre40 ? new FrameDecoderLegacy(allocator, useMessagingVersion) : FrameDecoderCrc.create(allocator);
                     break;
                 }
                 case UNPROTECTED:
                 {
-                    frameDecoder = new FrameDecoderUnprotected(allocator);
+                    frameDecoder = pre40 ? new FrameDecoderLegacy(allocator, useMessagingVersion) : new FrameDecoderUnprotected(allocator);
                     break;
                 }
                 default:

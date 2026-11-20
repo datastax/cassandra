@@ -39,6 +39,8 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.db.rows.UnfilteredSerializer;
+import org.apache.cassandra.db.view.DseViewHiddenColumns;
 import org.apache.cassandra.exceptions.InvalidColumnTypeException;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -49,6 +51,7 @@ import org.apache.cassandra.io.sstable.metadata.MetadataComponent;
 import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.serializers.AbstractTypeSerializer;
@@ -70,6 +73,13 @@ public class SerializationHeader
 
     private final Map<ByteBuffer, AbstractType<?>> typeMap;
 
+    /**
+     * The DSE hidden column whose cells give the rows of a DSE view sstable their liveness (see
+     * {@link DseViewHiddenColumns}), or {@code null}: always {@code null} unless the header was read from an
+     * sstable, or the header of an sstable stream, that names such a column.
+     */
+    private final ColumnMetadata dseViewLivenessColumn;
+
     private SerializationHeader(boolean isForSSTable,
                                 AbstractType<?> keyType,
                                 List<AbstractType<?>> clusteringTypes,
@@ -77,12 +87,24 @@ public class SerializationHeader
                                 EncodingStats stats,
                                 Map<ByteBuffer, AbstractType<?>> typeMap)
     {
+        this(isForSSTable, keyType, clusteringTypes, columns, stats, typeMap, null);
+    }
+
+    private SerializationHeader(boolean isForSSTable,
+                                AbstractType<?> keyType,
+                                List<AbstractType<?>> clusteringTypes,
+                                RegularAndStaticColumns columns,
+                                EncodingStats stats,
+                                Map<ByteBuffer, AbstractType<?>> typeMap,
+                                ColumnMetadata dseViewLivenessColumn)
+    {
         this.isForSSTable = isForSSTable;
         this.keyType = keyType;
         this.clusteringTypes = clusteringTypes;
         this.columns = columns;
         this.stats = stats;
         this.typeMap = typeMap;
+        this.dseViewLivenessColumn = dseViewLivenessColumn;
     }
 
     public static SerializationHeader makeWithoutStats(TableMetadata metadata)
@@ -110,7 +132,8 @@ public class SerializationHeader
             stats.updateTimestamp(sstable.getMinTimestamp());
             stats.updateLocalDeletionTime(sstable.getMinLocalDeletionTime());
             stats.updateTTL(sstable.getMinTTL());
-            columns.addAll(sstable.header.columns());
+            // the rows read from a DSE view sstable never carry its hidden column, see DseViewHiddenColumns
+            columns.addAll(sstable.header.withoutDseViewLivenessColumn().columns());
         }
         return new SerializationHeader(true, metadata, columns.build(), stats.get());
     }
@@ -141,6 +164,34 @@ public class SerializationHeader
     public RegularAndStaticColumns columns()
     {
         return columns;
+    }
+
+    /**
+     * The DSE hidden column of a regular base column in the view primary key, when this header was read from
+     * a view sstable written by DSE, or from the header of a stream of one (see {@link DseViewHiddenColumns});
+     * {@code null} otherwise.
+     */
+    public ColumnMetadata dseViewLivenessColumn()
+    {
+        return dseViewLivenessColumn;
+    }
+
+    /**
+     * This header without {@link #dseViewLivenessColumn()}: the rows read through this header never carry a cell
+     * of that column, so an sstable written with them must not name it (only sstables written by DSE do, which is
+     * what makes the reader apply DSE's liveness rule to their rows). Returns this header when it has no such column.
+     */
+    public SerializationHeader withoutDseViewLivenessColumn()
+    {
+        if (dseViewLivenessColumn == null)
+            return this;
+        Map<ByteBuffer, AbstractType<?>> types = null;
+        if (typeMap != null)
+        {
+            types = new HashMap<>(typeMap);
+            types.remove(dseViewLivenessColumn.name.bytes);
+        }
+        return new SerializationHeader(isForSSTable, keyType, clusteringTypes, columns.without(dseViewLivenessColumn), stats, types, null);
     }
 
     public boolean hasStatic()
@@ -205,6 +256,57 @@ public class SerializationHeader
             writeLocalDeletionTime(dt.localDeletionTime(), out);
     }
 
+    /**
+     * Writes {@code dt} as {@link #writeDeletionTime(DeletionTime, DataOutputPlus)} does, but for a LIVE deletion
+     * time sent to a pre-4.0 peer (a DSE 6 node, in DSE 6 compatibility mode). DSE 6, like Cassandra 3.x, reads the
+     * local deletion time as a 32-bit delta from the header's minimum and takes a deletion time for LIVE only when that
+     * time is {@code Integer.MAX_VALUE}: LIVE is written with the delta that decodes to it, as Cassandra 3.x writes it.
+     * With the zero delta of the default encoding a DSE 6 node would read LIVE as a deletion, and the row layout writes
+     * one for every complex column of a row as soon as one of them has a complex deletion: the DSE 6 node would store
+     * it, and its digests would no longer match those of the replicas DSE 6 wrote. From 4.0 on, without the mode and in
+     * sstables the bytes are those of the default encoding.
+     * <p>
+     * Sstables keep the default encoding: nb, written at {@link org.apache.cassandra.net.MessagingService#VERSION_30},
+     * and the trie-indexed bb sstables that DSE 6 compatibility mode writes and DSE 6 reads after a rollback, whose
+     * LIVE complex deletions a 32-bit reader would thus read as deletions that are not LIVE (digest mismatches after a
+     * rollback, no data lost): a known gap, not changed here. A future writer of big-format {@code me} sstables (at
+     * that same version) will need the encoding of this method.
+     *
+     * @param version the messaging version {@code dt} is serialized at
+     */
+    public void writeDeletionTime(DeletionTime dt, DataOutputPlus out, int version) throws IOException
+    {
+        if (dt.isLive() && isPre40Messaging(version))
+        {
+            writeTimestamp(dt.markedForDeleteAt(), out);
+            out.writeUnsignedVInt32(pre40LiveLocalDeletionTimeDelta(version));
+        }
+        else
+        {
+            writeDeletionTime(dt, out);
+        }
+    }
+
+    /** True for a header for messaging serialized at a pre-4.0 version, which only DSE 6 compatibility mode uses. */
+    private boolean isPre40Messaging(int version)
+    {
+        return !isForSSTable && DseCompat.isPre40Layout(version);
+    }
+
+    /**
+     * The delta a 32-bit reader adds to the header's minimum local deletion time to get {@code Integer.MAX_VALUE}, in
+     * 32-bit arithmetic as Cassandra 3.x computes it. The minimum fits in 32 bits, since no deletion time past 2038 is
+     * serialized at a pre-4.0 version; a minimum past 2038 is refused as such a deletion time is
+     * ({@link UnfilteredSerializer#checkPre40DeletionTime}), whether or not assertions are enabled. The minimum is
+     * never {@link org.apache.cassandra.db.rows.Cell#NO_DELETION_TIME}, which that check lets through:
+     * {@link EncodingStats} stores its epoch instead.
+     */
+    private int pre40LiveLocalDeletionTimeDelta(int version)
+    {
+        UnfilteredSerializer.checkPre40DeletionTime(stats.minLocalDeletionTime, version);
+        return Integer.MAX_VALUE - (int) stats.minLocalDeletionTime;
+    }
+
     public long readTimestamp(DataInputPlus in) throws IOException
     {
         return in.readUnsignedVInt() + stats.minTimestamp;
@@ -253,6 +355,15 @@ public class SerializationHeader
                + localDeletionTimeSerializedSize(dt.isLive() ? stats.minLocalDeletionTime : dt.localDeletionTime());
     }
 
+    /** The size of {@code dt} as {@link #writeDeletionTime(DeletionTime, DataOutputPlus, int)} writes it. */
+    public long deletionTimeSerializedSize(DeletionTime dt, int version)
+    {
+        if (dt.isLive() && isPre40Messaging(version))
+            return timestampSerializedSize(dt.markedForDeleteAt())
+                   + TypeSizes.sizeofUnsignedVInt(pre40LiveLocalDeletionTimeDelta(version));
+        return deletionTimeSerializedSize(dt);
+    }
+
     public void skipTimestamp(DataInputPlus in) throws IOException
     {
         in.readUnsignedVInt();
@@ -288,7 +399,8 @@ public class SerializationHeader
     @Override
     public String toString()
     {
-        return String.format("SerializationHeader[key=%s, cks=%s, columns=%s, stats=%s, typeMap=%s]", keyType, clusteringTypes, columns, stats, typeMap);
+        String header = String.format("SerializationHeader[key=%s, cks=%s, columns=%s, stats=%s, typeMap=%s]", keyType, clusteringTypes, columns, stats, typeMap);
+        return dseViewLivenessColumn == null ? header : header + "[dseViewLivenessColumn=" + dseViewLivenessColumn + ']';
     }
 
     /**
@@ -500,6 +612,7 @@ public class SerializationHeader
             Map<ByteBuffer, AbstractType<?>> typeMap = new HashMap<>(staticColumns.size() + regularColumns.size());
 
             RegularAndStaticColumns.Builder builder = RegularAndStaticColumns.builder();
+            ColumnMetadata dseViewLivenessColumn = null;
             for (Map<ByteBuffer, AbstractType<?>> map : ImmutableList.of(staticColumns, regularColumns))
             {
                 boolean isStatic = map == staticColumns;
@@ -524,7 +637,18 @@ public class SerializationHeader
                         // deserialization. The column will be ignored later on anyway.
                         ColumnMetadata droppedColumn = metadata.getDroppedColumn(name, isStatic);
                         if (droppedColumn == null)
-                            throw new UnknownColumnException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
+                        {
+                            // A view sstable written by DSE names the hidden columns DSE does not list among the
+                            // view's columns: read the one that carries the liveness of the rows, refuse the others.
+                            ColumnMetadata hidden = column == null ? DseViewHiddenColumns.resolve(descriptor, metadata, name, type, isStatic) : null;
+                            if (hidden == null)
+                                throw new UnknownColumnException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization");
+                            if (dseViewLivenessColumn != null)
+                                throw DseViewHiddenColumns.multipleRequiredColumns(descriptor, metadata, dseViewLivenessColumn, hidden);
+                            dseViewLivenessColumn = hidden;
+                            builder.add(hidden);
+                            continue;
+                        }
 
                         // Use the SSTable's validated type for the dropped column metadata instead of the
                         // schema's type. This is critical because column ordering depends on isComplex() which depends
@@ -554,7 +678,7 @@ public class SerializationHeader
                                                                                sstableVersion.hasImplicitlyFrozenTuples(),
                                                                                isForOfflineTool);
 
-            return new SerializationHeader(true, keyType, clusteringTypes, builder.build(), stats, typeMap);
+            return new SerializationHeader(true, keyType, clusteringTypes, builder.build(), stats, typeMap, dseViewLivenessColumn);
         }
 
         @Override
