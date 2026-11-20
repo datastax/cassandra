@@ -407,25 +407,13 @@ public class CC4NodesFileReaderDseTest extends CQLTester
     }
 
     @Test
-    public void aDirectoryInPlaceOfTheMarkerIsNoMarker() throws Exception
+    public void aDirectoryUnderTheMarkerNameIsNoMarkerAndFailsTheReload() throws Exception
     {
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
         Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
-        Files.createDirectory(nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6865)));
-        assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.NOT_IMPORTED);
-        assertThat(importBoth().getHostId()).isEqualTo(HOST_6926);
-        assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.DONE);
-        // ignored, not removed
-        assertThat(Files.isDirectory(nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6865)))).isTrue();
-    }
-
-    @Test
-    public void aDirectoryUnderTheExpectedMarkerNameFailsTheReload() throws Exception
-    {
-        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
-        Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
-        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926));
+        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME);
         Files.createDirectory(marker);
+        assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.NOT_IMPORTED);
         // a temporary file left by an earlier failed write: the failed write removes it too
         Files.write(nodes.resolve(".hcd-import-marker.tmp"), new byte[]{ 'x' });
         importBothWithoutWaiting();
@@ -444,7 +432,7 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
         Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
         importBoth();
-        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926));
+        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME);
         Files.write(marker, new byte[]{ 'l', 'o', 'c', (byte) 0xff, '\n' });
         assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.STALE);
         importBoth();
@@ -514,7 +502,7 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         for (String name : new String[]{ "local", "peers" })
             assertThat(Files.getLastModifiedTime(nodes.resolve(name))).as(name).isEqualTo(modified.get(name));
         assertThat(Files.exists(tempDir.resolve("nodes.migrated"))).isFalse();
-        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_PREFIX + HOST_6926);
+        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME);
         assertThat(Files.exists(marker)).isTrue();
         assertThat(new String(Files.readAllBytes(marker), StandardCharsets.UTF_8)).contains("local=739:", "peers=483:");
         assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.DONE);
@@ -561,7 +549,7 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         assertThat(third.getTruncationRecords()).containsKey(UUID.fromString("467ee541-b828-11f1-9f9f-754297a7ef99"));
         new Dse6UpgradeNodesPersistence().loadPeers().collect(Collectors.toList());
         Dse6UpgradeNodesPersistence.awaitPendingCompletion();
-        assertThat(new String(Files.readAllBytes(nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_PREFIX + HOST_6926)), StandardCharsets.UTF_8))
+        assertThat(new String(Files.readAllBytes(nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME)), StandardCharsets.UTF_8))
         .contains("local=801:");
         assertThat(new NodesPersistence().loadLocal().getTruncationRecords()).containsKey(UUID.fromString("467ee541-b828-11f1-9f9f-754297a7ef99"));
     }
@@ -643,18 +631,27 @@ public class CC4NodesFileReaderDseTest extends CQLTester
     }
 
     @Test
-    public void markerOfAnotherHostIdIsNotTrusted() throws Exception
+    public void markerOfAnotherNodeIsNotTrusted() throws Exception
     {
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
+        importBoth();
+        assertThat(new NodesPersistence().loadLocal().getHostId()).isEqualTo(HOST_6926);
+
+        // the nodes/ directory replaced by another node's backup, whose marker fingerprints its files (a copy that kept
+        // their modification time): the marker alone cannot tell, the host id of nodes/local against the tables does
+        new File(tempDir.resolve("nodes")).deleteRecursive();
         Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_8_65, false);
-        // a nodes/ directory restored from another node's backup: its marker even fingerprints these files
-        Path foreign = nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926));
-        Files.write(foreign, Dse6UpgradeNodesPersistence.fingerprint(nodes).getBytes(StandardCharsets.UTF_8));
-        assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.STALE);
+        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME);
+        Files.write(marker, Dse6UpgradeNodesPersistence.fingerprint(nodes).getBytes(StandardCharsets.UTF_8));
+        assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.DONE);
 
         assertThat(importBoth().getHostId()).isEqualTo(HOST_6865);
-        assertThat(Files.exists(foreign)).isFalse();
-        assertThat(Files.exists(nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6865)))).isTrue();
+        assertThat(new NodesPersistence().loadLocal().getHostId()).isEqualTo(HOST_6865);
+        // a stale import, not a first one: the peer of the other node's file absent from this one is removed
+        assertThat(new NodesPersistence().loadPeers().map(PeerInfo::getPeerAddressAndPort))
+        .containsExactlyInAnyOrder(address("192.168.57.12", 7000), address("192.168.57.13", 7000));
+        assertThat(new String(Files.readAllBytes(marker), StandardCharsets.UTF_8)).contains("# DSE node metadata imported");
         assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.DONE);
     }
 
@@ -673,7 +670,7 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         assertThat(restart.loadPeers().map(PeerInfo::getPeerAddressAndPort)).containsExactly(address("127.0.0.2", 7000));
         assertThat(new NodesPersistence().loadPeers().map(PeerInfo::getPeerAddressAndPort)).containsExactly(address("127.0.0.2", 7000));
         Dse6UpgradeNodesPersistence.awaitPendingCompletion();
-        assertThat(Files.exists(nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926)))).isTrue();
+        assertThat(Files.exists(nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME))).isTrue();
     }
 
     @Test
@@ -681,7 +678,7 @@ public class CC4NodesFileReaderDseTest extends CQLTester
     {
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
         Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
-        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926));
+        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME);
         // the loads run while Nodes is initialised, when no flush can end: they must return without one
         DeferredSyncPersistence persistence = new DeferredSyncPersistence(() -> Files.exists(marker));
         try
@@ -722,9 +719,9 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         // the reload of the start waits for the completion and fails with it
         assertThatThrownBy(() -> new Dse6UpgradeNodesPersistence().loadLocal())
         .hasMessage("Failed to complete the node metadata import: flushing the system tables, then writing the import marker " +
-                    nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926)))
+                    nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME))
         .hasRootCauseMessage("flush refused by the test");
-        assertThat(Files.exists(nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926)))).isFalse();
+        assertThat(Files.exists(nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME))).isFalse();
         assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.NOT_IMPORTED);
         Dse6UpgradeNodesPersistence.resetPendingCompletion();
     }
@@ -736,7 +733,7 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
         // a directory where the temporary marker goes: opening it for writing fails whoever runs the test
         Files.createDirectory(nodes.resolve(".hcd-import-marker.tmp"));
-        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926));
+        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME);
         importBothWithoutWaiting();
 
         assertThatThrownBy(() -> new Dse6UpgradeNodesPersistence().loadLocal())
@@ -750,15 +747,23 @@ public class CC4NodesFileReaderDseTest extends CQLTester
     }
 
     @Test
-    public void markerWithoutLocalFileNamesUnknown() throws Exception
+    public void markerWithoutLocalFileRecordsItAbsent() throws Exception
     {
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
         Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
         Files.delete(nodes.resolve("local"));
         importBoth();
-        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_PREFIX + "unknown");
+        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME);
         assertThat(Files.exists(marker)).isTrue();
         assertThat(new String(Files.readAllBytes(marker), StandardCharsets.UTF_8)).contains("local=absent", "peers=483:");
+        assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.DONE);
+
+        // a nodes/local that appears afterwards does not match the marker: it is imported
+        Files.copy(DseFixtures.nodesLocal(DseVersion.DSE_6_9_26), nodes.resolve("local"));
+        assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.STALE);
+        assertThat(importBoth().getHostId()).isEqualTo(HOST_6926);
+        assertThat(new NodesPersistence().loadLocal().getHostId()).isEqualTo(HOST_6926);
+        assertThat(new String(Files.readAllBytes(marker), StandardCharsets.UTF_8)).contains("local=739:", "peers=483:");
         assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.DONE);
     }
 
@@ -817,7 +822,7 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         assertThat(Files.exists(tempDir.resolve("nodes"))).isFalse();
         Path migrated = tempDir.resolve("nodes.migrated");
         assertThat(Files.exists(migrated.resolve("local"))).isTrue();
-        assertThat(Files.exists(migrated.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926)))).isTrue();
+        assertThat(Files.exists(migrated.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME))).isTrue();
         assertThat(CC4NodesFileReader.hasCC4NodesDirectory()).isFalse();
     }
 
@@ -896,7 +901,7 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.STALE);
         importBoth();
         assertThat(new NodesPersistence().loadPeers()).isEmpty();
-        assertThat(new String(Files.readAllBytes(nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926))), StandardCharsets.UTF_8))
+        assertThat(new String(Files.readAllBytes(nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME)), StandardCharsets.UTF_8))
         .contains("peers=1:");
         assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.DONE);
     }
@@ -930,10 +935,12 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
         importBoth();
 
-        // no local.old to recover from: the marker cannot be checked, and the start fails rather than guess
+        // no local.old to recover from: the marker no longer matches, and the import fails the start rather than guess
         Files.write(nodes.resolve("local"), new byte[]{ (byte) 0xc1 });
+        assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.STALE);
         assertThatThrownBy(() -> new Dse6UpgradeNodesPersistence().loadLocal())
-        .hasMessage("Failed to read the host id from the node metadata file " + nodes.resolve("local"));
+        .hasMessage("Failed to read CC4 local metadata from " + nodes.resolve("local") +
+                    "; aborting upgrade to prevent generating a new node identity");
     }
 
     @Test
@@ -1064,7 +1071,8 @@ public class CC4NodesFileReaderDseTest extends CQLTester
         importBoth();
         assertThat(Files.exists(nodes.resolve("local"))).isTrue();
         assertThat(Files.exists(nodes.resolve("peers"))).isTrue();
-        assertThat(Files.exists(nodes.resolve(Dse6UpgradeNodesPersistence.markerName(hostId)))).isTrue();
+        assertThat(Files.exists(nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME))).isTrue();
+        assertThat(new NodesPersistence().loadLocal().getHostId()).isEqualTo(hostId);
     }
 
     /**

@@ -112,32 +112,57 @@ public class Dse6UpgradeNodesPersistenceTest extends CQLTester
         assertThat(Dse6UpgradeNodesPersistence.handlesNodesDirectory()).isTrue();
         assertThat(Nodes.nodesDirectoryImport()).isExactlyInstanceOf(Dse6UpgradeNodesPersistence.class);
 
-        // the flag dropped: a directory under a marker's name is no marker, a file of any host id is one
+        // the flag dropped: a directory under the marker's name is no marker, a file of that name is one, whatever
+        // its content
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
-        Path notAMarker = Files.createDirectory(nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926)));
+        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME);
+        Files.createDirectory(marker);
         assertThat(Dse6UpgradeNodesPersistence.handlesNodesDirectory()).isFalse();
         assertThat(Nodes.nodesDirectoryImport()).isExactlyInstanceOf(CC4UpgradeNodesPersistence.class);
-        Files.delete(notAMarker);
-        Files.write(nodes.resolve(Dse6UpgradeNodesPersistence.markerName(UUID.randomUUID())), new byte[0]);
+        Files.delete(marker);
+        Files.write(marker, new byte[0]);
         assertThat(Dse6UpgradeNodesPersistence.handlesNodesDirectory()).isTrue();
         assertThat(Nodes.nodesDirectoryImport()).isExactlyInstanceOf(Dse6UpgradeNodesPersistence.class);
     }
 
     @Test
-    public void aNodesDirectoryThatCannotBeListedFailsTheChoice() throws Exception
+    public void aNodesDirectoryThatCannotBeReadFailsTheChoice() throws Exception
     {
         Assume.assumeTrue("POSIX permissions",
                           FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
         Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
         Set<PosixFilePermission> before = Files.getPosixFilePermissions(nodes);
-        // searchable but not readable: whether it holds a marker cannot be told
+        // searchable but not readable: the choice fails closed
         Files.setPosixFilePermissions(nodes, PosixFilePermissions.fromString("-wx------"));
         try
         {
             Assume.assumeFalse("the directory stays readable (run as root?)", Files.isReadable(nodes));
             assertThatThrownBy(Nodes::nodesDirectoryImport).isInstanceOf(RuntimeException.class)
-                                                           .hasMessage("Failed to list " + nodes);
+                                                           .hasMessage("Failed to read " + nodes + ": whether it holds the import marker cannot be told");
+        }
+        finally
+        {
+            Files.setPosixFilePermissions(nodes, before);
+        }
+    }
+
+    @Test
+    public void aNodesDirectoryThatCannotBeSearchedFailsTheChoice() throws Exception
+    {
+        Assume.assumeTrue("POSIX permissions",
+                          FileSystems.getDefault().supportedFileAttributeViews().contains("posix"));
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
+        Set<PosixFilePermission> before = Files.getPosixFilePermissions(nodes);
+        // readable but not searchable: the attributes of the marker cannot be read, the choice fails closed
+        Files.setPosixFilePermissions(nodes, PosixFilePermissions.fromString("r--------"));
+        try
+        {
+            Assume.assumeFalse("the directory stays searchable (run as root?)", Files.isExecutable(nodes));
+            Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME);
+            assertThatThrownBy(Nodes::nodesDirectoryImport).isInstanceOf(RuntimeException.class)
+                                                           .hasMessage("Failed to read the attributes of " + marker);
         }
         finally
         {
@@ -150,7 +175,7 @@ public class Dse6UpgradeNodesPersistenceTest extends CQLTester
     {
         Path nodes = DseFixtures.installNodesDirectory(tempDir, DseVersion.DSE_6_9_26, false);
         // a marker that no longer matches the files (DSE ran after the import), then the flag dropped
-        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.markerName(HOST_6926));
+        Path marker = nodes.resolve(Dse6UpgradeNodesPersistence.IMPORT_MARKER_NAME);
         Files.write(marker, "local=absent\npeers=absent\n".getBytes(StandardCharsets.UTF_8));
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
         assertThat(Dse6UpgradeNodesPersistence.importState()).isEqualTo(ImportState.STALE);

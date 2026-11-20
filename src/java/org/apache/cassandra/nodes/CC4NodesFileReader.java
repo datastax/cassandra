@@ -143,7 +143,8 @@ final class CC4NodesFileReader
 
     /**
      * Reads only the host id of {@code nodes/local}, without the transaction recovery of
-     * {@link #tryReadLocalInfo()}: used to check the import marker against the files it covers.
+     * {@link #tryReadLocalInfo()}: used, behind a valid import marker, to compare the host id of {@code nodes/local}
+     * with the one the system tables hold.
      *
      * @return the host id, or null if the nodes directory, the local file or its host id is absent
      * @throws RuntimeException if the local file exists but cannot be read or parsed

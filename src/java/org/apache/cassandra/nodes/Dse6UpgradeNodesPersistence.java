@@ -25,6 +25,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,17 +61,17 @@ import static org.apache.cassandra.concurrent.ExecutorFactory.Global.executorFac
  * the files with {@link CC4NodesFileReader}.
  *
  * In {@code internode_compatibility_mode: DSE_6} the directory holds DSE's own files, which a node rolled back to DSE
- * restarts from, so it stays in place and the import is recorded by a marker file
- * {@code nodes/.imported-by-hcd-<host id of nodes/local>} (or {@code -unknown} without a local file) that also holds
- * the size, modification time and CRC32 of {@code nodes/local} and {@code nodes/peers} as they were imported. A later
- * start skips the import only if the marker names the host id of the current {@code nodes/local} and the two files
- * are unchanged; otherwise DSE ran after the import (a rollback), or the directory was replaced, and DSE's files are
- * authoritative: the import runs again, with a warning, peers absent from DSE's (existing) peers file are removed
- * from the system tables, and per table the later truncation record of the file and of the tables is kept. A valid
- * marker whose host id the system tables no longer hold (system keyspace lost) also imports again rather than
- * starting with a new identity. When the flag is dropped, a start with a valid marker archives the directory to
- * {@code nodes.migrated} (the marker moves along); with a marker that no longer matches, it imports again as above,
- * then archives.
+ * restarts from, so it stays in place and the import is recorded by the marker file {@code nodes/.imported-by-hcd},
+ * which holds the size, modification time and CRC32 of {@code nodes/local} and {@code nodes/peers} as they were
+ * imported ({@code absent} for a file that did not exist). A later start skips the import only if the two files are
+ * unchanged; otherwise DSE ran after the import (a rollback), or the directory was replaced, and DSE's files are
+ * authoritative: the import runs again, with a warning, peers absent from DSE's (existing) peers file are removed from
+ * the system tables, and per table the later truncation record of the file and of the tables is kept. A
+ * {@code nodes/local} that appeared since an import made without one does not match either. A valid marker whose
+ * {@code nodes/local} names a host id other than the one the system tables hold (system keyspace lost, or the directory
+ * of another node whose files happen to match the marker) also imports again rather than starting with a new identity.
+ * When the flag is dropped, a start with a valid marker archives the directory to {@code nodes.migrated} (the marker
+ * moves along); with a marker that no longer matches, it imports again as above, then archives.
  *
  * In {@code DSE_6} the system tables are flushed before the marker is written, so that the marker never certifies an
  * import that is not on disk. {@link #loadLocal()} and {@link #loadPeers()} run while {@link Nodes} is being
@@ -94,8 +95,7 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
 {
     private static final Logger logger = LoggerFactory.getLogger(Dse6UpgradeNodesPersistence.class);
 
-    public static final String IMPORT_MARKER_PREFIX = ".imported-by-hcd-";
-    private static final String UNKNOWN_HOST_ID = "unknown";
+    public static final String IMPORT_MARKER_NAME = ".imported-by-hcd";
     private static final String MARKER_TEMP_NAME = ".hcd-import-marker.tmp";
     /** The files of the nodes directory the marker fingerprints. */
     private static final String[] COVERED_FILES = { "local", "peers" };
@@ -110,7 +110,7 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
 
     enum ImportState
     {
-        /** no marker: import (first start, or a crash before the marker was written) */
+        /** no marker (no regular file of its name): import (first start, or a crash before the marker was written) */
         NOT_IMPORTED,
         /** a marker for these very files: the system tables are authoritative */
         DONE,
@@ -120,8 +120,9 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
 
     /**
      * Set by {@link #loadLocal()} when it found the import stale (the marker does not match the files, or the system
-     * tables lost the imported identity): {@link #loadPeers()} then imports again too, even when the recovery of an
-     * interrupted DSE write, done by the local import, made the files match the marker again.
+     * tables do not hold the host id of {@code nodes/local}: they lost the imported identity, or the directory is
+     * another node's): {@link #loadPeers()} then imports again too, even when the recovery of an interrupted DSE write,
+     * done by the local import, made the files match the marker again.
      */
     private boolean localStale;
 
@@ -146,8 +147,9 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
                 logger.info("DSE node metadata already imported (marker matches nodes/local and nodes/peers), loading from the system tables");
                 return fromTables;
             }
-            // e.g. the system keyspace was wiped or restored while metadata_directory survived: starting from the
-            // tables would generate a new node identity next to DSE's nodes/local
+            // e.g. the system keyspace was wiped or restored while metadata_directory survived, or nodes/ was replaced
+            // by another node's copy whose marker matches its files: starting from the tables would generate a new node
+            // identity next to DSE's nodes/local, or keep this node's next to another node's files
             logger.warn("DSE node metadata import marker present but the system tables hold host id {} instead of {} " +
                         "from nodes/local: importing DSE's files again", fromTables == null ? null : fromTables.getHostId(), fileHostId);
             state = ImportState.STALE;
@@ -156,7 +158,7 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
         LocalInfo migrated = CC4NodesFileReader.tryReadLocalInfo();
         if (migrated != null)
         {
-            logger.info("Migrating local node metadata from CC4 file-based store (host_id={})", migrated.getHostId());
+            logger.info("Migrating local node metadata from DSE6 file-based store (host_id={})", migrated.getHostId());
             if (state == ImportState.STALE)
                 keepLaterTruncationRecords(migrated, super.loadLocal());
             saveLocal(migrated);
@@ -165,7 +167,7 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
             localImported = DatabaseDescriptor.isDse6CompatibilityMode();
             return migrated;
         }
-        logger.debug("No CC4 local metadata found to migrate, falling back to system tables");
+        logger.debug("No DSE6 local metadata found to migrate, falling back to system tables");
         return super.loadLocal();
     }
 
@@ -194,7 +196,7 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
                           && deletePeersMissingFrom(migrated);
         if (!migrated.isEmpty())
         {
-            logger.info("Migrating {} peer entries from CC4 file-based store", migrated.size());
+            logger.info("Migrating {} peer entries from DSE6 file-based store", migrated.size());
             for (PeerInfo peer : migrated)
                 savePeer(peer);
             written = true;
@@ -210,7 +212,7 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
                 // a single DSE 6.9 node writes an empty peers map: the normal case, not a warning
                 logger.info("No DSE peer metadata found to import, falling back to system tables");
             else
-                logger.warn("No CC4 peer metadata found to migrate, falling back to system tables");
+                logger.warn("No DSE6 peer metadata found to migrate, falling back to system tables");
             return super.loadPeers();
         }
 
@@ -220,17 +222,17 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
     /**
      * Whether {@link Nodes} imports the {@code nodes} directory of the metadata directory with this class rather than
      * with {@link CC4UpgradeNodesPersistence}: in {@code internode_compatibility_mode: DSE_6}, or when the directory
-     * holds an import marker, the flag having been dropped after an import made in {@code DSE_6} (see the class
+     * holds the import marker, the flag having been dropped after an import made in {@code DSE_6} (see the class
      * javadoc).
      *
-     * @throws RuntimeException if the directory cannot be listed
+     * @throws RuntimeException if the directory cannot be read, or the attributes of the marker cannot be read
      */
     static boolean handlesNodesDirectory()
     {
         if (DatabaseDescriptor.isDse6CompatibilityMode())
             return true;
         Path nodes = markerDirectory();
-        return Files.isDirectory(nodes) && !listMarkers(nodes).isEmpty();
+        return Files.isDirectory(nodes) && hasMarker(nodes);
     }
 
     /**
@@ -240,7 +242,7 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
     private void scheduleMarker(boolean flushLocal, boolean flushPeers)
     {
         Path nodes = markerDirectory();
-        Path marker = nodes.resolve(markerName(CC4NodesFileReader.readLocalHostId()));
+        Path marker = nodes.resolve(IMPORT_MARKER_NAME);
         String content = markerContent(nodes);
         ExecutorPlus executor = executorFactory().sequential("DseNodesImportMarker");
         try
@@ -392,12 +394,6 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
     }
 
     @VisibleForTesting
-    static String markerName(UUID hostId)
-    {
-        return IMPORT_MARKER_PREFIX + (hostId != null ? hostId.toString() : UNKNOWN_HOST_ID);
-    }
-
-    @VisibleForTesting
     static ImportState importState()
     {
         return importState(false);
@@ -406,11 +402,9 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
     private static ImportState importState(boolean logStale)
     {
         Path nodes = markerDirectory();
-        if (!Files.isDirectory(nodes))
+        if (!Files.isDirectory(nodes) || !hasMarker(nodes))
             return ImportState.NOT_IMPORTED;
-        List<Path> markers = listMarkers(nodes);
-        if (markers.isEmpty())
-            return ImportState.NOT_IMPORTED;
+        Path marker = nodes.resolve(IMPORT_MARKER_NAME);
 
         // checked before nodes/local is read: an interrupted write may have left it damaged, and the import recovers
         // it from the backup; a marker never lists a backup (it is written after the import recovered them)
@@ -422,19 +416,9 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
                 if (logStale)
                     logger.warn("The DSE node metadata import marker {} does not match the files in {}: DSE was interrupted " +
                                 "while writing them ({} present); recovering and importing DSE's files again",
-                                markers, nodes, backup.getFileName());
+                                marker.getFileName(), nodes, backup.getFileName());
                 return ImportState.STALE;
             }
-        }
-
-        Path marker = nodes.resolve(markerName(CC4NodesFileReader.readLocalHostId()));
-        if (!markers.contains(marker))
-        {
-            if (logStale)
-                logger.warn("The DSE node metadata import marker {} does not name the host id of {} (expected {}): the directory " +
-                            "was replaced or comes from another node; importing DSE's files again",
-                            markers, nodes.resolve("local"), marker.getFileName());
-            return ImportState.STALE;
         }
 
         String recorded = readFingerprint(marker);
@@ -443,7 +427,8 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
         {
             if (logStale)
                 logger.warn("The DSE node metadata files in {} changed since the import recorded by {} (DSE ran after it, " +
-                            "e.g. a rollback): importing DSE's files again, they are authoritative. Recorded: [{}], now: [{}]",
+                            "e.g. a rollback; or the directory was replaced): importing DSE's files again, they are " +
+                            "authoritative. Recorded: [{}], now: [{}]",
                             nodes, marker.getFileName(), recorded.replace('\n', ' ').trim(), current.replace('\n', ' ').trim());
             return ImportState.STALE;
         }
@@ -451,47 +436,29 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
     }
 
     /**
-     * Removes the markers of other host ids once {@code marker} is in place: a stale one left behind costs nothing (only
-     * the expected name is read), so a failure here is logged, not thrown.
+     * Whether {@code nodes} holds the import marker. A directory or other non-file entry of that name is no marker: the
+     * import is then not done, and the marker write fails on it (writeImportMarker) rather than replacing it. Fails
+     * closed: a nodes directory that cannot be read is no state to start from, and a marker whose attributes cannot
+     * be read is not taken for an absent one.
+     *
+     * @throws RuntimeException if the directory cannot be read, or the attributes of the marker cannot be read
      */
-    private static void removeOtherMarkers(Path nodes, Path marker)
+    private static boolean hasMarker(Path nodes)
     {
+        if (!Files.isReadable(nodes))
+            throw new RuntimeException("Failed to read " + nodes + ": whether it holds the import marker cannot be told");
+        Path marker = nodes.resolve(IMPORT_MARKER_NAME);
         try
         {
-            for (Path other : listMarkers(nodes))
-            {
-                if (!other.equals(marker))
-                {
-                    logger.info("Removing the stale DSE node metadata import marker {}", other);
-                    try
-                    {
-                        Files.deleteIfExists(other);
-                    }
-                    catch (IOException e)
-                    {
-                        logger.warn("Failed to remove the stale DSE node metadata import marker {}; it is ignored", other, e);
-                    }
-                }
-            }
+            return Files.readAttributes(marker, BasicFileAttributes.class).isRegularFile();
         }
-        catch (RuntimeException e)
+        catch (NoSuchFileException e)
         {
-            logger.warn("Failed to look for stale DSE node metadata import markers in {}; any left is ignored", nodes, e);
-        }
-    }
-
-    private static List<Path> listMarkers(Path nodes)
-    {
-        try (Stream<Path> files = Files.list(nodes))
-        {
-            // a directory or other non-file entry of that name is no marker: the import is then stale or not done,
-            // and under the expected name it fails the marker write (writeImportMarker) rather than being replaced
-            return files.filter(p -> p.getFileName().toString().startsWith(IMPORT_MARKER_PREFIX) && Files.isRegularFile(p))
-                        .collect(Collectors.toList());
+            return false;
         }
         catch (IOException e)
         {
-            throw new RuntimeException("Failed to list " + nodes, e);
+            throw new RuntimeException("Failed to read the attributes of " + marker, e);
         }
     }
 
@@ -556,7 +523,7 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
 
     /**
      * Writes the marker durably (temporary file, fsync, atomic rename, best-effort fsync of the directory) after the
-     * system tables were flushed, then removes markers of other host ids. A failure to write it fails the start (at
+     * system tables were flushed, replacing the marker of an earlier import. A failure to write it fails the start (at
      * the reload that waits for the completion, see the class javadoc) instead of warning like a failed archive:
      * without the marker the next start would import DSE's files again over what this node learnt since, whereas a
      * failed archive only repeats an idempotent import.
@@ -577,7 +544,6 @@ public class Dse6UpgradeNodesPersistence extends NodesPersistence
             }
             Files.move(temp, marker, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
             SyncUtil.trySyncDir(new File(nodes));
-            removeOtherMarkers(nodes, marker);
             logger.info("Wrote the DSE node metadata import marker {}; the nodes/ files stay in place for a rollback", marker);
         }
         catch (IOException e)
