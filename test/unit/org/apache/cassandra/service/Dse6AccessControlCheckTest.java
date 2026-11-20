@@ -49,16 +49,29 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.exceptions.TombstoneAbortException;
 import org.apache.cassandra.exceptions.UnavailableException;
+import org.apache.cassandra.schema.Dse51SchemaRows;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
+import org.apache.cassandra.schema.SchemaKeyspace;
+import org.apache.cassandra.schema.SchemaKeyspaceTables;
+import org.apache.cassandra.schema.SchemaTestUtil;
+import org.apache.cassandra.schema.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.schema.Tables;
+import org.apache.cassandra.schema.Types;
+import org.apache.cassandra.schema.ViewMetadata;
+import org.apache.cassandra.schema.Views;
 import org.apache.cassandra.service.Dse6AccessControlCheck.Findings;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
@@ -119,6 +132,72 @@ public class Dse6AccessControlCheckTest extends CQLTester
                                                  "delegations the replica holds, dropped, are not";
     private static final String DROPPED = ", DataStax Enterprise permissions: this software has MODIFY only, which grants both, so they are " +
                                           "dropped and these roles lose the access they gave: ";
+    /** The materialized view of the DSE 5.1.51 schema fixture that was restricted to rows, then unrestricted. */
+    private static final String DSE51_VIEW = Dse51SchemaRows.KEYSPACE + ".rlac_by_v";
+    /** The table of the DSE 5.1.51 schema fixture restricted to rows. */
+    private static final String DSE51_TABLE = Dse51SchemaRows.KEYSPACE + ".rlac";
+    /** The resources of the row-level grants of the DSE 5.1.51 schema fixture (its {@code select-system-auth.txt}). */
+    private static final List<String> DSE51_ROW_RESOURCES = List.of("rows/EU/data/test_ks/rlac",
+                                                                    "rows/EU/data/test_ks/rlac_by_v");
+    /** The row-level grants of the DSE 5.1.51 schema fixture, as the check lists them. */
+    private static final List<String> DSE51_ROW_GRANTS = List.of("role 'reader' on rows/EU/data/test_ks/rlac: [SELECT]",
+                                                                 "role 'reader' on rows/EU/data/test_ks/rlac_by_v: " +
+                                                                 "[SELECT]");
+    /** What a refusal of DSE_5_1 says of a materialized view restricted to rows. */
+    private static final String DSE51_VIEW_ADVICE = "For the materialized views restricted to rows [" + DSE51_VIEW +
+                                                    "]: roll this node back to DSE 5.1; if no other node runs this " +
+                                                    "software, remove the restriction there before the upgrade " +
+                                                    "starts again, once a row of system_schema.tables named after " +
+                                                    "the view, which a failed UNRESTRICT ROWS on it leaves on a " +
+                                                    "node, is repaired on that node (a DROP MATERIALIZED VIEW there " +
+                                                    "fails and leaves the row without columns): REVOKE the rows/ " +
+                                                    "grants on each view, drop it (DROP MATERIALIZED VIEW, which " +
+                                                    "also removes the view's rows/ grants) and create it again " +
+                                                    "without the restriction, which builds it again from its base " +
+                                                    "table; otherwise, in the mixed phase, which makes no schema or " +
+                                                    "grant change (the nodes of this software do not take DSE 5.1's " +
+                                                    "schema changes), upgrade no further node and report to the " +
+                                                    "upgrade owner. " +
+                                                    "DSE 5.1 keeps a RESTRICT ROWS on a view on the node that ran it " +
+                                                    "only until that node restarts; after it, the other nodes take " +
+                                                    "it from that node's schema. Never run UNRESTRICT ROWS on a " +
+                                                    "view: on DSE 5.1.51 it fails and leaves on that node a row of " +
+                                                    "system_schema.tables named after the view, with which neither " +
+                                                    "DSE 5.1.51 nor this software starts the node";
+    /** The repair of the row a failed UNRESTRICT ROWS on a view leaves, on a DSE 5.1 node that still runs. */
+    private static final String DSE51_TABLE_ROW_REPAIR = "as a superuser on the node that holds the row, DELETE FROM " +
+                                                         "system_schema.tables WHERE keyspace_name = '<keyspace>' " +
+                                                         "AND table_name = '<table>', the table row named, which has " +
+                                                         "the view's name where a failed UNRESTRICT ROWS left it " +
+                                                         "(and the view's rows of system_schema.columns only if a " +
+                                                         "DROP MATERIALIZED VIEW already ran on it), drain and " +
+                                                         "restart it, check the schema agreement with nodetool " +
+                                                         "describecluster, then remove the view's restriction, which " +
+                                                         "that restart spreads to every node: REVOKE the view's " +
+                                                         "rows/ grants, drop the view, unless a DROP MATERIALIZED " +
+                                                         "VIEW already ran, and create it again without the " +
+                                                         "restriction";
+    /** What the refusal of such a row says of its repair: only while no other node runs this software. */
+    private static final String DSE51_TABLE_ROW_ADVICE = "If no other node runs this software, on a DSE 5.1 node " +
+                                                         "that still runs, repair such a row there: " +
+                                                         DSE51_TABLE_ROW_REPAIR + "; otherwise, in the mixed phase, " +
+                                                         "whose schema changes the nodes of this software do not " +
+                                                         "take, upgrade no further node and report to the upgrade " +
+                                                         "owner. This node, which DSE 5.1.51 does not start either, " +
+                                                         "is repaired as the upgrade documentation describes for a " +
+                                                         "node already down, then upgraded again. Never run " +
+                                                         "UNRESTRICT ROWS on a view";
+    /** The advice of a refusal of DSE_5_1 that read rows of this node's replica. */
+    private static final String DSE51_STALE = STALE.replace("rolled back to DSE,", "rolled back to DSE 5.1,")
+                                                   .replace("made on DSE while", "made on DSE 5.1 while");
+    /** What a remedy of DSE_5_1 on DSE 5.1 says for the mixed phase. */
+    private static final String DSE51_MIXED_PHASE = "otherwise, in the mixed phase, which makes no schema or grant " +
+                                                    "change (the nodes of this software do not take DSE 5.1's " +
+                                                    "schema changes), upgrade no further node and report to the " +
+                                                    "upgrade owner";
+    private static final String DSE51_REFUSED = "internode_compatibility_mode DSE_5_1 refused: DSE access controls " +
+                                                "that this software does not enforce would grant access if ignored " +
+                                                "(found by this node's replica): ";
     private InternodeCompatibilityMode modeBefore;
     private boolean ownsAToken;
     private final List<String> rolesToDelete = new ArrayList<>(List.of("analyst", "auditor", "delegate"));
@@ -1125,6 +1204,182 @@ public class Dse6AccessControlCheckTest extends CQLTester
         }
     }
 
+    /** The WARN of a {@code DSE_5_1} start on this node's replica after the cluster-wide read failed. */
+    private static String dse51FallbackWarning(String failure, String tried)
+    {
+        return "The startup check of the DSE access controls could not read system_auth.role_permissions at " +
+               "LOCAL_QUORUM (" + failure + ')' + tried + "; with internode_compatibility_mode DSE_5_1 only this " +
+               "node's replica was checked, since DSE 5.1 has no RESTRICT and no delegation and the restrictions DSE " +
+               "5.1 applies on this node are in the schema this node checked; the periodic check reads the whole " +
+               "table again every 10 minutes";
+    }
+
+    /** The cluster-wide read of {@code read}, and this node's replica read as the pass reads it. */
+    private static Function<ConsistencyLevel, Findings> orThisNodesReplica(ScriptedRead read)
+    {
+        return consistency -> consistency == null ? Dse6AccessControlCheck.scan(null) : read.apply(consistency);
+    }
+
+    /** {@code system_auth.role_permissions} as DSE 5.1 has it: without the columns of DSE 6. */
+    private void removeDseColumns() throws Throwable
+    {
+        for (String column : List.of("restricted", "grantables"))
+        {
+            TableMetadata table = Schema.instance.getTableMetadata(SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                                   AuthKeyspace.ROLE_PERMISSIONS);
+            if (table.getColumn(ColumnIdentifier.getInterned(column, true)) != null)
+                execute("ALTER TABLE system_auth.role_permissions DROP " + column);
+        }
+    }
+
+    /**
+     * In DSE_5_1, a cluster-wide read still failing on the request at the end of the wait is followed by the check of
+     * this node's replica, and the node starts with a WARN of its own; compatstatus' source says the cluster-wide read
+     * failed. What the replica holds is still refused.
+     */
+    @Test
+    public void dse51AClusterWideReadStillFailingAfterTheWaitFallsBackToThisNodesReplica() throws Throwable
+    {
+        removeDseColumns();
+        dse51();
+        FakeTime time = new FakeTime();
+        ScriptedRead read = new ScriptedRead(List.of(), null, time);
+        Function<ConsistencyLevel, Findings> scan = orThisNodesReplica(read);
+        List<String> warnings = warnings(() -> Dse6AccessControlCheck.verifyAfterJoin(scan, time.now::get, time,
+                                                                                      SECONDS.toNanos(10), PAUSE));
+        assertThat(read.attempts).isEqualTo(3);
+        assertThat(time.pauses).containsExactly(PAUSE, PAUSE);
+        assertThat(warnings).containsExactly(retryWarning(1, TIMED_OUT, 10), retryWarning(2, TIMED_OUT, 10),
+                                             dse51FallbackWarning(TIMED_OUT, " after 3 attempts in 10 s"));
+        assertThat(Dse6AccessControlCheck.lastCheck().source)
+        .isEqualTo("this node's replica only: the cluster-wide read failed (" + TIMED_OUT + ')');
+        assertThat(Dse6AccessControlCheck.lastCheck().findings).isEmpty();
+
+        // a single attempt with a wait of 0, the same fallback
+        FakeTime once = new FakeTime();
+        RuntimeException unavailable = UnavailableException.create(ConsistencyLevel.LOCAL_QUORUM, 2, 1);
+        ScriptedRead single = new ScriptedRead(List.of(unavailable), new Findings(), once);
+        Function<ConsistencyLevel, Findings> singleScan = orThisNodesReplica(single);
+        assertThat(warnings(() -> Dse6AccessControlCheck.verifyAfterJoin(singleScan, once.now::get, once, 0, 0)))
+        .containsExactly(dse51FallbackWarning(LOCAL_QUORUM_FAILED, ""));
+        assertThat(single.attempts).isEqualTo(1);
+
+        // a row-level grant held on this node's replica is refused, with the text of the local-only fallback
+        execute("INSERT INTO system_auth.role_permissions (role, resource, permissions) " +
+                "VALUES ('analyst', 'rows/top_secret/data/ks1/table1', {'SELECT'})");
+        FakeTime again = new FakeTime();
+        Function<ConsistencyLevel, Findings> refusedScan = orThisNodesReplica(new ScriptedRead(List.of(), null, again));
+        assertThatThrownBy(() -> Dse6AccessControlCheck.verifyAfterJoin(refusedScan, again.now::get, again, 0, 0))
+        .isInstanceOf(StartupException.class)
+        .hasMessageStartingWith("internode_compatibility_mode DSE_5_1 refused: DSE access controls that this " +
+                                "software does not enforce would grant access if ignored (found by this node's " +
+                                "replica only: the cluster-wide read failed (" + TIMED_OUT + ")): row-level grants " +
+                                "[role 'analyst' on rows/top_secret/data/ks1/table1: [SELECT]]. " + DSE51_STALE);
+    }
+
+    /**
+     * In DSE_5_1, a permissions table with a column of DSE 6 ({@code restricted} or {@code grantables}, each alone or
+     * both) keeps the refusal of a cluster-wide read that cannot be made, which says why: a RESTRICT or a delegation
+     * held on another replica only would go unseen.
+     */
+    @Test
+    public void dse51KeepsTheRefusalWhenThePermissionsTableHasTheColumnsOfDse6() throws Throwable
+    {
+        String dse6Shaped = "; this node's system_auth.role_permissions has the restricted or grantables column of " +
+                            "DSE 6, so this node's replica alone is not relied on";
+        for (String columns : List.of("restricted set<text>", "grantables set<text>",
+                                      "restricted set<text>, grantables set<text>"))
+        {
+            removeDseColumns();
+            execute("ALTER TABLE system_auth.role_permissions ADD (" + columns + ')');
+            try
+            {
+                dse51();
+                FakeTime time = new FakeTime();
+                ScriptedRead read = new ScriptedRead(List.of(), null, time);
+                Function<ConsistencyLevel, Findings> scan = orThisNodesReplica(read);
+                String refusal = refusal(TIMED_OUT, " after 3 attempts in 10 s").replace("DSE_6 refused",
+                                                                                         "DSE_5_1 refused");
+                String unable = unableToRead(TIMED_OUT, " after 3 attempts in 10 s");
+                assertThatThrownBy(() -> Dse6AccessControlCheck.verifyAfterJoin(scan, time.now::get, time,
+                                                                                SECONDS.toNanos(10), PAUSE))
+                .as(columns)
+                .isInstanceOf(StartupException.class)
+                .hasMessage(refusal.replace(unable, unable + dse6Shaped))
+                .hasCauseInstanceOf(ReadTimeoutException.class);
+                assertThat(read.attempts).isEqualTo(3);
+                // no start on this node's replica was recorded
+                assertThat(Dse6AccessControlCheck.lastCheck()).as(columns).isNull();
+            }
+            finally
+            {
+                // the schema is frozen in the mode
+                DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+                removeDseColumns();
+            }
+        }
+    }
+
+    /**
+     * DSE_6 keeps its refusal of a cluster-wide read that cannot be made on a permissions table of DSE 5.1's shape too:
+     * the fallback after the wait is DSE_5_1's, whatever the table.
+     */
+    @Test
+    public void dse6RefusesTheStartOnAPermissionsTableOfDse51sShape() throws Throwable
+    {
+        removeDseColumns();
+        dse6();
+        FakeTime time = new FakeTime();
+        ScriptedRead read = new ScriptedRead(List.of(), null, time);
+        Function<ConsistencyLevel, Findings> scan = orThisNodesReplica(read);
+        long wait = SECONDS.toNanos(10);
+        String refused = refusal(TIMED_OUT, " after 3 attempts in 10 s");
+        List<String> warnings = warnings(() -> {
+            assertThatThrownBy(() -> Dse6AccessControlCheck.verifyAfterJoin(scan, time.now::get, time, wait, PAUSE))
+            .isInstanceOf(StartupException.class)
+            .hasMessage(refused);
+        });
+        assertThat(read.attempts).isEqualTo(3);
+        // the retries only, no WARN of a start on this node's replica
+        assertThat(warnings).containsExactly(retryWarning(1, TIMED_OUT, 10), retryWarning(2, TIMED_OUT, 10));
+        assertThat(Dse6AccessControlCheck.lastCheck()).isNull();
+    }
+
+    /**
+     * In DSE_5_1 the cluster-wide read is taken when it succeeds, after retries; one failing otherwise than on the
+     * request (aborted by the guardrails, or any other error) still refuses the start, never falling back.
+     */
+    @Test
+    public void dse51TakesTheClusterWideReadAndRefusesItsOtherFailures() throws Throwable
+    {
+        removeDseColumns();
+        dse51();
+        FakeTime time = new FakeTime();
+        ScriptedRead read = new ScriptedRead(List.of(UnavailableException.create(ConsistencyLevel.LOCAL_QUORUM, 2, 1)),
+                                             new Findings(), time);
+        Function<ConsistencyLevel, Findings> scan = orThisNodesReplica(read);
+        List<String> warnings = warnings(() -> Dse6AccessControlCheck.verifyAfterJoin(scan, time.now::get, time,
+                                                                                      SECONDS.toNanos(120), PAUSE));
+        assertThat(read.attempts).isEqualTo(2);
+        assertThat(warnings).containsExactly(retryWarning(1, LOCAL_QUORUM_FAILED, 120));
+        assertThat(Dse6AccessControlCheck.lastCheck().source).isEqualTo("a LOCAL_QUORUM read");
+
+        RuntimeException aborted = new TombstoneAbortException("too many tombstones", 1, 100_001, false,
+                                                               ConsistencyLevel.LOCAL_QUORUM, 0, 2, Map.of());
+        for (RuntimeException failure : List.of(new IllegalStateException("unreadable row"), aborted))
+        {
+            FakeTime once = new FakeTime();
+            ScriptedRead failing = new ScriptedRead(List.of(failure), new Findings(), once);
+            Function<ConsistencyLevel, Findings> failingScan = orThisNodesReplica(failing);
+            assertThatThrownBy(() -> Dse6AccessControlCheck.verifyAfterJoin(failingScan, once.now::get, once,
+                                                                            SECONDS.toNanos(120), PAUSE))
+            .isInstanceOf(StartupException.class)
+            .hasMessage(refusal(failure.getMessage(), "").replace("DSE_6 refused", "DSE_5_1 refused"))
+            .hasCause(failure);
+            assertThat(failing.attempts).isEqualTo(1);
+        }
+    }
+
     /**
      * The real pass, with the wait property: retried (one pause of 5 s within a 7 s wait) then refused on this node,
      * which never joined a ring; not retried at all when the local-only or ignore property says what to do; an invalid
@@ -1215,6 +1470,38 @@ public class Dse6AccessControlCheckTest extends CQLTester
             assertThat(events(Dse6AccessControlCheck.class, Dse6AccessControlCheck::recheck))
             .noneMatch(e -> e.getLevel() == Level.ERROR || e.getLevel() == Level.WARN);
         }
+    }
+
+    /**
+     * A row-level grant added after the start, with no table restricted to rows: the periodic ERROR asks to remove it
+     * on DSE in DSE_6, and in DSE_5_1 to roll this node back first and to remove it on DSE 5.1 only while no other
+     * node runs this software. The DSE_5_1 half switches the mode of the same node after its startup passes in DSE_6,
+     * a state no node reaches, since only the text of the periodic ERROR depends on the mode here.
+     */
+    @Test
+    public void thePeriodicCheckOfAGrantAddedSinceTheStart() throws Throwable
+    {
+        String found = ") found DSE access controls this node does not enforce: row-level grants [role 'analyst' on " +
+                       "rows/top_secret/data/ks1/table1: [SELECT]]; ";
+        joinTheRing();
+        dse6();
+        Dse6AccessControlCheck.verifyAtStartup();
+        Dse6AccessControlCheck.verifyAfterJoin();
+        execute("INSERT INTO system_auth.role_permissions (role, resource, permissions) " +
+                "VALUES ('analyst', 'rows/top_secret/data/ks1/table1', {'SELECT'})");
+        assertThat(messages(Dse6AccessControlCheck.class, Level.ERROR, Dse6AccessControlCheck::recheck))
+        .singleElement().asString()
+        .startsWith("The periodic check (")
+        .endsWith(found + "remove them on DSE, and do not run GRANT, REVOKE, RESTRICT, UNRESTRICT, RESTRICT ROWS or " +
+                  "UNRESTRICT ROWS on DSE nodes during the upgrade");
+
+        dse51();
+        assertThat(messages(Dse6AccessControlCheck.class, Level.ERROR, Dse6AccessControlCheck::recheck))
+        .singleElement().asString()
+        .startsWith("The periodic check (")
+        .endsWith(found + "this node refuses its next start on them: roll it back to DSE 5.1; if no other node runs " +
+                  "this software, remove them there and upgrade it again; " + DSE51_MIXED_PHASE + "; do not run " +
+                  "GRANT, REVOKE, RESTRICT ROWS or UNRESTRICT ROWS on DSE 5.1 nodes during the upgrade");
     }
 
     /** Each property of the check that is set is logged at WARN by every start, whatever the check finds. */
@@ -1322,5 +1609,265 @@ public class Dse6AccessControlCheckTest extends CQLTester
         String longName = "\n" + "r".repeat(100);
         assertThat(Dse6AccessControlCheck.permissionsEntry(longName, "data/ks1", Set.of("SELECT")))
         .startsWith("role '0x0a72").contains("... (cut) (bytes, not text)' on data/ks1");
+    }
+
+    // ---- DSE 5.1 ----
+
+    private static void dse51()
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+    }
+
+    /** Removes the rows of the keyspace of the DSE 5.1.51 schema fixture from the schema tables of this node. */
+    private static void deleteDse51SchemaRows()
+    {
+        for (String table : SchemaKeyspaceTables.ALL)
+            QueryProcessor.executeInternal("DELETE FROM system_schema." + table + " WHERE keyspace_name = ?",
+                                           Dse51SchemaRows.KEYSPACE);
+    }
+
+    /** Removes the row of {@code system_schema.tables} named after the view of the DSE 5.1.51 schema fixture. */
+    private static void deleteTheTableRowOfTheView()
+    {
+        QueryProcessor.executeInternal("DELETE FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
+                                       Dse51SchemaRows.KEYSPACE, "rlac_by_v");
+    }
+
+    /** The row-level grants of the DSE 5.1.51 schema fixture, written to {@code system_auth.role_permissions}. */
+    private void insertDse51RowGrants() throws Throwable
+    {
+        for (String resource : DSE51_ROW_RESOURCES)
+            execute("INSERT INTO system_auth.role_permissions (role, resource, permissions) " +
+                    "VALUES ('reader', ?, {'SELECT'})", resource);
+    }
+
+    /**
+     * The refusal of the rows of {@code system_schema.tables} named after a view: every row as listed, in its order,
+     * the repair of a DSE 5.1 node that still runs (the row deleted, a drain and a restart, the schema agreement
+     * checked, then the view's restriction removed), the procedures for a node already down named, and never
+     * {@code UNRESTRICT ROWS} on a view.
+     */
+    @Test
+    public void dse51TheRefusalOfTheRowsOfViewsGivesTheRepair()
+    {
+        String first = SchemaKeyspace.dse51TableRowOfView("ks.v1", "id1", "ks.v1", "id1");
+        String second = SchemaKeyspace.dse51TableRowOfView("ks.t2", "id2", "ks.\"V2\"", "id2");
+        assertThat(first).isEqualTo("the table row ks.v1 (id id1) beside the materialized view ks.v1 (id id1)");
+        assertThat(SchemaKeyspace.dse51TableRowsOfViewsRefusal(List.of(first, second)))
+        .isEqualTo("internode_compatibility_mode DSE_5_1 refused: system_schema.tables holds rows of materialized " +
+                   "views of system_schema.views: " + first + ", " + second + ". DSE 5.1.51 leaves such a row on " +
+                   "the node where UNRESTRICT ROWS on a view failed, after which neither DSE 5.1.51 nor this " +
+                   "software can start the node; this software does not repair it. " + DSE51_TABLE_ROW_ADVICE);
+        assertThat(SchemaKeyspace.DSE51_TABLE_ROW_REPAIR).isEqualTo(DSE51_TABLE_ROW_REPAIR);
+    }
+
+    /**
+     * Node 1 of the DSE 5.1.51 schema fixture, as DSE 5.1.51 left it after the failed {@code UNRESTRICT ROWS} on the
+     * view: a row of {@code system_schema.tables} named after the view, with its id, beside the view. Without the mode
+     * (as in {@code DSE_6}) the build of the schema fails on the shared id, with an error that does not say why; in
+     * {@code DSE_5_1} the start is refused with the rows named before the schema is loaded, and so is every read of
+     * the schema. Without that row the view loads from DSE 5.1's rows, which have no {@code version} column (a view
+     * of version 0).
+     */
+    @Test
+    public void dse51TheRowUnrestrictRowsLeavesBesideAViewRefusesTheSchema() throws Throwable
+    {
+        Dse51SchemaRows.apply(Dse51SchemaRows.KEYSPACE);
+        String id = Dse51Fixtures.RLAC_VIEW_ID.toString();
+        try
+        {
+            for (InternodeCompatibilityMode mode : List.of(InternodeCompatibilityMode.NONE,
+                                                           InternodeCompatibilityMode.DSE_6))
+            {
+                DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+                assertThatThrownBy(SchemaKeyspace::fetchNonSystemKeyspaces)
+                .as("%s", mode)
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Multiple entries with same key: " + id + '=' + DSE51_VIEW + " and " + id + '=' +
+                            DSE51_VIEW);
+            }
+            // in DSE_5_1 the startup check refuses the row before the schema is loaded, with the text of the
+            // check of SchemaKeyspace, which stands behind it for every read of the schema
+            dse51();
+            String refusal = "internode_compatibility_mode DSE_5_1 refused: system_schema.tables holds rows of " +
+                             "materialized views of system_schema.views: the table row " + DSE51_VIEW + " (id " + id +
+                             ") beside the materialized view " + DSE51_VIEW + " (id " + id + "). DSE 5.1.51 leaves " +
+                             "such a row on the node where UNRESTRICT ROWS on a view failed, after which neither DSE " +
+                             "5.1.51 nor this software can start the node; this software does not repair it. " +
+                             DSE51_TABLE_ROW_ADVICE;
+            assertThatThrownBy(Dse6AccessControlCheck::verifyDse51SchemaRowsAtStartup)
+            .isInstanceOfSatisfying(StartupException.class,
+                                    e -> assertThat(e.returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG))
+            .hasMessage(refusal);
+            assertThatThrownBy(SchemaKeyspace::fetchNonSystemKeyspaces)
+            .isInstanceOf(ConfigurationException.class)
+            .hasMessage(refusal);
+            for (InternodeCompatibilityMode mode : List.of(InternodeCompatibilityMode.NONE,
+                                                           InternodeCompatibilityMode.DSE_6))
+            {
+                DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+                Dse6AccessControlCheck.verifyDse51SchemaRowsAtStartup();
+            }
+            dse51();
+
+            // without that row the start goes on and the schema of the keyspace is built, the view with the key of
+            // its restriction
+            deleteTheTableRowOfTheView();
+            Dse6AccessControlCheck.verifyDse51SchemaRowsAtStartup();
+            KeyspaceMetadata keyspace = SchemaKeyspace.fetchNonSystemKeyspaces().getNullable(Dse51SchemaRows.KEYSPACE);
+            assertThat(keyspace.views.getNullable("rlac_by_v").metadata.params.extensions)
+            .containsExactly(Map.entry(Dse6AccessControlCheck.RLAC_EXTENSION_KEY, ByteBufferUtil.bytes("region")));
+            // a view of version 0, as DSE 5.1 writes every view (its row has no version), with no hidden column:
+            // the columns of its definition only
+            UntypedResultSet viewRow = QueryProcessor.executeInternal("SELECT version FROM system_schema.views " +
+                                                                      "WHERE keyspace_name = ? AND view_name = ?",
+                                                                      Dse51SchemaRows.KEYSPACE, "rlac_by_v");
+            assertThat(viewRow.size()).isEqualTo(1);
+            assertThat(viewRow.one().has("version")).isFalse();
+            assertThat(keyspace.views.getNullable("rlac_by_v").metadata.columns())
+            .extracting(column -> column.name.toString())
+            .containsExactlyInAnyOrder("v", "region", "id");
+        }
+        finally
+        {
+            deleteDse51SchemaRows();
+        }
+    }
+
+    /**
+     * The restricted table and the view of the DSE 5.1.51 schema fixture, with its row-level grants, as node 1 has them
+     * (the view's key there), then as nodes 2 and 3 have them (the view without the key): node 1 refuses the table,
+     * the view and the grants, with no remedy for the view, the others the table and the grants. The DSE 5.1 node has
+     * no {@code restricted} or {@code grantables} column and grants neither UPDATE nor TRUNCATE.
+     */
+    @Test
+    public void dse51RestrictedTablesViewsAndRowGrantsRefuseTheStart() throws Throwable
+    {
+        rolesToDelete.add("reader");
+        // the drop of a view records it in system_distributed, which this test node does not create
+        String distributed = SchemaConstants.DISTRIBUTED_KEYSPACE_NAME;
+        boolean distributedAdded = Schema.instance.getKeyspaceMetadata(distributed) == null;
+        if (distributedAdded)
+            SchemaTestUtil.addOrUpdateKeyspace(SystemDistributedKeyspace.metadata(), true);
+        KeyspaceMetadata node1 = dse51FixtureKeyspace();
+        try
+        {
+            SchemaTestUtil.addOrUpdateKeyspace(node1, true);
+            insertDse51RowGrants();
+            dse51();
+            Findings findings = Dse6AccessControlCheck.scan(null);
+            assertThat(findings.rowLevelGrants).isEqualTo(DSE51_ROW_GRANTS);
+            assertThat(findings.restrictions).isEmpty();
+            assertThat(findings.delegations).isEmpty();
+            String tables = "row-level restricted tables in the schema [" + DSE51_TABLE + " (tenant column region)]";
+            String views = "row-level restricted materialized views in the schema [" + DSE51_VIEW +
+                           " (tenant column region)]";
+            String grants = "row-level grants " + DSE51_ROW_GRANTS;
+            // in DSE_5_1 a remedy on DSE 5.1 only while no other node runs this software, none in the mixed phase
+            String remedy = "Roll this node back to DSE 5.1; if no other node runs this software, remove them there " +
+                            "(REVOKE the row-level grants, UNRESTRICT ROWS ON " + DSE51_TABLE + ") and upgrade it " +
+                            "again; " + DSE51_MIXED_PHASE;
+            String end = "; or start with " + OVERRIDE + " to drop them knowingly";
+            assertThatThrownBy(Dse6AccessControlCheck::verifyAtStartup)
+            .isInstanceOf(StartupException.class)
+            .hasMessage(DSE51_REFUSED + grants + "; " + tables + "; " + views + ". " + DSE51_STALE + remedy + ". " +
+                        DSE51_VIEW_ADVICE + end);
+            assertThat(Dse6AccessControlCheck.lastCheck().findings)
+            .containsExactly("row-level grant " + DSE51_ROW_GRANTS.get(0), "row-level grant " + DSE51_ROW_GRANTS.get(1),
+                             "row-level restricted table in the schema " + DSE51_TABLE + " (tenant column region)",
+                             "row-level restricted materialized view in the schema " + DSE51_VIEW +
+                             " (tenant column region)");
+            // the lone grants of DSE 6 are not looked for
+            assertThat(CassandraAuthorizer.loneDseWriteGrantsSource())
+            .startsWith("the rows read since startup; DSE 5.1 grants neither");
+
+            // the periodic check reports them, with the statements DSE 5.1 has
+            List<String> errors = messages(Dse6AccessControlCheck.class, Level.ERROR, Dse6AccessControlCheck::recheck);
+            assertThat(errors).hasSize(1);
+            // the whole ERROR, but the source of the check before it
+            assertThat(errors.get(0))
+            .startsWith("The periodic check (")
+            .endsWith(") found DSE access controls this node does not enforce: " + grants + "; " + tables + "; " +
+                      views + "; this node refuses its next start on them: roll it back to DSE 5.1; if no other " +
+                      "node runs this software, remove the row-level grants there and upgrade it again; " +
+                      DSE51_MIXED_PHASE + "; do not run GRANT, REVOKE, RESTRICT ROWS or UNRESTRICT " +
+                      "ROWS on DSE 5.1 nodes during the upgrade; the tables restricted to rows are in this node's " +
+                      "schema, which DSE 5.1 DDL does not reach, and refuse its next start: roll it back to DSE 5.1; " +
+                      "if no other node runs this software, run UNRESTRICT ROWS ON " + DSE51_TABLE + " there and " +
+                      "upgrade it again; " + DSE51_MIXED_PHASE + "; the materialized views restricted to rows are in " +
+                      "this node's schema and refuse its next start. " + DSE51_VIEW_ADVICE);
+
+            // the view alone, as the only finding: no advice to roll back
+            execute("DELETE FROM system_auth.role_permissions WHERE role = 'reader'");
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            TableMetadata table = Schema.instance.getTableMetadata(Dse51SchemaRows.KEYSPACE, "rlac");
+            TableMetadata unrestricted = table.unbuild()
+                                              .params(table.params.unbuild().extensions(Map.of()).build())
+                                              .build();
+            SchemaTestUtil.addOrUpdateKeyspace(node1.withSwapped(node1.tables.withSwapped(unrestricted)), true);
+            dse51();
+            assertThatThrownBy(Dse6AccessControlCheck::verifyAtStartup)
+            .hasMessage(DSE51_REFUSED + views + ". " + DSE51_VIEW_ADVICE + end);
+
+            // nodes 2 and 3: the view without the key, which only the node that ran RESTRICT ROWS on it has
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            SchemaTestUtil.addOrUpdateKeyspace(withoutTheViewsKey(node1), true);
+            assertThat(Schema.instance.getKeyspaceMetadata(Dse51SchemaRows.KEYSPACE).views.getNullable("rlac_by_v")
+                                      .metadata.params.extensions).isEmpty();
+            insertDse51RowGrants();
+            dse51();
+            assertThatThrownBy(Dse6AccessControlCheck::verifyAtStartup)
+            .hasMessage(DSE51_REFUSED + grants + "; " + tables + ". " + DSE51_STALE + remedy + end);
+
+            // in DSE_6 a view's key is not looked for (DSE 6's behaviour is unchanged)
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            SchemaTestUtil.addOrUpdateKeyspace(node1, true);
+            execute("DELETE FROM system_auth.role_permissions WHERE role = 'reader'");
+            dse6();
+            assertThatThrownBy(Dse6AccessControlCheck::verifyAtStartup)
+            .hasMessage("internode_compatibility_mode DSE_6 refused: DSE access controls that this software does not " +
+                        "enforce would grant access if ignored (found by this node's replica): " + tables + ". " +
+                        ROLL_BACK + "UNRESTRICT ROWS ON " + DSE51_TABLE + UPGRADE_AGAIN);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            SchemaTestUtil.dropKeyspaceIfExist(Dse51SchemaRows.KEYSPACE, true);
+            if (distributedAdded)
+                SchemaTestUtil.dropKeyspaceIfExist(distributed, true);
+            deleteDse51SchemaRows();
+        }
+    }
+
+    /**
+     * The keyspace of the DSE 5.1.51 schema fixture with its table {@code rlac} and the view {@code rlac_by_v} only, as
+     * node 1 has them once the row of {@code system_schema.tables} named after the view is removed: the other tables
+     * are left out (their SASI index and compact storage are not what these tests are about).
+     */
+    private static KeyspaceMetadata dse51FixtureKeyspace() throws Exception
+    {
+        Dse51SchemaRows.apply(Dse51SchemaRows.KEYSPACE);
+        deleteTheTableRowOfTheView();
+        KeyspaceMetadata keyspace = SchemaKeyspace.fetchNonSystemKeyspaces().getNullable(Dse51SchemaRows.KEYSPACE);
+        deleteDse51SchemaRows();
+        TableMetadata table = keyspace.tables.getNullable("rlac");
+        assertThat(table.id.asUUID()).isEqualTo(Dse51Fixtures.RLAC_TABLE_ID);
+        assertThat(table.params.extensions)
+        .containsExactly(Map.entry(Dse6AccessControlCheck.RLAC_EXTENSION_KEY, ByteBufferUtil.bytes("region")));
+        ViewMetadata view = keyspace.views.getNullable("rlac_by_v");
+        assertThat(view.metadata.id.asUUID()).isEqualTo(Dse51Fixtures.RLAC_VIEW_ID);
+        return keyspace.withSwapped(Tables.of(table))
+                       .withSwapped(Views.builder().put(view).build())
+                       .withSwapped(Types.none());
+    }
+
+    /** {@code keyspace} with its view as nodes 2 and 3 of the fixture have it, without the key of its restriction. */
+    private static KeyspaceMetadata withoutTheViewsKey(KeyspaceMetadata keyspace)
+    {
+        ViewMetadata view = keyspace.views.getNullable("rlac_by_v");
+        TableMetadata unrestricted = view.metadata.unbuild()
+                                                  .params(view.metadata.params.unbuild().extensions(Map.of()).build())
+                                                  .build();
+        return keyspace.withSwapped(Views.builder().put(view.copy(unrestricted)).build());
     }
 }

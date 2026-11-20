@@ -668,8 +668,8 @@ public final class DseUpgradeGuards
 
     /**
      * Starts the periodic tasks, once at server start in {@code DSE_6} or {@code DSE_5_1} mode (a no-op otherwise): the
-     * status line, and, in {@code DSE_6} only, a new check of the DSE access controls, which a DSE node can still
-     * change after this node started. The check reads {@code system_auth} across the cluster and may block: it runs on
+     * status line, and a new check of the DSE access controls, which a DSE node can still change after this node
+     * started. The check reads {@code system_auth} across the cluster and may block: it runs on
      * the optional tasks executor, not on the shared scheduled tasks one. That executor also runs other background
      * tasks of the node (the size estimates, the speculative retry thresholds, for instance), which a slow read delays
      * for as long as it lasts, at most the read timeout and then a read of this node's replica, every
@@ -680,30 +680,28 @@ public final class DseUpgradeGuards
         if (!DseCompat.enabled() || !STATUS_LOG_STARTED.compareAndSet(false, true))
             return;
         schedulePeriodicTasks(ScheduledExecutors.scheduledTasks, ScheduledExecutors.optionalTasks);
-        if (DseCompat.isDse51())
-            logger.info("The DSE 5.1 upgrade status will be logged every {} minutes", STATUS_LOG_INTERVAL_MINUTES);
-        else
-            logger.info("The DSE 6 upgrade status will be logged, and the DSE access controls checked again, every " +
-                        "{} minutes; the check does not see RESTRICT ROWS or UNRESTRICT ROWS run on DSE nodes during " +
-                        "the upgrade (DSE schema changes do not reach this node): do not run them until every node " +
-                        "is upgraded", STATUS_LOG_INTERVAL_MINUTES);
+        logger.info("The {} upgrade status will be logged, and the DSE access controls checked again, every " +
+                    "{} minutes; the check does not see RESTRICT ROWS or UNRESTRICT ROWS run on DSE nodes during " +
+                    "the upgrade (DSE schema changes do not reach this node): do not run them until every node " +
+                    "is upgraded", DseCompat.source(), STATUS_LOG_INTERVAL_MINUTES);
     }
 
     /**
      * Schedules the status line on {@code statusExecutor} and the check of the DSE access controls on
-     * {@code recheckExecutor}, except in {@code DSE_5_1}, which has no DSE access control to check
-     * ({@link Dse6AccessControlCheck#recheck()} does nothing there).
+     * {@code recheckExecutor}.
      */
     @VisibleForTesting
     static void schedulePeriodicTasks(ScheduledExecutorService statusExecutor, ScheduledExecutorService recheckExecutor)
     {
         statusExecutor.scheduleWithFixedDelay(DseUpgradeGuards::logStatus, STATUS_LOG_INTERVAL_MINUTES, STATUS_LOG_INTERVAL_MINUTES, TimeUnit.MINUTES);
-        if (!DseCompat.isDse51())
-            recheckExecutor.scheduleWithFixedDelay(DseUpgradeGuards::recheckAccessControls, STATUS_LOG_INTERVAL_MINUTES,
-                                                   STATUS_LOG_INTERVAL_MINUTES, TimeUnit.MINUTES);
+        recheckExecutor.scheduleWithFixedDelay(DseUpgradeGuards::recheckAccessControls, STATUS_LOG_INTERVAL_MINUTES,
+                                               STATUS_LOG_INTERVAL_MINUTES, TimeUnit.MINUTES);
     }
 
-    /** One status line; a failure is logged and never cancels the next runs. */
+    /**
+     * One status line, and in {@code DSE_5_1} a new check of the workloads the DSE 5.1 peers gossip; a failure is
+     * logged and never cancels the next runs.
+     */
     @VisibleForTesting
     static void logStatus()
     {
@@ -714,6 +712,14 @@ public final class DseUpgradeGuards
         catch (RuntimeException e)
         {
             logger.error("Unable to compute the {} upgrade status", DseCompat.source(), e);
+        }
+        try
+        {
+            Dse6NonCoreTraces.recheckDse51GossipedWorkloads();
+        }
+        catch (RuntimeException e)
+        {
+            logger.error("Unable to check the workloads the DSE 5.1 peers gossip again", e);
         }
     }
 

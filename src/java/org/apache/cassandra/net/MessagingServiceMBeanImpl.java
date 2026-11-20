@@ -412,7 +412,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     @Override
     public String getDseNonCoreTraces()
     {
-        return DatabaseDescriptor.isDse6CompatibilityMode() ? Dse6NonCoreTraces.status() : null;
+        return DatabaseDescriptor.isDseCompatibilityMode() ? Dse6NonCoreTraces.status() : null;
     }
 
     @Override
