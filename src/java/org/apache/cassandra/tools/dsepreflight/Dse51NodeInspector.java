@@ -45,6 +45,7 @@ import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.commitlog.CommitLogDescriptor;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.compress.ICompressor;
 import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.sstable.SSTableIdFactory;
@@ -56,6 +57,7 @@ import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.nodes.DseNodeWorkloads;
+import org.apache.cassandra.schema.Dse51ColumnTypes;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.SchemaKeyspaceTables;
 import org.apache.cassandra.service.Dse6NonCoreTraces;
@@ -85,7 +87,8 @@ import static org.apache.cassandra.tools.dsepreflight.NodeLayout.isTrue;
  * never writes to them; the optional {@code nodetool} commands are read-only ones ({@link LiveState#DSE51_COMMANDS}).
  * The checks both inspections make are package-private helpers of {@link NodeInspector}; the traces of the features
  * this software does not support are gathered with the rules of the node's own start check
- * ({@link Dse6NonCoreTraces.Dse51Markers}). The report has the fields of a DSE 6 node's, and a section of its own
+ * ({@link Dse6NonCoreTraces.Dse51Markers}), and the schema and the access controls are checked by
+ * {@link SchemaInspector#forDse51}. The report has the fields of a DSE 6 node's, and a section of its own
  * ({@link NodeReport.Dse51}).
  */
 final class Dse51NodeInspector
@@ -134,6 +137,11 @@ final class Dse51NodeInspector
     static final List<String> MARKER_CODES = List.of("NON_CORE_WORKLOAD", "SEARCH_INDEX", "GRAPH_KEYSPACE",
                                                      "NON_CORE_KEYSPACE", "ADVANCED_REPLICATION", "TIERED_STORAGE",
                                                      "REMOVED_COMPACTION");
+    /** The codes of the blocking findings of the schema of DSE 5.1 a step of the upgrade path names. */
+    static final List<String> SCHEMA_CODES = List.of("COMPACT_STORAGE", "SASI_INDEX", "UNLOADABLE_KEYSPACE",
+                                                     "UNLOADABLE_TYPE", "UNLOADABLE_TABLE", "UNLOADABLE_CLASS",
+                                                     "LEGACY_AUTH_TABLES", "JAVASCRIPT_UDF", "UDF_LANGUAGE",
+                                                     Dse51ColumnTypes.PREFLIGHT_CODE);
 
     static final String SSTABLE_BIG_OLDER = "big sstables older than me (written by an earlier DSE 5.1 release, by " +
                                             "DSE 5.0 or earlier, or by Apache Cassandra 3.x), which the upgrade " +
@@ -167,8 +175,10 @@ final class Dse51NodeInspector
     /** the options of DSE's {@code jvm.options}; null when it could not be read */
     @Nullable
     private List<String> jvmOptions;
-    /** what of the schema the traces could not be read from */
-    private final List<String> schemaNotRead = new ArrayList<>();
+    /** the inspection of the schema and the access controls, which reads the rows of system_schema the traces need */
+    private SchemaInspector schema;
+    /** whether the inspection of the schema completed, without an error {@link #guarded} reported */
+    private boolean schemaInspected;
     private final Map<String, Long> liveBytesByDataDirectory = new LinkedHashMap<>();
     private final List<String> unreadableTransactionLogs = new ArrayList<>();
     /** the blocking kinds of sstable problem found in the data directories */
@@ -197,15 +207,22 @@ final class Dse51NodeInspector
         guarded("the inputs", this::recordInputs);
         guarded("system.local and system.peers", this::inspectSystemTables);
         guarded("cassandra.yaml, dse.yaml and jvm.options", this::inspectConfiguration);
+        // after the configuration, whose settings tell whether DSE enforces row-level access control
+        schema = SchemaInspector.forDse51(layout.dataDirectories, NodeInspector.dsefsKeyspace(layout),
+                                          NodeInspector.partitioner(layout), dse51.rowLevelAccessControlEnforced,
+                                          nodesByDataCenter(), nodesWithoutDataCenter(), local != null && peersRead,
+                                          peersRead, report.peers.stream().anyMatch(peer -> peer.upgraded),
+                                          findings);
+        guarded("the schema and the access controls", this::inspectSchema);
         guarded("the traces of the features HCD 2.0 does not support", this::inspectMarkers);
         guarded("the data directories", this::inspectDataDirectories);
         guarded("the hints directory", this::inspectHints);
         guarded("the commit log directory", this::inspectCommitLog);
         findings.add(info("SSTABLES_ONLY",
-                          "system.local, system.peers and system_schema are read from their sstables, so changes a " +
-                          "running DSE node has not flushed yet (a workload recorded, a schema change) are not " +
-                          "seen: run nodetool flush system && nodetool flush system_schema (two commands, one " +
-                          "keyspace each) right before the tool"));
+                          "system.local, system.peers, system_schema and system_auth are read from their sstables, " +
+                          "so changes a running DSE node has not flushed yet (a workload recorded, a schema change, " +
+                          "a GRANT) are not seen: run nodetool flush system && nodetool flush system_schema && " +
+                          "nodetool flush system_auth (three commands, one keyspace each) right before the tool"));
         guarded("the metadata directory", this::inspectMetadataDirectory);
         if (live != null)
             guarded("the live state", this::inspectLive);
@@ -223,7 +240,7 @@ final class Dse51NodeInspector
         {
             part.run();
         }
-        catch (RuntimeException | AssertionError e)
+        catch (RuntimeException | AssertionError | FSError e)
         {
             findings.add(blocking("INSPECTION_ERROR",
                                   "the inspection of " + what + " failed (" + e + "), so it is incomplete",
@@ -510,13 +527,72 @@ final class Dse51NodeInspector
                                  "each"));
     }
 
+    /**
+     * The nodes of each data center, this node included, as {@code system.local} and {@code system.peers} record them,
+     * for the checks of the replication; a node whose data center is not recorded is not counted.
+     */
+    private Map<String, Integer> nodesByDataCenter()
+    {
+        Map<String, Integer> nodes = new TreeMap<>();
+        if (local != null && report.node.dataCenter != null)
+            nodes.merge(report.node.dataCenter, 1, Integer::sum);
+        for (NodeReport.Peer peer : report.peers)
+            if (peer.dataCenter != null)
+                nodes.merge(peer.dataCenter, 1, Integer::sum);
+        return nodes;
+    }
+
+    /** The nodes of {@code system.local} and {@code system.peers} that record no data center. */
+    private int nodesWithoutDataCenter()
+    {
+        int nodes = local != null && report.node.dataCenter == null ? 1 : 0;
+        for (NodeReport.Peer peer : report.peers)
+            if (peer.dataCenter == null)
+                nodes++;
+        return nodes;
+    }
+
+    // ---- the schema and the access controls ----
+
+    /**
+     * The checks of the schema and of {@code system_auth.role_permissions} ({@link SchemaInspector#forDse51}), with
+     * what the report and the aggregate take from them: the rows of {@code role_permissions} read, whether DSE checks
+     * permissions, the views restricted to rows in this node's schema and the rows a failed {@code UNRESTRICT ROWS}
+     * on a view left (both null when the schema or its views could not be read, or its inspection failed).
+     */
+    private void inspectSchema()
+    {
+        // from the yaml files only: known whether the inspection of the schema completes or not
+        report.accessControls.authorizationEnabled = NodeInspector.authorizationEnabled(layout);
+        schema.inspect();
+        schemaInspected = true;
+        report.accessControls.rolePermissionsRows = schema.rolePermissionsRead ? schema.rolePermissionsRows : null;
+        if (!schema.schemaRead)
+            return;
+        // without system_schema.views neither is known, which the aggregate must not take for none
+        if (schema.viewInputsNotRead().isEmpty())
+        {
+            dse51.restrictedViews = new ArrayList<>(schema.restrictedViews);
+            dse51.viewTableRows = new ArrayList<>(schema.viewTableRows);
+        }
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("keyspaces", schema.keyspaceCount);
+        summary.put("tables", schema.tableCount);
+        summary.put("views", schema.viewCount);
+        summary.put("keyspace_names", schema.keyspaceNames());
+        // DSE 5.1 lists system and system_schema in its schema; the keyspaces of the traces are reported apart
+        summary.put("keyspaces_left_out", schema.keyspacesLeftOut());
+        report.inputs.put("schema", summary);
+    }
+
     // ---- the traces of the features HCD 2.0 does not support ----
 
     /**
      * The traces the start of a node in {@code DSE_5_1} mode refuses (the workloads of {@code system.local} and
      * {@code system.peers}, the keyspaces, the indexes and the compaction of the tables and views of
      * {@code system_schema}, the {@code solr.data} directories), one blocking finding per feature, so that the
-     * operator removes them on DSE 5.1 before the first node is upgraded.
+     * operator removes them on DSE 5.1 before the first node is upgraded. The rows of {@code system_schema} are those
+     * the inspection of the schema read ({@link SchemaInspector#rowsOf}), which reports the tables it could not read.
      */
     private void inspectMarkers()
     {
@@ -526,68 +602,32 @@ final class Dse51NodeInspector
         for (UntypedResultSet.Row row : peers)
             markers.workloads(workloads(inet(row, "peer"), row));
 
-        DseTableReader.TableRows keyspaces = readSchema(SchemaKeyspaceTables.KEYSPACES, List.of(), true);
-        if (keyspaces != null)
+        Map<String, String> replication = schema.replicationClasses();
+        if (replication != null)
         {
-            Map<String, String> replication = new TreeMap<>();
-            for (UntypedResultSet.Row row : keyspaces.rows)
-                replication.put(row.getString("keyspace_name"),
-                                row.has("replication") ? row.getFrozenTextMap("replication").get("class") : null);
             markers.keyspaces(replication);
+            String dsefs = NodeInspector.dsefsKeyspace(layout);
+            if (dsefs != null && replication.containsKey(dsefs))
+                markers.dsefsKeyspace(dsefs);
         }
-        DseTableReader.TableRows indexes = readSchema(SchemaKeyspaceTables.INDEXES,
-                                                      List.of("table_name", "index_name"), false);
+        DseTableReader.TableRows indexes = schema.rowsOf(SchemaKeyspaceTables.INDEXES);
         if (indexes != null)
             for (UntypedResultSet.Row row : indexes.rows)
                 markers.index(row.getString("keyspace_name"), row.getString("table_name"), row.getString("index_name"),
                               row.has("options")
                               ? row.getFrozenTextMap("options").get(IndexTarget.CUSTOM_INDEX_OPTION_NAME)
                               : null);
-        DseTableReader.TableRows tables = readSchema(SchemaKeyspaceTables.TABLES, List.of("table_name"), true);
+        DseTableReader.TableRows tables = schema.rowsOf(SchemaKeyspaceTables.TABLES);
         if (tables != null)
             for (UntypedResultSet.Row row : tables.rows)
                 markers.table(row.getString("keyspace_name"), row.getString("table_name"), compactionClass(row));
-        DseTableReader.TableRows views = readSchema(SchemaKeyspaceTables.VIEWS, List.of("view_name"), false);
+        DseTableReader.TableRows views = schema.rowsOf(SchemaKeyspaceTables.VIEWS);
         if (views != null)
             for (UntypedResultSet.Row row : views.rows)
                 markers.view(row.getString("keyspace_name"), row.getString("view_name"), compactionClass(row));
         markers.solrData(layout.dataDirectories.toArray(new File[0]));
-        if (!schemaNotRead.isEmpty())
-            findings.add(blocking("UNREADABLE_SCHEMA",
-                                  "cannot read " + list(schemaNotRead) + ", so the traces of the DSE features HCD " +
-                                  "2.0 does not support cannot all be checked",
-                                  "run the tool again (DSE may have been compacting the tables); if it persists, " +
-                                  "run it as the user DSE runs as (or as root), on DSE's data directories " +
-                                  "(--data-dir); a damaged sstable of system_schema must be repaired on DSE first"));
 
         markers.byFeature().forEach((feature, traces) -> findings.add(markerFinding(feature, traces)));
-    }
-
-    /**
-     * A table of {@code system_schema}; null, with the table added to {@link #schemaNotRead}, when it cannot be read
-     * or when it is a {@code required} one and the data directories hold no directory of it.
-     */
-    @Nullable
-    private DseTableReader.TableRows readSchema(String table, List<String> clustering, boolean required)
-    {
-        String name = SchemaConstants.SCHEMA_KEYSPACE_NAME + '.' + table;
-        try
-        {
-            DseTableReader.TableRows rows = DseTableReader.readBig(layout.dataDirectories,
-                                                                   SchemaConstants.SCHEMA_KEYSPACE_NAME, table,
-                                                                   List.of("keyspace_name"), clustering);
-            if (required && !rows.found)
-            {
-                schemaNotRead.add(name + " (no sstable of the table)");
-                return null;
-            }
-            return rows;
-        }
-        catch (IOException | RuntimeException e)
-        {
-            schemaNotRead.add(name + " (" + rootCause(e) + ')');
-            return null;
-        }
     }
 
     @Nullable
@@ -759,22 +799,22 @@ final class Dse51NodeInspector
 
     /**
      * The settings of DSE 5.1's {@code cassandra.yaml} that encrypt or compress what HCD 2.0 replays or delivers:
-     * {@code transparent_data_encryption_options}, which encrypts the commit log and, in DSE 5.1, the hints files, and
+     * {@code transparent_data_encryption_options}, which encrypts the commit log (DSE 5.1.51's writer of hints files
+     * writes no encryption: it encrypts them through {@code system_info_encryption}, {@code TDE_TABLE}), and
      * {@code hints_compression}. Blocking, as for DSE 6.
      */
     private void checkCommitLogAndHintsSettings(Map<String, Object> yaml)
     {
         if (isTrue(get(yaml, "transparent_data_encryption_options", "enabled")))
             findings.add(blocking("TDE_COMMITLOG",
-                                  "transparent_data_encryption_options.enabled is true in DSE's cassandra.yaml: DSE " +
-                                  "5.1 encrypts the commit log and the hints files it writes; encryption is out of " +
-                                  "scope of this upgrade, and HCD 2.0 was validated with neither encrypted",
+                                  "transparent_data_encryption_options.enabled is true in DSE's cassandra.yaml: the " +
+                                  "commit log DSE 5.1 writes is encrypted; encryption is out of scope of this " +
+                                  "upgrade, and HCD 2.0's replay of DSE's commit log was not validated with " +
+                                  "encrypted segments",
                                   "set enabled: false under transparent_data_encryption_options and restart DSE on " +
                                   "every node, with the keystore that section names still in place, so that DSE " +
-                                  "replays the commit log segments written before and writes its segments and hints " +
-                                  "files unencrypted from then on; with every node up, wait until DSE has delivered " +
-                                  "the hints files written before and they are gone; all of it before the first node " +
-                                  "is upgraded"));
+                                  "replays the commit log segments written before and writes its segments " +
+                                  "unencrypted from then on, before the first node is upgraded"));
         Object hintsCompression = yaml.get("hints_compression");
         if (NodeInspector.isSetValue(hintsCompression))
             findings.add(blocking("HINTS_COMPRESSION",
@@ -1046,10 +1086,10 @@ final class Dse51NodeInspector
                                  "on DSE 5.1, before the first node is upgraded: give the users who read restricted " +
                                  "tables the access they need without row-level access control (or none), UNRESTRICT " +
                                  "ROWS on every restricted table, REVOKE the rows/ grants, then set " +
-                                 "allow_row_level_security: false; for a materialized view restricted to rows, ask " +
-                                 "the upgrade owner, since its remedy is not validated yet (never UNRESTRICT ROWS on " +
-                                 "a view: on DSE 5.1.51 it fails and leaves a row in system_schema after which the " +
-                                 "node does not start)"));
+                                 "allow_row_level_security: false; drop a materialized view restricted to rows and " +
+                                 "create it again without the restriction (see RESTRICTED_VIEW where a node reports " +
+                                 "it; " + SchemaInspector.DROP_REMOVES_VIEW_GRANTS + "; " +
+                                 SchemaInspector.NEVER_UNRESTRICT_VIEW + ')'));
         else if (allowed)
             findings.add(info("ROW_LEVEL_ACCESS",
                               "allow_row_level_security is true in dse.yaml, but DSE 5.1 does not enforce row-level " +
@@ -1058,9 +1098,9 @@ final class Dse51NodeInspector
                                              : "the authorizer is not DseAuthorizer") +
                               "): restrictions and rows/ grants left in the schema still keep HCD 2.0 from starting; " +
                               "remove them before the first node is upgraded: UNRESTRICT ROWS on a restricted table " +
-                              "and REVOKE of the rows/ grants; for a materialized view restricted to rows, ask the " +
-                              "upgrade owner, since its remedy is not validated yet (never UNRESTRICT ROWS on a " +
-                              "view)"));
+                              "and REVOKE of the rows/ grants; drop a materialized view restricted to rows and " +
+                              "create it again without the restriction (" + SchemaInspector.DROP_REMOVES_VIEW_GRANTS +
+                              "; never UNRESTRICT ROWS on a view)"));
     }
 
     // ---- data directories ----
@@ -1263,8 +1303,9 @@ final class Dse51NodeInspector
             });
             boolean unknown = headers.containsKey(HintsHeader.UNKNOWN_COMPRESSOR) ||
                               headers.containsKey(HintsHeader.UNKNOWN_PARAMETER);
+            boolean encryptionSection = headers.containsKey(HintsHeader.ENCRYPTION_SECTION);
             List<String> why = new ArrayList<>(3);
-            if (headers.containsKey(HintsHeader.ENCRYPTED_BY_TDE) ||
+            if (encryptionSection ||
                 headers.containsKey(HintsHeader.ENCRYPTED_BY_SYSTEM_INFO))
                 why.add("HCD 2.0 has neither DSE's encrypting compressors nor its keys");
             if (headers.containsKey(HintsHeader.COMPRESSED))
@@ -1275,11 +1316,14 @@ final class Dse51NodeInspector
             findings.add(blocking("HINTS_COMPRESSION",
                                   "DSE 5.1 hints files whose header records a compression, an encryption or " +
                                   "another parameter: " + String.join("; ", found) + "; " + String.join(", and ", why),
-                                  (unknown ? "find out what wrote the files with a compressor or a parameter HCD 2.0 " +
-                                             "does not know; " : "") +
+                                  findOut(unknown, encryptionSection) +
                                   (settings.isEmpty() ? "" : String.join(" and ", settings) + ", and ") +
-                                  "restart DSE on this node, so that the hints files it writes from then on record " +
-                                  "none of these; with every node up, wait until DSE has delivered the files written " +
+                                  // a restart changes nothing for a section DSE 5.1.51 never writes
+                                  (encryptionSection && settings.isEmpty() && !unknown
+                                   ? ""
+                                   : "restart DSE on this node, so that the hints files it writes from then on " +
+                                     "record none of these; ") +
+                                  "with every node up, wait until DSE has delivered the files written " +
                                   "before and they are gone, before the first node of the cluster is upgraded, then " +
                                   "run this tool again"));
         }
@@ -1298,12 +1342,30 @@ final class Dse51NodeInspector
                                   "them"));
     }
 
+    /**
+     * What the remedy of {@code HINTS_COMPRESSION} asks to find out first: what wrote files with a compressor or a
+     * parameter this software does not know ({@code unknown}), or with an encryption section, which DSE 5.1.51's writer
+     * does not write; nothing when neither.
+     */
+    private static String findOut(boolean unknown, boolean encryptionSection)
+    {
+        String what = unknown && encryptionSection
+                      ? "a compressor or a parameter HCD 2.0 does not know or an encryption section, which DSE " +
+                        "5.1.51's writer does not write"
+                      : unknown ? "a compressor or a parameter HCD 2.0 does not know"
+                      : encryptionSection ? "an encryption section, which DSE 5.1.51's writer does not write"
+                      : null;
+        return what == null ? "" : "find out what wrote the files with " + what + "; ";
+    }
+
     /** What the header of a DSE 5.1 hints file records, in the order the finding lists them. */
     enum HintsHeader
     {
-        /** an {@code encryption} section, which {@code transparent_data_encryption_options} writes */
-        ENCRYPTED_BY_TDE("an encryption (transparent_data_encryption_options)",
-                         "set enabled: false under transparent_data_encryption_options in DSE's cassandra.yaml"),
+        /**
+         * an {@code encryption} section, which DSE 5.1.51's writer does not write (it encrypts its hints files through
+         * {@code system_info_encryption}, {@link #ENCRYPTED_BY_SYSTEM_INFO}): no setting of DSE 5.1 removes it
+         */
+        ENCRYPTION_SECTION("an encryption section, which DSE 5.1.51's writer does not write", null),
         /** a compression by one of {@link #ENCRYPTING_COMPRESSORS}, which {@code system_info_encryption} sets */
         ENCRYPTED_BY_SYSTEM_INFO("an encryption (system_info_encryption)",
                                  "set enabled: false under system_info_encryption in dse.yaml"),
@@ -1328,14 +1390,13 @@ final class Dse51NodeInspector
     }
 
     /**
-     * What the parameters of a hints file header record, each kind found: an encryption,
-     * {@code transparent_data_encryption_options}'s {@code encryption} section or a compression by one of DSE 5.1's
-     * encrypting compressors ({@link #ENCRYPTING_COMPRESSORS}, set by {@code system_info_encryption}), which this
-     * software does not have; a compression by another class this software does not have, or by a class that is no
-     * {@link ICompressor}; a compression of its own; and, beside any of them, a parameter other than
-     * {@code compression} and {@code encryption}. {@link HintsHeader#PLAIN} alone when there is no parameter. Only the
-     * class name of a compression is read, never a value of an encryption, and the class is looked up without being
-     * initialised.
+     * What the parameters of a hints file header record, each kind found: an encryption, an {@code encryption} section,
+     * which DSE 5.1.51's writer does not write, or a compression by one of DSE 5.1's encrypting compressors
+     * ({@link #ENCRYPTING_COMPRESSORS}, set by {@code system_info_encryption}), which this software does not have; a
+     * compression by another class this software does not have, or by a class that is no {@link ICompressor}; a
+     * compression of its own; and, beside any of them, a parameter other than {@code compression} and
+     * {@code encryption}. {@link HintsHeader#PLAIN} alone when there is no parameter. Only the class name of a
+     * compression is read, never a value of an encryption, and the class is looked up without being initialised.
      */
     @VisibleForTesting
     static Set<HintsHeader> hintsHeader(Map<String, Object> parameters)
@@ -1346,7 +1407,7 @@ final class Dse51NodeInspector
         if (!Set.of("compression", "encryption").containsAll(parameters.keySet()))
             kinds.add(HintsHeader.UNKNOWN_PARAMETER);
         if (parameters.containsKey("encryption"))
-            kinds.add(HintsHeader.ENCRYPTED_BY_TDE);
+            kinds.add(HintsHeader.ENCRYPTION_SECTION);
         else if (parameters.containsKey("compression"))
             kinds.add(compressionOf(parameters.get("compression")));
         return kinds;
@@ -1457,15 +1518,33 @@ final class Dse51NodeInspector
                               "DSE 5.1 has no metadata directory: the files HCD 2.0 writes in DSE_5_1 mode are " +
                               "looked for in " + directory + "; pass --metadata-dir <directory> when HCD 2.0's " +
                               "cassandra.yaml sets another metadata_directory on this node"));
-        // the start in DSE_5_1 is refused while DSE 6's marker exists, or its record lists a peer or cannot be read
+        // the start in DSE_5_1 is refused while DSE 6's marker exists, or its record lists a peer or cannot be read;
+        // listed first, as the files of the upgrade from DSE 5.1 are: in a directory that can be listed but not
+        // searched, the names tell what is there
+        File[] dse6Listed = directory.isDirectory()
+                            ? directory.tryList(f -> f.name().equals(DseUpgradeMarker.FILE_NAME) ||
+                                                     f.name().equals(DsePeersRecord.FILE_NAME))
+                            : null;
+        boolean dse6MarkerListed = false;
+        boolean dse6RecordListed = false;
+        if (dse6Listed != null)
+        {
+            for (File file : dse6Listed)
+            {
+                dse6MarkerListed |= file.name().equals(DseUpgradeMarker.FILE_NAME);
+                dse6RecordListed |= file.name().equals(DsePeersRecord.FILE_NAME);
+            }
+        }
         List<String> dse6Files = new ArrayList<>();
         Path dse6Marker = directory.toPath().resolve(DseUpgradeMarker.FILE_NAME);
-        if (Files.exists(dse6Marker))
+        if (dse6MarkerListed || Files.exists(dse6Marker))
             dse6Files.add("the DSE 6 upgrade marker " + DseUpgradeMarker.FILE_NAME);
-        else if (!Files.notExists(dse6Marker))
+        else if (dse6Listed == null && !Files.notExists(dse6Marker))
             dse6Files.add("the DSE 6 upgrade marker " + DseUpgradeMarker.FILE_NAME + " (or may hold it: its presence " +
                           "cannot be checked)");
-        String dse6Record = dse6RecordState(directory.toPath().resolve(DsePeersRecord.FILE_NAME));
+        String dse6Record = dse6Listed != null && !dse6RecordListed
+                            ? null
+                            : dse6RecordState(directory.toPath().resolve(DsePeersRecord.FILE_NAME), dse6RecordListed);
         if (dse6Record != null)
             dse6Files.add("the record of DSE 6 peers " + DsePeersRecord.FILE_NAME + ' ' + dse6Record);
         if (!dse6Files.isEmpty())
@@ -1528,14 +1607,15 @@ final class Dse51NodeInspector
      * What keeps the record of DSE 6 peers {@code record} from letting a start in {@code DSE_5_1} go on, as the
      * startup check reads it, failing closed: {@code listing <n> peers}, {@code that cannot be read (<cause>)}, or
      * {@code (or may hold it: its presence cannot be checked)}; null when it is absent or lists no peer (its comment
-     * lines and empty lines left out).
+     * lines and empty lines left out). {@code listed}: the listing of the directory shows it, which tells it is there
+     * where its presence cannot be checked by its path.
      */
     @Nullable
-    private static String dse6RecordState(Path record)
+    private static String dse6RecordState(Path record, boolean listed)
     {
-        if (Files.notExists(record))
+        if (!listed && Files.notExists(record))
             return null;
-        if (!Files.exists(record))
+        if (!listed && !Files.exists(record))
             return "(or may hold it: its presence cannot be checked)";
         try
         {
@@ -1665,7 +1745,9 @@ final class Dse51NodeInspector
                                                         : has("JVM_OPTIONS") ? "remove the options JVM_OPTIONS names"
                                                                              : "none HCD 2.0 refuses in " +
                                                                                layout.jvmOptions));
-        List<String> notRead = new ArrayList<>(schemaNotRead);
+        List<String> notRead = schema.notRead(SchemaInspector.MARKER_SCHEMA_TABLES);
+        if (!schemaInspected)
+            notRead.add("the inspection of the schema failed, see INSPECTION_ERROR");
         if (local == null)
             notRead.add("system.local");
         if (!peersRead)
@@ -1681,6 +1763,7 @@ final class Dse51NodeInspector
                       "tiered storage or in-memory tables, nor a compaction strategy HCD 2.0 no longer has, was found");
         else
             steps.add("DSE core only: " + notComplete);
+        buildSchemaSteps(steps);
         steps.add("Native port: " + (dse51.nativeTransportPort == null
                                      ? "not checked (cassandra.yaml could not be read)"
                                      : has("NATIVE_PORTS") ? "move to one native port first (see NATIVE_PORTS)"
@@ -1715,6 +1798,155 @@ final class Dse51NodeInspector
         steps.add("Snapshot: nodetool flush, then nodetool snapshot -t pre-hcd-<UTC timestamp>; copy cassandra.yaml, " +
                   "dse.yaml, cassandra-rackdc.properties and jvm.options aside");
         steps.add("Install: install HCD 2.0, with JDK " + HCD_20_JAVA + ", and the settings to carry listed here");
+    }
+
+    /** The steps of the schema, its materialized views and the access controls. */
+    private void buildSchemaSteps(List<String> steps)
+    {
+        List<String> notRead = schema.notRead();
+        if (!schemaInspected)
+            notRead.add("the inspection of the schema failed, see INSPECTION_ERROR");
+        String schemaNotRead = notRead.isEmpty() ? "" : "not checked completely (not read: " + list(notRead) + ')';
+        List<String> schemaCodes = present(SCHEMA_CODES);
+        // TDE_TABLE of an encrypted table or view of the schema, not of system_info_encryption
+        if (schema.encryptedTablesFound)
+            schemaCodes.add("TDE_TABLE");
+        // in the mixed phase the views HCD 2.0 cannot load are left to the step of the views, which drops and creates
+        // no view then; UNLOADABLE_TABLE stays in the list only while it also names tables or dropped columns
+        boolean mixedPhase = report.peers.stream().anyMatch(peer -> peer.upgraded);
+        String unloadableViews = "";
+        if (mixedPhase && !schema.viewsToDrop.isEmpty() && has("UNLOADABLE_TABLE"))
+        {
+            if (!schema.unloadableTablesFound)
+                schemaCodes.remove("UNLOADABLE_TABLE");
+            unloadableViews = "for the views UNLOADABLE_TABLE names, see Materialized views";
+        }
+        // in the mixed phase no schema change is made, as for the views (see the Materialized views step)
+        if (!schemaCodes.isEmpty() && mixedPhase)
+            steps.add("Schema: " + SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE + " (see " +
+                      String.join(", ", schemaCodes) + ')' +
+                      (unloadableViews.isEmpty() ? "" : "; " + unloadableViews) +
+                      (schemaNotRead.isEmpty() ? "" : "; " + schemaNotRead));
+        else if (!schemaCodes.isEmpty())
+            steps.add("Schema: change on DSE 5.1, before the first node is upgraded, what " +
+                      String.join(", ", schemaCodes) + " name" +
+                      (unloadableViews.isEmpty() ? "" : "; " + unloadableViews) +
+                      (schemaNotRead.isEmpty() ? "" : "; " + schemaNotRead));
+        else if (!unloadableViews.isEmpty())
+            steps.add("Schema: " + unloadableViews + (schemaNotRead.isEmpty() ? "" : "; " + schemaNotRead));
+        else if (schemaNotRead.isEmpty() && schema.schemaRead)
+            steps.add("Schema: no table, index, type or function HCD 2.0 refuses or cannot load was found");
+        else
+            steps.add("Schema: " + (schemaNotRead.isEmpty() ? "not checked (the schema could not be read)"
+                                                            : schemaNotRead));
+        String replicationNotChecked = "not checked (the schema could not be read, or its inspection failed)";
+        steps.add("Replication of system_auth: " + (schema.authReplicationStep == null ? replicationNotChecked
+                                                                                      : schema.authReplicationStep));
+        steps.add("Replication of the other system keyspaces: " +
+                  (schema.otherReplicationStep == null ? replicationNotChecked : schema.otherReplicationStep));
+
+        String everyNode = "a RESTRICT ROWS on a view is in the schema of the node that ran it " +
+                           SchemaInspector.RESTRICTION_SPREADS_AT_RESTART + ": aggregate the reports of every node";
+        List<String> views = new ArrayList<>();
+        List<String> viewCodes = new ArrayList<>();
+        if (!schema.restrictedViews.isEmpty())
+            viewCodes.add("RESTRICTED_VIEW");
+        if (!schema.viewTableRows.isEmpty())
+            viewCodes.add("VIEW_TABLE_ROW");
+        if (!schema.viewsToDrop.isEmpty())
+            viewCodes.add("UNLOADABLE_TABLE");
+        // in the mixed phase no view is dropped or created; otherwise the rows first, the drop of a view failing beside
+        // its row
+        if (mixedPhase && !viewCodes.isEmpty())
+            views.add(SchemaInspector.NO_VIEW_CHANGE_IN_MIXED_PHASE + " (see " + String.join(", ", viewCodes) + ')');
+        if (!mixedPhase && !schema.viewTableRows.isEmpty())
+            views.add("on DSE 5.1, repair the rows VIEW_TABLE_ROW names while DSE still runs on this node, before it " +
+                      "is stopped (see VIEW_TABLE_ROW)");
+        if (!mixedPhase && !schema.restrictedViews.isEmpty())
+            views.add("on DSE 5.1, REVOKE the rows/ grants on " + list(schema.restrictedViews) + ", then drop " +
+                      (schema.restrictedViews.size() == 1 ? "it and create it" : "them and create them") +
+                      " again without the restriction (see RESTRICTED_VIEW; " +
+                      SchemaInspector.DROP_REMOVES_VIEW_GRANTS + ")" +
+                      (schema.restrictedViewsWithTableRow.isEmpty()
+                       ? ""
+                       : schema.restrictedViewsWithTableRow.size() == schema.restrictedViews.size()
+                         ? ", only once the row VIEW_TABLE_ROW names beside " +
+                           (schema.restrictedViews.size() == 1 ? "it" : "each") + " is repaired (" +
+                           SchemaInspector.DROP_FAILS_BESIDE_THE_ROW + ')'
+                         : ", " + list(schema.restrictedViewsWithTableRow) + " only once the row VIEW_TABLE_ROW " +
+                           "names beside it is repaired (" + SchemaInspector.DROP_FAILS_BESIDE_THE_ROW + ')'));
+        if (!mixedPhase && !schema.viewsToDrop.isEmpty())
+            views.add("drop " + list(schema.viewsToDrop) + " on DSE 5.1, and create " +
+                      (schema.viewsToDrop.size() == 1 ? "it" : "them") + " again once no node runs DSE");
+        if (!schemaInspected && !schema.schemaRead)
+            steps.add("Materialized views: not checked (see INSPECTION_ERROR); " + everyNode);
+        else if (!schema.schemaRead)
+            steps.add("Materialized views: not checked (the schema could not be read); " + everyNode);
+        else if (!schemaInspected || !schema.viewInputsNotRead().isEmpty())
+            steps.add("Materialized views: " + (views.isEmpty() ? "" : String.join("; ", views) + "; ") +
+                      "not checked completely (" + (schemaInspected ? "not read: " +
+                                                                      list(schema.viewInputsNotRead())
+                                                                    : "see INSPECTION_ERROR") + "); " + everyNode);
+        else if (views.isEmpty())
+            steps.add("Materialized views: " + schema.viewCount + " view(s), none to change in this node's schema; " +
+                      everyNode);
+        else
+            steps.add("Materialized views: " + String.join("; ", views) + "; " + everyNode);
+
+        List<String> securityNotRead = new ArrayList<>();
+        if (layout.unreadable.containsKey(NodeLayout.DSE_YAML))
+            securityNotRead.add("dse.yaml");
+        securityNotRead.addAll(schema.accessControlInputsNotRead());
+        if (!schemaInspected)
+            securityNotRead.add("the inspection of the schema failed, see INSPECTION_ERROR");
+        String securityIncomplete = securityNotRead.isEmpty() ? "" : "not checked completely (not read: " +
+                                                                     String.join(", ", securityNotRead) + ')';
+        // in the mixed phase no schema change is made: neither the UNRESTRICT ROWS of a table nor the drop of a view
+        boolean restrictedViews = !schema.restrictedViews.isEmpty();
+        if (mixedPhase && (schema.rowRestrictedTablesFound || restrictedViews))
+        {
+            List<String> security = new ArrayList<>();
+            // the grants: RESTRICT, which the step of before names, cannot be found on a DSE 5.1 node, whose
+            // role_permissions has no restricted column
+            if (schema.rowGrantsFound)
+                security.add("resolve the other blocking access control findings above, on DSE 5.1");
+            if (schema.rowRestrictedTablesFound)
+                security.add("for the tables restricted to rows (ROW_LEVEL_ACCESS), " +
+                             SchemaInspector.NO_SCHEMA_CHANGE_IN_MIXED_PHASE);
+            if (restrictedViews)
+                security.add("for the views restricted to rows, see Materialized views");
+            if (!securityIncomplete.isEmpty())
+                security.add(securityIncomplete);
+            steps.add("Security: " + String.join("; ", security));
+        }
+        else if (has("RESTRICT", "ROW_LEVEL_ACCESS", "RESTRICTED_VIEW"))
+            steps.add("Security: resolve the blocking access control findings above, on DSE 5.1" +
+                      (securityIncomplete.isEmpty() ? "" : "; " + securityIncomplete));
+        else if (warns("ROW_LEVEL_ACCESS", "PROXY_GRANT", "DELEGATION", "LONE_WRITE_GRANT", "DSE_ONLY_PERMISSION",
+                       "DSE_ONLY_RESOURCE"))
+            steps.add("Security: review the access control warnings above" +
+                      (securityIncomplete.isEmpty() ? "" : "; " + securityIncomplete));
+        else if (!securityIncomplete.isEmpty())
+            steps.add("Security: " + securityIncomplete);
+        else
+            steps.add("Security: no DSE access control this software ignores was found in the schema and this " +
+                      "node's replica of system_auth.role_permissions");
+    }
+
+    /** Those of {@code codes} that a blocking finding has, in their order. */
+    private List<String> present(List<String> codes)
+    {
+        List<String> present = new ArrayList<>();
+        for (String code : codes)
+            if (has(code))
+                present.add(code);
+        return present;
+    }
+
+    private boolean warns(String... codes)
+    {
+        Set<String> wanted = Set.of(codes);
+        return findings.stream().anyMatch(f -> f.severity == Finding.Severity.WARNING && wanted.contains(f.code));
     }
 
     private boolean has(String... codes)

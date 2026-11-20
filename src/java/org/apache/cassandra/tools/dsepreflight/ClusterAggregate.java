@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonLocation;
@@ -49,6 +50,8 @@ import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
 
+// for a compile-time constant only, inlined: the aggregate loads no class of the server for it
+import org.apache.cassandra.schema.SchemaKeyspace;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JsonUtils;
 
@@ -91,6 +94,15 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.list;
  * <p>
  * The files of the directory are read, and named in the texts, in the order of their paths, not in the order the file
  * system lists the directory in, which differs from one file system to another: the same reports give the same texts.
+ * <p>
+ * The reports of DSE 5.1 nodes ({@link NodeReport#dse51}) are aggregated by the same rules, their identity read from
+ * {@code system.local} and {@code system.peers}, which the texts then name, and by three more: every DSE 5.1 node runs
+ * DSE 5.1.51 ({@code DSE_RELEASE}); the views restricted to rows ({@code RESTRICTED_VIEW}) and the rows of
+ * {@code system_schema.tables} a failed {@code UNRESTRICT ROWS} on a view left ({@code VIEW_TABLE_ROW}) are named with
+ * the nodes whose schema holds them, since DSE 5.1 keeps both on the node that ran the statement only (a view's
+ * restriction until that node restarts). Reports of DSE 5.1 nodes beside reports of DSE 6 nodes block the cluster
+ * ({@code MIXED_SOURCES}), the texts then naming DSE 6's files. The printed aggregate names the release of the nodes
+ * of its reports in its header ({@link AggregateReport#source}).
  */
 final class ClusterAggregate
 {
@@ -146,6 +158,41 @@ final class ClusterAggregate
         /** the warnings of the node reports, by code, with the nodes that have them */
         @JsonProperty("warnings_by_code")
         public Map<String, List<String>> warningsByCode = new TreeMap<>();
+        /**
+         * The release of the DSE nodes whose reports were read, as the header of the printed aggregate names it:
+         * {@link #DSE51_SOURCE} when every report is of a DSE 5.1 node, {@link #MIXED_SOURCE} beside reports of DSE 6
+         * nodes ({@code MIXED_SOURCES}), otherwise, without a report too, {@link #DSE6_SOURCE}. Not written to JSON,
+         * whose readers tell a DSE 5.1 node by the {@code dse51} section of its own report.
+         */
+        @JsonIgnore
+        public String source = DSE6_SOURCE;
+    }
+
+    /** The {@link AggregateReport#source} of DSE 6 nodes. */
+    static final String DSE6_SOURCE = "DSE 6";
+    /** The {@link AggregateReport#source} of DSE 5.1 nodes. */
+    static final String DSE51_SOURCE = "DSE 5.1";
+    /** The {@link AggregateReport#source} of reports of DSE 5.1 nodes beside reports of DSE 6 nodes. */
+    static final String MIXED_SOURCE = "DSE 5.1 and DSE 6";
+
+    /**
+     * Where the reports aggregated took the identity of their nodes from, as the texts of the aggregate name it: DSE
+     * 6's {@code nodes/local} and {@code nodes/peers}, or the {@code system.local} and {@code system.peers} of DSE 5.1
+     * when every report is of a DSE 5.1 node.
+     */
+    enum Sources
+    {
+        DSE6("nodes/local", "nodes/peers"),
+        DSE51("system.local", "system.peers");
+
+        final String local;
+        final String peers;
+
+        Sources(String local, String peers)
+        {
+            this.local = local;
+            this.peers = peers;
+        }
     }
 
     private ClusterAggregate()
@@ -186,6 +233,7 @@ final class ClusterAggregate
         List<String> notFiles = new ArrayList<>();
         List<String> stale = new ArrayList<>();
         List<String> dse51Reports = new ArrayList<>();
+        List<String> dse6Reports = new ArrayList<>();
         try (DirectoryStream<Path> files = Files.newDirectoryStream(directory, "*.json"))
         {
             for (Path file : inTheOrderOfTheirPaths(files))
@@ -238,11 +286,7 @@ final class ClusterAggregate
                         unreadable.add(name + " (" + problem + ')');
                         continue;
                     }
-                    if (report.dse51 != null)
-                    {
-                        dse51Reports.add(name);
-                        continue;
-                    }
+                    (report.dse51 != null ? dse51Reports : dse6Reports).add(name);
                     Instant generatedAt = Instant.parse(report.generatedAt);
                     if (generatedAt.isBefore(now.minus(MAX_REPORT_AGE)) || generatedAt.isAfter(now.plus(MAX_CLOCK_SKEW)))
                         stale.add(name + " (written at " + report.generatedAt + ')');
@@ -268,12 +312,18 @@ final class ClusterAggregate
             findings.add(blocking("UNREADABLE_REPORT", "reports that cannot be read: " + list(unreadable),
                                   "run the tool again on those nodes with --json, with the same release of HCD 2.0, and remove from the " +
                                   "directory any file that is not a node report of this tool"));
-        if (!dse51Reports.isEmpty())
-            findings.add(blocking("DSE51_REPORT",
-                                  "reports of DSE 5.1 nodes, which this release of the tool does not aggregate: " +
-                                  list(dse51Reports),
-                                  "check the report of each DSE 5.1 node on its own (its result and its findings)"));
-        if (reports.isEmpty() && dse51Reports.isEmpty())
+        if (!dse51Reports.isEmpty() && !dse6Reports.isEmpty())
+            findings.add(blocking("MIXED_SOURCES",
+                                  "reports of DSE 5.1 nodes and of DSE 6 nodes in one aggregate: DSE 5.1 " +
+                                  list(dse51Reports) + "; DSE 6 " + list(dse6Reports) + "; an upgrade starts from " +
+                                  "one release, and a cluster that runs both is not upgraded in place",
+                                  "aggregate the reports of one cluster at a time; if these nodes are one cluster, " +
+                                  "bring every node to one release supported for the upgrade first (DSE 5.1.51, " +
+                                  "or DSE 6.8 or 6.9)"));
+        // the texts that name the tables of the nodes' identity: DSE 5.1's when every report is of a DSE 5.1 node
+        Sources sources = dse6Reports.isEmpty() && !dse51Reports.isEmpty() ? Sources.DSE51 : Sources.DSE6;
+        aggregate.source = dse51Reports.isEmpty() ? DSE6_SOURCE : dse6Reports.isEmpty() ? DSE51_SOURCE : MIXED_SOURCE;
+        if (reports.isEmpty())
             findings.add(blocking("NO_REPORT", "no report in " + directory, "collect the --json report of every DSE node into one directory"));
         if (!stale.isEmpty())
             findings.add(blocking("STALE_REPORT", "reports written more than " + MAX_REPORT_AGE.toHours() + " hours before this aggregate, or " +
@@ -309,6 +359,12 @@ final class ClusterAggregate
         // no peer
         Set<String> reportedNodes = new TreeSet<>();
         List<String> withoutPeers = new ArrayList<>();
+        // of the reports of DSE 5.1 nodes: those not at DSE 5.1.51, and the views restricted to rows and the rows a
+        // failed UNRESTRICT ROWS on a view left, each with the nodes whose schema holds it
+        List<String> notDse51551 = new ArrayList<>();
+        Map<String, Set<String>> restrictedViews = new TreeMap<>();
+        Map<String, Set<String>> viewTableRows = new TreeMap<>();
+        List<String> viewsNotKnown = new ArrayList<>();
         for (Map.Entry<Path, NodeReport> entry : reports.entrySet())
         {
             NodeReport report = entry.getValue();
@@ -351,6 +407,29 @@ final class ClusterAggregate
             reportedNodes.add(report.node.hostId != null ? "host id " + report.node.hostId
                                                          : report.node.broadcastAddress != null ? "address " + report.node.broadcastAddress
                                                                                                 : "file " + entry.getKey());
+            if (report.dse51 != null)
+            {
+                // a blocked report may name no release (its system.local unread): NODE_BLOCKED names it already
+                if ((report.node.releaseVersion != null || report.node.dseVersion != null) &&
+                    !Dse51NodeInspector.isDse51551(report.node.releaseVersion, report.node.dseVersion))
+                {
+                    String release = report.node.releaseVersion;
+                    String dseVersion = report.node.dseVersion;
+                    notDse51551.add(node + " (" + (release == null ? "" : "release " + release) +
+                                    (release == null || dseVersion == null ? "" : ", ") +
+                                    (dseVersion == null ? "" : "DSE " + dseVersion) + ')');
+                }
+                // a ready or incomplete report always has both (problem); a blocked one may not: its views are not
+                // known
+                if (report.dse51.restrictedViews == null || report.dse51.viewTableRows == null)
+                    viewsNotKnown.add(node);
+                if (report.dse51.restrictedViews != null)
+                    for (String view : report.dse51.restrictedViews)
+                        restrictedViews.computeIfAbsent(view, v -> new TreeSet<>()).add(node);
+                if (report.dse51.viewTableRows != null)
+                    for (String row : report.dse51.viewTableRows)
+                        viewTableRows.computeIfAbsent(row, r -> new TreeSet<>()).add(node);
+            }
             for (Finding finding : report.findings)
                 if (finding.severity == Finding.Severity.WARNING)
                     aggregate.warningsByCode.computeIfAbsent(finding.code, c -> new ArrayList<>()).add(node);
@@ -408,7 +487,15 @@ final class ClusterAggregate
                                   "--nodetool, then aggregate again"));
         // a node that records no peer was counted alone by its report (the replication checks among others), which is
         // wrong once another node of the cluster has a report: its nodes/peers is lost or stale
-        if (!withoutPeers.isEmpty() && reportedNodes.size() > 1)
+        if (!withoutPeers.isEmpty() && reportedNodes.size() > 1 && sources == Sources.DSE51)
+            findings.add(blocking("NO_PEERS_RECORDED",
+                                  "nodes whose system.peers records no other node, although other nodes of the " +
+                                  "cluster have reports: " + list(withoutPeers) + "; their reports counted each of " +
+                                  "them alone",
+                                  "on each of them, check that nodetool status shows its peers and run nodetool " +
+                                  "flush system, then run the tool on it again and aggregate again; if system.peers " +
+                                  "still records no peer, report to the upgrade owner"));
+        else if (!withoutPeers.isEmpty() && reportedNodes.size() > 1)
             findings.add(blocking("NO_PEERS_RECORDED", "nodes whose nodes/peers records no other node, although other nodes of the cluster have " +
                                                        "reports: " + list(withoutPeers) + "; their reports counted each of them alone",
                                   "on each of them, restart DSE and wait until nodetool status shows its peers (DSE then writes nodes/peers anew), " +
@@ -416,11 +503,76 @@ final class ClusterAggregate
                                   "KEYSPACE_REPLICATION from the reports it replaces; if nodes/peers still records no peer, report to the upgrade owner"));
         if (releases.size() > 1)
             findings.add(blocking("MIXED_RELEASES", "the nodes run different DSE releases: " + groups(releases),
-                                  "bring every DSE node to the same release (6.9 preferred) before the upgrade"));
+                                  sources == Sources.DSE51 ? "bring every DSE 5.1 node to DSE 5.1.51 before the upgrade"
+                                                           : "bring every DSE node to the same release (6.9 " +
+                                                             "preferred) before the upgrade"));
+        if (!notDse51551.isEmpty())
+            findings.add(blocking("DSE_RELEASE", "DSE 5.1 nodes that do not run DSE 5.1.51, the only DSE 5.1 " +
+                                                 "release upgraded in place: " + list(notDse51551),
+                                  "upgrade them to DSE 5.1.51 first, then run the tool on them again"));
         if (schemaVersions.size() > 1)
-            findings.add(blocking("SCHEMA_DISAGREEMENT", "the nodes record different schema versions in nodes/local: " + groups(schemaVersions),
+            findings.add(blocking("SCHEMA_DISAGREEMENT",
+                                  "the nodes record different schema versions in " + sources.local + ": " +
+                                  groups(schemaVersions),
                                   "wait for schema agreement (nodetool describecluster shows one version), then run the tool on every node again"));
-        if (authorizationOn && rolePermissionsRows == 0)
+        // a peer already on HCD 2.0 in a report: the views are no longer dropped and created again
+        boolean mixedPhase = reports.values().stream().anyMatch(r -> r.peers.stream().anyMatch(p -> p.upgraded));
+        if (!restrictedViews.isEmpty())
+        {
+            List<String> items = new ArrayList<>();
+            restrictedViews.forEach((view, nodes) -> items.add(view + " on " + nodes));
+            findings.add(blocking("RESTRICTED_VIEW",
+                                  "materialized views restricted to rows, with the nodes whose schema holds the " +
+                                  "restriction: " + list(items) + "; DSE 5.1 keeps a RESTRICT ROWS on a view in the " +
+                                  "schema of the node that ran it " + SchemaInspector.RESTRICTION_SPREADS_AT_RESTART +
+                                  ", and a node in DSE_5_1 mode refuses to start while its schema holds one",
+                                  (mixedPhase
+                                   ? SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX +
+                                     SchemaInspector.KEEP_VIEW_GRANTS_IN_MIXED_PHASE
+                                   : "on DSE 5.1, before the first node is upgraded: " +
+                                     (viewTableRows.isEmpty()
+                                      ? ""
+                                      : "repair first the row VIEW_TABLE_ROW names beside a view, on its node (" +
+                                        SchemaInspector.DROP_FAILS_BESIDE_THE_ROW + "); ") +
+                                     "give the users who read these views through rows/ grants the access they need " +
+                                     "without row-level access control where DSE enforces it (the ROW_LEVEL_ACCESS " +
+                                     "finding of a node's settings says so), then REVOKE the rows/ grants on each " +
+                                     "view, drop it (" + SchemaInspector.DROP_REMOVES_VIEW_GRANTS + ") and create it " +
+                                     "again without the restriction; ") +
+                                  SchemaInspector.NEVER_UNRESTRICT_VIEW));
+        }
+        if (!viewsNotKnown.isEmpty())
+            findings.add(info("VIEWS_NOT_KNOWN",
+                              "DSE 5.1 nodes whose views restricted to rows and leftover rows are not known (their " +
+                              "reports are blocked without them: the schema or system_schema.views could not be " +
+                              "read, or the inspection of the schema failed): " + list(viewsNotKnown) + "; " +
+                              "RESTRICTED_VIEW and VIEW_TABLE_ROW name only the other nodes until they are " +
+                              "inspected again"));
+        if (!viewTableRows.isEmpty())
+        {
+            List<String> items = new ArrayList<>();
+            viewTableRows.forEach((row, nodes) -> items.add(row + " on " + nodes));
+            findings.add(blocking("VIEW_TABLE_ROW",
+                                  "rows of system_schema.tables named after a materialized view, or with its id, " +
+                                  "with the nodes whose schema holds them: " + list(items) + "; DSE 5.1.51 leaves " +
+                                  "such a row on the node where UNRESTRICT ROWS on a view failed, after which " +
+                                  "neither DSE 5.1.51 nor HCD 2.0 starts that node",
+                                  (mixedPhase
+                                   ? SchemaInspector.MIXED_PHASE_NO_VIEW_CHANGE_PREFIX
+                                   : "on DSE 5.1, before the first node is upgraded, repair each row on its node " +
+                                     "while DSE still runs there, before it is stopped: " +
+                                     SchemaKeyspace.DSE51_TABLE_ROW_REPAIR + "; then run the tool again on that " +
+                                     "node (a node already down takes the procedures the upgrade documentation " +
+                                     "gives for it); ") + SchemaInspector.NEVER_UNRESTRICT_VIEW));
+        }
+        if (authorizationOn && rolePermissionsRows == 0 && sources == Sources.DSE51)
+            findings.add(Finding.warning("NO_GRANTS_READ",
+                                         "DSE checks permissions, but no report read a row of " +
+                                         "system_auth.role_permissions: the checks of the DSE access controls " +
+                                         "(row-level access control, proxy grants) had nothing to check on any node",
+                                         "check that every node was inspected with all its data directories, after " +
+                                         "nodetool flush system_auth"));
+        else if (authorizationOn && rolePermissionsRows == 0)
             findings.add(Finding.warning("NO_GRANTS_READ",
                                          "DSE checks permissions, but no report read a row of system_auth.role_permissions: the checks of the DSE access " +
                                          "controls (RESTRICT, row-level access control, lone grants) had nothing to check on any node",
@@ -433,7 +585,17 @@ final class ClusterAggregate
             findings.add(blocking("MIXED_TOOL_BUILDS", "the reports were written by the release " + builds.keySet().iterator().next() + " of the tool, and this " +
                                                        "aggregate runs the release " + build + ", whose rules may differ",
                                   "aggregate with the release that wrote the reports, or run the tool of this release on every node again"));
-        if (internodeTls.size() > 1)
+        if (internodeTls.size() > 1 && sources == Sources.DSE51)
+            findings.add(Finding.warning("INTERNODE_TLS",
+                                         "the DSE nodes differ in their internode TLS settings: " +
+                                         groups(internodeTls),
+                                         "give every DSE 5.1 node the same internode_encryption and ssl_storage_port " +
+                                         "before the upgrade: HCD 2.0 dials every connection it encrypts to a DSE " +
+                                         "5.1 node on the ssl_storage_port of its own cassandra.yaml, and listens " +
+                                         "there for those of DSE 5.1, which dials the ssl_storage_port of the DSE " +
+                                         "5.1 node's own cassandra.yaml; and " +
+                                         NodeInspector.CHECK_SSL_STORAGE_PORT_OPTION));
+        else if (internodeTls.size() > 1)
             findings.add(Finding.warning("INTERNODE_TLS", "the DSE nodes differ in their internode TLS settings: " + groups(internodeTls),
                                          "give every DSE node the same internode_encryption and ssl_storage_port before the upgrade: for the " +
                                          "connections they encrypt, HCD 2.0 dials its own ssl_storage_port on every DSE node below 6.9.7, and on " +
@@ -471,13 +633,14 @@ final class ClusterAggregate
             findings.add(blocking("DUPLICATE_REPORT", "more than one report for the same node (host id or broadcast address): " + list(duplicates),
                                   "keep the latest report of each node"));
 
-        List<String> mismatches = topologyMismatches(reports);
+        List<String> mismatches = topologyMismatches(reports, sources);
         if (!mismatches.isEmpty())
             findings.add(Finding.warning("TOPOLOGY_MISMATCH", "the reports record nodes with more than one data center or rack: " + list(mismatches),
                                          "a node should be recorded with the same data center and rack everywhere: check its snitch settings and " +
                                          "nodetool status on the nodes that record it otherwise, then run the tool again on those nodes (with a " +
                                          "snitch that learns its peers' data center and rack from gossip, such as GossipingPropertyFileSnitch, an " +
-                                         "upgraded node takes them from DSE's nodes/peers until gossip gives them)"));
+                                         "upgraded node takes them from DSE's " + sources.peers +
+                                         " until gossip gives them)"));
 
         Map<String, Set<String>> missing = new TreeMap<>();
         Map<String, Set<String>> upgraded = new TreeMap<>();
@@ -502,8 +665,17 @@ final class ClusterAggregate
             List<String> items = new ArrayList<>();
             missing.forEach((peer, by) -> items.add(peer + " listed by " + by));
             findings.add(blocking("MISSING_REPORT", "DSE nodes without a report: " + list(items),
-                                  "run the tool on each of them and add its report; an entry of a node that has left the cluster is stale: restart DSE " +
-                                  "on the nodes listing it to refresh their nodes/peers"));
+                                  sources == Sources.DSE51
+                                  ? "run the tool on each of them and add its report; an entry of a node that has " +
+                                    "left the cluster is stale: check nodetool status on the nodes listing it, and " +
+                                    (upgraded.isEmpty()
+                                     ? "remove the node from the ring there (nodetool removenode) if it has left; " +
+                                       "if nodetool status does not list it, report to the upgrade owner"
+                                     : "report to the upgrade owner if it has left: the upgrade has started " +
+                                       "(UPGRADED_PEERS), and no topology change is made in the mixed phase")
+                                  : "run the tool on each of them and add its report; an entry of a node that has " +
+                                    "left the cluster is stale: restart DSE on the nodes listing it to refresh their " +
+                                    "nodes/peers"));
         }
         if (!upgraded.isEmpty())
             findings.add(info("UPGRADED_PEERS", "nodes already running HCD 2.0 (no report needed): " + list(upgraded.keySet())));
@@ -565,7 +737,8 @@ final class ClusterAggregate
     /**
      * Why a node report cannot be aggregated; null when it can. An incomplete report has the finding that makes it
      * so, {@code LIVE_UNAVAILABLE}. A ready or incomplete report must name its node fully, as the node inspection of a
-     * node whose {@code nodes/local} it read does: host id, an address, cluster name, release and schema version.
+     * node whose {@code nodes/local} it read does: host id, an address, cluster name, release and schema version; a
+     * ready or incomplete report of a DSE 5.1 node also its restricted views and leftover rows, empty or not.
      */
     private static String problem(NodeReport report)
     {
@@ -581,6 +754,12 @@ final class ClusterAggregate
              node.releaseVersion == null || node.schemaVersion == null))
             return (incomplete ? "incomplete" : "ready") + ", but its node section lacks the host id, the addresses, " +
                    "the cluster name, the release or the schema version";
+        // a ready or incomplete report of a DSE 5.1 node gives what its schema holds of views, which no other node's
+        // report shows
+        if ((NodeReport.READY.equals(report.result) || incomplete) && report.dse51 != null &&
+            (report.dse51.restrictedViews == null || report.dse51.viewTableRows == null))
+            return (incomplete ? "incomplete" : "ready") + ", but its dse51 section lacks restricted_views or " +
+                   "view_table_rows";
         return null;
     }
 
@@ -673,8 +852,11 @@ final class ClusterAggregate
      * report is matched by address too (the broadcast addresses of the reports first, then their listen addresses), so a
      * stale record of a node replaced at the same address shows in both: as missing, and as recording that address's node
      * with the old node's data center and rack.
+     *
+     * @param sources the tables the texts name: DSE 6's nodes files, or DSE 5.1's {@code system.local} and
+     *                {@code system.peers}
      */
-    private static List<String> topologyMismatches(Map<Path, NodeReport> reports)
+    private static List<String> topologyMismatches(Map<Path, NodeReport> reports, Sources sources)
     {
         Map<String, NodeReport> byHostId = new TreeMap<>();
         // a peer record's address is looked up among the broadcast addresses of the reports first, then their listen ones
@@ -786,13 +968,16 @@ final class ClusterAggregate
             // its own data center and rack first, then the largest group, then the others: a cut keeps the two views to compare
             List<String> items = new ArrayList<>();
             if (ownTopology != null)
-                items.add(ownTopology + " in its nodes/local" +
-                          (byTopology.containsKey(ownTopology) ? " and in the nodes/peers of " + nodes(byTopology.get(ownTopology), ownTopology.equals(largest)) : ""));
+                items.add(ownTopology + " in its " + sources.local +
+                          (byTopology.containsKey(ownTopology)
+                           ? " and in the " + sources.peers + " of " + nodes(byTopology.get(ownTopology),
+                                                                             ownTopology.equals(largest))
+                           : ""));
             if (largest != null && !largest.equals(ownTopology))
-                items.add(largest + " in the nodes/peers of " + nodes(byTopology.get(largest), true));
+                items.add(largest + " in the " + sources.peers + " of " + nodes(byTopology.get(largest), true));
             byTopology.forEach((topology, by) -> {
                 if (!topology.equals(ownTopology) && !topology.equals(largest))
-                    items.add(topology + " in the nodes/peers of " + nodes(by, false));
+                    items.add(topology + " in the " + sources.peers + " of " + nodes(by, false));
             });
             List<String> shown = items;
             if (items.size() > NAMED_RECORDERS)
