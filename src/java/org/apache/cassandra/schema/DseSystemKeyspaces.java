@@ -19,6 +19,9 @@ package org.apache.cassandra.schema;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.net.DseCompat;
+
 /**
  * The replicated system keyspaces ({@code system_auth}, {@code system_distributed}, {@code system_traces}) in the DSE 6
  * compatibility mode: they keep the definitions DSE 6 wrote, and this software's additions to them (the tables and
@@ -53,25 +56,46 @@ import java.util.List;
  * <li>{@code system_distributed.repair_history.coordinator_port} and {@code participants_v2}: written by repair only,
  *     which is refused during the upgrade ({@code DseUpgradeGuards}).</li>
  * </ul>
+ * <p>
+ * The DSE 5.1 compatibility mode keeps the definitions DSE 5.1 wrote the same way, for the same reasons (a DSE 5.1 node
+ * pulls and pushes the schema whenever it stored version 11 for this node; a rollback restores DSE 5.1's
+ * {@code system_schema}), and the texts name DSE 5.1 ({@link #deferred(String)}). Its {@code system_auth} is narrower
+ * than DSE 6's: a fresh DSE 5.1.51 install has no {@code resource_role_permissons_index}, which a cluster upgraded from
+ * an earlier DSE 5.x may still hold; {@code CassandraAuthorizer} maintains it only when the loaded {@code system_auth}
+ * has it, as in the DSE 6 mode.
  */
 public final class DseSystemKeyspaces
 {
-    /** Why a table of this software is missing in the mode, and when it is created. */
-    public static final String DEFERRED = "the replicated system keyspaces keep DSE 6's definitions during the upgrade, and this software creates " +
-                                          "its own tables in them at the first start with internode_compatibility_mode NONE";
+    /** Why a table of this software is missing in the DSE 6 compatibility mode, and when it is created. */
+    public static final String DEFERRED = deferred("DSE 6");
 
     private DseSystemKeyspaces()
     {
     }
 
+    /** Why a table of this software is missing in the mode of the upgrade from {@code source}, and when it is made. */
+    public static String deferred(String source)
+    {
+        return "the replicated system keyspaces keep " + source + "'s definitions during the upgrade, and this " +
+               "software creates its own tables in them at the first start with internode_compatibility_mode NONE";
+    }
+
     /**
-     * The text used by every feature that is off or refused in the mode for lack of one of the deferred tables.
+     * The text used by every feature that is off or refused in the mode for lack of one of the deferred tables, naming
+     * the DSE mode the node runs in ({@link DseCompat#textMode()}, {@code DSE_6} with {@code NONE}).
      *
      * @param table the table, as {@code keyspace.table}
      */
     public static String deferredTable(String table)
     {
-        return "table " + table + " is missing in internode_compatibility_mode DSE_6 (DSE 6 does not have it): " + DEFERRED;
+        return deferredTable(table, DseCompat.textMode());
+    }
+
+    /** {@link #deferredTable(String)} in {@code mode}, {@code DSE_6} or {@code DSE_5_1}. */
+    public static String deferredTable(String table, InternodeCompatibilityMode mode)
+    {
+        return "table " + table + " is missing in internode_compatibility_mode " + mode + " (" + mode.source() +
+               " does not have it): " + deferred(mode.source());
     }
 
     /**

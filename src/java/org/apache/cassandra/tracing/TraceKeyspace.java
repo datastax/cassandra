@@ -117,9 +117,9 @@ public final class TraceKeyspace
 
     /**
      * Whether the trace rows carry the port columns ({@code coordinator_port}, {@code source_port}): not while a node
-     * older than 4.0 may be in the cluster, and not in the DSE 6 compatibility mode, where {@code system_traces} keeps
-     * the definition DSE 6 wrote, which has neither column, on this node as on the DSE replicas (the columns are added
-     * at the first start with {@code internode_compatibility_mode: NONE}).
+     * older than 4.0 may be in the cluster, and not in the DSE 6 or DSE 5.1 compatibility mode, where
+     * {@code system_traces} keeps the definition DSE wrote, which has neither column, on this node as on the DSE
+     * replicas (the columns are added at the first start with {@code internode_compatibility_mode: NONE}).
      */
     private static boolean writesPortColumns()
     {

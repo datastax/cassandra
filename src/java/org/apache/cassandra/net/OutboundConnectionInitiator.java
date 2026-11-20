@@ -99,7 +99,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
     private final SslFallbackConnectionType sslConnectionType;
     private final OutboundConnectionSettings settings;
     /**
-     * The version we request. Only DSE 6 compatibility mode puts it on the wire: below 4.0 (a peer known to speak the
+     * The version we request. Only the DSE modes put it on the wire: below 4.0 (a peer known to speak the
      * 3.0.14 dialect) the first message is the pre-4.0 one and the handshake has three messages; otherwise it goes,
      * raised to at least 13 ({@code VERSION_50}, since DSE echoes 12, as the source of DSE 6.9 has it), in the legacy
      * version byte of the 4.0-style first message. With {@code NONE} that byte keeps carrying {@code acceptVersions.min}.
@@ -146,7 +146,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
     }
 
     /**
-     * @param requestMessagingVersion the version to request; below 4.0 the pre-4.0 handshake is used (DSE 6 compatibility mode)
+     * @param requestMessagingVersion the version to request; below 4.0 the pre-4.0 handshake is used (DSE modes)
      */
     static Future<Result<MessagingSuccess>> initiateMessaging(EventLoop eventLoop, ConnectionType type, SslFallbackConnectionType sslConnectionType,
                                                               OutboundConnectionSettings settings, int requestMessagingVersion, Promise<Result<MessagingSuccess>> result)
@@ -328,12 +328,12 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
             Initiate msg;
             if (DseCompat.enabled() && requestMessagingVersion < VERSION_40 && type.isMessaging())
             {
-                // DSE 6 compatibility mode, a peer known to speak the 3.0.14 dialect: the 8-byte pre-4.0 first message
+                // DSE modes, a peer known to speak the 3.0.14 dialect: the 8-byte pre-4.0 first message
                 msg = new Initiate(requestMessagingVersion, null, type, settings.framing, settings.from);
             }
             else if (DseCompat.enabled() && requestMessagingVersion >= VERSION_40)
             {
-                // DSE 6 compatibility mode: the 4.0-style first message with the requested version (the current version
+                // DSE modes: the 4.0-style first message with the requested version (the current version
                 // for an unknown peer) in the legacy version byte, which DSE answers with its own version (relative << 8)
                 // so that we reconnect in the dialect; 4.0+ peers only check that byte is 4.0 or later.
                 // Never 12 there: DSE would echo a 4-byte 12 (as the source of DSE 6.9 has it), which cannot be told from
@@ -396,7 +396,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 assert useMessagingVersion > 0 || DseCompat.enabled();
                 if (useMessagingVersion == 0 && DseCompat.enabled())
                 {
-                    // a pre-4.0 reply (only decoded in DSE 6 compatibility mode): 4 bytes carrying the peer's version, or
+                    // a pre-4.0 reply (only decoded in the DSE modes): 4 bytes carrying the peer's version, or
                     // the dialect a DSE version (relative << 8) maps to.
                     if (!type.isMessaging())
                     {

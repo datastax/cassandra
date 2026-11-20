@@ -84,6 +84,15 @@ public class TraceKeyspaceDse6Test
         assertThat(columns(event())).contains("source").doesNotContain("source_port");
     }
 
+    /** In the DSE 5.1 compatibility mode too: {@code system_traces} keeps DSE 5.1's definition, without the ports. */
+    @Test
+    public void portColumnsLeftOutInDse51Mode()
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        assertThat(columns(startSession())).contains("coordinator").doesNotContain("coordinator_port");
+        assertThat(columns(event())).contains("source").doesNotContain("source_port");
+    }
+
     private static Mutation startSession()
     {
         return TraceKeyspace.makeStartSessionMutation(SESSION, InetAddress.getLoopbackAddress(), Collections.emptyMap(), "request",

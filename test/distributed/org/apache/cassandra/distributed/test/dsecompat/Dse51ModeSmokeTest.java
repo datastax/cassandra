@@ -22,6 +22,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -38,26 +39,32 @@ import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.distributed.shared.ClusterUtils;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.service.DseUpgradeMarker;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NETWORK;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * A cluster of nodes of this software in {@code internode_compatibility_mode: DSE_5_1}, on the storage settings the
- * mode requires, starts, writes, flushes and restarts: each node writes big {@code nb} sstables with numeric
- * generations, writes the DSE 5.1 upgrade marker once, at its first start, and is not refused by it when it starts
- * again in the mode, reads and records the values of DSE 5.1's columns of {@code system.local} and
- * {@code system.peers} at its first start and loads them from that record at the restart, and replays its own commit
- * log segments at the restart without moving them aside. Its saved definitions of {@code system.local} and
+ * mode requires, started without the mode first and restarted in it, as upgraded DSE 5.1 nodes, writes, flushes and
+ * restarts: each node writes big {@code nb} sstables with numeric generations, writes the DSE 5.1 upgrade marker once,
+ * at its first start in the mode, and is not refused by it when it starts again in the mode, reads and records the
+ * values of DSE 5.1's columns of {@code system.local} and {@code system.peers} at its first start in the mode and loads
+ * them from that record at the restart, and replays its own commit log segments at the restarts without moving them
+ * aside. Its saved definitions of {@code system.local} and
  * {@code system.peers} list the columns DSE 5.1 adds as dropped columns. The nodes talk to each other as nodes of
- * this software: the mode speaks no pre-4.0 dialect yet. A node in the mode also starts on the {@code system.local}
- * and {@code system.peers} sstables a DSE 5.1.51 node wrote, and reads and records their values.
+ * this software, at their own messaging version: GROUP BY queries with paging, logged batches and lightweight
+ * transactions run between them, while the schema is frozen as in {@code DSE_6} and the property lifts the freeze. A
+ * node in the mode also starts on the {@code system.local} and {@code system.peers} sstables a DSE 5.1.51 node wrote,
+ * and reads and records their values.
  */
 public class Dse51ModeSmokeTest extends TestBaseImpl
 {
@@ -69,16 +76,8 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
     @Test
     public void aClusterInTheModeStartsWritesFlushesAndRestarts() throws Throwable
     {
-        try (Cluster cluster = Cluster.build(NODES)
-                                      .withDynamicPortAllocation(true)
-                                      .withConfig(c -> c.with(NETWORK, GOSSIP)
-                                                        .set("storage_compatibility_mode", "HCD_1")
-                                                        .set("sstable", Map.of("selected_format", "big"))
-                                                        .set("internode_compatibility_mode", "DSE_5_1"))
-                                      .start())
+        try (Cluster cluster = upgradedNodes(NODES, "CREATE TABLE %s.t (id int PRIMARY KEY, v text)"))
         {
-            init(cluster, NODES);
-            cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (id int PRIMARY KEY, v text)"));
             for (int i = 0; i < ROWS; i++)
                 cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.t (id, v) VALUES (?, ?)"),
                                                ConsistencyLevel.ALL, i, "v" + i);
@@ -142,6 +141,101 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
     }
 
     /**
+     * The messaging between nodes of this software in the mode, which opens the pre-4.0 code paths only below 4.0:
+     * GROUP BY queries, paged, logged batches and lightweight transactions (Paxos v1, the variant of the mode) run at
+     * ALL and SERIAL; a schema change is refused, with the text of the mode, and the property lifts the freeze.
+     */
+    @Test
+    public void theNodesInTheModeServeGroupByBatchesAndLightweightTransactions() throws Throwable
+    {
+        try (Cluster cluster = upgradedNodes(NODES, "CREATE TABLE %s.g (pk int, ck int, v int, PRIMARY KEY (pk, ck))",
+                                             "CREATE TABLE %s.lwt (id int PRIMARY KEY, v int)"))
+        {
+            for (int pk = 0; pk < 4; pk++)
+                for (int ck = 0; ck < 5; ck++)
+                    cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.g (pk, ck, v) VALUES (?, ?, ?)"),
+                                                   ConsistencyLevel.ALL, pk, ck, pk * 10 + ck);
+            // GROUP BY, at ALL across both nodes, paged two rows at a time
+            String groupBy = withKeyspace("SELECT pk, count(*) FROM %s.g GROUP BY pk");
+            Object[][] groups = toArray(cluster.coordinator(2).executeWithPaging(groupBy, ConsistencyLevel.ALL, 2));
+            assertThat(groups).hasNumberOfRows(4);
+            for (Object[] group : groups)
+                assertThat(group[1]).isEqualTo(5L);
+            // a logged batch
+            cluster.coordinator(1).execute("BEGIN BATCH " +
+                                           withKeyspace("INSERT INTO %s.g (pk, ck, v) VALUES (9, 0, 90); ") +
+                                           withKeyspace("INSERT INTO %s.lwt (id, v) VALUES (9, 9); ") +
+                                           "APPLY BATCH", ConsistencyLevel.ALL);
+            assertThat(cluster.coordinator(2).execute(withKeyspace("SELECT v FROM %s.lwt WHERE id = 9"),
+                                                      ConsistencyLevel.ALL))
+            .isDeepEqualTo(new Object[][]{ { 9 } });
+            // lightweight transactions
+            String insert = withKeyspace("INSERT INTO %s.lwt (id, v) VALUES (1, 1) IF NOT EXISTS");
+            Object[][] applied = cluster.coordinator(1).execute(insert, ConsistencyLevel.QUORUM);
+            assertThat(applied[0][0]).isEqualTo(true);
+            applied = cluster.coordinator(2).execute(withKeyspace("UPDATE %s.lwt SET v = 2 WHERE id = 1 IF v = 1"),
+                                                     ConsistencyLevel.QUORUM);
+            assertThat(applied[0][0]).isEqualTo(true);
+            assertThat(cluster.coordinator(1).execute(withKeyspace("SELECT v FROM %s.lwt WHERE id = 1"),
+                                                      ConsistencyLevel.SERIAL))
+            .isDeepEqualTo(new Object[][]{ { 2 } });
+
+            // the schema is frozen
+            String alter = withKeyspace("ALTER TABLE %s.g ADD w int");
+            assertThatThrownBy(() -> cluster.coordinator(1).execute(alter, ConsistencyLevel.ALL))
+            .hasMessageContaining("schema changes are frozen during the DSE 5.1 upgrade; run them after the flag is " +
+                                  "dropped");
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                cluster.coordinator(1).execute(withKeyspace("ALTER TABLE %s.g ADD w int"), ConsistencyLevel.ALL);
+            }
+        }
+    }
+
+    /**
+     * Nodes of this software, started without the mode on the storage settings it requires, with the test keyspace and
+     * the tables of {@code schema} created then, and restarted in {@code DSE_5_1}: the restart of an upgraded DSE 5.1
+     * node, which has joined its ring (a node in the mode does not bootstrap, the guards refuse it) and whose schema is
+     * frozen in the mode.
+     */
+    private static Cluster upgradedNodes(int nodes, String... schema) throws Throwable
+    {
+        Cluster cluster = Cluster.build(nodes)
+                                 .withDynamicPortAllocation(true)
+                                 .withConfig(c -> c.with(NETWORK, GOSSIP)
+                                                   .set("storage_compatibility_mode", "HCD_1")
+                                                   .set("uuid_sstable_identifiers_enabled", false)
+                                                   .set("sstable", Map.of("selected_format", "big")))
+                                 .start();
+        try
+        {
+            init(cluster, nodes);
+            for (String statement : schema)
+                cluster.schemaChange(withKeyspace(statement));
+            for (int node = 1; node <= nodes; node++)
+            {
+                IInvokableInstance instance = cluster.get(node);
+                instance.shutdown().get();
+                instance.config().set("internode_compatibility_mode", "DSE_5_1");
+                instance.startup();
+            }
+            return cluster;
+        }
+        catch (Throwable t)
+        {
+            cluster.close();
+            throw t;
+        }
+    }
+
+    private static Object[][] toArray(Iterator<Object[]> rows)
+    {
+        List<Object[]> list = new ArrayList<>();
+        rows.forEachRemaining(list::add);
+        return list.toArray(new Object[0][]);
+    }
+
+    /**
      * A node in the mode started on the {@code system.local} and {@code system.peers} sstables a DSE 5.1.51 node wrote
      * (the compacted ones of node 1 of the three-node cluster of the DSE 5.1.51 fixtures): copied into its data
      * directory while it is down, its DSE 5.1 upgrade marker and the record of the values deleted so that it starts as
@@ -152,13 +246,7 @@ public class Dse51ModeSmokeTest extends TestBaseImpl
     @Test
     public void aNodeInTheModeStartsOnTheSystemSSTablesDse51Wrote() throws Throwable
     {
-        try (Cluster cluster = Cluster.build(1)
-                                      .withDynamicPortAllocation(true)
-                                      .withConfig(c -> c.with(NETWORK, GOSSIP)
-                                                        .set("storage_compatibility_mode", "HCD_1")
-                                                        .set("sstable", Map.of("selected_format", "big"))
-                                                        .set("internode_compatibility_mode", "DSE_5_1"))
-                                      .start())
+        try (Cluster cluster = upgradedNodes(1))
         {
             IInvokableInstance instance = cluster.get(1);
             String dataDirectory = instance.callOnInstance(() -> DatabaseDescriptor.getAllDataFileLocations()[0]

@@ -775,17 +775,24 @@ public class MigrationCoordinator
     }
 
     /**
-     * In the DSE 6 compatibility mode, whether this node exchanges its schema with the endpoint: answers its schema pulls
-     * with this node's schema and applies the schema it pushes. Only a peer this node would push its schema to
-     * ({@link #shouldPushSchemaTo}: another node, speaking this node's messaging version) qualifies; any other peer, a
-     * DSE 6 node in the first place, is answered with no schema and its pushes are ignored ({@code DefaultSchemaUpdateHandler}).
+     * In a DSE compatibility mode ({@code DSE_6} or {@code DSE_5_1}), whether this node exchanges its schema with
+     * the endpoint: answers its schema pulls with this node's schema and applies the schema it pushes. Only a peer
+     * this node would push its schema to ({@link #shouldPushSchemaTo}: another node, speaking this node's messaging
+     * version) qualifies; any other peer, a DSE node in the first place, is answered with no schema and its pushes
+     * are ignored ({@code DefaultSchemaUpdateHandler}).
      * <p>
      * A DSE 6 node pulls the schema of a peer whose schema version differs from its own, as this node's does in practice
      * (the two digest different {@code system_schema} tables), and merges what it receives (observed with DSE 6.8.65):
      * this node's schema must not reach it, since the schema is frozen during the upgrade and a table DSE does not know
      * stays in its schema after a rollback. DSE 6 pushes a schema change to every live peer it considers
      * schema-compatible, so a DDL run on a DSE node can be pushed here: ignoring it keeps the freeze on this side as
-     * well. Without the mode the caller does not ask, and every peer is answered and applied as before.
+     * well.
+     * <p>
+     * A DSE 5.1 node stores this node's messaging version from the gossiped {@code NET_VERSION} (this node's own
+     * messaging version, 4.0 or later) and from the handshakes (11), so the value it holds changes from one to the
+     * other; whenever it holds 11, it pushes its schema changes to this node and pulls this node's schema: both are
+     * refused here, as for DSE 6. Without a DSE mode the caller does not ask, and every peer is answered and applied as
+     * before.
      */
     boolean exchangesSchemaWith(InetAddressAndPort endpoint)
     {

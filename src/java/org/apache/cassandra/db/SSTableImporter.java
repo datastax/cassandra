@@ -84,7 +84,7 @@ public class SSTableImporter
     @VisibleForTesting
     synchronized List<String> importNewSSTables(Options options)
     {
-        // refused while the DSE 6 upgrade is in progress: an import changes the data behind the DSE nodes' back
+        // refused while a DSE upgrade is in progress: an import changes the data behind the DSE nodes' back
         DseUpgradeGuards.refuseWhileUpgrading("import");
         UUID importID = UUID.randomUUID();
         logger.info("[{}] Loading new SSTables for {}/{}: {}", importID, cfs.getKeyspaceName(), cfs.getTableName(), options);

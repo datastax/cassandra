@@ -504,7 +504,7 @@ public class OutboundConnection
     }
 
     /**
-     * DSE 6 compatibility mode: a request whose verb does not exist in the pre-4.0 dialect, queued before the peer's
+     * DSE compatibility modes: a request whose verb does not exist in the pre-4.0 dialect, queued before the peer's
      * version was known (MessagingService refuses it before queuing otherwise), fails to serialize on a connection
      * that turned out to speak that dialect. It is dropped once, counted as a refusal, and its callback fails at once;
      * the message cannot be sized at the connection's version, so its canonical size is accounted. Like any message
@@ -512,8 +512,8 @@ public class OutboundConnection
      */
     private void onRefusedForPre40Peer(Message<?> message)
     {
-        noSpamLogger.warn("{} not sending {}: the verb does not exist in the pre-4.0 dialect this peer speaks (DSE 6 compatibility mode)",
-                          id(), message.verb());
+        noSpamLogger.warn("{} not sending {}: the verb does not exist in the pre-4.0 dialect this peer speaks ({} " +
+                          "compatibility mode)", id(), message.verb(), DseCompat.source());
         releaseCapacity(1, canonicalSize(message));
         errorCount += 1;
         errorBytes += canonicalSize(message);
@@ -1125,7 +1125,7 @@ public class OutboundConnection
             // our connection settings, possibly updated on retry
             int messagingVersion = template.endpointToVersion().get(template.to);
             OutboundConnectionSettings settings;
-            /** DSE 6 compatibility mode: a connection made in a superseded dialect was made again at once already. */
+            /** DSE modes: a connection made in a superseded dialect was made again at once already. */
             boolean remadeAfterSupersededDialect;
 
             /**
@@ -1155,7 +1155,7 @@ public class OutboundConnection
             }
 
             /**
-             * DSE 6 compatibility mode: schedules the next attempt after the current delay, as {@link #onFailure} does
+             * DSE modes: schedules the next attempt after the current delay, as {@link #onFailure} does
              * (the delay doubles up to a second), or none without messages, for a connection that is not a failure.
              */
             private void retryLater()
@@ -1182,7 +1182,7 @@ public class OutboundConnection
                         assert !state.isClosed();
 
                         MessagingSuccess success = result.success();
-                        // DSE 6 compatibility mode: the peer's version rose to 4.0 or later while this connection was made
+                        // DSE modes: the peer's version rose to 4.0 or later while this connection was made
                         // in the dialect; it is made again, with the 4.0-style handshake: at once the first time, then
                         // with the delays of a failed attempt, so that a version going back and forth cannot spin
                         if (DseCompat.enabled() && DseDialectVersions.supersededDialect(settings.to, success.messagingVersion, MessagingService.instance().versions))
@@ -1247,7 +1247,7 @@ public class OutboundConnection
                         // the messaging version we connected with was incorrect; try again with the one supplied by the remote host
                         messagingVersion = result.retry().withMessagingVersion;
                         settings.endpointToVersion.set(settings.to, messagingVersion);
-                        // DSE 6 compatibility mode: a peer answering in the dialect is recorded at it by the node too
+                        // DSE modes: a peer answering in the dialect is recorded at it by the node too
                         if (DseCompat.enabled() && messagingVersion < MessagingService.VERSION_40)
                             DseDialectVersions.answeredInTheDialect(settings.to, messagingVersion);
 
@@ -1288,7 +1288,7 @@ public class OutboundConnection
                  * port being selected if configured with legacy_ssl_storage_port_enabled=true.
                  */
                 int knownMessagingVersion = messagingVersion();
-                // DSE 6 compatibility mode: a peer taken for a pre-4.0 node that the node now knows at 4.0 or later
+                // DSE modes: a peer taken for a pre-4.0 node that the node now knows at 4.0 or later
                 if (DseCompat.enabled())
                     knownMessagingVersion = DseDialectVersions.connectionVersion(template.to, knownMessagingVersion, template.endpointToVersion(),
                                                                                  MessagingService.instance().versions);

@@ -47,6 +47,11 @@ import org.apache.cassandra.net.DseCompatRefusals;
  * Multi-range reads are not checked here: they are never built in the mode ({@code RangeCommandIterator} queries
  * every range on its own), and their verb is refused on the way to a DSE 6 peer like any other verb the dialect lacks.
  * <p>
+ * The DSE 5.1 compatibility mode applies the same rules, with the texts naming DSE 5.1: DSE 5.1 speaks the same pre-4.0
+ * layout at messaging version 11 (Apache Cassandra 3.11's), whose operators also end with {@code LIKE} (so no
+ * {@code ANN}, code 15), whose expression kinds end with 4 and whose read command has no disjunction, no index hints
+ * and no SAI optimizer option; it has no GROUP BY with a selector function either, and no multi-range read verb.
+ * <p>
  * Kept apart from {@link DseCompat}, which the messaging code loads, so that messaging does not initialise the CQL and
  * read classes.
  */
@@ -66,7 +71,8 @@ public final class DseReadGuard
     }
 
     /**
-     * Refuses, in DSE 6 compatibility mode, a read that a DSE 6 replica cannot parse; a no-op when the mode is off.
+     * Refuses, in the DSE 6 or DSE 5.1 compatibility mode, a read that a DSE replica cannot parse; a no-op when the
+     * mode is off.
      *
      * @throws InvalidRequestException when the mode is on and the command uses a feature the dialect cannot carry
      */
@@ -78,8 +84,10 @@ public final class DseReadGuard
         if (feature != null)
         {
             DseCompatRefusals.refused("read with " + feature);
-            throw new InvalidRequestException("DSE 6 compatibility mode: " + feature + " is not available while the upgrade from DSE 6 is in progress; "
-                                              + "run the query once internode_compatibility_mode is NONE on every node");
+            String source = DseCompat.source();
+            throw new InvalidRequestException(source + " compatibility mode: " + feature + " is not available while " +
+                                              "the upgrade from " + source + " is in progress; run the query once " +
+                                              "internode_compatibility_mode is NONE on every node");
         }
     }
 

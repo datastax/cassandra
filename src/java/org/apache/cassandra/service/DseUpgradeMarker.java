@@ -50,8 +50,8 @@ import org.apache.cassandra.utils.SyncUtil;
  * {@code <metadata_directory>/dse51-upgrade-in-progress}, which the node writes on its first start in
  * {@code internode_compatibility_mode: DSE_5_1}: the name says which upgrade a marker is of, whatever its content (the
  * content is only informative, and may be empty or partial), so that a start in the mode of that upgrade is not refused
- * by it, and a start in {@code NONE} is; the DSE 6 marker also refuses a start in {@code DSE_5_1}. The methods without
- * a mode are those of the DSE 6 marker.
+ * by it, and a start in {@code NONE} or {@code DSE_6} is; the DSE 6 marker also refuses a start in {@code DSE_5_1}.
+ * The methods without a mode are those of the DSE 6 marker.
  */
 public final class DseUpgradeMarker
 {

@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Pattern;
 
 import org.junit.After;
 import org.junit.Before;
@@ -359,6 +360,52 @@ public class V11SerializationAuditTest extends CQLTester
         {
             MessagingService.instance().callbacks.remove(request.id(), PEER);
         }
+    }
+
+    /**
+     * In DSE 5.1 compatibility mode the same verbs and payloads round trip at version 11, the pre-4.0 layout DSE 5.1
+     * speaks (Apache Cassandra 3.11's), and the same verbs are refused; the params, the read commands, responses and
+     * filters, the optimizer options, the response expiry, the hint acknowledgements and the refusal of deletion times
+     * past 2038 (naming DSE 5.1) are those of the DSE 6 compatibility mode.
+     */
+    @Test
+    public void everyPayloadRoundTripsAtVersion11InDse51Mode() throws Throwable
+    {
+        Audit[] audits = { this::everyVerbEitherMapsToThe30DialectOrIsRefused,
+                           this::refusedVerbsAreNotSerialized,
+                           this::requestsRoundTripAtVersion11,
+                           this::responsesRoundTripAtVersion11,
+                           this::headerAndFlagParamBytes,
+                           this::failureResponseBytes,
+                           this::forwardingParamBytes,
+                           this::columnFilterAtVersion11,
+                           this::readResponseAtVersion11,
+                           this::reconciliationFlagIsNotSentAtVersion11,
+                           this::optimizerOptionsAreNotSentAtVersion11,
+                           this::responseReadAtVersion11SerializesAtEveryVersion,
+                           this::pre40ResponseExpiresWithItsCallback,
+                           this::pre40PayloadWithoutCallbackIsSkipped,
+                           this::hintAcknowledgementAtVersion11,
+                           this::headerParamsRoundTripAtVersion11,
+                           this::extendedDeletionTimesAreNeverSentAtVersion11 };
+        for (Audit audit : audits)
+        {
+            // each in the mode: some end with the mode off
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+            audit.run();
+        }
+    }
+
+    private interface Audit
+    {
+        void run() throws Throwable;
+    }
+
+    /** The DSE release the texts of the mode the test runs in name. */
+    private static String expectedSource()
+    {
+        return DatabaseDescriptor.getInternodeCompatibilityMode() == InternodeCompatibilityMode.DSE_5_1 ? "DSE 5.1"
+                                                                                                        : "DSE 6";
     }
 
     /**
@@ -900,8 +947,10 @@ public class V11SerializationAuditTest extends CQLTester
             {
                 IllegalStateException refused = assertThrows(e.getKey(), IllegalStateException.class, () -> Mutation.serializer.serialize(mutation, out, VERSION_3014));
                 assertTrue(e.getKey() + ": " + refused.getMessage(),
-                           refused.getMessage().matches("DSE 6 compatibility mode: local deletion time \\d+ is past 2038 and cannot be sent at messaging version " +
-                                                        VERSION_3014 + ", whose deletion times are 32-bit"));
+                           refused.getMessage().matches(Pattern.quote(expectedSource()) +
+                                                        " compatibility mode: local deletion time \\d+ is past 2038 " +
+                                                        "and cannot be sent at messaging version " + VERSION_3014 +
+                                                        ", whose deletion times are 32-bit"));
             }
             try (DataOutputBuffer out = new DataOutputBuffer())
             {
@@ -921,8 +970,9 @@ public class V11SerializationAuditTest extends CQLTester
             {
                 IllegalStateException refused = assertThrows(marker.toString(), IllegalStateException.class,
                                                               () -> UnfilteredSerializer.serializer.serialize(marker, helper, out, VERSION_3014));
-                assertEquals("DSE 6 compatibility mode: local deletion time " + past2038 + " is past 2038 and cannot be sent at messaging version " +
-                             VERSION_3014 + ", whose deletion times are 32-bit", refused.getMessage());
+                assertEquals(expectedSource() + " compatibility mode: local deletion time " + past2038 +
+                             " is past 2038 and cannot be sent at messaging version " + VERSION_3014 +
+                             ", whose deletion times are 32-bit", refused.getMessage());
                 assertEquals("nothing is written before the refusal", 0, out.getLength());
             }
         }
@@ -947,10 +997,11 @@ public class V11SerializationAuditTest extends CQLTester
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             IllegalStateException refused = assertThrows(IllegalStateException.class, () -> Mutation.serializer.serialize(pastCap.get("cell tombstone"), out, VERSION_3014));
-            assertEquals("DSE 6 compatibility mode: local deletion time " + past2038 + " is past 2038 and cannot be sent at messaging version " +
-                         VERSION_3014 + ", whose deletion times are 32-bit", refused.getMessage());
+            assertEquals(expectedSource() + " compatibility mode: local deletion time " + past2038 +
+                         " is past 2038 and cannot be sent at messaging version " + VERSION_3014 +
+                         ", whose deletion times are 32-bit", refused.getMessage());
         }
-        // the data of a read response is serialized again at 11 for a DSE 6 coordinator, and refused there too
+        // the data of a read response is serialized again at 11 for a DSE coordinator, and refused there too
         long nowInSec = FBUtilities.nowInSeconds();
         SinglePartitionReadCommand read = SinglePartitionReadCommand.fullPartitionRead(metadata, nowInSec, key);
         PartitionUpdate tombstone = pastCap.get("cell tombstone").getPartitionUpdate(metadata);
@@ -961,7 +1012,7 @@ public class V11SerializationAuditTest extends CQLTester
         IllegalStateException refusedResponse =
             assertThrows(IllegalStateException.class,
                          () -> ReadResponse.serializer.serializedSize(pastCapResponse, VERSION_3014));
-        assertEquals("DSE 6 compatibility mode: local deletion time " + past2038 +
+        assertEquals(expectedSource() + " compatibility mode: local deletion time " + past2038 +
                      " is past 2038 and cannot be sent at messaging version " + VERSION_3014 +
                      ", whose deletion times are 32-bit",
                      refusedResponse.getMessage());

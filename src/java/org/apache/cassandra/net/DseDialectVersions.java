@@ -39,8 +39,9 @@ import org.apache.cassandra.utils.NoSpamLogger;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 
 /**
- * The messaging version this node opens a connection to a peer with, in DSE 6 compatibility mode, where some peers speak
- * only the pre-4.0 dialect (messaging version 11). Every method is only called in that mode.
+ * The messaging version this node opens a connection to a peer with, in a DSE compatibility mode, where some peers
+ * speak only the pre-4.0 dialect (messaging version 11). Every method is only called in those modes; the seeding from
+ * the saved peers ({@link #seedFromSavedPeers}) only in {@code DSE_6}.
  * <p>
  * A peer whose version this node does not know gets the 4.0-style first handshake message. DSE answers it with its own
  * version and then reads the rest of that 19-byte message as a third handshake message, which fails with an error and a
@@ -232,8 +233,9 @@ public final class DseDialectVersions
         {
             // logged outside the lock, at most one such line a minute whatever the peer: every connection type of such a
             // peer reconnects this way
-            noSpamLogger.info("DSE 6 compatibility mode: {} connected with the pre-4.0 handshake, but gossips a messaging version of 4.0 or later; " +
-                              "keeping {} for it", peer, kept == null ? "no version" : "version " + kept);
+            noSpamLogger.info("{} compatibility mode: {} connected with the pre-4.0 handshake, but gossips a " +
+                              "messaging version of 4.0 or later; keeping {} for it",
+                              DseCompat.source(), peer, kept == null ? "no version" : "version " + kept);
             return;
         }
         versionRaised(peer, wasPre40, version);
@@ -252,8 +254,8 @@ public final class DseDialectVersions
     {
         if (!wasPre40 || version < VERSION_40)
             return;
-        logger.info("DSE 6 compatibility mode: {} is at messaging version {}, not at the pre-4.0 dialect; reconnecting to it with the 4.0-style handshake",
-                    peer, version);
+        logger.info("{} compatibility mode: {} is at messaging version {}, not at the pre-4.0 dialect; reconnecting " +
+                    "to it with the 4.0-style handshake", DseCompat.source(), peer, version);
         MessagingService.instance().interruptOutbound(peer);
     }
 
@@ -282,15 +284,17 @@ public final class DseDialectVersions
         {
             if (!isPre40(nodeVersions, peer) || !DsePeers.isDse(peer))
                 return connectionVersion;
-            logger.debug("DSE 6 compatibility mode: {} is a DSE node at the pre-4.0 dialect; connecting to it with the pre-4.0 handshake", peer);
+            logger.debug("{} compatibility mode: {} is a DSE node at the pre-4.0 dialect; connecting to it with the " +
+                         "pre-4.0 handshake", DseCompat.source(), peer);
             connectionVersions.set(peer, DseCompat.DSE_DIALECT);
             return DseCompat.DSE_DIALECT;
         }
         int nodeVersion = version40OrLater(nodeVersions, peer);
         if (nodeVersion < 0)
             return connectionVersion;
-        logger.debug("DSE 6 compatibility mode: the connection to {} had the pre-4.0 dialect, but the peer is at messaging version {}; connecting with the 4.0-style handshake",
-                     peer, nodeVersion);
+        logger.debug("{} compatibility mode: the connection to {} had the pre-4.0 dialect, but the peer is at " +
+                     "messaging version {}; connecting with the 4.0-style handshake",
+                     DseCompat.source(), peer, nodeVersion);
         connectionVersions.set(peer, nodeVersion);
         return nodeVersion;
     }
@@ -308,8 +312,9 @@ public final class DseDialectVersions
         int nodeVersion = version40OrLater(nodeVersions, peer);
         if (nodeVersion < 0)
             return false;
-        logger.info("DSE 6 compatibility mode: the connection to {} was made in the pre-4.0 dialect, but the peer is at messaging version {} now; " +
-                    "making it again with the 4.0-style handshake", peer, nodeVersion);
+        logger.info("{} compatibility mode: the connection to {} was made in the pre-4.0 dialect, but the peer is at " +
+                    "messaging version {} now; making it again with the 4.0-style handshake",
+                    DseCompat.source(), peer, nodeVersion);
         return true;
     }
 

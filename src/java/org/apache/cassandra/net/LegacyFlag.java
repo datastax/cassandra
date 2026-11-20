@@ -30,7 +30,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
  * using a dummy value (single byte set to 0). From now on, {@link MessageFlag} should be extended
  * instead.
  *
- * Used only with peers speaking the pre-4.0 dialect (the DSE 6 compatibility mode); it goes away with that mode.
+ * Used only with peers speaking the pre-4.0 dialect (the DSE compatibility modes); it goes away with those modes.
  */
 final class LegacyFlag
 {

@@ -537,7 +537,7 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         {
             int key = in.readInt();
             VersionedValue value = VersionedValue.serializer.deserialize(in, version);
-            if ((key < 0 || key >= Gossiper.STATES.length) && DseCompat.enabled())
+            if ((key < 0 || key >= Gossiper.STATES.length) && DseCompat.isDse6())
             {
                 // DSE 6 compatibility mode: DSE 6 has one more padding state than this software (ordinal 31); an ordinal
                 // this software does not know is dropped, the rest of the endpoint state is kept.
