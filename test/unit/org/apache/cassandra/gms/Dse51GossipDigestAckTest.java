@@ -34,6 +34,8 @@ import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.nodes.DseNodeWorkloads;
+import org.apache.cassandra.utils.JsonUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -93,6 +95,43 @@ public class Dse51GossipDigestAckTest
             assertThat(value(state, ApplicationState.NET_VERSION)).as(node).isEqualTo("11");
             assertThat(DsePeers.gossipedDseRelease(state)).as(node).isEqualTo(Dse51Fixtures.DSE_VERSION);
             assertThat(DsePeers.gossipsDseVersion(state)).as(node).isTrue();
+        }
+    }
+
+    /**
+     * The DSE state each of the three nodes gossips in the captured ack, at DSE 5.1's ordinal 9: the JSON with
+     * {@code active} a string ("true", or "false" for the node that had just restarted) and the {@code Cassandra}
+     * workload, read by {@link Dse51GossipStates}; the ack carries no state at an ordinal above DSE 5.1's last, 24.
+     */
+    @Test
+    public void theCapturedAckCarriesTheDseStateOfEachNodeAtOrdinal9() throws Exception
+    {
+        Dse51Fixtures.Message captured = DSE51.messages("gossip-digest-ack").get(0);
+        InetAddressAndPort sender = InetAddressAndPort.getByName(captured.from);
+        Message<GossipDigestAck> message;
+        try (DataInputBuffer in = new DataInputBuffer(captured.bytes))
+        {
+            message = Message.serializer.deserialize(in, sender, MessagingService.VERSION_3014);
+        }
+        Map<InetAddressAndPort, EndpointState> states = message.payload.getEndpointStateMap(sender);
+        assertThat(states).hasSize(3);
+        // DSE 5.1 keeps its state at ordinal 9, this software's X_11_PADDING
+        assertThat(ApplicationState.X_11_PADDING.ordinal()).isEqualTo(9);
+        for (Map.Entry<InetAddressAndPort, EndpointState> e : states.entrySet())
+        {
+            String node = e.getKey().toString();
+            EndpointState state = e.getValue();
+            assertThat(state.states()).as(node).allMatch(s -> s.getKey().ordinal() <= Dse51GossipStates.DSE51_MAX_ORDINAL);
+            Map<String, Object> dseState = JsonUtils.fromJsonMap(value(state, ApplicationState.X_11_PADDING));
+            // active is a JSON string, "false" for node 3, which had just restarted when node 1 sent the ack
+            assertThat(dseState.get("active")).as(node).isEqualTo(e.getKey().getHostAddress(false).equals("127.0.51.13") ? "false" : "true");
+            assertThat(dseState).as(node).containsEntry("dse_version", Dse51Fixtures.DSE_VERSION)
+                                         .containsEntry("graph", false)
+                                         .containsEntry("workloads", "Cassandra");
+            DseNodeWorkloads workloads = Dse51GossipStates.gossipedWorkloads(e.getKey(), state);
+            assertThat(workloads.workloads).as(node).containsExactly("Cassandra");
+            assertThat(workloads.workload).as(node).isEqualTo("Cassandra");
+            assertThat(workloads.graph).as(node).isFalse();
         }
     }
 

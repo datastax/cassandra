@@ -67,19 +67,20 @@ import org.apache.cassandra.utils.NoSpamLogger;
  *       {@code STATUS}; states DSE does not know are not sent; no ordinal is written twice.</li>
  * </ul>
  * The two translations apply only to the gossip messages ({@code GossipDigestAck}, {@code GossipDigestAck2}) exchanged
- * at a pre-4.0 messaging version, which this software speaks only in DSE 6 compatibility mode, with a peer identified as
- * a DSE node ({@link DsePeers}, which documents how a peer is identified and what happens before it is); the acks sent to
- * a peer only presumed to be one carry no endpoint state ({@link DsePeers#isPresumed}). HCD 1.2 started
- * at version 11 is not such a peer: it exchanges the 4.0 line's ordinals at version 11, as at 4.0 and later, and so does
- * this node with it (as each side numbers them: HCD 1.2 has DISK_USAGE at 18 and SSTABLE_VERSIONS at 19, this software
- * the other way round, at every version; a difference older than the DSE 6 compatibility mode). The
- * serializer cannot tell the two apart, since it does not know the peer: a message to send is bound to its recipient
- * ({@link Recipient}), and a received one is translated by its verb handler, which knows the sender
- * ({@link #receivedFrom}).
+ * at a pre-4.0 messaging version, which this software speaks only in the DSE compatibility modes (the translations in
+ * DSE 6 compatibility mode only), with a peer identified as a DSE node ({@link DsePeers}, which documents how a peer is
+ * identified and what happens before it is); the acks sent to a peer only presumed to be one carry no endpoint state
+ * ({@link DsePeers#isPresumed}). HCD 1.2 started at version 11 is not such a peer: it exchanges the 4.0 line's ordinals
+ * at version 11, as at 4.0 and later, and so does this node with it (as each side numbers them: HCD 1.2 has DISK_USAGE
+ * at 18 and SSTABLE_VERSIONS at 19, this software the other way round, at every version; a difference older than the
+ * DSE 6 compatibility mode). The serializer cannot tell the two apart, since it does not know the peer: a message to
+ * send is bound to its recipient ({@link Recipient}), and a received one is translated by its verb handler, which knows
+ * the sender ({@link #receivedFrom}).
  * <p>
  * Besides the translations, a peer identified as a DSE node is not sent all the states of this node when it asks for
  * some of them, unlike any other peer ({@link #sendsAllOwnStates}), and this node gossips a {@code DSE_GOSSIP_STATE}
- * of its own ({@link #publishedDseState}).
+ * of its own ({@link #publishedDseState}). In the DSE 5.1 compatibility mode both apply, to DSE 5.1 nodes, the DSE
+ * state in DSE 5.1's form ({@link Dse51GossipStates}); there is no translation.
  */
 final class DseGossipStates
 {
@@ -304,9 +305,17 @@ final class DseGossipStates
      * <p>
      * The gossiped {@code NET_VERSION} this node stores for the peer identifies it first, as when a message to it is
      * written ({@link Recipient}), so that the states sent to a DSE node and their ordinals are decided alike.
+     * <p>
+     * In the DSE 5.1 compatibility mode the same holds for a DSE 5.1 node, which fires its listeners for every state it
+     * receives too (it does not have CASSANDRA-15097, see {@link Dse51GossipStates}): a peer identified as a DSE 5.1
+     * node ({@link DsePeers}), or whose {@code NET_VERSION} stored here is 10 or 11, is sent the states above the
+     * version its digest asks for, as DSE 5.1 nodes answer each other's digests.
      */
     static boolean sendsAllOwnStates(InetAddressAndPort peer)
     {
+        if (DseCompat.isDse51())
+            return !DsePeers.isDse(peer)
+                   && !DsePeers.gossipsDseVersion(Gossiper.instance.getEndpointStateForEndpoint(peer));
         if (!DseCompat.isDse6())
             return true;
         identify(peer, null);

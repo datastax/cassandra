@@ -27,12 +27,14 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.utils.Clock;
 
 /**
- * The echo requests the gossiper sends to mark a peer up, in DSE 6 compatibility mode, so that one a peer (a DSE 6 node
- * or a node of this software) leaves unanswered, or answers with a failure, is sent again. Every method but
- * {@link #clear} (test cleanup) and the test accessors is only called in that mode.
+ * The echo requests the gossiper sends to mark a peer up, in the DSE compatibility modes, so that one a peer (a DSE
+ * node or a node of this software) leaves unanswered, or answers with a failure, is sent again. Every method but
+ * {@link #clear} (test cleanup) and the test accessors is only called in those modes; the log lines name the DSE
+ * release of the mode ({@link DseCompat#source}).
  * <p>
  * The gossiper sends one echo request per endpoint state of a peer it does not consider alive, and marks the peer up
  * when the answer arrives; upstream's callback ignores failures, so while the peer keeps the same state (the same
@@ -85,6 +87,13 @@ import org.apache.cassandra.utils.Clock;
  * through other nodes (a partition between the two only) is not in a dead state: it gets a request every request
  * timeout, or every gossip interval when the requests fail sooner, for as long as that lasts, where upstream sends one;
  * the debug line of the retries is logged for the first attempts and then every {@value #LOG_EVERY}th.
+ * <p>
+ * In the DSE 5.1 compatibility mode the same retries apply to DSE 5.1 nodes and to the nodes of this software. A DSE
+ * 5.1.51 node answers every echo request, ready or not, and never with a failure, so a retry there only covers a
+ * request or an answer lost on the way. By DSE 5.1.51's source (not observed yet), DSE 5.1 has the serial echo from DSE
+ * 5.1.18 on: it keeps at most one echo request in flight to this node, whose release it takes to support it, and sends
+ * the next one only once the previous one completed; this node answers each one it receives (it does not answer while
+ * it shuts down).
  */
 final class DseEchoRetries
 {
@@ -146,9 +155,9 @@ final class DseEchoRetries
         Sent last = previous[0];
         int attempt = recorded.attempt;
         if (attempt > 1 && (attempt <= LOGGED_FIRST || attempt % LOG_EVERY == 0))
-            logger.debug("DSE 6 compatibility mode: peer {} {} the echo request sent {} ms ago; sending it again (attempt {}), " +
+            logger.debug("{} compatibility mode: peer {} {} the echo request sent {} ms ago; sending it again (attempt {}), " +
                          "since it stays down until one is answered",
-                         peer, outcome(last.failure),
+                         DseCompat.source(), peer, outcome(last.failure),
                          TimeUnit.NANOSECONDS.toMillis(now - last.atNanos), attempt);
         return attempt;
     }
@@ -183,8 +192,8 @@ final class DseEchoRetries
     {
         sent.remove(peer);
         if (attempt > 1)
-            logger.info("DSE 6 compatibility mode: peer {} answered the echo request sent again (attempt {}); marking it up",
-                        peer, attempt);
+            logger.info("{} compatibility mode: peer {} answered the echo request sent again (attempt {}); marking it up",
+                        DseCompat.source(), peer, attempt);
     }
 
     /** Drops the record of {@code peer}: the gossiper dropped its pending echo request, or evicted the peer. */
