@@ -2381,6 +2381,8 @@ public class StorageProxy implements StorageProxyMBean
                                          QueryInfoTracker.ReadTracker readTracker)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
+        DseReadGuard.checkReadCommands(group.queries);
+
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(group.metadata());
 
@@ -2888,6 +2890,8 @@ public class StorageProxy implements StorageProxyMBean
                                                   Dispatcher.RequestTime requestTime,
                                                   ClientState clientState)
     {
+        DseReadGuard.checkReadCommand(command);
+
         if (DatabaseDescriptor.getPartitionDenylistEnabled() && DatabaseDescriptor.getDenylistRangeReadsEnabled())
         {
             final int denylisted = partitionDenylist.getDeniedKeysInRangeCount(command.metadata().id, command.dataRange().keyRange());
