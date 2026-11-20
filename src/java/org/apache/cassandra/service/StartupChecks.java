@@ -153,6 +153,11 @@ public class StartupChecks
     }
 
     private static final Logger logger = LoggerFactory.getLogger(StartupChecks.class);
+    /**
+     * The first words of the WARN of a post-action that failed, such as the write of a DSE upgrade marker; a
+     * compile-time constant, which the rollback check of the preflight tool quotes without loading this class.
+     */
+    public static final String POST_ACTION_FAILED = "Failed to run startup check post-action on";
     // List of checks to run before starting up. If any test reports failure, startup will be halted.
     private final List<StartupCheck> preFlightChecks = new ArrayList<>();
 
@@ -229,7 +234,7 @@ public class StartupChecks
             }
             catch (Throwable t)
             {
-                logger.warn("Failed to run startup check post-action on " + test.getStartupCheckType());
+                logger.warn(POST_ACTION_FAILED + ' ' + test.getStartupCheckType());
             }
         }
     }
@@ -910,7 +915,7 @@ public class StartupChecks
         try
         {
             if (write.writeIfAbsent())
-                logger.info("Wrote the {} upgrade marker {}", source, path);
+                logger.info("{} {}", DseUpgradeMarker.writtenText(mode), path);
         }
         catch (IOException | RuntimeException | FSError e)
         {
@@ -919,16 +924,15 @@ public class StartupChecks
                             "that matters: a later start with internode_compatibility_mode {} is refused while it does",
                             source, path, mode.isDse51() ? "NONE or DSE_6" : "NONE", e);
             else if (mode.isDse51())
-                logger.error("Unable to write the {} upgrade marker {}: unless the file exists, a later start with " +
-                             "internode_compatibility_mode NONE or DSE_6 will not be refused while {} peers may " +
-                             "remain; create it by hand. Until it exists, every start also discards the record of " +
-                             "the values of DSE 5.1's columns of system.local and system.peers",
-                             source, path, source, e);
+                logger.error("{} {}: unless the file exists, a later start with internode_compatibility_mode " +
+                             "NONE or DSE_6 will not be refused while {} peers may remain; create it by hand. Until " +
+                             "it exists, every start also discards the record of the values of DSE 5.1's columns of " +
+                             "system.local and system.peers",
+                             DseUpgradeMarker.notWrittenText(mode), path, source, e);
             else
-                logger.error("Unable to write the {} upgrade marker {}: unless the file exists, a later start with " +
-                             "internode_compatibility_mode NONE will not be refused while {} peers may remain; " +
-                             "create it by hand",
-                             source, path, source, e);
+                logger.error("{} {}: unless the file exists, a later start with internode_compatibility_mode " +
+                             "NONE will not be refused while {} peers may remain; create it by hand",
+                             DseUpgradeMarker.notWrittenText(mode), path, source, e);
         }
     }
 
