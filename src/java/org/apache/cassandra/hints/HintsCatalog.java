@@ -22,6 +22,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
 
@@ -46,6 +48,9 @@ import static java.util.stream.Collectors.groupingBy;
 final class HintsCatalog
 {
     private static final Logger logger = LoggerFactory.getLogger(HintsCatalog.class);
+
+    /** The name DataStax Enterprise 6 gives its hints files: {@code <host id>-<timestamp>-v<version>.hints}. */
+    static final Pattern DSE_HINTS_FILE_NAME = Pattern.compile("^" + HintsDescriptor.HOST_ID_REGEX + "\\-\\d+\\-v\\d+\\.hints$");
 
     private final File hintsDirectory;
     private final Map<UUID, HintsStore> stores;
@@ -80,6 +85,22 @@ final class HintsCatalog
         catch (IOException e)
         {
             throw new FSReadError(e, hintsDirectory);
+        }
+    }
+
+    /**
+     * The DSE 6 hints files in the directory, sorted by name; empty when there are none. They carry DSE's own descriptor
+     * (version field -1) and a name {@link HintsDescriptor#isHintFileName} does not match, so the catalog never loads,
+     * delivers or moves them aside; in {@code internode_compatibility_mode: DSE_6} {@link DseHintsConverter} turns them
+     * into hints files of this software when hints dispatch starts.
+     */
+    static List<Path> dseHintsFiles(File hintsDirectory) throws IOException
+    {
+        try (Stream<Path> list = Files.list(hintsDirectory.toPath()))
+        {
+            return list.filter(p -> DSE_HINTS_FILE_NAME.matcher(p.getFileName().toString()).matches())
+                       .sorted()
+                       .collect(Collectors.toList());
         }
     }
 
@@ -173,6 +194,11 @@ final class HintsCatalog
             logger.error("Unable to open directory {}", hintsDirectory.absolutePath());
             FileUtils.handleFSErrorAndPropagate(new FSWriteError(new IOException(String.format("Unable to open hint directory %s", hintsDirectory.absolutePath())), hintsDirectory.absolutePath()));
         }
+    }
+
+    File getHintsDirectory()
+    {
+        return hintsDirectory;
     }
 
     ImmutableMap<String, Object> getWriterParams()
