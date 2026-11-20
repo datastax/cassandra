@@ -26,7 +26,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The pure readings of DataStax Enterprise's {@code role_permissions} names, for callers that read the rows themselves
+ * The pure readings of DataStax Enterprise's {@code role_permissions} names that the DSE 6 preflight inspection uses
  * ({@link CassandraAuthorizer#dseLoneWriteGrantName}, {@link CassandraAuthorizer#unknownPermissionNames},
  * {@link CassandraAuthorizer#isKnownResourceName}): the same rules as the authorizer's own reading of the rows, without
  * reading, logging or recording anything.
