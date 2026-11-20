@@ -188,5 +188,19 @@ public interface MessagingServiceMBean
      */
     public String getDseSaiVersionPin();
 
+    /**
+     * The grants of DataStax Enterprise's {@code UPDATE} or {@code TRUNCATE} alone on data resources in
+     * {@code system_auth.role_permissions}, which {@code CassandraAuthorizer} drops (the two together are read as
+     * {@code MODIFY}), in every mode, as last read on this node: {@code role '<role>' on <resource>: <name>}, sorted.
+     * Empty when another authorizer is configured.
+     */
+    public List<String> getDseLoneWriteGrants();
+
+    /**
+     * How the list of {@link #getDseLoneWriteGrants()} was made: the rows read since startup, or the last scan of
+     * {@code role_permissions} and the rows read since; null when another authorizer is configured.
+     */
+    public String getDseLoneWriteGrantsSource();
+
     void reloadSslCertificates() throws IOException;
 }
