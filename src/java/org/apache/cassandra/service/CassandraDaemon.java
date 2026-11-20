@@ -66,6 +66,7 @@ import org.apache.cassandra.metrics.DefaultNameFactory;
 import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.StartupClusterConnectivityChecker;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.Dse51ColumnTypes;
 import org.apache.cassandra.schema.Dse51Compressors;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -340,12 +341,14 @@ public class CassandraDaemon
             exitOrFail(e.returnCode, e.getMessage(), e.getCause());
         }
 
-        // DSE 5.1 compatibility: refuse to start while a table is compressed with a compressor DSE 5.1 does not read,
-        // or encrypted
+        // DSE 5.1 compatibility: refuse to start while a table has a column of a type not written for DSE 5.1, or is
+        // compressed with a compressor DSE 5.1 does not read, encrypted, or given a min_compress_ratio; the column
+        // types first, since one of their remedies, the flag drop, ends the check of the compressors too
         if (DatabaseDescriptor.isDse51CompatibilityMode())
         {
             try
             {
+                Dse51ColumnTypes.verifyAtStartup();
                 Dse51Compressors.verifyAtStartup();
             }
             catch (StartupException e)
@@ -363,6 +366,20 @@ public class CassandraDaemon
         catch (StartupException e)
         {
             exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
+        // DSE 5.1 compatibility: refuse to start while an sstable on disk is compressed with a compressor DSE 5.1 does
+        // not read, or encrypted, once the leftovers of the transactions that did not finish are removed
+        if (DatabaseDescriptor.isDse51CompatibilityMode())
+        {
+            try
+            {
+                Dse51Compressors.verifySSTablesAtStartup();
+            }
+            catch (StartupException e)
+            {
+                exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+            }
         }
 
         Keyspace.setInitialized();

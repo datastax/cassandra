@@ -24,7 +24,9 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 import com.google.common.io.Files;
@@ -263,6 +265,98 @@ public class CompressedSequentialWriterTest extends SequentialWriterTest
 
     }
 
+
+    /**
+     * The data file of a 3.x sstable (big me, for DSE 5.1) has every chunk compressed, even one that does not shrink,
+     * and a compression info without the maximum compressed length, which a parameters with a maximum cannot be
+     * written with.
+     */
+    @Test
+    public void aPre40FileHasEveryChunkCompressedAndNoMaximumCompressedLength() throws IOException
+    {
+        CompressionParams withMaximum = CompressionParams.lz4(DEFAULT_CHUNK_LENGTH, DEFAULT_CHUNK_LENGTH / 2);
+        ClusteringComparator comparator = new ClusteringComparator(Collections.singletonList(BytesType.instance));
+        MetadataCollector collector = new MetadataCollector(comparator);
+        File refused = FileUtils.createTempFile("pre40refused", "1");
+        Assert.assertThrows(IllegalArgumentException.class,
+                            () -> new CompressedSequentialWriter(refused, new File(refused.path() + ".metadata"), null,
+                                                                 ChecksumType.CRC32, SequentialWriterOption.DEFAULT,
+                                                                 withMaximum, collector, true));
+        refused.tryDelete();
+
+        CompressionParams everyChunk = withMaximum.withEveryChunkCompressed();
+        assertEquals(Integer.MAX_VALUE, everyChunk.maxCompressedLength());
+        assertEquals(withMaximum.chunkLength(), everyChunk.chunkLength());
+        assertEquals(withMaximum.klass(), everyChunk.klass());
+        // random data, which LZ4 does not shrink: with the maximum it would be stored uncompressed
+        byte[] data = new byte[DEFAULT_CHUNK_LENGTH * 2 + 100];
+        new Random(42).nextBytes(data);
+        File pre40 = FileUtils.createTempFile("pre40", "1");
+        File current = FileUtils.createTempFile("current", "1");
+        try
+        {
+            Map<File, long[]> ratios = new HashMap<>();
+            for (File f : new File[]{ pre40, current })
+            {
+                CompressionParams params = f == pre40 ? everyChunk : withMaximum;
+                // the compressed and uncompressed lengths the writer gives the ratio of the statistics
+                MetadataCollector ratioOf = new MetadataCollector(comparator)
+                {
+                    @Override
+                    public MetadataCollector addCompressionRatio(long compressed, long uncompressed)
+                    {
+                        ratios.put(f, new long[]{ compressed, uncompressed });
+                        return super.addCompressionRatio(compressed, uncompressed);
+                    }
+                };
+                try (CompressedSequentialWriter writer = new CompressedSequentialWriter(f, metadataOf(f), null,
+                                                                                        ChecksumType.CRC32,
+                                                                                        SequentialWriterOption.DEFAULT,
+                                                                                        params, ratioOf, f == pre40))
+                {
+                    writer.write(data);
+                    writer.finish();
+                }
+            }
+            // the ratio of 3.x leaves out the int checksum that follows each of the three chunks; the current one
+            // counts the whole data file
+            assertThat(ratios.get(pre40)).containsExactly(pre40.length() - 4L * 3, data.length);
+            assertThat(ratios.get(current)).containsExactly(current.length(), data.length);
+            // the same header but for the maximum compressed length, an int
+            assertEquals(metadataOf(current).length() - 4, metadataOf(pre40).length());
+            try (CompressionMetadata metadata = CompressionMetadata.open(metadataOf(pre40), pre40.length(), false);
+                 FileHandle fh = new FileHandle.Builder(pre40).withCompressionMetadata(metadata).complete();
+                 RandomAccessReader reader = fh.createReader())
+            {
+                assertEquals(Integer.MAX_VALUE, metadata.maxCompressedLength());
+                // compressed, so longer than the chunk itself for this data
+                for (long position = 0; position < DEFAULT_CHUNK_LENGTH * 2; position += DEFAULT_CHUNK_LENGTH)
+                    assertThat(metadata.chunkFor(position).length).as("chunk at %s", position)
+                                                                .isGreaterThan(DEFAULT_CHUNK_LENGTH);
+                byte[] read = new byte[(int) reader.length()];
+                reader.readFully(read);
+                assertTrue(Arrays.equals(data, read));
+            }
+            // the file written with the maximum stores the chunks uncompressed, as they are
+            try (CompressionMetadata metadata = CompressionMetadata.open(metadataOf(current), current.length(), true))
+            {
+                assertEquals(DEFAULT_CHUNK_LENGTH, metadata.chunkFor(0).length);
+            }
+        }
+        finally
+        {
+            for (File f : new File[]{ pre40, current })
+            {
+                f.tryDelete();
+                metadataOf(f).tryDelete();
+            }
+        }
+    }
+
+    private static File metadataOf(File data)
+    {
+        return new File(data.path() + ".metadata");
+    }
 
     private ByteBuffer makeBB(int size)
     {

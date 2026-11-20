@@ -23,6 +23,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Instant;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +46,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.db.Dse51SystemTables;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
@@ -82,6 +84,25 @@ public class Dse51StartupChecksTest
     private static final String REFUSAL = "cannot enter DSE_5_1 compatibility mode: the node already ran without it, " +
                                           "these files could not be read correctly, or at all, by DSE 5.1 after a " +
                                           "rollback: ";
+    /** The first remedy of that refusal for the big sstables sstableupgrade rewrites at me. */
+    private static final String REWRITE_AT_ME = ". Rewrite the big sstables of a version newer than me among them at " +
+                                                "me, the node stopped: sstableupgrade <keyspace> <table>, run with " +
+                                                "this node's cassandra.yaml, for each of their tables, then start " +
+                                                "the node again. Before it, the node stopped: sstablerepairedset " +
+                                                "--really-set --is-unrepaired <its Data.db file> on an sstable " +
+                                                "still pending repair (incrementally repaired while the node ran " +
+                                                "without the mode), which sstableupgrade does not rewrite " +
+                                                "otherwise. Nor does it rewrite an oa sstable with a deletion or " +
+                                                "expiration time after 2038-01-19T03:14:06Z, which me cannot " +
+                                                "hold: for an sstable it does not rewrite, it prints \"Error " +
+                                                "upgrading\", keeps the sstable and still exits 0, and the next " +
+                                                "start refuses it again. The sstables of a secondary index (the " +
+                                                ".<index> directories of a table) are not rewritten so either.";
+    /** The end of that refusal: the snapshot restore, and the deletion of the files. */
+    private static final String RESTORE = " the node from its pre-upgrade snapshot. Deleting these files instead " +
+                                          "loses this node's copy of their data: do it only if that data is " +
+                                          "replicated on other nodes, and repair the node once the compatibility " +
+                                          "mode is dropped";
     /**
      * The end of a refusal of {@code DSE_6} on the DSE 5.1 files: the remedy of a node of the upgrade from DSE 6 that
      * kept them from an earlier upgrade from DSE 5.1, then the override.
@@ -192,11 +213,11 @@ public class Dse51StartupChecksTest
     public void dse51AcceptsWhatItWritesAndWhatDse51WroteAndWritesItsMarker() throws Exception
     {
         mode(InternodeCompatibilityMode.DSE_5_1);
-        // what DSE 5.1 wrote (big me, and older big versions it still reads), big nb, which the node writes in the
-        // mode, and big oa, which offline tools write in it; commit log segments of DSE 5.1 (version 6) and of the
-        // node in the mode (version 7)
+        // what DSE 5.1 wrote, and what the node and the offline tools write in the mode (big me), and older big
+        // versions DSE 5.1 still reads; commit log segments of DSE 5.1 (version 6) and of the node in the mode
+        // (version 7)
         touch(sstableDir, "me-1-big-Data.db", "me-1-big-TOC.txt", "mc-2-big-Data.db", "ma-3-big-Data.db",
-              "nb-4-big-Data.db", "oa-5-big-Data.db");
+              "me-4-big-Data.db");
         touch(commitLogDir, "CommitLog-6-1.log", "CommitLog-7-2.log");
 
         StartupChecks.checkDse6Artefacts.execute(OPTIONS);
@@ -227,7 +248,8 @@ public class Dse51StartupChecksTest
     {
         mode(InternodeCompatibilityMode.DSE_5_1);
         String ulid = ULIDBasedSSTableId.Builder.instance.generator(Stream.empty()).get().toString();
-        touch(sstableDir, "me-1-big-Data.db", "nb-2-big-Data.db", "pa-3-big-Data.db", "aa-4-bti-Data.db",
+        touch(sstableDir, "me-1-big-Data.db", "nb-2-big-Data.db", "oa-7-big-Data.db", "pa-3-big-Data.db",
+              "aa-4-bti-Data.db",
               "bb-5-bti-Data.db", "me-6-xyz-Data.db", "nb-3h43_18di_43ocw25niiw1m23p1r-big-Data.db",
               "me-" + ulid + "-big-Data.db");
         touch(commitLogDir, "CommitLog-6-1.log", "CommitLog-7-2.log", "CommitLog-8-3.log", "CommitLog-110-4.log",
@@ -235,6 +257,8 @@ public class Dse51StartupChecksTest
         assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(OPTIONS))
         .isInstanceOf(StartupException.class)
         .hasMessageStartingWith(REFUSAL)
+        .hasMessageContaining("nb-2-big-Data.db")
+        .hasMessageContaining("oa-7-big-Data.db")
         .hasMessageContaining("pa-3-big-Data.db")
         .hasMessageContaining("aa-4-bti-Data.db")
         .hasMessageContaining("bb-5-bti-Data.db")
@@ -245,25 +269,82 @@ public class Dse51StartupChecksTest
         .hasMessageContaining("CommitLog-110-4.log")
         .hasMessageContaining("CommitLog-680-5.log")
         .hasMessageNotContaining("me-1-big-Data.db")
-        .hasMessageNotContaining("nb-2-big-Data.db")
         .hasMessageNotContaining("CommitLog-6-1.log")
         .hasMessageNotContaining("CommitLog-7-2.log")
-        .hasMessageEndingWith(". Restore the node from its pre-upgrade snapshot. Deleting these files instead loses " +
-                              "this node's copy of their data: do it only if that data is replicated on other nodes, " +
-                              "and repair the node once the compatibility mode is dropped")
+        .hasMessageEndingWith(REWRITE_AT_ME + " Otherwise, and for the other files, restore" + RESTORE)
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_DISK_STATE));
         assertThat(DseUpgradeMarker.exists(InternodeCompatibilityMode.DSE_5_1)).isFalse();
+    }
+
+    /**
+     * The first remedy of the refusal in {@code DSE_5_1}, the rewrite at me by sstableupgrade, is named for the big
+     * sstables of a version newer than me that this software reads, whatever their identifier, and only then: with
+     * those sstables alone the snapshot restore is the fallback for them; without them the text is as before. Those of
+     * a secondary index, which the tool does not list, are other files: alone, they get the text of before.
+     */
+    @Test
+    public void dse51NamesSstableupgradeForTheBigSSTablesItRewritesAtMe() throws Exception
+    {
+        // the last time me holds, as the remedy names it: the cap of the 32-bit deletion times
+        assertThat(StartupChecks.DSE51_ME_LAST_TIME)
+        .isEqualTo(Instant.ofEpochSecond(CellData.MAX_DELETION_TIME_2038_LEGACY_CAP).toString());
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("nb-2-big-Data.db")).isTrue();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("oa-7-big-Index.db")).isTrue();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("na-1-big-Data.db")).isTrue();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("me-1-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("pa-3-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("bb-5-bti-Data.db")).isFalse();
+        // a non-numeric identifier too: the tool, with the node's configuration, rewrites it with a numeric one
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("nb-3h43_18di_43ocw25niiw1m23p1r-big-Data.db")).isTrue();
+        // a me sstable, which the tool does not rewrite
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("me-3h43_18di_43ocw25niiw1m23p1r-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isBigSSTableRewrittenAtMe("CommitLog-8-3.log")).isFalse();
+
+        mode(InternodeCompatibilityMode.DSE_5_1);
+        touch(sstableDir, "nb-2-big-Data.db", "oa-7-big-Data.db");
+        assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessageStartingWith(REFUSAL)
+        .hasMessageContaining(sstableDir.resolve("nb-2-big-Data.db").toString())
+        .hasMessageContaining(sstableDir.resolve("oa-7-big-Data.db").toString())
+        .hasMessageEndingWith(REWRITE_AT_ME + " Otherwise, restore" + RESTORE);
+
+        // the same sstable in the directory of a secondary index is not for the tool
+        Path index = Files.createDirectories(sstableDir.resolve(".t_idx"));
+        touch(index, "nb-4-big-Data.db");
+        assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessageContaining(index.resolve("nb-4-big-Data.db").toString())
+        .hasMessageEndingWith(REWRITE_AT_ME + " Otherwise, and for the other files, restore" + RESTORE);
+
+        // the sstables of a secondary index alone: no rewrite at me named
+        Files.delete(sstableDir.resolve("nb-2-big-Data.db"));
+        Files.delete(sstableDir.resolve("oa-7-big-Data.db"));
+        assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessage(REFUSAL + index.resolve("nb-4-big-Data.db") + ". Restore" + RESTORE);
+        Files.delete(index.resolve("nb-4-big-Data.db"));
+        Files.delete(index);
+
+        touch(sstableDir, "bb-5-bti-Data.db");
+        touch(commitLogDir, "CommitLog-8-3.log");
+        assertThatThrownBy(() -> StartupChecks.checkDse6Artefacts.execute(OPTIONS))
+        .isInstanceOf(StartupException.class)
+        .hasMessage(REFUSAL + sstableDir.resolve("bb-5-bti-Data.db") + ", " +
+                    commitLogDir.resolve("CommitLog-8-3.log") + ". Restore" + RESTORE);
     }
 
     @Test
     public void theRulesOfEachModeDiffer()
     {
         // big me, nb and oa, every trie version, numeric and other identifiers, names that do not parse
-        assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("nb-1-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("me-1-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isSSTableUnreadableByDse6("me-1-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("nb-1-big-Data.db")).isTrue();
         assertThat(StartupChecks.isSSTableUnreadableByDse6("nb-1-big-Data.db")).isTrue();
         assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("bb-1-bti-Data.db")).isTrue();
         assertThat(StartupChecks.isSSTableUnreadableByDse6("bb-1-bti-Data.db")).isFalse();
-        assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("oa-1-big-Data.db")).isFalse();
+        assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("oa-1-big-Data.db")).isTrue();
         assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("pa-1-big-Data.db")).isTrue();
         assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("ka-1-big-Data.db")).isFalse();
         assertThat(StartupChecks.isSSTableWrittenWithoutDse51Mode("ks-t-ka-1-Data.db")).isFalse();
@@ -306,6 +387,7 @@ public class Dse51StartupChecksTest
         assertThat(segments).noneMatch(StartupChecks::isCommitLogSegmentWrittenWithoutDse51Mode);
         // the names reach the classification: the same names of another format or version are refused
         assertThat(sstables).allMatch(n -> StartupChecks.isSSTableWrittenWithoutDse51Mode(n.replace("-big-", "-bti-")));
+        assertThat(sstables).allMatch(n -> StartupChecks.isSSTableWrittenWithoutDse51Mode("nb" + n.substring(2)));
         assertThat(segments).allMatch(n -> StartupChecks.isCommitLogSegmentWrittenWithoutDse51Mode(
             n.replaceFirst("^CommitLog-" + Dse51Fixtures.COMMIT_LOG_VERSION + '-', "CommitLog-680-")));
     }
@@ -319,7 +401,8 @@ public class Dse51StartupChecksTest
         assertThatThrownBy(() -> StartupChecks.checkDsePeersWithoutFlag.execute(OPTIONS))
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode is NONE but the DSE 5.1 upgrade marker " + marker + " is present: " +
-                    "DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: DSE_5_1, or once " +
+                    "DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: " +
+                    "DSE_5_1 with storage_compatibility_mode: DSE_5_1 and sstable.selected_format: big, or once " +
                     "every node runs this software, delete the marker, or start with " +
                     "-Dcassandra.internode_compatibility_mode.ignore_dse_peers=true")
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
@@ -347,11 +430,12 @@ public class Dse51StartupChecksTest
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode is NONE but the record of DSE 5.1 peers " + record +
                     " listing [10.0.0.2:7000, 10.0.0.3:not-a-port] is present: DSE 5.1 peers may still be in the " +
-                    "cluster. Set internode_compatibility_mode: DSE_5_1, or the record empties itself once this " +
-                    "node has seen every listed peer at messaging version 4.0 or later (run once more with " +
-                    "DSE_5_1 after the last upgrade); delete it by hand only after checking that the listed peers " +
-                    "have left the cluster; the entries [10.0.0.3:not-a-port] are not addresses with port " +
-                    "(<ip>:<port>) and must be removed from it by hand, or start with " +
+                    "cluster. Set internode_compatibility_mode: DSE_5_1 with storage_compatibility_mode: DSE_5_1 " +
+                    "and sstable.selected_format: big, or the record empties itself once this node has seen every " +
+                    "listed peer at messaging version 4.0 or later (run once more with DSE_5_1 after the last " +
+                    "upgrade); delete it by hand only after checking that the listed peers have left the cluster; " +
+                    "the entries [10.0.0.3:not-a-port] are not addresses with port (<ip>:<port>) and must be " +
+                    "removed from it by hand, or start with " +
                     "-Dcassandra.internode_compatibility_mode.ignore_dse_peers=true");
 
         // a record that cannot be read refuses the start too
@@ -362,7 +446,8 @@ public class Dse51StartupChecksTest
         .hasMessageStartingWith("internode_compatibility_mode is NONE but the record of DSE 5.1 peers " + record +
                                 " cannot be read (")
         .hasMessageContaining("): DSE 5.1 peers may still be in the cluster. Set internode_compatibility_mode: " +
-                              "DSE_5_1, or make the record readable, or start with ");
+                              "DSE_5_1 with storage_compatibility_mode: DSE_5_1 and sstable.selected_format: big, " +
+                              "or make the record readable, or start with ");
     }
 
     @Test
@@ -436,8 +521,9 @@ public class Dse51StartupChecksTest
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode is DSE_6 but the DSE 5.1 upgrade marker " + marker + " is present: " +
                     "DSE 5.1 peers may still be in the cluster. On a node of the upgrade from DSE 5.1, set " +
-                    "internode_compatibility_mode: DSE_5_1, or once every node runs this software, delete the " +
-                    "marker. " + LEFT_FROM_AN_EARLIER_UPGRADE)
+                    "internode_compatibility_mode: DSE_5_1 with storage_compatibility_mode: DSE_5_1 and " +
+                    "sstable.selected_format: big, or once every node runs this software, delete the marker. " +
+                    LEFT_FROM_AN_EARLIER_UPGRADE)
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
 
         try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS, true))
@@ -480,7 +566,8 @@ public class Dse51StartupChecksTest
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode is DSE_6 but the record of DSE 5.1 peers " + record +
                     " listing [10.0.0.2:7000] is present: DSE 5.1 peers may still be in the cluster. On a node of " +
-                    "the upgrade from DSE 5.1, set internode_compatibility_mode: DSE_5_1, or " + recordRemedy)
+                    "the upgrade from DSE 5.1, set internode_compatibility_mode: DSE_5_1 with " +
+                    "storage_compatibility_mode: DSE_5_1 and sstable.selected_format: big, or " + recordRemedy)
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
 
         try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS, true))
@@ -498,8 +585,9 @@ public class Dse51StartupChecksTest
         .hasMessage("internode_compatibility_mode is DSE_6 but the DSE 5.1 upgrade marker " + marker + " is present " +
                     "and the record of DSE 5.1 peers " + record + " listing [10.0.0.2:7000] is present: DSE 5.1 " +
                     "peers may still be in the cluster. On a node of the upgrade from DSE 5.1, set " +
-                    "internode_compatibility_mode: DSE_5_1, or once every node runs this software, delete the " +
-                    "marker; " + recordRemedy);
+                    "internode_compatibility_mode: DSE_5_1 with storage_compatibility_mode: DSE_5_1 and " +
+                    "sstable.selected_format: big, or once every node runs this software, delete the marker; " +
+                    recordRemedy);
         assertThat(DseUpgradeMarker.delete(InternodeCompatibilityMode.DSE_5_1)).isTrue();
 
         Files.delete(record);
@@ -509,7 +597,8 @@ public class Dse51StartupChecksTest
         .hasMessageStartingWith("internode_compatibility_mode is DSE_6 but the record of DSE 5.1 peers " + record +
                                 " cannot be read (")
         .hasMessageEndingWith("): DSE 5.1 peers may still be in the cluster. On a node of the upgrade from DSE " +
-                              "5.1, set internode_compatibility_mode: DSE_5_1, or make the record readable. " +
+                              "5.1, set internode_compatibility_mode: DSE_5_1 with storage_compatibility_mode: " +
+                              "DSE_5_1 and sstable.selected_format: big, or make the record readable. " +
                               LEFT_FROM_AN_EARLIER_UPGRADE)
         .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
         try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS, true))

@@ -48,6 +48,19 @@ public enum StorageCompatibilityMode
     HCD_1(4),
 
     /**
+     * The storage formats DSE 5.1 reads back, for {@code internode_compatibility_mode: DSE_5_1}, which it requires and
+     * is required by (each is refused without the other): sstables are written in the big format at version {@code me},
+     * the version DSE 5.1 writes, while the code reads every big version up to {@code oa} (a start in the internode
+     * mode refuses those newer than {@code me}, an entire-sstable stream of any version but the big 3.x ones is
+     * refused, and the guards of the mode refuse every import and refresh); the on-disk formats written at a messaging
+     * version ({@link #storageMessagingVersion()}: the commit log, the hints, the batch log) take that of
+     * {@link #HCD_1}, which DSE 5.1 does not read back. Of major 3, so every rule of a storage mode before 5.0 applies
+     * as it does for {@link #HCD_1}, and a rule of a mode before 4.0, which no other mode is, applies to it alone; the
+     * {@code bti} format is refused, as for {@link #CASSANDRA_4} ({@link #validateSstableFormat}).
+     */
+    DSE_5_1(3),
+
+    /**
      * Use the storage formats of the current version, but disabling features that are not compatible with any
      * not-upgraded nodes in the cluster. Use this during rolling upgrades to a new major Cassandra version. Once all
      * nodes have been upgraded, you can set the compatibility to {@link #NONE}.
@@ -85,7 +98,7 @@ public enum StorageCompatibilityMode
 
     public void validateSstableFormat(SSTableFormat<?, ?> selectedFormat)
     {
-        if (selectedFormat.name().equals(BtiFormat.NAME) && this == StorageCompatibilityMode.CASSANDRA_4)
+        if (selectedFormat.name().equals(BtiFormat.NAME) && (this == CASSANDRA_4 || this == DSE_5_1))
             throw new ConfigurationException(String.format("Selected sstable format '%s' is not available when in storage compatibility mode '%s'.",
                                                            selectedFormat.name(),
                                                            this));
@@ -104,6 +117,7 @@ public enum StorageCompatibilityMode
         {
             case CASSANDRA_4:
             case HCD_1:
+            case DSE_5_1:
                 return MessagingService.VERSION_40;
             case UPGRADING:
             case NONE:

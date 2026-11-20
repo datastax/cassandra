@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.io.sstable.format;
 
+import com.google.common.base.Preconditions;
+
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.io.compress.CompressedSequentialWriter;
@@ -60,14 +62,25 @@ public class DataComponent
     {
         if (metadata.params.compression.isEnabled())
         {
-            final CompressionParams compressionParams = buildCompressionParams(metadata, operationType);
+            CompressionParams compressionParams = buildCompressionParams(metadata, operationType);
+            boolean pre40Layout = descriptor.version.hasPre40Encoding();
+            // the compression info of the 3.x versions is the one without a maximum compressed length
+            Preconditions.checkState(!pre40Layout || !descriptor.version.hasMaxCompressedLength(),
+                                     "the compression info layout of sstable version %s does not match its row " +
+                                     "encoding (hasPre40Encoding %s, hasMaxCompressedLength %s)",
+                                     descriptor.version, pre40Layout, descriptor.version.hasMaxCompressedLength());
+            // a 3.x version (big m*) has no uncompressed chunk: its readers decompress every chunk, so a table's
+            // min_compress_ratio does not apply to it
+            if (pre40Layout)
+                compressionParams = compressionParams.withEveryChunkCompressed();
             return new CompressedSequentialWriter(descriptor.fileFor(Components.DATA),
                                                   descriptor.fileFor(Components.COMPRESSION_INFO),
                                                   descriptor.fileFor(digestComponent),
                                                       checksumType,
                                                   options,
                                                   compressionParams,
-                                                  metadataCollector);
+                                                  metadataCollector,
+                                                  pre40Layout);
         }
         else
         {

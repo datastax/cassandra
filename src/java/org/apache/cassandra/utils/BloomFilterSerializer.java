@@ -51,12 +51,20 @@ public final class BloomFilterSerializer implements IGenericSerializer<BloomFilt
         return newFormatInstance;
     }
 
+    /**
+     * Serializes {@code bf}: the hash count, then the bits, in the layout of this serializer's format; the old one is
+     * that of the big {@code m*} sstables and of the trie {@code a*} ones (DSE 6.0 and 6.7): those the DSE 5.1
+     * compatibility mode writes at {@code me}, and, in every mode, the rebuilt filter of one of them opened later (its
+     * {@code Filter.db} missing, or its false positive chance changed), which its version reads in that layout.
+     */
     @Override
     public void serialize(BloomFilter bf, DataOutputStreamPlus out) throws IOException
     {
-        assert !oldFormat : "Filter should not be serialized in old format";
         out.writeInt(bf.hashCount);
-        bf.bitset.serialize(out);
+        if (oldFormat)
+            bf.bitset.serializeOldBfFormat(out);
+        else
+            bf.bitset.serialize(out);
     }
 
     /**

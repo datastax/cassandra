@@ -154,13 +154,13 @@ public class AuthConfigDse6Test
         String cidrRefusal = "cidr_authorizer " + CIDR.getClass().getName() + " reads system_auth.cidr_permissions " +
                              "and system_auth.cidr_groups, which DSE 5.1 does not have: this software creates them " +
                              "only with storage_compatibility_mode UPGRADING or NONE, after the upgrade " +
-                             "(internode_compatibility_mode DSE_5_1 requires HCD_1); use AllowAllCIDRAuthorizer " +
-                             "until then";
+                             "(internode_compatibility_mode DSE_5_1 requires storage_compatibility_mode DSE_5_1); " +
+                             "use AllowAllCIDRAuthorizer until then";
         String authenticatorRefusal = "authenticator " + mutualTls.getClass().getName() + " reads " +
                                       "system_auth.identity_to_role, which DSE 5.1 does not have: this software " +
                                       "creates it only with storage_compatibility_mode UPGRADING or NONE, after the " +
-                                      "upgrade (internode_compatibility_mode DSE_5_1 requires HCD_1); use " +
-                                      "PasswordAuthenticator until then";
+                                      "upgrade (internode_compatibility_mode DSE_5_1 requires " +
+                                      "storage_compatibility_mode DSE_5_1); use PasswordAuthenticator until then";
         String refusal = "internode_compatibility_mode DSE_5_1 refused: " + networkRefusal + ". " + cidrRefusal + ". " +
                          authenticatorRefusal;
         assertThatThrownBy(() -> AuthConfig.refuseWhatNeedsTablesDseLacks(dse51, mutualTls, NETWORK, CIDR))

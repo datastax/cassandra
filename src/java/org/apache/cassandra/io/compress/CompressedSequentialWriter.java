@@ -79,6 +79,9 @@ public class CompressedSequentialWriter extends SequentialWriter
 
     private final int maxCompressedLength;
 
+    /** Whether the file is written as Cassandra 3.x writes the data of its sstables, see the constructor. */
+    private final boolean pre40Layout;
+
     /**
      * When corruption is found, the file writer is reset to previous data point but we can't reset the CRC checksum.
      * So we have to recompute digest value.
@@ -103,13 +106,29 @@ public class CompressedSequentialWriter extends SequentialWriter
                                       CompressionParams parameters,
                                       MetadataCollector sstableMetadataCollector)
     {
-        super(file, SequentialWriterOption.newBuilder()
-                                          .bufferSize(option.bufferSize())
-                                          .bufferType(option.bufferType())
-                                          .bufferSize(parameters.chunkLength())
-                                          .bufferType(parameters.getSstableCompressor().preferredBufferType())
-                                          .finishOnClose(option.finishOnClose())
-                                          .build());
+        this(file, offsetsFile, digestFile, checksumType, option, parameters, sstableMetadataCollector, false);
+    }
+
+    /**
+     * As {@link #CompressedSequentialWriter(File, File, File, ChecksumType, SequentialWriterOption, CompressionParams,
+     * MetadataCollector)}, for the data file of an sstable of a 3.x version or not.
+     *
+     * @param pre40Layout whether the file is written as Cassandra 3.x writes the data of its sstables (big {@code m*},
+     *                    {@link org.apache.cassandra.io.sstable.format.Version#hasPre40Encoding()}): no maximum
+     *                    compressed length in the compression info, so {@code parameters} must have none
+     *                    ({@link CompressionParams#withEveryChunkCompressed}), and the compression ratio of the
+     *                    statistics over the compressed chunks without their checksums, as 3.x computes it
+     */
+    public CompressedSequentialWriter(File file,
+                                      File offsetsFile,
+                                      File digestFile,
+                                      ChecksumType checksumType,
+                                      SequentialWriterOption option,
+                                      CompressionParams parameters,
+                                      MetadataCollector sstableMetadataCollector,
+                                      boolean pre40Layout)
+    {
+        super(file, writerOption(option, parameters, pre40Layout));
         this.parameters = parameters;
         this.compressor = parameters.getSstableCompressor();
         this.digestFile = Optional.ofNullable(digestFile);
@@ -128,10 +147,30 @@ public class CompressedSequentialWriter extends SequentialWriter
         }
 
         /* Index File (-CompressionInfo.db component) and it's header */
-        metadataWriter = CompressionMetadata.Writer.open(parameters, offsetsFile);
+        metadataWriter = CompressionMetadata.Writer.open(parameters, offsetsFile, !pre40Layout);
+        this.pre40Layout = pre40Layout;
 
         this.sstableMetadataCollector = sstableMetadataCollector;
         crcMetadata = new ChecksumWriter(new DataOutputStream(Channels.newOutputStream(channel)), checksumType);
+    }
+
+    /**
+     * The option of the underlying writer, after the check of {@code parameters} for a 3.x file (every chunk
+     * compressed), made before the file is opened.
+     */
+    private static SequentialWriterOption writerOption(SequentialWriterOption option, CompressionParams parameters,
+                                                       boolean pre40Layout)
+    {
+        Preconditions.checkArgument(!pre40Layout || parameters.maxCompressedLength() == Integer.MAX_VALUE,
+                                    "the data file of a 3.x sstable requires every chunk compressed, found a maximum " +
+                                    "compressed length of %s", parameters.maxCompressedLength());
+        return SequentialWriterOption.newBuilder()
+                                     .bufferSize(option.bufferSize())
+                                     .bufferType(option.bufferType())
+                                     .bufferSize(parameters.chunkLength())
+                                     .bufferType(parameters.getSstableCompressor().preferredBufferType())
+                                     .finishOnClose(option.finishOnClose())
+                                     .build();
     }
 
     /**
@@ -456,7 +495,10 @@ public class CompressedSequentialWriter extends SequentialWriter
             syncInternal();
             maybeWriteChecksum();
 
-            sstableMetadataCollector.addCompressionRatio(chunkOffset, lastFlushOffset);
+            // 3.x leaves the checksum that follows each chunk out of the ratio: an int whatever the checksum type,
+            // as the step of chunkOffset in flushData counts it
+            long compressedLength = pre40Layout ? chunkOffset - 4L * chunkCount : chunkOffset;
+            sstableMetadataCollector.addCompressionRatio(compressedLength, lastFlushOffset);
             metadataWriter.finalizeLength(current(), chunkCount).prepareToCommit();
         }
 

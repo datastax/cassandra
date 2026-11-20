@@ -28,6 +28,8 @@ import org.apache.cassandra.net.MessagingService;
 import org.assertj.core.api.Assertions;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 public class StorageCompatibilityModeTest
 {
@@ -48,6 +50,7 @@ public class StorageCompatibilityModeTest
                     mode.validateSstableFormat(trie);
                     break;
                 case CASSANDRA_4:
+                case DSE_5_1:
                     mode.validateSstableFormat(big);
                     Assertions.assertThatThrownBy(() -> mode.validateSstableFormat(trie))
                               .isInstanceOf(ConfigurationException.class)
@@ -65,6 +68,7 @@ public class StorageCompatibilityModeTest
         // CASSANDRA_4 and HCD_1 should use VERSION_40 for storage compatibility
         assertEquals(MessagingService.VERSION_40, StorageCompatibilityMode.CASSANDRA_4.storageMessagingVersion());
         assertEquals(MessagingService.VERSION_40, StorageCompatibilityMode.HCD_1.storageMessagingVersion());
+        assertEquals(MessagingService.VERSION_40, StorageCompatibilityMode.DSE_5_1.storageMessagingVersion());
 
         // UPGRADING and NONE should use the current messaging version
         assertEquals(MessagingService.current_version, StorageCompatibilityMode.UPGRADING.storageMessagingVersion());
@@ -82,6 +86,7 @@ public class StorageCompatibilityModeTest
             {
                 case CASSANDRA_4:
                 case HCD_1:
+                case DSE_5_1:
                     assertEquals("Mode " + mode + " should use VERSION_40 for storage",
                                  MessagingService.VERSION_40, version);
                     break;
@@ -94,5 +99,20 @@ public class StorageCompatibilityModeTest
                     throw new AssertionError("Undefined storage messaging version behaviour for mode " + mode);
             }
         }
+    }
+
+    /** The storage mode of DSE 5.1 is of major 3: every rule of a mode before 4.0 and before 5.0 applies to it. */
+    @Test
+    public void theDse51ModeIsBefore4And5()
+    {
+        assertEquals(3, StorageCompatibilityMode.DSE_5_1.major);
+        assertTrue(StorageCompatibilityMode.DSE_5_1.isBefore(4));
+        assertTrue(StorageCompatibilityMode.DSE_5_1.isBefore(5));
+        assertFalse(StorageCompatibilityMode.DSE_5_1.isBefore(3));
+        assertFalse(StorageCompatibilityMode.DSE_5_1.disabled());
+        assertEquals(StorageCompatibilityMode.DSE_5_1, StorageCompatibilityMode.valueOf("DSE_5_1"));
+        // the other modes keep their majors
+        assertFalse(StorageCompatibilityMode.HCD_1.isBefore(4));
+        assertFalse(StorageCompatibilityMode.CASSANDRA_4.isBefore(4));
     }
 }
