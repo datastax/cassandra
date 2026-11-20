@@ -350,6 +350,116 @@ public class RowFilterAbsorptionTest extends CQLTester
                     "a != 0 AND a != 1 AND b = 1");
     }
 
+    /// The model of a row in the test table with a clustering column. Clustering columns are never null.
+    private static class ClusteringRow
+    {
+        final int k;
+        final int ck;
+        final Integer b;
+
+        ClusteringRow(int k, int ck, Integer b)
+        {
+            this.k = k;
+            this.ck = ck;
+            this.b = b;
+        }
+    }
+
+    private final List<ClusteringRow> clusteringRows = new ArrayList<>();
+
+    private void createAndPopulateClusteringTable()
+    {
+        createTable("CREATE TABLE %s (k int, ck int, s int static, b int, PRIMARY KEY (k, ck))");
+
+        if (index)
+            createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+
+        for (int k = 0; k < 2; k++)
+        {
+            for (int ck = 0; ck < 4; ck++)
+            {
+                for (Integer b : VALUES)
+                {
+                    // one row per ck and value of b, so the partitions are spread over several partition keys
+                    int partition = k * 100 + (b == null ? 99 : b);
+                    clusteringRows.add(new ClusteringRow(partition, ck, b));
+                }
+            }
+        }
+
+        for (ClusteringRow row : clusteringRows)
+        {
+            if (row.b == null)
+                execute("INSERT INTO %s (k, ck, s) VALUES (?, ?, ?)", row.k, row.ck, 7);
+            else
+                execute("INSERT INTO %s (k, ck, s, b) VALUES (?, ?, ?, ?)", row.k, row.ck, 7, row.b);
+        }
+
+        // a partition that only has a static row, which must never be returned by the queries on clustering columns
+        execute("INSERT INTO %s (k, s) VALUES (?, ?)", 1000, 7);
+
+        if (flush)
+            flush();
+    }
+
+    /// The tautology `ck = x OR ck != x` is only applied to clustering columns, which are never null.
+    @Test
+    public void testTautologyInClusteringColumns()
+    {
+        createAndPopulateClusteringTable();
+
+        // x OR (!x AND y) -> x OR y
+        assertClusteringQuery("SELECT k, ck FROM %s WHERE ck = 1 OR (ck != 1 AND b = 1)",
+                              r -> r.ck == 1 || eq(r.b, 1),
+                              "ck = 1 OR b = 1");
+        assertClusteringQuery("SELECT k, ck FROM %s WHERE ck != 1 OR (ck = 1 AND b = 1)",
+                              r -> r.ck != 1 || eq(r.b, 1),
+                              "ck != 1 OR b = 1");
+
+        // overlapping and touching slices
+        assertClusteringQuery("SELECT k, ck FROM %s WHERE ck < 2 OR (ck >= 2 AND b = 1)",
+                              r -> r.ck < 2 || eq(r.b, 1),
+                              "ck < 2 OR b = 1");
+        assertClusteringQuery("SELECT k, ck FROM %s WHERE ck < 2 OR (ck > 1 AND b = 1)",
+                              r -> r.ck < 2 || eq(r.b, 1),
+                              "ck < 2 OR b = 1");
+        assertClusteringQuery("SELECT k, ck FROM %s WHERE ck != 1 OR (ck != 2 AND b = 1)",
+                              r -> r.ck != 1 || eq(r.b, 1),
+                              "ck != 1 OR b = 1");
+
+        // slices that leave a gap or don't cover the excluded bound are not tautologies
+        assertClusteringQuery("SELECT k, ck FROM %s WHERE ck < 2 OR (ck > 2 AND b = 1)",
+                              r -> r.ck < 2 || (r.ck > 2 && eq(r.b, 1)),
+                              "ck < 2 OR (ck > 2 AND b = 1)");
+        assertClusteringQuery("SELECT k, ck FROM %s WHERE ck = 1 OR (ck = 2 AND b = 1)",
+                              r -> r.ck == 1 || (r.ck == 2 && eq(r.b, 1)),
+                              "ck = 1 OR (ck = 2 AND b = 1)");
+
+        // the expression is only removed from the conjunction, the rest of it is kept
+        assertClusteringQuery("SELECT k, ck FROM %s WHERE ck = 1 OR (ck != 1 AND b = 1 AND s = 7)",
+                              r -> r.ck == 1 || eq(r.b, 1));
+
+        // a top-level restriction on a clustering column is not part of the row filter, so it can't simplify it,
+        // but the results must be the same
+        assertClusteringQuery("SELECT k, ck FROM %s WHERE ck = 1 AND (ck != 1 OR b = 1)",
+                              r -> r.ck == 1 && eq(r.b, 1));
+
+        // the partitions that only have a static row are never returned
+        assertClusteringQuery("SELECT k, ck FROM %s WHERE ck = 1 OR (ck != 1 AND s = 7)",
+                              r -> true);
+    }
+
+    /// Verifies that the specified query on the table with a clustering column returns the rows of the model that
+    /// satisfy the specified predicate, and optionally its row filter.
+    private void assertClusteringQuery(String query, Predicate<ClusteringRow> expected, String... optimizedFilters)
+    {
+        Object[][] expectedRows = clusteringRows.stream()
+                                                .filter(expected)
+                                                .map(r -> new Object[]{ r.k, r.ck })
+                                                .toArray(Object[][]::new);
+        assertQuery(query, true, expectedRows, optimizedFilters);
+    }
+
     /// Verifies that the specified query returns the rows of the model that satisfy the specified predicate,
     /// and that its row filter has one of the specified CQL representations, ignoring the order of the terms of each
     /// conjunction and disjunction.
@@ -364,15 +474,15 @@ public class RowFilterAbsorptionTest extends CQLTester
                                       .filter(expected)
                                       .map(r -> new Object[]{ r.k })
                                       .toArray(Object[][]::new);
-        assertQuery(query, expectedRows, optimizedFilters);
+        assertQuery(query, false, expectedRows, optimizedFilters);
     }
 
-    private void assertQuery(String query, Object[][] expectedRows, String... optimizedFilters)
+    private void assertQuery(String query, boolean allowFiltering, Object[][] expectedRows, String... optimizedFilters)
     {
         List<String> variants = new ArrayList<>();
         if (index)
         {
-            variants.add(query);
+            variants.add(allowFiltering ? query + " ALLOW FILTERING" : query);
             variants.add(query + " ALLOW FILTERING WITH excluded_indexes = {*}");
         }
         else

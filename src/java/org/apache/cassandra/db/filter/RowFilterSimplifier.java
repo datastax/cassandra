@@ -36,13 +36,16 @@ import org.apache.cassandra.schema.TableMetadata;
 /// All the simplifications here return exactly the same rows as the original element, including the rows where the
 /// compared columns are null. Note that [Expression#isSatisfiedBy] returns `false` for null values, for all the
 /// operators including `!=`, so `a != 0` is not the negation of `a = 0`. This is why `a = 0 OR (a != 0 AND b = 1)` is
-/// not simplified to `a = 0 OR b = 1`.
+/// not simplified to `a = 0 OR b = 1` for columns that can be null.
 ///
 /// The supported simplifications are:
 /// * Absorption: `x OR (x AND y)` is replaced by `x`, and `x AND (x OR y)` is replaced by `x`.
 /// * Contradiction: in `x AND (e OR y)`, `e` is removed if `x` and `e` can never be satisfied by the same value.
 ///   For example, `a = 0 AND (a != 0 OR b = 1)` is replaced by `a = 0 AND b = 1`. This is valid for any column,
 ///   because if `x` is satisfied the value is not null, so `e` can't be satisfied either.
+/// * Tautology: in `x OR (e AND y)`, `e` is removed if every non-null value satisfies `x OR e`. For example,
+///   `a = 0 OR (a != 0 AND b = 1)` is replaced by `a = 0 OR b = 1`. This is only valid for columns that are never null,
+///   because a null value satisfies neither `x` nor `e`. Only clustering columns are considered.
 ///
 /// The simplifications only look at the expressions of the element and at the expressions of its direct children.
 final class RowFilterSimplifier
@@ -85,17 +88,10 @@ final class RowFilterSimplifier
                 continue;
             }
 
-            // the contradictions are only valid in conjunctions, see above
-            if (element.isDisjunction())
-            {
-                children.add(child);
-                continue;
-            }
-
             List<Expression> remaining = new ArrayList<>(child.expressions().size());
             for (Expression expression : child.expressions())
             {
-                if (!contradictsAny(parentExpressions, expression, table, hints))
+                if (!isRedundant(element.isDisjunction(), parentExpressions, expression, table, hints))
                     remaining.add(expression);
             }
 
@@ -105,16 +101,30 @@ final class RowFilterSimplifier
                 continue;
             }
 
-            changed = true;
-
             // An empty disjunction is always false, and so is the conjunction that contains it.
             if (remaining.isEmpty() && child.children().isEmpty())
-                return FilterElement.REJECT_ALL;
+            {
+                if (!element.isDisjunction())
+                    return FilterElement.REJECT_ALL;
+
+                // An empty conjunction is always true, but an empty filter would also stop filtering out the
+                // partitions that only have a static row, so the child is kept.
+                children.add(child);
+                continue;
+            }
+
+            changed = true;
 
             // If there is a single expression left it is moved to the parent, unless the parent already has an
             // expression on the same column. That would produce combinations of restrictions on the same column
             // that CQL doesn't allow, such as `a > 5 AND a > 7`.
-            if (remaining.size() == 1 && child.children().isEmpty() && !hasExpressionOnColumn(expressions, remaining.get(0)))
+            // Static expressions are not moved to disjunctions, because RowFilter#filter splits the filter in a
+            // partition-level tree and a row-level tree that are applied as a conjunction. That is not equivalent
+            // to the original filter if a disjunction mixes static and non-static expressions at the same level.
+            if (remaining.size() == 1
+                && child.children().isEmpty()
+                && !hasExpressionOnColumn(expressions, remaining.get(0))
+                && !(element.isDisjunction() && isPartitionLevel(remaining.get(0))))
                 expressions.add(remaining.get(0));
             else
                 children.add(new FilterElement(child.isDisjunction(), remaining, child.children()));
@@ -142,19 +152,30 @@ final class RowFilterSimplifier
         return !expression.isOrderingExpression() && !expression.isCustom() && !expression.isUserDefined();
     }
 
-    /// Returns whether the specified expression of a disjunction can be removed because it contradicts any of the
-    /// specified expressions of its parent conjunction.
-    private static boolean contradictsAny(List<Expression> parentExpressions,
-                                          Expression expression,
-                                          TableMetadata table,
-                                          IndexHints hints)
+    /// Returns whether the specified expression of a child element can be removed because of the specified expressions
+    /// of its parent element.
+    ///
+    /// @param parentIsDisjunction whether the parent is a disjunction, so the child is a conjunction (tautology),
+    /// or the parent is a conjunction, so the child is a disjunction (contradiction)
+    private static boolean isRedundant(boolean parentIsDisjunction,
+                                       List<Expression> parentExpressions,
+                                       Expression expression,
+                                       TableMetadata table,
+                                       IndexHints hints)
     {
         for (Expression parentExpression : parentExpressions)
         {
-            if (areMutuallyExclusive(parentExpression, expression, table, hints))
+            if (parentIsDisjunction
+                ? isTautology(parentExpression, expression, table, hints)
+                : areMutuallyExclusive(parentExpression, expression, table, hints))
                 return true;
         }
         return false;
+    }
+
+    private static boolean isPartitionLevel(Expression expression)
+    {
+        return expression.column().isStatic() || expression.column().isPartitionKey();
     }
 
     private static boolean hasExpressionOnColumn(List<Expression> expressions, Expression expression)
@@ -183,6 +204,44 @@ final class RowFilterSimplifier
             return null;
 
         return type;
+    }
+
+    /// Returns whether every non-null value satisfies at least one of the specified expressions.
+    /// This is only considered for clustering columns, because they are never null. A null value satisfies no
+    /// expression, not even `!=`, so for other columns `x OR e` can reject rows even if `x` and `e` are complementary.
+    /// For example, `x = 1` and `x != 1`, `x != 1` and `x != 2`, or `x < 2` and `x >= 2` form a tautology.
+    static boolean isTautology(Expression left, Expression right, TableMetadata table, IndexHints hints)
+    {
+        if (!left.column().isClusteringColumn())
+            return false;
+
+        AbstractType<?> type = comparableType(left, right, table, hints);
+        if (type == null)
+            return false;
+
+        Operator leftOperator = left.operator();
+        Operator rightOperator = right.operator();
+
+        // `x != a` accepts every value but `a`, so it only needs the other expression to accept `a`
+        if (leftOperator == Operator.NEQ)
+            return rightOperator.isSatisfiedBy(type, left.value, right.value);
+
+        if (rightOperator == Operator.NEQ)
+            return leftOperator.isSatisfiedBy(type, right.value, left.value);
+
+        // a lower bound and an upper bound cover all the values if they overlap, such as `x < 2 OR x > 1`,
+        // or if they touch at an included value, such as `x < 1 OR x >= 1`
+        if (leftOperator.isSlice() && rightOperator.isSlice() && isLowerBound(leftOperator) != isLowerBound(rightOperator))
+        {
+            boolean leftIsLower = isLowerBound(leftOperator);
+            Operator lowerOperator = leftIsLower ? leftOperator : rightOperator;
+            Operator upperOperator = leftIsLower ? rightOperator : leftOperator;
+            int comparison = type.compareForCQL(leftIsLower ? left.value : right.value,
+                                                leftIsLower ? right.value : left.value);
+            return comparison < 0 || (comparison == 0 && (lowerOperator == Operator.GTE || upperOperator == Operator.LTE));
+        }
+
+        return false;
     }
 
     /// Returns whether it's impossible for the same value to satisfy both specified expressions.
