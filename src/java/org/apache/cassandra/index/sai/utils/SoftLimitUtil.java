@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.index.sai.utils;
 
+import org.apache.commons.math3.distribution.BinomialDistribution;
 import org.apache.commons.math3.distribution.PascalDistribution;
 
 public class SoftLimitUtil
@@ -67,4 +68,40 @@ public class SoftLimitUtil
         return (int) Math.min(softLimit, Integer.MAX_VALUE);
     }
 
+    /**
+     * Computes the maximum number of items that a subset (e.g. segment, partition) holding a given fraction of the total
+     * data is expected to contribute toward a sample of {@code totalItems} with the given {@code confidenceLevel}.
+     * It assumes that items matching the query are uniformly distributed across the subsets.
+     * <p>
+     * For example, if a query limit is 1000 items and a segment holds 20% of the data (fraction = 0.2), then with
+     * confidence 0.999, the segment is expected to deliver at most {@code expectedSubsetItems(1000, 0.2, 0.999)} items
+     * to satisfy the query limit.
+     *
+     * @param totalItems the total number of items to be retrieved across all subsets (e.g. query row limit)
+     * @param subsetFraction the fraction of total data held by this subset, in range [0.0, 1.0]
+     * @param confidenceLevel the desired confidence level, in range [0.0, 1.0)
+     * @return the expected number of items from this subset, clamped between 0 and {@code totalItems}
+     */
+    public static int expectedSubsetItems(int totalItems, double subsetFraction, double confidenceLevel)
+    {
+        if (Double.isNaN(confidenceLevel))
+            throw new IllegalArgumentException("confidenceLevel must not be NaN");
+        if (confidenceLevel < 0.0 || confidenceLevel >= 1.0)
+            throw new IllegalArgumentException("confidenceLevel out of range [0.0, 1.0): " + confidenceLevel);
+        if (Double.isNaN(subsetFraction))
+            throw new IllegalArgumentException("subsetFraction must not be NaN");
+        if (subsetFraction < 0.0 || subsetFraction > 1.0)
+            throw new IllegalArgumentException("subsetFraction out of range [0.0, 1.0]: " + subsetFraction);
+        if (totalItems < 0)
+            throw new IllegalArgumentException("totalItems must not be < 0: " + totalItems);
+
+        if (totalItems == 0 || subsetFraction == 0.0 || confidenceLevel == 0.0)
+            return 0;
+        if (subsetFraction == 1.0)
+            return totalItems;
+
+        final var distribution = new BinomialDistribution(totalItems, subsetFraction);
+        int expected = distribution.inverseCumulativeProbability(confidenceLevel);
+        return Math.min(expected, totalItems);
+    }
 }
