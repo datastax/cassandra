@@ -184,10 +184,14 @@ public class Dse51CompressorsTest extends CQLTester
     @Test
     public void theRefusalNamesEveryTableAndTheFix()
     {
+        // the remedy starts the node without the mode past the DSE 5.1 upgrade marker, which refuses such a start
         String fix = ". DSE 5.1 reads LZ4Compressor, SnappyCompressor and DeflateCompressor. Start this node without " +
-                     "the mode, keeping sstable.selected_format: big and uuid_sstable_identifiers_enabled: " +
-                     "false, change the compression of the tables named to one of them, rewrite their sstables " +
-                     "(nodetool upgradesstables -a), then start the node in the mode again";
+                     "the mode, with -Dcassandra.internode_compatibility_mode.ignore_dse_peers=true (the DSE 5.1 " +
+                     "upgrade marker this node wrote at its start in the mode refuses that start otherwise), keeping " +
+                     "storage_compatibility_mode: HCD_1, sstable.selected_format: big and " +
+                     "uuid_sstable_identifiers_enabled: false, change the compression of the tables named to one of " +
+                     "them, rewrite their sstables (nodetool upgradesstables -a), then start the node in the mode " +
+                     "again without that property";
         assertThat(Dse51Compressors.refusal(List.of("ks.t (ZstdCompressor)"), List.of()))
         .isEqualTo("internode_compatibility_mode DSE_5_1 refused: ks.t (ZstdCompressor) is compressed with a " +
                    "compressor DSE 5.1 does not read, so a DSE 5.1 node could not open the sstables this node writes " +

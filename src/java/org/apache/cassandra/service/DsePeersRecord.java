@@ -37,6 +37,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.net.HostAndPort;
 import com.google.common.net.InetAddresses;
 import org.slf4j.Logger;
@@ -44,6 +45,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileOutputStreamPlus;
@@ -78,14 +80,27 @@ import org.apache.cassandra.utils.SyncUtil;
  * The file is rewritten off the calling thread (the version is recorded on event loops and the gossip stage),
  * atomically and synced, and once more, synchronously, when the node drains ({@link #persistAtDrain}). Only maintained
  * while the DSE 6 compatibility mode is on; with {@code NONE} nothing is recorded and nothing is written.
+ * <p>
+ * The upgrade from DataStax Enterprise 5.1 has a record of its own, {@code <metadata_directory>/dse51-peers-seen}, with
+ * a header naming DSE 5.1 ({@link #path(InternodeCompatibilityMode)}, {@link #content}). Nothing maintains it so far:
+ * the record is loaded, written and kept up to date only while {@link DseCompat#enabled()}, which is false in
+ * {@code internode_compatibility_mode: DSE_5_1}. Only the check of a start in {@code NONE} reads it
+ * ({@code StartupChecks.checkDsePeersWithoutFlag}), which refuses the start while it lists a peer, as for the DSE 6
+ * record, which also refuses a start in {@code DSE_5_1}. The methods without a mode are those of the DSE 6 record,
+ * whose file and bytes do not depend on the DSE 5.1 one.
  */
 public final class DsePeersRecord
 {
     private static final Logger logger = LoggerFactory.getLogger(DsePeersRecord.class);
 
+    /** The record of the upgrade from DSE 6. */
     public static final String FILE_NAME = "dse-peers-seen";
-    private static final String TEMPORARY_FILE_NAME = FILE_NAME + ".tmp";
+    /** The record of the upgrade from DSE 5.1. */
+    public static final String DSE_51_FILE_NAME = "dse51-peers-seen";
+    private static final String TEMPORARY_SUFFIX = ".tmp";
     private static final String HEADER = "# peers known to speak the pre-4.0 dialect (DSE 6); maintained by the node, one address with port per line";
+    private static final String DSE_51_HEADER = "# peers known to speak the pre-4.0 dialect (DSE 5.1); maintained by " +
+                                                "the node, one address with port per line";
 
     private static final Set<InetAddressAndPort> PRE40_PEERS = ConcurrentHashMap.newKeySet();
     /** Lines of the persisted file that did not parse as an address: kept as they are, never silently dropped. */
@@ -103,7 +118,25 @@ public final class DsePeersRecord
 
     public static Path path()
     {
-        return DatabaseDescriptor.getMetadataDirectory().toPath().resolve(FILE_NAME);
+        return path(InternodeCompatibilityMode.DSE_6);
+    }
+
+    /** The record of the upgrade of {@code mode}, {@code DSE_6} or {@code DSE_5_1}. */
+    public static Path path(InternodeCompatibilityMode mode)
+    {
+        Preconditions.checkArgument(mode.isDse(), "no record of DSE peers for %s", mode);
+        String name = mode.isDse51() ? DSE_51_FILE_NAME : FILE_NAME;
+        return DatabaseDescriptor.getMetadataDirectory().toPath().resolve(name);
+    }
+
+    /**
+     * The upgrade whose record the node maintains: {@code DSE_5_1} in that mode, otherwise {@code DSE_6}, the record of
+     * the DSE 6 compatibility mode, which is the only one maintained so far.
+     */
+    static InternodeCompatibilityMode source()
+    {
+        return DatabaseDescriptor.isDse51CompatibilityMode() ? InternodeCompatibilityMode.DSE_5_1
+                                                             : InternodeCompatibilityMode.DSE_6;
     }
 
     /**
@@ -117,7 +150,7 @@ public final class DsePeersRecord
         List<String> persisted;
         try
         {
-            persisted = persistedPeers();
+            persisted = persistedPeers(source());
         }
         catch (IOException | RuntimeException e)
         {
@@ -129,7 +162,9 @@ public final class DsePeersRecord
             InetAddressAndPort peer = parseEntry(line);
             if (peer == null)
             {
-                logger.error("Entry '{}' of the record of DSE 6 peers {} is not an address with port (<ip>:<port>); it is kept in the file", line, path());
+                logger.error("Entry '{}' of the record of {} peers {} is not an address with port (<ip>:<port>); it " +
+                             "is kept in the file",
+                             line, source().source(), path(source()));
                 UNPARSED_LINES.add(line);
             }
             else
@@ -138,7 +173,7 @@ public final class DsePeersRecord
             }
         }
         if (!PRE40_PEERS.isEmpty())
-            logger.info("DSE 6 peers on record from the previous run: {}", peers());
+            logger.info("{} peers on record from the previous run: {}", source().source(), peers());
     }
 
     /**
@@ -204,7 +239,13 @@ public final class DsePeersRecord
      */
     public static List<String> persistedPeers() throws IOException
     {
-        Path path = path();
+        return persistedPeers(InternodeCompatibilityMode.DSE_6);
+    }
+
+    /** The addresses persisted in the record of the upgrade of {@code mode}, as {@link #persistedPeers()}. */
+    public static List<String> persistedPeers(InternodeCompatibilityMode mode) throws IOException
+    {
+        Path path = path(mode);
         // Files.exists is false when the check itself fails: only a file known to be absent is an empty record, anything
         // else is read, and a failure to read it is reported (the NONE check then refuses the start: fail closed)
         if (Files.notExists(path))
@@ -298,7 +339,8 @@ public final class DsePeersRecord
      */
     private static synchronized void persist()
     {
-        Path path = path();
+        InternodeCompatibilityMode source = source();
+        Path path = path(source);
         try
         {
             Set<String> lines = new TreeSet<>(UNPARSED_LINES);
@@ -307,18 +349,15 @@ public final class DsePeersRecord
             if (lines.isEmpty())
             {
                 Files.deleteIfExists(path);
-                Files.deleteIfExists(path.resolveSibling(TEMPORARY_FILE_NAME));
+                Files.deleteIfExists(temporary(path));
                 SyncUtil.trySyncDir(new File(path.getParent()));
                 return;
             }
             Files.createDirectories(path.getParent());
-            StringBuilder content = new StringBuilder(HEADER).append('\n');
-            for (String line : lines)
-                content.append(line).append('\n');
-            File temp = new File(path.resolveSibling(TEMPORARY_FILE_NAME));
+            File temp = new File(temporary(path));
             try (FileOutputStreamPlus out = temp.newOutputStream(File.WriteMode.OVERWRITE))
             {
-                out.write(content.toString().getBytes(StandardCharsets.UTF_8));
+                out.write(content(source, lines).getBytes(StandardCharsets.UTF_8));
                 out.sync();
             }
             temp.move(new File(path)); // atomic where the file system allows it (PathUtils.atomicMoveWithFallback)
@@ -326,9 +365,27 @@ public final class DsePeersRecord
         }
         catch (IOException | RuntimeException | FSError e)
         {
-            logger.error("Unable to persist the record of DSE 6 peers to {}; a later start with internode_compatibility_mode: NONE " +
-                         "will not know about them", path, e);
+            logger.error("Unable to persist the record of {} peers to {}; a later start with " +
+                         "internode_compatibility_mode: NONE will not know about them", source.source(), path, e);
         }
+    }
+
+    /**
+     * The content of the record of the upgrade of {@code mode} listing {@code lines}: its header, naming the DSE
+     * release, then one line each, in their order.
+     */
+    @VisibleForTesting
+    static String content(InternodeCompatibilityMode mode, Iterable<String> lines)
+    {
+        StringBuilder content = new StringBuilder(mode.isDse51() ? DSE_51_HEADER : HEADER).append('\n');
+        for (String line : lines)
+            content.append(line).append('\n');
+        return content.toString();
+    }
+
+    private static Path temporary(Path record)
+    {
+        return record.resolveSibling(record.getFileName() + TEMPORARY_SUFFIX);
     }
 
     /** Waits for the pending write, if any. */
@@ -340,7 +397,7 @@ public final class DsePeersRecord
             pending.get();
     }
 
-    /** Forgets every peer, allows a new load and deletes the file. */
+    /** Forgets every peer, allows a new load and deletes the files of both records. */
     @VisibleForTesting
     public static void clear() throws IOException
     {
@@ -358,8 +415,12 @@ public final class DsePeersRecord
             UNPARSED_LINES.clear();
             LOADED.set(false);
             CHANGED.set(false);
-            Files.deleteIfExists(path());
-            Files.deleteIfExists(path().resolveSibling(TEMPORARY_FILE_NAME));
+            for (InternodeCompatibilityMode mode : List.of(InternodeCompatibilityMode.DSE_6,
+                                                           InternodeCompatibilityMode.DSE_5_1))
+            {
+                Files.deleteIfExists(path(mode));
+                Files.deleteIfExists(temporary(path(mode)));
+            }
         }
     }
 }

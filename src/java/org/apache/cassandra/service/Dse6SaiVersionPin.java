@@ -217,7 +217,10 @@ public final class Dse6SaiVersionPin
         return version == null ? null : version.saiVersion;
     }
 
-    /** Runs the check in {@code DSE_6}; does nothing with {@code NONE}. */
+    /**
+     * Runs the check in {@code DSE_6}; does nothing with {@code NONE}, nor in {@code DSE_5_1}: DSE 5.1 has no SAI, so
+     * there is no version of its own to pin to.
+     */
     public static void verifyAtStartup() throws StartupException
     {
         if (!DatabaseDescriptor.isDse6CompatibilityMode())
