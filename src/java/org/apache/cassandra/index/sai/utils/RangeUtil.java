@@ -18,14 +18,12 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.List;
-
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 public class RangeUtil
@@ -72,24 +70,82 @@ public class RangeUtil
     }
 
 
+    /**
+     * Estimates how many of the given {@code rows}, assumed to be spread uniformly over the whole ring,
+     * fall into the {@code keyRange}. Does no I/O, it only uses ring arithmetic.
+     *
+     * @throws UnsupportedOperationException if the partitioner doesn't support token arithmetic
+     */
+    public static long estimateRowsInRange(long rows, AbstractBounds<PartitionPosition> keyRange)
+    {
+        if (rows <= 0)
+            return 0;
+        if (coversFullRing(keyRange))
+            return rows;
+        return Math.round(rows * getRingFraction(keyRange));
+    }
+
+    /**
+     * Estimates how many rows of the given index segment fall into the {@code keyRange}, assuming the rows are spread
+     * uniformly over the tokens between the min and the max key of the segment.
+     * Does no I/O, it only uses ring arithmetic.
+     */
+    public static long estimateRowsInRange(SegmentMetadata segment, AbstractBounds<PartitionPosition> keyRange)
+    {
+        long segmentRows = 1 + segment.maxSSTableRowId - segment.minSSTableRowId;
+        return estimateRowsInRange(segmentRows, segment.minKey.token(), segment.maxKey.token(), keyRange);
+    }
+
+    /**
+     * Estimates how many rows of the given sstable fall into the {@code keyRange}, assuming the rows are spread
+     * uniformly over the tokens between the first and the last token of the sstable.
+     * Does no I/O, it only uses ring arithmetic.
+     */
+    public static long estimateRowsInRange(SSTableReader sstable, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return estimateRowsInRange(sstable.getTotalRows(), sstable.first.getToken(), sstable.last.getToken(), keyRange);
+    }
+
+    /**
+     * Estimates how many of the given {@code rows}, assumed to be spread uniformly over tokens between
+     * {@code minToken} and {@code maxToken} (both inclusive), fall into the {@code keyRange}.
+     * Does no I/O, it only uses ring arithmetic.
+     *
+     * @throws UnsupportedOperationException if the partitioner doesn't support token arithmetic
+     */
+    @SuppressWarnings("unchecked")
+    private static long estimateRowsInRange(long rows, Token minToken, Token maxToken, AbstractBounds<PartitionPosition> keyRange)
+    {
+        if (rows <= 0)
+            return 0;
+        if (coversFullRing(keyRange))
+            return rows;
+
+        if (keyRange instanceof Range && ((Range<PartitionPosition>) keyRange).isTrulyWrapAround())
+        {
+            long sum = 0;
+            for (Range<PartitionPosition> unwrapped : ((Range<PartitionPosition>) keyRange).unwrap())
+                sum += estimateRowsInRange(rows, minToken, maxToken, unwrapped);
+            return Math.min(rows, sum);
+        }
+
+        Token lo = keyRange.left.getToken();
+        if (lo.compareTo(minToken) < 0)
+            lo = minToken;
+        // a minimum right bound denotes the end of the ring
+        Token hi = keyRange.right.isMinimum() ? maxToken : keyRange.right.getToken();
+        if (hi.compareTo(maxToken) > 0)
+            hi = maxToken;
+        if (lo.compareTo(hi) > 0)
+            return 0;
+
+        double spanFraction = minToken.size(maxToken.nextValidToken());
+        double overlapFraction = lo.size(hi.nextValidToken());
+        return Math.round(rows * Math.min(1.0, overlapFraction / spanFraction));
+    }
+
     public static double getRingFraction(AbstractBounds<PartitionPosition> keyRange)
     {
         return keyRange.left.getToken().size(keyRange.right.getToken().nextValidToken());
-    }
-
-    public static double getRingFraction(DataRange dataRange)
-    {
-        return getRingFraction(dataRange.keyRange());
-    }
-
-    public static double getRingFraction(List<DataRange> dataRanges)
-    {
-        double fraction = 0.0;
-        for (DataRange range : dataRanges)
-        {
-            fraction += getRingFraction(range);
-        }
-        fraction = Math.min(1.0, fraction);  // rounding errors could cause exceeding 1.0
-        return fraction;
     }
 }

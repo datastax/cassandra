@@ -62,8 +62,10 @@ import org.apache.cassandra.index.sai.utils.BM25Utils.EagerDocTF;
 import org.apache.cassandra.index.sai.utils.PrimaryKey;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithScore;
 import org.apache.cassandra.index.sai.utils.PrimaryKeyWithSortKey;
+import org.apache.cassandra.index.sai.utils.RangeUtil;
 import org.apache.cassandra.index.sai.utils.RowIdWithByteComparable;
 import org.apache.cassandra.index.sai.utils.SAICodecUtils;
+import org.apache.cassandra.index.sai.utils.SoftLimitUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.SSTableId;
@@ -139,11 +141,43 @@ public class InvertedIndexSearcher extends IndexSearcher
     @SuppressWarnings("resource")
     public KeyRangeIterator search(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context, boolean defer) throws IOException
     {
-        PostingList postingList = searchPosting(exp, context);
+        PostingList postingList = searchPosting(exp, keyRange, context);
         return toPrimaryKeyIterator(postingList, context);
     }
 
-    private PostingList searchPosting(Expression exp, QueryContext context)
+    /**
+     * Estimates the expected number of matching rows this segment will need to produce to satisfy the query limit.
+     * <p>
+     * Under the assumption of mostly uniform data distribution across segments, the number of matching rows
+     * contributed by this segment follows a binomial distribution. It computes the quantile corresponding
+     * to 99.9% confidence to prevent unnecessary queue refills from statistical variance while keeping resource
+     * allocation minimal.
+     * <p>
+     * The fraction of the data held by this segment is the number of segment rows that fall in the queried key range,
+     * divided by the number of rows in the key range in all sstables and memtables read by the query
+     * (see {@link QueryContext#estimatedRowsInQueryRange()}). Both are estimated from ring arithmetic only,
+     * assuming rows are uniformly distributed over the token span, so no I/O is needed.
+     *
+     * @param keyRange the key range restricting the query
+     * @param context the query context containing the global query limit
+     * @return the expected number of rows to be consumed from this segment
+     */
+    private int expectedRows(AbstractBounds<PartitionPosition> keyRange, QueryContext context)
+    {
+        int rowLimit = context.rowLimit();
+        if (rowLimit == Integer.MAX_VALUE)
+            return rowLimit;
+
+        long segmentRowsInRange = RangeUtil.estimateRowsInRange(metadata, keyRange);
+
+        long totalRowsInRange = context.estimatedRowsInQueryRange();
+        assert totalRowsInRange >= 0 : "The query controller must set the estimated rows in the query range before searching";
+
+        double fraction = Math.min(1.0, (double) segmentRowsInRange / Math.max(1, totalRowsInRange));
+        return SoftLimitUtil.expectedSubsetItems(rowLimit, fraction, 0.9999);
+    }
+
+    private PostingList searchPosting(Expression exp, AbstractBounds<PartitionPosition> keyRange, QueryContext context)
     {
         if (logger.isTraceEnabled())
             logger.trace(indexContext.logMessage("Searching on expression '{}'..."), exp);
@@ -156,7 +190,9 @@ public class InvertedIndexSearcher extends IndexSearcher
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             return reader.exactMatch(term, listener, context);
         }
-        else if (exp.isLiteralTermRange())
+
+        int expectedRows = expectedRows(keyRange, context);
+        if (exp.isLiteralTermRange())
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             // The terms are the raw value bytes, which have no terminator to adjust for an exclusive bound. The
@@ -164,14 +200,14 @@ public class InvertedIndexSearcher extends IndexSearcher
             // before the term equal to an exclusive upper bound.
             var start = exp.getLiteralRangeScanStart(version);
             var end = exp.getEncodedUpperBoundByteComparable(version);
-            return reader.rangeMatch(start, end, exp.upper == null || exp.upper.inclusive, listener, context);
+            return reader.rangeMatch(start, end, exp.upper == null || exp.upper.inclusive, listener, context, expectedRows);
         }
         else if (exp.getOp() == Expression.Op.RANGE)
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
             var lower = exp.getEncodedLowerBoundByteComparable(version);
             var upper = exp.getEncodedUpperBoundByteComparable(version);
-            return reader.rangeMatch(filterRangeResults ? exp : null, lower, upper, listener, context);
+            return reader.rangeMatch(filterRangeResults ? exp : null, lower, upper, listener, context, expectedRows);
         }
         else if (exp.getOp() == Expression.Op.PREFIX)
         {
@@ -183,7 +219,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             // filterRangeResults is about), so the scan bounds delimit exactly the terms starting with the prefix.
             var lower = version.onDiskFormat().encodeForTrie(exp.lower.value.encoded, indexContext.getValidator());
             var upper = exp.getPrefixUpperBoundByteComparable(version);
-            return reader.rangeMatch(lower, upper, false, listener, context);
+            return reader.rangeMatch(lower, upper, false, listener, context, expectedRows);
         }
         else if (exp.getOp() == Expression.Op.AUTOMATON)
         {
@@ -191,7 +227,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             // dictionary with the expression's compiled automaton and union the posting lists of the accepted
             // terms. Only supported on non-composite literal indexes (guarded by IndexContext#supports at the
             // CQL layer).
-            return searchAutomatonPostings(exp.getAutomaton(), exp.getAutomatonCommonPrefix(), context);
+            return searchAutomatonPostings(exp.getAutomaton(), exp.getAutomatonCommonPrefix(), context, expectedRows);
         }
         throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
     }
@@ -200,7 +236,7 @@ public class InvertedIndexSearcher extends IndexSearcher
      * Returns the union of the posting lists of all terms in this segment matching the automaton (consistent with
      * what {@code searchPosting} returns for {@code Expression.Op.RANGE}).
      */
-    private PostingList searchAutomatonPostings(CompiledAutomaton automaton, byte[] commonPrefix, QueryContext context)
+    private PostingList searchAutomatonPostings(CompiledAutomaton automaton, byte[] commonPrefix, QueryContext context, int expectedRows)
     {
         // Automaton intersection runs directly over the stored term bytes, which only line up with the raw value
         // bytes for non-composite literal types (see OnDiskFormat#encodeForTrie).
@@ -208,7 +244,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             throw new IllegalStateException(indexContext.logMessage("Automaton matching is only supported on non-composite literal indexes"));
 
         QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
-        return reader.intersect(automaton, commonPrefix, listener, context);
+        return reader.intersect(automaton, commonPrefix, listener, context, expectedRows);
     }
 
     private Cell<?> readColumn(SSTableReader sstable, PrimaryKey primaryKey)
