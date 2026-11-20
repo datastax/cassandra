@@ -211,8 +211,8 @@ public class LikePrefixTest extends SAITester
     @Test
     public void testNonPrefixLikeVariantsAreServed()
     {
-        // The non-prefix LIKE variants are served by automaton intersection with the terms dictionary;
-        // see AutomatonQueryTest for exhaustive coverage.
+        // The non-prefix LIKE variants are served by walking the terms trie with the pattern, like the prefix ones;
+        // see LikePatternQueryTest for exhaustive coverage.
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
 

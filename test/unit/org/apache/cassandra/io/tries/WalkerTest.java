@@ -130,6 +130,28 @@ public class WalkerTest extends AbstractTrieTestBase
         assertEquals(4, it.payloadFlags());
     }
 
+    /**
+     * The root of this trie is a dense node whose last child is a payload-only node of a single byte, written right
+     * before it. Searching a dense node must not mistake the transition to such a child (a delta of -1) for a missing
+     * one.
+     */
+    @Test
+    public void testFollowDenseChildRightBeforeNode() throws IOException
+    {
+        DataOutputBuffer buf = new DataOutputBufferPaged();
+        IncrementalTrieWriter<Integer> builder = newTrieWriter(serializer, buf);
+        String[] keys = { "a0", "a2", "a5", "a5x", "a7", "a9", "b1", "b3", "b30", "b35", "c" };
+        for (String key : keys)
+            builder.add(source(key), 1);
+        long rootPos = builder.complete();
+
+        Walker<?> it = new Walker<>(new ByteBufRebufferer(buf.asNewBuffer()), rootPos, version);
+        for (String key : keys)
+            assertEquals(key, ByteSource.END_OF_STREAM, it.follow(source(key)));
+        assertEquals('d', it.follow(source("d")));
+        assertEquals('3', it.follow(source("a3")));
+    }
+
     @Test
     public void testIteratorWithoutBounds() throws IOException
     {

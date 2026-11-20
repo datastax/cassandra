@@ -696,8 +696,9 @@ public abstract class TrieNode
             int len = transitionRange(src, position);
             if (i >= len)
                 return -len - 1;
-            long t = transition(src, position, 0L, i);
-            return t != -1 ? i : -i - 1;
+            // Check the delta, as the position it leads to can't be computed here (a delta of -1, i.e. a 1-byte child
+            // right before this node, would be indistinguishable from NONE if added to 0).
+            return transitionDelta(src, position, i) != NULL_VALUE ? i : -i - 1;
         }
 
         @Override

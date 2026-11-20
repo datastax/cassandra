@@ -312,6 +312,21 @@ public class CursorTest
             });
     }
 
+
+    @Test
+    public void testEncodeWithOverflow()
+    {
+        qt().withExamples(EXAMPLES)
+            .forAll(DEPTH_GEN, TRANSITION_GEN, DIRECTION_GEN)
+            .checkAssert((depth, transition, direction) -> {
+                long pos = Cursor.encode(depth, transition, direction);
+                assertEquals(pos, Cursor.encodeWithOverflow(depth, transition, direction));
+                long newPos = Cursor.positionForSkippingBranch(pos);
+                assertEquals(newPos, Cursor.encodeWithOverflow(depth, transition + direction.increase, direction));
+            });
+    }
+
+
     @Test
     public void testAscendedForward()
     {

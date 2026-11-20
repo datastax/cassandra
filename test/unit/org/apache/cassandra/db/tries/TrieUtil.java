@@ -400,6 +400,14 @@ public class TrieUtil
         return trie;
     }
 
+    static Trie<String> directOrderedTrie(String... points) throws TrieSpaceExhaustedException
+    {
+        InMemoryTrie<String> trie = InMemoryTrie.shortLivedOrdered(VERSION);
+        for (String s : points)
+            trie.putRecursive(directComparable(s), s, (ex, n) -> n);
+        return trie;
+    }
+
     static TrieSet directRanges(String... ranges)
     {
         return TrieSet.ranges(VERSION, true, true, Arrays.stream(ranges)

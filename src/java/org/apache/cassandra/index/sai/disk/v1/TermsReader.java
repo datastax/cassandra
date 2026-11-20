@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.lang.invoke.MethodHandles;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
@@ -32,8 +31,8 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.tries.TriePattern;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.QueryContext;
 import org.apache.cassandra.index.sai.disk.PostingList;
@@ -44,24 +43,23 @@ import org.apache.cassandra.index.sai.disk.io.IndexInput;
 import org.apache.cassandra.index.sai.disk.v1.postings.MergePostingList;
 import org.apache.cassandra.index.sai.disk.v1.postings.PostingsReader;
 import org.apache.cassandra.index.sai.disk.v1.postings.ScanningPostingsReader;
+import org.apache.cassandra.index.sai.disk.v1.trie.PatternTermsDictionaryReader;
 import org.apache.cassandra.index.sai.disk.v1.trie.ReverseTrieTermsDictionaryReader;
+import org.apache.cassandra.index.sai.disk.v1.trie.TermsDictionaryIterator;
 import org.apache.cassandra.index.sai.disk.v1.trie.TrieTermsDictionaryReader;
 import org.apache.cassandra.index.sai.metrics.QueryEventListener;
 import org.apache.cassandra.index.sai.plan.Expression;
 import org.apache.cassandra.index.sai.utils.AbortedOperationException;
-import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.FileHandle;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.ReadPattern;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.cassandra.utils.bytecomparable.ByteSourceInverse;
-import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 import static org.apache.cassandra.index.sai.utils.SAICodecUtils.validate;
 import static org.apache.cassandra.utils.Clock.Global.nanoTime;
@@ -150,27 +148,15 @@ public class TermsReader implements Closeable
     }
 
     /**
-     * Iterates, in the given order, the terms of an ordering scan restricted by the given prefix or automaton pattern
-     * expression ({@code LIKE} on the ordering column): the terms starting with the prefix, or the terms accepted by
-     * the automaton, which all start with its common prefix. Only the range of terms starting with that prefix is
-     * read. Only valid for non-composite literal indexes, whose terms are stored as their raw bytes.
+     * Iterates, in the given order, the terms of an ordering scan restricted by the given pattern expression
+     * ({@code LIKE} on the ordering column): the terms matching the pattern, which are found by walking the terms trie
+     * with the pattern (see {@link PatternTermsDictionaryReader}). Only valid for non-composite literal indexes, whose
+     * terms are stored as their raw bytes.
      */
     public TermsIterator patternTerms(Expression filter, boolean ascending)
     {
-        byte[] prefix;
-        CompiledAutomaton automaton;
-        if (filter.getOp() == Expression.Op.PREFIX)
-        {
-            prefix = ByteBufferUtil.getArray(filter.lower.value.encoded);
-            automaton = null;
-        }
-        else
-        {
-            assert filter.getOp() == Expression.Op.AUTOMATON : "Not a pattern expression: " + filter;
-            prefix = filter.getAutomatonCommonPrefix();
-            automaton = filter.getAutomaton();
-        }
-        return ascending ? new TermsScanner(prefix, automaton) : new ReverseTermsScanner(prefix, automaton);
+        assert filter.getOp() == Expression.Op.PATTERN : "Not a pattern expression: " + filter;
+        return new PatternTermsScanner(filter.getTriePattern(), ascending);
     }
 
     public PostingList exactMatch(ByteComparable term, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
@@ -187,68 +173,30 @@ public class TermsReader implements Closeable
     {
         perQueryEventListener.onSegmentHit();
         Predicate<byte[]> termFilter = exp == null ? null : term -> exp.isSatisfiedBy(ByteBuffer.wrap(term));
-        return new RangeQuery(termFilter, lower, upper, false, perQueryEventListener, context).execute();
+        return new RangeQuery(termFilter, lower, upper, perQueryEventListener, context).execute();
     }
 
     /**
-     * Range query for scans whose only possible over-match is a term exactly equal to the upper bound: the end
-     * bound of the trie scan is always inclusive, so instead of collecting and post-filtering every matched term
-     * (see {@link #rangeMatch}), the postings of the single term equal to {@code upper}, if that term exists, are
-     * excluded from the merge. Used by prefix scans over {@code [enc(prefix), nextOf(enc(prefix)))} of
-     * non-composite literal indexes, whose terms are stored order-preserving at every index version.
-     */
-    public PostingList rangeMatchExcludingUpperBoundTerm(ByteComparable lower, ByteComparable upper, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
-    {
-        perQueryEventListener.onSegmentHit();
-        return new RangeQuery(null, lower, upper, true, perQueryEventListener, context).execute();
-    }
-
-    /**
-     * Intersects the terms dictionary with a byte-level automaton (the non-prefix LIKE matching engine, see
-     * {@link AutomatonQueries}) and returns the union of the posting lists of all accepted terms.
+     * Returns the union of the posting lists of all the terms that match the given pattern (the LIKE operators, see
+     * {@link org.apache.cassandra.cql3.LikePatterns#forPatternOperator}).
      * <p>
-     * This is only correct for indexes over non-composite literal types: those store the raw, unterminated term
-     * bytes in the trie at every index version (see {@code OnDiskFormat#encodeForTrie}), so the automaton can be run
-     * directly over the stored bytes. Callers are responsible for that guard.
-     * <p>
-     * The terms accepted by the automaton all start with its common prefix, so the intersection is a range query
-     * over {@code [commonPrefix, nextOf(commonPrefix))} keeping the terms the automaton accepts. The scan visits
-     * every term of that range: past a {@code %} wildcard, every term starting with the literal prefix of the
-     * pattern may match. Only patterns with a {@code _} wildcard could skip terms by seeking.
+     * The terms trie is walked with the pattern, which skips the branches that cannot contain a match (see
+     * {@link PatternTermsDictionaryReader}). This is only correct for indexes over non-composite literal types: those
+     * store the raw, unterminated term bytes in the trie at every index version (see
+     * {@code OnDiskFormat#encodeForTrie}), so the pattern can be matched directly against the stored bytes. Callers are
+     * responsible for that guard.
      *
-     * @param automaton the compiled byte-level automaton to intersect with the dictionary
+     * @param pattern the pattern to match
      * @param perQueryEventListener the event listener
      * @param context the query context
      * @return the union of the posting lists of all matching terms, possibly {@link PostingList#EMPTY}
      */
-    @VisibleForTesting
-    public PostingList intersect(CompiledAutomaton automaton,
-                                 QueryEventListener.TrieIndexEventListener perQueryEventListener,
-                                 QueryContext context)
-    {
-        return intersect(automaton, AutomatonQueries.commonPrefixBytes(automaton), perQueryEventListener, context);
-    }
-
-    /**
-     * Same as {@link #intersect(CompiledAutomaton, QueryEventListener.TrieIndexEventListener, QueryContext)}, with
-     * the automaton's common byte prefix ({@link AutomatonQueries#commonPrefixBytes}) computed by the caller, so
-     * that it isn't recomputed for every segment a query intersects (see {@code Expression#getAutomatonCommonPrefix()}).
-     */
-    public PostingList intersect(CompiledAutomaton automaton,
-                                 byte[] commonPrefix,
-                                 QueryEventListener.TrieIndexEventListener perQueryEventListener,
-                                 QueryContext context)
+    public PostingList patternMatch(TriePattern pattern,
+                                    QueryEventListener.TrieIndexEventListener perQueryEventListener,
+                                    QueryContext context)
     {
         perQueryEventListener.onSegmentHit();
-        ByteComparable lower = commonPrefix.length == 0
-                               ? null
-                               : ByteComparable.preencoded(termDictionaryFileEncodingVersion, commonPrefix);
-        // the end bound of the scan is inclusive, but the automaton rejects nextOf(commonPrefix)
-        byte[] upperBytes = AutomatonQueries.prefixUpperBound(commonPrefix);
-        ByteComparable upper = upperBytes == null
-                               ? null
-                               : ByteComparable.preencoded(termDictionaryFileEncodingVersion, upperBytes);
-        return new RangeQuery(term -> LikePatterns.accepts(automaton, term), lower, upper, false, perQueryEventListener, context).execute();
+        return new PatternQuery(pattern, perQueryEventListener, context).execute();
     }
 
     @VisibleForTesting
@@ -349,48 +297,44 @@ public class TermsReader implements Closeable
         private final Predicate<byte[]> termFilter;
         private final ByteComparable lower;
         private final ByteComparable upper;
-        private final boolean excludeExactUpperTerm;
 
         // When the term filter is not null, only the terms it accepts are read
-        RangeQuery(@Nullable Predicate<byte[]> termFilter, ByteComparable lower, ByteComparable upper, boolean excludeExactUpperTerm, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
+        RangeQuery(@Nullable Predicate<byte[]> termFilter, ByteComparable lower, ByteComparable upper, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
         {
-            assert termFilter == null || !excludeExactUpperTerm : "per-term filtering already excludes the upper bound term";
             this.listener = listener;
             this.termFilter = termFilter;
             lookupStartTime = Clock.Global.nanoTime();
             this.context = context;
             this.lower = lower;
             this.upper = upper;
-            this.excludeExactUpperTerm = excludeExactUpperTerm;
         }
 
-        public PostingList execute()
+        /**
+         * Opens the reader of the terms of the query.
+         */
+        protected TermsDictionaryIterator openReader()
         {
             // Note: we always pass true for include start because we use the ByteComparable terminator above
             // to selectively determine when we have a match on the first/last term. This is probably part of the API
             // that could change, but it's been there for a bit, so we'll leave it for now.
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
-                                                                                  termDictionaryRoot,
-                                                                                  lower,
-                                                                                  upper,
-                                                                                  true,
-                                                                                  termFilter != null,
-                                                                                  termDictionaryFileEncodingVersion))
+            return new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
+                                                 termDictionaryRoot,
+                                                 lower,
+                                                 upper,
+                                                 true,
+                                                 termFilter != null,
+                                                 termDictionaryFileEncodingVersion);
+        }
+
+        public PostingList execute()
+        {
+            try (TermsDictionaryIterator reader = openReader())
             {
                 if (!reader.hasNext())
                     return PostingList.EMPTY;
 
-                // The end bound of the trie scan is inclusive. When the caller asked for an end-exclusive scan,
-                // look up the postings offset of the term exactly equal to the upper bound (a single extra trie
-                // descent) so its postings can be skipped by readAndMergePostings without collecting and
-                // comparing the bytes of every matched term. Deferred until the scan is known non-empty, so
-                // empty segments (the common case for selective prefixes over many segments) skip the descent.
-                long excludedPostingsOffset = excludeExactUpperTerm && upper != null
-                                              ? lookupExactTermOffset(upper)
-                                              : TrieTermsDictionaryReader.NOT_FOUND;
-
                 context.checkpoint();
-                PostingList postings = readAndMergePostings(reader, excludedPostingsOffset);
+                PostingList postings = readAndMergePostings(reader);
 
                 listener.onTraversalComplete(Clock.Global.nanoTime() - lookupStartTime, TimeUnit.NANOSECONDS);
 
@@ -406,28 +350,12 @@ public class TermsReader implements Closeable
         }
 
         /**
-         * Looks up the postings offset (the trie payload) of the term exactly equal to the given key, or
-         * {@link TrieTermsDictionaryReader#NOT_FOUND} if the term is not present in this segment.
-         */
-        private long lookupExactTermOffset(ByteComparable term)
-        {
-            try (TrieTermsDictionaryReader reader = new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
-                                                                                  termDictionaryRoot,
-                                                                                  termDictionaryFileEncodingVersion))
-            {
-                return reader.exactMatch(term);
-            }
-        }
-
-        /**
-         * Reads the posting lists of the terms of the range accepted by the term filter, if any, and merges them
+         * Reads the posting lists of the terms of the query accepted by the term filter, if any, and merges them
          * into a single posting list. It assumes that the posting list for each term is sorted.
          *
-         * @param excludedPostingsOffset postings offset of the single term to exclude from the merge (the term
-         *        exactly matching an end-exclusive upper bound), or {@link TrieTermsDictionaryReader#NOT_FOUND}
          * @return the posting lists for the terms matching the query.
          */
-        private PostingList readAndMergePostings(TrieTermsDictionaryReader reader, long excludedPostingsOffset) throws IOException
+        private PostingList readAndMergePostings(TermsDictionaryIterator reader) throws IOException
         {
             assert reader.hasNext();
             ArrayList<PostingList> postingLists = new ArrayList<>();
@@ -454,8 +382,6 @@ public class TermsReader implements Closeable
                     if (termFilter == null)
                     {
                         postingsOffset = reader.nextAsLong();
-                        if (excludedPostingsOffset != TrieTermsDictionaryReader.NOT_FOUND && excludedPostingsOffset == postingsOffset)
-                            continue;
                     }
                     else
                     {
@@ -502,29 +428,49 @@ public class TermsReader implements Closeable
         }
     }
 
+    /**
+     * Reads the posting lists of the terms that match a pattern, see {@link #patternMatch}.
+     */
+    private class PatternQuery extends RangeQuery
+    {
+        private final TriePattern pattern;
+
+        PatternQuery(TriePattern pattern, QueryEventListener.TrieIndexEventListener listener, QueryContext context)
+        {
+            super(null, null, null, listener, context);
+            this.pattern = pattern;
+        }
+
+        @Override
+        protected TermsDictionaryIterator openReader()
+        {
+            return new PatternTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
+                                                    termDictionaryRoot,
+                                                    pattern,
+                                                    true,
+                                                    false,
+                                                    termDictionaryFileEncodingVersion);
+        }
+    }
+
     private boolean readFrequencies()
     {
         return indexContext.isAnalyzed() && version.onOrAfter(Version.BM25_EARLIEST);
     }
 
     /**
-     * Iterates the terms of the terms dictionary read by the given reader, in its order, with their postings, keeping
-     * only those accepted by the filter, if any.
+     * Iterates the terms of the terms dictionary read by the given reader, in its order, with their postings.
      */
     private abstract class AbstractTermsScanner<T extends Iterator<Pair<ByteComparable, Long>> & AutoCloseable> implements TermsIterator
     {
         protected final T terms;
-        @Nullable
-        private final Predicate<byte[]> filter;
         private final IndexInput postingsInput;
         private final IndexInput postingsSummaryInput;
         private Pair<ByteComparable, Long> entry;
-        private Pair<ByteComparable, Long> pending;
 
-        AbstractTermsScanner(T terms, @Nullable Predicate<byte[]> filter)
+        AbstractTermsScanner(T terms)
         {
             this.terms = terms;
-            this.filter = filter;
             // If an open throws, the constructor exits before the caller could clean up: close what was already
             // opened on the way out instead of leaking it.
             IndexInput postings = null;
@@ -576,33 +522,19 @@ public class TermsReader implements Closeable
         {
             if (!hasNext())
                 return null;
-            entry = pending;
-            pending = null;
+            entry = terms.next();
             return entry.left;
         }
 
         @Override
         public boolean hasNext()
         {
-            if (pending != null)
-                return true;
-
-            while (terms.hasNext())
-            {
-                Pair<ByteComparable, Long> candidate = terms.next();
-                if (filter == null || filter.test(ByteSourceInverse.readBytes(candidate.left.asComparableBytes(termDictionaryFileEncodingVersion))))
-                {
-                    pending = candidate;
-                    return true;
-                }
-            }
-            return false;
+            return terms.hasNext();
         }
     }
 
     /**
-     * Iterates the terms in ascending order: all of them, or only those of an ordering scan restricted by a pattern
-     * (see {@link #patternTerms}).
+     * Iterates all the terms in ascending order.
      */
     private class TermsScanner extends AbstractTermsScanner<TrieTermsDictionaryReader>
     {
@@ -610,7 +542,7 @@ public class TermsReader implements Closeable
 
         private TermsScanner(Version version, AbstractType<?> type)
         {
-            super(new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot, termDictionaryFileEncodingVersion), null);
+            super(new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot, termDictionaryFileEncodingVersion));
             // We decode based on the logic used to encode the min and max terms in the trie.
             if (version.onOrAfter(Version.DB) && TypeUtil.isComposite(type))
             {
@@ -624,86 +556,43 @@ public class TermsReader implements Closeable
             }
         }
 
-        private TermsScanner(byte[] prefix, @Nullable CompiledAutomaton automaton)
-        {
-            super(new TrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
-                                                termDictionaryRoot,
-                                                bound(prefix),
-                                                prefixUpperBound(prefix),
-                                                true,
-                                                true,
-                                                termDictionaryFileEncodingVersion),
-                  patternFilter(prefix, automaton));
-            // reading them would move the reader, and only the full scans of segment merging need them
-            this.minTerm = null;
-            this.maxTerm = null;
-        }
-
         @Override
         public ByteBuffer getMinTerm()
         {
-            if (minTerm == null)
-                throw new UnsupportedOperationException();
             return minTerm;
         }
 
         @Override
         public ByteBuffer getMaxTerm()
         {
-            if (maxTerm == null)
-                throw new UnsupportedOperationException();
             return maxTerm;
         }
     }
 
     /**
-     * Iterates the terms in descending order: all of them, or only those of an ordering scan restricted by a pattern
-     * (see {@link #patternTerms}).
+     * Iterates all the terms in descending order.
      */
     private class ReverseTermsScanner extends AbstractTermsScanner<ReverseTrieTermsDictionaryReader>
     {
         private ReverseTermsScanner()
         {
-            super(new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot), null);
+            super(new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL), termDictionaryRoot));
         }
+    }
 
-        private ReverseTermsScanner(byte[] prefix, @Nullable CompiledAutomaton automaton)
+    /**
+     * Iterates the terms that match a pattern, in ascending or descending order (see {@link #patternTerms}).
+     */
+    private class PatternTermsScanner extends AbstractTermsScanner<PatternTermsDictionaryReader>
+    {
+        private PatternTermsScanner(TriePattern pattern, boolean ascending)
         {
-            super(new ReverseTrieTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
-                                                       termDictionaryRoot,
-                                                       bound(prefix),
-                                                       prefixUpperBound(prefix),
-                                                       termDictionaryFileEncodingVersion),
-                  patternFilter(prefix, automaton));
+            super(new PatternTermsDictionaryReader(termDictionaryFile.instantiateRebufferer(null, ReadPattern.SEQUENTIAL),
+                                                   termDictionaryRoot,
+                                                   pattern,
+                                                   ascending,
+                                                   true,
+                                                   termDictionaryFileEncodingVersion));
         }
-    }
-
-    /**
-     * The upper bound of the terms starting with the prefix, {@code nextOf(prefix)}: the readers include it, so
-     * {@link #patternFilter} skips it.
-     */
-    @Nullable
-    private ByteComparable prefixUpperBound(byte[] prefix)
-    {
-        return bound(AutomatonQueries.prefixUpperBound(prefix));
-    }
-
-    @Nullable
-    private ByteComparable bound(@Nullable byte[] bytes)
-    {
-        return bytes == null || bytes.length == 0 ? null : ByteComparable.preencoded(termDictionaryFileEncodingVersion, bytes);
-    }
-
-    /**
-     * Accepts the terms starting with the prefix, which the automaton, if any, accepts.
-     */
-    private static Predicate<byte[]> patternFilter(byte[] prefix, @Nullable CompiledAutomaton automaton)
-    {
-        return term -> startsWith(term, prefix) && (automaton == null || LikePatterns.accepts(automaton, term));
-    }
-
-    private static boolean startsWith(byte[] term, byte[] prefix)
-    {
-        return term.length >= prefix.length && Arrays.equals(term, 0, prefix.length, prefix, 0, prefix.length);
     }
 }

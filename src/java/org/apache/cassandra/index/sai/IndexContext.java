@@ -737,8 +737,8 @@ public class IndexContext
      * suffix, contains and generic patterns.
      * <p>
      * These are supported on non-tokenized indexes of plain {@code text}/{@code ascii} columns: the terms
-     * dictionary then contains whole (though possibly normalized, e.g. lowercased) terms in sorted order, so
-     * prefixes map to contiguous scans of it and the other patterns to automaton intersections with it.
+     * dictionary then contains whole (though possibly normalized, e.g. lowercased) terms in sorted order, whose trie
+     * is walked with the pattern to select the matching terms.
      * Tokenizing (Lucene) analyzers break the 1:1 mapping between column values and indexed terms, making
      * pattern semantics over the indexed terms undefined.
      * <p>

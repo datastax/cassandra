@@ -40,6 +40,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Unfiltered;
+import org.apache.cassandra.db.tries.TriePattern;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.FeatureNeedsIndexRebuildException;
@@ -73,7 +74,6 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
-import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 import static org.apache.cassandra.index.sai.disk.PostingList.END_OF_STREAM;
 import static org.apache.cassandra.index.sai.disk.v1.SegmentMetadata.INVALID_TOTAL_TERM_COUNT;
@@ -163,44 +163,29 @@ public class InvertedIndexSearcher extends IndexSearcher
             var upper = exp.getEncodedUpperBoundByteComparable(version);
             return reader.rangeMatch(filterRangeResults ? exp : null, lower, upper, listener, context);
         }
-        else if (exp.getOp() == Expression.Op.PREFIX)
+        else if (exp.getOp() == Expression.Op.PATTERN)
         {
-            QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
-            // A prefix query is a bounded scan over the trie: [enc(prefix), nextOf(enc(prefix))), computed on the
-            // unterminated byte-comparable. Prefix queries are only supported on non-composite literal indexes,
-            // whose terms are stored as their raw, order-preserving bytes at every index version (only composite
-            // terms are stored in a non-order-preserving encoding before DB, which is what filterRangeResults is
-            // about), so the scan bounds delimit exactly the terms starting with the prefix, except that the end
-            // bound of the trie scan is inclusive: the term exactly equal to nextOf(enc(prefix)), if any, is the only
-            // possible over-match, and is excluded at the reader level instead of post-filtering every matched term.
-            var lower = version.onDiskFormat().encodeForTrie(exp.lower.value.encoded, indexContext.getValidator());
-            var upper = exp.getPrefixUpperBoundByteComparable(version);
-            return reader.rangeMatchExcludingUpperBoundTerm(lower, upper, listener, context);
-        }
-        else if (exp.getOp() == Expression.Op.AUTOMATON)
-        {
-            // Automaton-served pattern matching (non-prefix LIKE variants): intersect the segment's terms
-            // dictionary with the expression's compiled automaton and union the posting lists of the accepted
-            // terms. Only supported on non-composite literal indexes (guarded by IndexContext#supports at the
-            // CQL layer).
-            return searchAutomatonPostings(exp.getAutomaton(), exp.getAutomatonCommonPrefix(), context);
+            // Pattern matching (LIKE): walk the segment's terms dictionary with the expression's pattern and union the
+            // posting lists of the matching terms. Only supported on non-composite literal indexes (guarded by
+            // IndexContext#supports at the CQL layer).
+            return searchPatternPostings(exp.getTriePattern(), context);
         }
         throw new IllegalArgumentException(indexContext.logMessage("Unsupported expression: " + exp));
     }
 
     /**
-     * Returns the union of the posting lists of all terms in this segment matching the automaton (consistent with
+     * Returns the union of the posting lists of all terms in this segment matching the pattern (consistent with
      * what {@code searchPosting} returns for {@code Expression.Op.RANGE}).
      */
-    private PostingList searchAutomatonPostings(CompiledAutomaton automaton, byte[] commonPrefix, QueryContext context)
+    private PostingList searchPatternPostings(TriePattern pattern, QueryContext context)
     {
-        // Automaton intersection runs directly over the stored term bytes, which only line up with the raw value
+        // The pattern is matched directly against the stored term bytes, which only line up with the raw value
         // bytes for non-composite literal types (see OnDiskFormat#encodeForTrie).
         if (!indexContext.isLiteral() || TypeUtil.isComposite(indexContext.getValidator()))
-            throw new IllegalStateException(indexContext.logMessage("Automaton matching is only supported on non-composite literal indexes"));
+            throw new IllegalStateException(indexContext.logMessage("Pattern matching is only supported on non-composite literal indexes"));
 
         QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
-        return reader.intersect(automaton, commonPrefix, listener, context);
+        return reader.patternMatch(pattern, listener, context);
     }
 
     private Cell<?> readColumn(SSTableReader sstable, PrimaryKey primaryKey)
@@ -230,8 +215,7 @@ public class InvertedIndexSearcher extends IndexSearcher
         {
             // A LIKE restriction on the ordering column only scans the terms it can match; otherwise the whole terms
             // dictionary is scanned, and the ordered rows are post-filtered by the query.
-            boolean patternFilter = slice != null
-                                    && (slice.getOp() == Expression.Op.PREFIX || slice.getOp() == Expression.Op.AUTOMATON);
+            boolean patternFilter = slice != null && slice.getOp() == Expression.Op.PATTERN;
             var terms = patternFilter
                         ? reader.patternTerms(slice, orderer.isAscending())
                         : reader.allTerms(orderer.isAscending());
