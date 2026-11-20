@@ -1,0 +1,22 @@
+/127.0.0.1
+  generation:1790256234
+  heartbeat:819
+  STATUS:23:NORMAL,-660323125693613959
+  LOAD:797:272483.0
+  SCHEMA:669:1a50fe72-f814-3069-b1f3-46399971119e
+  DC:14:Cassandra
+  RACK:17:rack1
+  RELEASE_VERSION:4:4.0.0.6926
+  NATIVE_TRANSPORT_ADDRESS:3:127.0.0.1
+  DSE_GOSSIP_STATE:808:{"graph":false,"active":"true","cluster_name":"Test Cluster","dse_version":"6.9.26","partitioner_name":"org.apache.cassandra.dht.Murmur3Partitioner","workloads":"Cassandra","workload":"Cassandra","server_id":"28-A4-4A-CB-3D-F1","health":0.6}
+  NET_VERSION:1:1536
+  HOST_ID:2:55771b40-b5c1-4123-94e5-8af8ce644811
+  NATIVE_TRANSPORT_READY:41:true
+  NATIVE_TRANSPORT_PORT:7:9042
+  NATIVE_TRANSPORT_PORT_SSL:8:9042
+  STORAGE_PORT:9:7000
+  STORAGE_PORT_SSL:10:7001
+  JMX_PORT:11:7199
+  SCHEMA_COMPATIBILITY_VERSION:5:2
+  TOKENS:22:<hidden>
+

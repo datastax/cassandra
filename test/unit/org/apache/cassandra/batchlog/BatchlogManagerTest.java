@@ -27,11 +27,15 @@ import org.junit.*;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.Util.PartitionerSwitcher;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.gms.IFailureDetector;
+import org.apache.cassandra.hints.Dse51Hints;
 import org.apache.cassandra.hints.HintsService;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.StorageMetrics;
+import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.schema.Schema;
@@ -549,5 +553,55 @@ public class BatchlogManagerTest
                      StorageMetrics.hintedBatchlogReplays.getCount());
         assertEquals(initialBatchlogReplays,
                      StorageMetrics.batchlogReplays.getCount());
+    }
+
+    /**
+     * In the DSE 5.1 storage mode a replayed batch whose hint the mode's hints files cannot hold (a deletion time past
+     * 2038) is deleted as one whose hints were written: the hint is refused and counted, none is stored.
+     */
+    @Test
+    public void testReplayWithARefusedHintInTheDse51Mode() throws Exception
+    {
+        TokenMetadata metadata = StorageService.instance.getTokenMetadata();
+        InetAddressAndPort peer = InetAddressAndPort.getByName("127.0.0.3");
+        UUID peerHostId = UUID.randomUUID();
+        TableMetadata cfm = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1).metadata();
+        Mutation mutation = RowUpdateBuilder.deleteRowAt(cfm, FBUtilities.timestampMicros(),
+                                                         CellData.MAX_DELETION_TIME_2038_LEGACY_CAP + 1000L,
+                                                         ByteBufferUtil.bytes("refused"), "name");
+        StorageCompatibilityMode storageBefore = DatabaseDescriptor.getStorageCompatibilityMode();
+        InternodeCompatibilityMode internodeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        long initialHints = StorageMetrics.totalHints.getCount();
+        long initialReplayedBatches = BatchlogManager.instance.getTotalBatchesReplayed();
+        DseCompatRefusals.reset();
+        try
+        {
+            metadata.updateNormalToken(mutation.key().getToken(), peer);
+            metadata.updateHostId(peerHostId, peer);
+            assertFalse(IFailureDetector.instance.isAlive(peer));
+            DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+
+            long timestamp = currentTimeMillis() - BatchlogManager.getBatchlogTimeout();
+            BatchlogManager.store(Batch.createLocal(atUnixMillis(timestamp, 0), timestamp * 1000,
+                                                    Collections.singletonList(mutation)));
+            BatchlogManager.instance.startBatchlogReplay().get();
+
+            assertEquals(initialReplayedBatches + 1, BatchlogManager.instance.getTotalBatchesReplayed());
+            assertEquals(1, DseCompatRefusals.count(Dse51Hints.REFUSED_HINT));
+            assertEquals(initialHints, StorageMetrics.totalHints.getCount());
+            assertEquals(0, HintsService.instance.getTotalHintsSize(peerHostId));
+            // the batch is deleted
+            assertTrue(executeInternal(String.format("SELECT * FROM %s.%s", SchemaConstants.SYSTEM_KEYSPACE_NAME,
+                                                     SystemKeyspace.BATCHES)).isEmpty());
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(storageBefore);
+            DatabaseDescriptor.setInternodeCompatibilityMode(internodeBefore);
+            DseCompatRefusals.reset();
+            HintsService.instance.deleteAllHintsForEndpoint(peer);
+            metadata.removeEndpoint(peer);
+        }
     }
 }

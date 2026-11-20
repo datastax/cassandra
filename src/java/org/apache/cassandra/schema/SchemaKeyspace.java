@@ -53,6 +53,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.schema.ColumnMetadata.ClusteringOrder;
@@ -1091,7 +1092,79 @@ public final class SchemaKeyspace
         UserFunctions functions = fetchFunctions(keyspaceName, types);
         Tables tables = fetchTables(keyspaceName, types, functions);
         Views views = fetchViews(keyspaceName, types, functions);
+        if (DatabaseDescriptor.isDse51CompatibilityMode())
+            refuseDse51TableRowsOfViews(tables, views);
         return KeyspaceMetadata.create(keyspaceName, params, tables, views, types, functions);
+    }
+
+    /**
+     * In {@code internode_compatibility_mode: DSE_5_1}, refuses a schema where a row of {@code system_schema.tables}
+     * has the name or the id of a materialized view of {@code system_schema.views}: the row DSE 5.1.51 leaves on the
+     * node where {@code UNRESTRICT ROWS} on a view failed, which keeps DSE 5.1.51 itself from starting the node, and
+     * this software too (the two share the id, which fails the build of the schema with an error that does not say
+     * why). The startup check of {@code Dse6AccessControlCheck} refuses such a row before the schema is loaded; this
+     * one stands behind it for every other read of the schema. No repair of the row is attempted: the refusal gives
+     * the repair ({@link #DSE51_TABLE_ROW_REPAIR}).
+     *
+     * @throws ConfigurationException naming each such row and its view ({@link #dse51TableRowsOfViewsRefusal})
+     */
+    @VisibleForTesting
+    static void refuseDse51TableRowsOfViews(Tables tables, Views views)
+    {
+        List<String> found = new ArrayList<>();
+        for (ViewMetadata view : views)
+        {
+            TableMetadata byName = tables.getNullable(view.name());
+            TableMetadata table = byName != null ? byName : tables.getNullable(view.metadata.id);
+            if (table != null)
+                found.add(dse51TableRowOfView(table.toString(), table.id.toString(), view.metadata.toString(),
+                                              view.metadata.id.toString()));
+        }
+        if (!found.isEmpty())
+            throw new ConfigurationException(dse51TableRowsOfViewsRefusal(found));
+    }
+
+    /** One row of {@code system_schema.tables} named after a view, or with its id, as the refusals list it. */
+    public static String dse51TableRowOfView(String table, String tableId, String view, String viewId)
+    {
+        return "the table row " + table + " (id " + tableId + ") beside the materialized view " + view + " (id " +
+               viewId + ')';
+    }
+
+    /**
+     * The repair, on a DSE 5.1 node that still runs, of the row of {@code system_schema.tables} a failed
+     * {@code UNRESTRICT ROWS} on a view leaves there, as a local trial on DSE 5.1.51 nodes validated it: the row
+     * deleted on that node, a restart, which also spreads the view's {@code RESTRICT ROWS} to every node, then the
+     * remedy of a view restricted to rows (where a {@code DROP MATERIALIZED VIEW} already ran on the node, it reached
+     * the other nodes and the view is gone: only its creation is left). A node already down takes other procedures,
+     * which the upgrade documentation gives. A compile-time constant, so that the preflight tool, which names it, loads
+     * no class of the server for it.
+     */
+    public static final String DSE51_TABLE_ROW_REPAIR =
+        "as a superuser on the node that holds the row, DELETE FROM system_schema.tables WHERE keyspace_name = " +
+        "'<keyspace>' AND table_name = '<table>', the table row named, which has the view's name where a failed " +
+        "UNRESTRICT ROWS left it (and the view's rows of system_schema.columns only if a DROP MATERIALIZED VIEW " +
+        "already ran on it), drain and restart it, check the schema agreement with nodetool describecluster, then " +
+        "remove the view's restriction, which that restart spreads to every node: REVOKE the view's rows/ grants, " +
+        "drop the view, unless a DROP MATERIALIZED VIEW already ran, and create it again without the restriction";
+
+    /**
+     * The refusal of the rows of {@code system_schema.tables} named after a view of {@code system_schema.views}, or
+     * with its id, as {@link #dse51TableRowOfView} describes them, with the repair ({@link #DSE51_TABLE_ROW_REPAIR}),
+     * which drops and creates a view: only while no other node runs this software, whose nodes do not take DSE's
+     * schema changes in the mixed phase.
+     */
+    public static String dse51TableRowsOfViewsRefusal(List<String> found)
+    {
+        return "internode_compatibility_mode DSE_5_1 refused: system_schema.tables holds rows of materialized views " +
+               "of system_schema.views: " + String.join(", ", found) + ". DSE 5.1.51 leaves such a row on the node " +
+               "where UNRESTRICT ROWS on a view failed, after which neither DSE 5.1.51 nor this software can start " +
+               "the node; this software does not repair it. If no other node runs this software, on a DSE 5.1 node " +
+               "that still runs, repair such a row there: " + DSE51_TABLE_ROW_REPAIR + "; otherwise, in the mixed " +
+               "phase, whose schema changes the nodes of this software do not take, upgrade no further node and " +
+               "report to the upgrade owner. This node, which DSE 5.1.51 does not start either, is repaired as the " +
+               "upgrade documentation describes for a node already down, then upgraded again. Never run UNRESTRICT " +
+               "ROWS on a view";
     }
 
     private static KeyspaceParams fetchKeyspaceParams(String keyspaceName)
@@ -1178,8 +1251,17 @@ public final class SchemaKeyspace
                             .build();
     }
 
-    @VisibleForTesting
-    static TableParams createTableParamsFromRow(UntypedResultSet.Row row, String keyspaceName, String tableName)
+    /**
+     * The table parameters of a row of {@code system_schema.tables} or {@code system_schema.views}, as the schema load
+     * reads them; also used by the DSE 6 preflight inspection on the rows it reads offline from DSE's sstables.
+     *
+     * @param keyspaceName the keyspace of the table or view, named in the warning on stored compression options this
+     *                     software normalises ({@link CompressionParams#fromStoredMap})
+     * @param tableName the name of the table or view, as above
+     * @throws RuntimeException (a {@code ConfigurationException}, for instance) when a parameter cannot be loaded, such
+     * as a compaction or compression class this software does not have
+     */
+    public static TableParams createTableParamsFromRow(UntypedResultSet.Row row, String keyspaceName, String tableName)
     {
         TableParams.Builder builder = TableParams.builder(SchemaConstants.SCHEMA_KEYSPACE_NAME)
                                                  .bloomFilterFpChance(row.getDouble("bloom_filter_fp_chance"))

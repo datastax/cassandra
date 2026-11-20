@@ -1,0 +1,46 @@
+/127.0.51.11
+  generation:1793958239
+  heartbeat:324
+  STATUS:46:NORMAL,1021152624147296821
+  LOAD:285:135932.0
+  SCHEMA:15:8e43d429-1d22-341e-b29f-f6883e09ed75
+  DC:48:Cassandra
+  RACK:13:rack1
+  RELEASE_VERSION:4:3.11.3.5151
+  RPC_ADDRESS:3:127.0.51.1
+  X_11_PADDING:321:{"dse_version":"5.1.51","workloads":"Cassandra","workload":"Cassandra","active":"true","server_id":"14-B5-CD-55-FA-6B","graph":false,"health":0.3}
+  NET_VERSION:1:11
+  HOST_ID:2:c8896567-fb1e-4ce9-bb92-c8a31586e679
+  RPC_READY:63:true
+  TOKENS:45:<hidden>
+/127.0.51.12
+  generation:1793958290
+  heartbeat:273
+  STATUS:83:NORMAL,-1824726619835567993
+  LOAD:226:98087.0
+  SCHEMA:20:8e43d429-1d22-341e-b29f-f6883e09ed75
+  DC:85:Cassandra
+  RACK:12:rack1
+  RELEASE_VERSION:4:3.11.3.5151
+  RPC_ADDRESS:3:127.0.51.2
+  X_11_PADDING:233:{"dse_version":"5.1.51","workloads":"Cassandra","workload":"Cassandra","active":"true","server_id":"14-B5-CD-55-FA-6B","graph":false,"health":0.3}
+  NET_VERSION:1:11
+  HOST_ID:2:a7314433-9ca0-4bbc-9d7a-6163c4ce7ce9
+  RPC_READY:103:true
+  TOKENS:82:<hidden>
+/127.0.51.13
+  generation:1793958378
+  heartbeat:188
+  STATUS:89:NORMAL,-2751153962405162262
+  LOAD:168:70665.0
+  SCHEMA:29:8e43d429-1d22-341e-b29f-f6883e09ed75
+  DC:91:Cassandra
+  RACK:12:rack1
+  RELEASE_VERSION:4:3.11.3.5151
+  RPC_ADDRESS:3:127.0.51.3
+  X_11_PADDING:174:{"dse_version":"5.1.51","workloads":"Cassandra","workload":"Cassandra","active":"true","server_id":"14-B5-CD-55-FA-6B","graph":false,"health":0.2}
+  NET_VERSION:1:11
+  HOST_ID:2:1971c79a-2f22-4458-8f99-61dab1d68f7f
+  RPC_READY:109:true
+  TOKENS:88:<hidden>
+

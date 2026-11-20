@@ -30,9 +30,12 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.rows.CellPath;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.CassandraVersion;
@@ -71,6 +74,24 @@ public abstract class ColumnFilter
     public static final ColumnFilter NONE = selection(RegularAndStaticColumns.NONE);
 
     public static final Serializer serializer = new Serializer();
+
+    /**
+     * DSE 6 compatibility mode: the filter a DSE 6 coordinator sent, naming the hidden column of a materialized view
+     * that this filter leaves out ({@link #withoutDseViewHiddenColumn}); {@code null} for any other filter. Kept here so
+     * that every copy of a read command keeps it; not part of {@code equals}.
+     */
+    @Nullable
+    private final ColumnFilter dseColumnFilter;
+
+    protected ColumnFilter()
+    {
+        this(null);
+    }
+
+    private ColumnFilter(ColumnFilter dseColumnFilter)
+    {
+        this.dseColumnFilter = dseColumnFilter;
+    }
 
     // TODO remove this with Ordering.Ann.USE_SYNTHETIC_SCORE
     public abstract boolean fetchesExplicitly(ColumnMetadata column);
@@ -330,6 +351,41 @@ public abstract class ColumnFilter
     public abstract SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections();
 
     /**
+     * DSE 6 compatibility mode: this filter, also fetching and querying {@code hidden}, the hidden column DSE keeps in a
+     * materialized view (see {@link DseViewWireFormat}), which the table metadata of this software does not list. The
+     * filter a read of such a view is sent to a DSE 6 replica with.
+     *
+     * @throws UnsupportedOperationException for a filter of another kind than the two of this class
+     */
+    public ColumnFilter withDseViewHiddenColumn(ColumnMetadata hidden)
+    {
+        throw new UnsupportedOperationException(getClass().getName());
+    }
+
+    /**
+     * DSE 6 compatibility mode: this filter, neither fetching nor querying {@code hidden} (see
+     * {@link #withDseViewHiddenColumn}), and remembering this filter as {@link #dseColumnFilter()}; this filter itself
+     * when it does neither. The filter a read a DSE 6 coordinator sends is run with.
+     *
+     * @throws UnsupportedOperationException for a filter of another kind than the two of this class
+     */
+    public ColumnFilter withoutDseViewHiddenColumn(ColumnMetadata hidden)
+    {
+        throw new UnsupportedOperationException(getClass().getName());
+    }
+
+    /**
+     * DSE 6 compatibility mode: the filter a DSE 6 coordinator sent, naming the hidden column of a materialized view
+     * that this filter leaves out: the data of the response is serialized with it (see {@link DseViewWireFormat}).
+     * {@code null} for any other filter.
+     */
+    @Nullable
+    public ColumnFilter dseColumnFilter()
+    {
+        return dseColumnFilter;
+    }
+
+    /**
      * Returns a {@code ColumnFilter} builder that fetches all regular columns or all columns (and queries the columns
      * added to the builder, or everything if no column is added).
      *
@@ -550,6 +606,12 @@ public abstract class ColumnFilter
          */
         private WildCardColumnFilter(RegularAndStaticColumns fetchedAndQueried)
         {
+            this(fetchedAndQueried, null);
+        }
+
+        private WildCardColumnFilter(RegularAndStaticColumns fetchedAndQueried, ColumnFilter dseColumnFilter)
+        {
+            super(dseColumnFilter);
             this.fetchedAndQueried = fetchedAndQueried;
         }
 
@@ -650,6 +712,18 @@ public abstract class ColumnFilter
         {
             return null;
         }
+
+        @Override
+        public ColumnFilter withDseViewHiddenColumn(ColumnMetadata hidden)
+        {
+            return new WildCardColumnFilter(fetchedAndQueried.mergeTo(RegularAndStaticColumns.of(hidden)));
+        }
+
+        @Override
+        public ColumnFilter withoutDseViewHiddenColumn(ColumnMetadata hidden)
+        {
+            return fetchedAndQueried.contains(hidden) ? new WildCardColumnFilter(fetchedAndQueried.without(hidden), this) : this;
+        }
     }
 
     /**
@@ -699,6 +773,16 @@ public abstract class ColumnFilter
                                      RegularAndStaticColumns fetched,
                                      SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections)
         {
+            this(fetchingStrategy, queried, fetched, subSelections, null);
+        }
+
+        private SelectionColumnFilter(FetchingStrategy fetchingStrategy,
+                                      RegularAndStaticColumns queried,
+                                      RegularAndStaticColumns fetched,
+                                      SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections,
+                                      ColumnFilter dseColumnFilter)
+        {
+            super(dseColumnFilter);
             assert queried != null;
             assert fetched.includes(queried);
 
@@ -802,6 +886,21 @@ public abstract class ColumnFilter
         }
 
         @Override
+        public ColumnFilter withDseViewHiddenColumn(ColumnMetadata hidden)
+        {
+            RegularAndStaticColumns hiddenOnly = RegularAndStaticColumns.of(hidden);
+            return new SelectionColumnFilter(fetchingStrategy, queried.mergeTo(hiddenOnly), fetched.mergeTo(hiddenOnly), subSelections);
+        }
+
+        @Override
+        public ColumnFilter withoutDseViewHiddenColumn(ColumnMetadata hidden)
+        {
+            if (!queried.contains(hidden) && !fetched.contains(hidden))
+                return this;
+            return new SelectionColumnFilter(fetchingStrategy, queried.without(hidden), fetched.without(hidden), subSelections, this);
+        }
+
+        @Override
         public boolean equals(Object other)
         {
             if (other == this)
@@ -882,19 +981,37 @@ public abstract class ColumnFilter
         // to return static data for empty partitions
         private static final int FETCH_ALL_STATICS_MASK = 0x08;
 
-        private static int makeHeaderByte(ColumnFilter selection)
+        /**
+         * The bits the pre-4.0 layout defines (DSE modes, messaging version 11): the 3.0.14 header
+         * has no FETCH_ALL_STATICS bit, and in that dialect FETCH_ALL already means all regular and all static
+         * columns.
+         */
+        private static final int PRE40_HEADER_MASK = FETCH_ALL_REGULARS_MASK | HAS_QUERIED_MASK | HAS_SUB_SELECTIONS_MASK;
+
+        private static int makeHeaderByte(ColumnFilter selection, boolean pre40)
         {
-            return (selection.fetchesAllColumns(false) ? FETCH_ALL_REGULARS_MASK : 0)
-                   | (!selection.isWildcard() ? HAS_QUERIED_MASK : 0)
-                   | (selection.subSelections() != null ? HAS_SUB_SELECTIONS_MASK : 0)
-                   | (selection.fetchesAllColumns(true) ? FETCH_ALL_STATICS_MASK : 0);
+            int header = (selection.fetchesAllColumns(false) ? FETCH_ALL_REGULARS_MASK : 0)
+                         | (!selection.isWildcard() ? HAS_QUERIED_MASK : 0)
+                         | (selection.subSelections() != null ? HAS_SUB_SELECTIONS_MASK : 0)
+                         | (selection.fetchesAllColumns(true) ? FETCH_ALL_STATICS_MASK : 0);
+            return pre40 ? header & PRE40_HEADER_MASK : header;
+        }
+
+        /**
+         * Whether the fetched columns are sent: always, except in the pre-4.0 layout of Cassandra 3.0.0-3.0.13 (messaging
+         * version 10), where the receiver fetches all the columns of the table, as HCD 1.2 does. Only in DSE 6
+         * compatibility mode: with the mode off version 10 keeps the layout it had before the mode existed.
+         */
+        private static boolean hasFetchedColumns(int version)
+        {
+            return version >= MessagingService.VERSION_3014 || !DseCompat.isPre40Layout(version);
         }
 
         public void serialize(ColumnFilter selection, DataOutputPlus out, int version) throws IOException
         {
-            out.writeByte(makeHeaderByte(selection));
+            out.writeByte(makeHeaderByte(selection, DseCompat.isPre40Layout(version)));
 
-            if (selection.fetchesAllColumns(false))
+            if (hasFetchedColumns(version) && selection.fetchesAllColumns(false))
             {
                 serializeRegularAndStaticColumns(selection.fetchedColumns(), out);
             }
@@ -936,12 +1053,14 @@ public abstract class ColumnFilter
 
             RegularAndStaticColumns fetched = null;
             RegularAndStaticColumns queried = null;
+            // a DSE 6 coordinator names the hidden column of a materialized view among its columns (DseViewWireFormat)
+            boolean dseViewHiddenColumns = DseViewWireFormat.translates(metadata, version);
 
             if (isFetchAllRegulars)
-                fetched = deserializeRegularAndStaticColumns(in, metadata);
+                fetched = hasFetchedColumns(version) ? deserializeRegularAndStaticColumns(in, metadata, dseViewHiddenColumns) : metadata.regularAndStaticColumns();
 
             if (hasQueried)
-                queried = deserializeRegularAndStaticColumns(in, metadata);
+                queried = deserializeRegularAndStaticColumns(in, metadata, dseViewHiddenColumns);
 
             SortedSetMultimap<ColumnIdentifier, ColumnSubselection> subSelections = null;
             if (hasSubSelections)
@@ -951,6 +1070,11 @@ public abstract class ColumnFilter
             {
                 if (!hasQueried)
                     return new WildCardColumnFilter(fetched);
+
+                // pre-4.0 (CASSANDRA-12768), and so in the DSE 6 dialect, fetching all regular columns fetched all
+                // static columns too; the sender does not have a FETCH_ALL_STATICS bit to say so
+                if (DseCompat.isPre40Layout(version))
+                    return new SelectionColumnFilter(FetchingStrategy.ALL_COLUMNS, queried, fetched, subSelections);
 
                 if (!isFetchAllStatics)
                     return new SelectionColumnFilter(FetchingStrategy.ALL_REGULARS_AND_QUERIED_STATICS_COLUMNS, queried, fetched, subSelections);
@@ -962,10 +1086,12 @@ public abstract class ColumnFilter
         }
 
         private RegularAndStaticColumns deserializeRegularAndStaticColumns(DataInputPlus in,
-                                                                           TableMetadata metadata) throws IOException
+                                                                           TableMetadata metadata,
+                                                                           boolean dseViewHiddenColumns) throws IOException
         {
+            // DSE's hidden columns are regular: a view has no static column
             Columns statics = Columns.serializer.deserialize(in, metadata);
-            Columns regulars = Columns.serializer.deserialize(in, metadata);
+            Columns regulars = Columns.serializer.deserialize(in, metadata, dseViewHiddenColumns);
             return new RegularAndStaticColumns(statics, regulars);
         }
 
@@ -987,7 +1113,7 @@ public abstract class ColumnFilter
         {
             long size = 1; // header byte
 
-            if (selection.fetchesAllColumns(false))
+            if (hasFetchedColumns(version) && selection.fetchesAllColumns(false))
             {
                 size += regularAndStaticColumnsSerializedSize(selection.fetchedColumns());
             }

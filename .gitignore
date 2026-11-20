@@ -4,6 +4,7 @@
 .build/.run-ci.env
 build
 build/
+build-hcd12/
 src/gen-java/
 src/resources/org/apache/cassandra/config/
 logs/

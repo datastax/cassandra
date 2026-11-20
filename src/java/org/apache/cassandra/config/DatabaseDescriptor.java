@@ -90,8 +90,10 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.gms.IFailureDetector;
+import org.apache.cassandra.hints.Dse51HintsCompression;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.storage.StorageProvider;
 import org.apache.cassandra.io.util.DiskOptimizationStrategy;
@@ -112,6 +114,7 @@ import org.apache.cassandra.security.JREProvider;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.CacheService.CacheType;
 import org.apache.cassandra.service.paxos.Paxos;
+import org.apache.cassandra.utils.ChecksumType;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
@@ -248,6 +251,12 @@ public class DatabaseDescriptor
     private static ImmutableMap<String, SSTableFormat<?, ?>> sstableFormats;
     private static volatile SSTableFormat<?, ?> selectedSSTableFormat;
     private static StorageCompatibilityMode storageCompatibilityMode = CassandraRelevantProperties.TEST_STORAGE_COMPATIBILITY_MODE.getEnum(true, StorageCompatibilityMode.class);
+    private static InternodeCompatibilityMode internodeCompatibilityMode = InternodeCompatibilityMode.NONE;
+    /**
+     * The internode compatibility mode requested, for the node and for tools alike (see {@link #isDse6SSTableOutput()}
+     * and {@link #isDseSSTableOutput()}); {@code NONE} without one.
+     */
+    private static InternodeCompatibilityMode sstableOutputMode = InternodeCompatibilityMode.NONE;
 
     private static Function<CommitLog, AbstractCommitLogSegmentManager> commitLogSegmentMgrProvider = c -> DatabaseDescriptor.isCDCEnabled()
                                                                                                            ? new CommitLogSegmentManagerCDC(c, DatabaseDescriptor.getCommitLogLocation())
@@ -357,6 +366,10 @@ public class DatabaseDescriptor
 
         applySSTableFormats();
 
+        verifyDse6SSTableFormat();
+
+        verifyDse51SSTableFormat();
+
         applySimpleConfig();
 
         applyPartitioner();
@@ -415,6 +428,8 @@ public class DatabaseDescriptor
         applyCompatibilityMode();
         diskOptimizationStrategy = new SpinningDiskOptimizationStrategy();
         applySSTableFormats();
+        verifyDse6SSTableFormat();
+        verifyDse51SSTableFormat();
     }
 
     public static boolean isClientInitialized()
@@ -524,6 +539,12 @@ public class DatabaseDescriptor
         applyCompatibilityMode();
 
         applySSTableFormats();
+
+        verifyDse6SSTableFormat();
+
+        verifyDse51SSTableFormat();
+
+        announceDse51Mode();
 
         applyCryptoProvider();
 
@@ -1717,6 +1738,435 @@ public class DatabaseDescriptor
             storageCompatibilityMode = StorageCompatibilityMode.NONE;
         else if (conf != null && conf.storage_compatibility_mode != null)
             storageCompatibilityMode = conf.storage_compatibility_mode;
+
+        applyInternodeCompatibilityMode(conf);
+    }
+
+    /**
+     * Reads {@code internode_compatibility_mode} (the {@code cassandra.internode_compatibility_mode} property wins
+     * over the yaml) and, for {@link InternodeCompatibilityMode#DSE_6}, checks (and for the sstable settings
+     * forces) the settings a DSE peer needs to read what this node writes: {@code storage_compatibility_mode: HCD_1},
+     * the {@code bti} sstable format at trie version {@code bb}, numeric sstable generations, the default compression
+     * selector, {@code flush_compression} {@code fast} or {@code table} and {@code paxos_variant: v1}. Must run before
+     * the sstable formats are loaded, because the trie version is read once when {@code BtiFormat} initialises.
+     * <p>
+     * Tools and clients do not speak the internode protocol, so for them the mode stays {@code NONE}; they still
+     * inherit its on-disk half (trie version {@code bb}, numeric generations, the compressor checks), because what an
+     * offline tool such as {@code sstablescrub} writes during the upgrade must stay readable by DSE like what the node
+     * writes.
+     * <p>
+     * For {@link InternodeCompatibilityMode#DSE_5_1} it checks the same settings, with
+     * {@code storage_compatibility_mode: DSE_5_1} in place of {@code HCD_1} (and that storage mode is refused without
+     * this internode mode, for the node and for tools alike), the {@code big} sstable format in place of {@code bti}
+     * and no trie version, the checksum type CRC32 of the sstable digests, no transient replication and a
+     * {@code hints_compression} DSE 5.1 can build (for the node only: tools write no hints), and forces
+     * numeric sstable generations; tools inherit the on-disk checks (the format, the compressors, the checksum type,
+     * the generations) and the transaction logs, statistics and sstable version of the mode
+     * ({@link #isDseSSTableOutput()}) without the storage mode and paxos checks, and clients, which do not read
+     * {@code cassandra.yaml}, get the {@code big} format forced instead of refused. The node, the offline tools run
+     * with its configuration and the clients in the mode write big sstables of version {@code me}, which DSE 5.1
+     * reads; a node in the mode speaks the pre-4.0 dialect of DSE 5.1 with its DSE 5.1 peers.
+     */
+    @VisibleForTesting
+    static void applyInternodeCompatibilityMode(Config conf)
+    {
+        InternodeCompatibilityMode mode = requestedInternodeCompatibilityMode(conf);
+
+        // the storage mode of DSE 5.1 writes for DSE 5.1 only while the node (or the tool) is in its internode mode:
+        // a tool runs with the storage mode NONE, so its configuration is what is checked
+        StorageCompatibilityMode configuredStorageMode = isClientOrToolInitialized()
+                                                         ? (conf == null ? null : conf.storage_compatibility_mode)
+                                                         : storageCompatibilityMode;
+        if (configuredStorageMode == StorageCompatibilityMode.DSE_5_1 && !mode.isDse51())
+        {
+            String message = String.format("storage_compatibility_mode DSE_5_1 requires " +
+                                           "internode_compatibility_mode DSE_5_1, found %s: the storage mode writes " +
+                                           "the sstables of DSE 5.1 for as long as the node is in the DSE 5.1 " +
+                                           "compatibility mode, and the two are set and dropped together; set " +
+                                           (mode.isDse6()
+                                            ? "storage_compatibility_mode: HCD_1, which DSE_6 requires, "
+                                            : "storage_compatibility_mode: HCD_1 with " +
+                                              "internode_compatibility_mode: NONE, or both to DSE_5_1, ") +
+                                           "in conf/cassandra.yaml, then restart the node or run the tool again",
+                                           mode);
+            throw new ConfigurationException(message, false);
+        }
+
+        if (isClientOrToolInitialized())
+        {
+            if (mode.isDse6())
+                applyDse6SSTableOutput(conf);
+            else if (mode.isDse51())
+                applyDse51SSTableOutput(conf);
+            internodeCompatibilityMode = InternodeCompatibilityMode.NONE;
+            sstableOutputMode = mode;
+            return;
+        }
+
+        if (mode.isDse6())
+        {
+            if (storageCompatibilityMode != StorageCompatibilityMode.HCD_1)
+                throw new ConfigurationException(String.format("internode_compatibility_mode DSE_6 requires storage_compatibility_mode HCD_1, found %s: " +
+                                                               "DSE 6 cannot read data written in a newer storage format", storageCompatibilityMode), false);
+            Config.PaxosVariant paxosVariant = conf == null ? Config.PaxosVariant.v1 : conf.paxos_variant;
+            if (!isDse6PaxosVariant(paxosVariant))
+                throw new ConfigurationException(dse6PaxosVariantRefusal(paxosVariant), false);
+            applyDse6SSTableOutput(conf);
+        }
+        else if (mode.isDse51())
+        {
+            if (storageCompatibilityMode != StorageCompatibilityMode.DSE_5_1)
+            {
+                String message = String.format("internode_compatibility_mode DSE_5_1 requires " +
+                                               "storage_compatibility_mode DSE_5_1, found %s: DSE_5_1 writes the " +
+                                               "big me sstables DSE 5.1 reads; set storage_compatibility_mode: " +
+                                               "DSE_5_1 in conf/cassandra.yaml, then restart the node",
+                                               storageCompatibilityMode);
+                throw new ConfigurationException(message, false);
+            }
+            Config.PaxosVariant paxosVariant = conf == null ? Config.PaxosVariant.v1 : conf.paxos_variant;
+            if (!isDsePaxosVariant(paxosVariant))
+                throw new ConfigurationException(dsePaxosVariantRefusal(mode, paxosVariant), false);
+            if (conf != null && conf.transient_replication_enabled)
+                throw new ConfigurationException("internode_compatibility_mode DSE_5_1 refuses " +
+                                                 "transient_replication_enabled: the big me sstables written for DSE " +
+                                                 "5.1 cannot mark an sstable transient; set " +
+                                                 "transient_replication_enabled: false in conf/cassandra.yaml, then " +
+                                                 "restart the node", false);
+            checkDse51HintsCompression(conf);
+            applyDse51SSTableOutput(conf);
+        }
+
+        internodeCompatibilityMode = mode;
+        sstableOutputMode = mode;
+    }
+
+    private static InternodeCompatibilityMode requestedInternodeCompatibilityMode(Config conf)
+    {
+        if (CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE.isPresent())
+        {
+            String value = CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE.getString();
+            try
+            {
+                return CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE.getEnum(true, InternodeCompatibilityMode.class);
+            }
+            catch (IllegalArgumentException e)
+            {
+                throw new ConfigurationException(String.format("internode_compatibility_mode: unknown value %s, " +
+                                                               "expected NONE, DSE_6 or DSE_5_1", value), false);
+            }
+        }
+        if (conf != null && conf.internode_compatibility_mode != null)
+            return conf.internode_compatibility_mode;
+        return InternodeCompatibilityMode.NONE;
+    }
+
+    /**
+     * Whether {@code variant} is the Paxos variant the {@code DSE_6} mode accepts: exactly {@code v1}. DSE 6 has no
+     * Paxos v2, and with {@code v1_without_linearizable_reads_or_rejected_writes} a SERIAL or LOCAL_SERIAL read
+     * proposes nothing: it still completes the in-progress round its quorum sees, but does not fence a proposal
+     * accepted only by replicas it did not hear from, which can reappear later, so the LWTs are not linearizable
+     * against the DSE nodes. The same rule as {@link #isDsePaxosVariant}.
+     */
+    public static boolean isDse6PaxosVariant(Config.PaxosVariant variant)
+    {
+        return isDsePaxosVariant(variant);
+    }
+
+    /**
+     * Whether {@code variant} is the Paxos variant the {@code DSE_6} and {@code DSE_5_1} modes accept: exactly
+     * {@code v1}, for the reasons given for DSE 6 ({@link #isDse6PaxosVariant}); DSE 5.1 has a single Paxos
+     * implementation, the protocol of {@code v1}.
+     */
+    public static boolean isDsePaxosVariant(Config.PaxosVariant variant)
+    {
+        return variant == Config.PaxosVariant.v1;
+    }
+
+    /**
+     * The refusal of a Paxos variant other than v1 in DSE_6 mode, at startup and at runtime alike, with the reason
+     * that applies to the variant.
+     */
+    private static String dse6PaxosVariantRefusal(Config.PaxosVariant variant)
+    {
+        return dsePaxosVariantRefusal(InternodeCompatibilityMode.DSE_6, variant);
+    }
+
+    /**
+     * The refusal of a Paxos variant other than v1 in DSE_6 or DSE_5_1 mode, at startup and at runtime alike, with
+     * the reason that applies to the variant.
+     */
+    private static String dsePaxosVariantRefusal(InternodeCompatibilityMode mode, Config.PaxosVariant variant)
+    {
+        String reason = variant == Config.PaxosVariant.v1_without_linearizable_reads_or_rejected_writes
+                        ? "with it SERIAL and LOCAL_SERIAL reads propose nothing, which breaks the linearizability of LWTs against the DSE nodes"
+                        : mode.source() + " has no Paxos v2";
+        return String.format("internode_compatibility_mode %s requires paxos_variant v1, found %s: %s",
+                             mode, variant, reason);
+    }
+
+    /**
+     * Refuses a runtime change of the Paxos variant to anything but v1 while in DSE_6 or DSE_5_1 mode, with the text
+     * of the startup refusal.
+     */
+    public static void checkPaxosVariantAllowed(Config.PaxosVariant variant)
+    {
+        if (isDseCompatibilityMode() && !isDsePaxosVariant(variant))
+            throw new IllegalArgumentException(dsePaxosVariantRefusal(internodeCompatibilityMode, variant));
+    }
+
+    /**
+     * The on-disk half of DSE_6: the bti format at trie version bb, numeric sstable generations, and, for what is
+     * flushed and compacted, compressors DSE 6 is known to read (the default compression selector, and
+     * {@code flush_compression} {@code fast} or {@code table}: {@code adaptive} would flush with
+     * {@code AdaptiveCompressor}, {@code none} with {@code NoopCompressor}).
+     */
+    private static void applyDse6SSTableOutput(Config conf)
+    {
+        String selectedFormat = conf == null || conf.sstable == null || StringUtils.isBlank(conf.sstable.selected_format)
+                                ? BtiFormat.NAME : conf.sstable.selected_format;
+        if (!BtiFormat.NAME.equals(selectedFormat))
+            throw new ConfigurationException(String.format("internode_compatibility_mode DSE_6 requires sstable.selected_format %s, found %s: " +
+                                                           "DSE 6 only reads its own trie format", BtiFormat.NAME, selectedFormat), false);
+
+        // the compressor of what this node flushes and compacts must stay one DSE 6 reads, as the tables' own are
+        checkDseFlushAndCompactionCompressors(InternodeCompatibilityMode.DSE_6, conf);
+        forceNumericSSTableGenerations(InternodeCompatibilityMode.DSE_6, conf);
+
+        String trieVersion = InternodeCompatibilityMode.DSE_6_TRIE_INDEX_FORMAT_VERSION;
+        if (CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.isPresent())
+        {
+            String requested = CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.getString();
+            if (!trieVersion.equals(requested))
+                throw new ConfigurationException(String.format("internode_compatibility_mode DSE_6 requires trie index format version %s, but %s=%s: " +
+                                                               "DSE 6 cannot read newer trie indexes", trieVersion,
+                                                               CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.getKey(), requested), false);
+        }
+        else
+        {
+            // the expected case, with nothing for the operator to change: INFO for the node as well (on the node the
+            // mode itself is announced with a WARN once the version is verified)
+            logger.info("internode_compatibility_mode DSE_6 sets {}={}, which was not set: " +
+                        "DSE 6 cannot read newer trie indexes",
+                        CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.getKey(), trieVersion);
+            CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.setString(trieVersion);
+        }
+    }
+
+    /**
+     * The on-disk half of DSE_5_1: the big format (forced for a client, which does not read cassandra.yaml, refused
+     * otherwise), numeric sstable generations, the checksum type CRC32 (the digest of a big {@code me} sstable is
+     * {@code Digest.crc32}, the only one DSE 5.1 reads), and, for what is flushed and compacted, compressors DSE 5.1
+     * reads, as for DSE_6 (see {@link #applyDse6SSTableOutput}). The compressors of the tables themselves are checked
+     * once the schema is loaded ({@link org.apache.cassandra.schema.Dse51Compressors}).
+     */
+    private static void applyDse51SSTableOutput(Config conf)
+    {
+        // refused before anything of the configuration is changed
+        CassandraRelevantProperties checksumProperty = CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE;
+        String checksumType = checksumProperty.getString();
+        if (!ChecksumType.CRC32.name().equalsIgnoreCase(checksumType))
+        {
+            String message = String.format("internode_compatibility_mode DSE_5_1 requires the sstable checksum type " +
+                                           "%s, but %s=%s: DSE 5.1 only reads the digest Digest.crc32; remove -D%s " +
+                                           "from the JVM options (conf/jvm-server.options or JVM_EXTRA_OPTS for the " +
+                                           "node, conf/jvm-clients.options or JVM_OPTS for a tool), or set it to " +
+                                           "CRC32, then restart the node or run the tool again", ChecksumType.CRC32,
+                                           checksumProperty.getKey(), checksumType, checksumProperty.getKey());
+            throw new ConfigurationException(message, false);
+        }
+        boolean noFormat = conf == null || conf.sstable == null || StringUtils.isBlank(conf.sstable.selected_format);
+        String selectedFormat = noFormat ? BtiFormat.NAME : conf.sstable.selected_format;
+        if (!BigFormat.NAME.equals(selectedFormat))
+        {
+            if (conf == null || conf.sstable == null || !isClientInitialized())
+            {
+                String message = String.format("internode_compatibility_mode DSE_5_1 requires " +
+                                               "sstable.selected_format %s, found %s: DSE 5.1 only reads the big " +
+                                               "format; set selected_format: %s in the sstable section of " +
+                                               "conf/cassandra.yaml, then restart the node or run the tool again",
+                                               BigFormat.NAME, selectedFormat, BigFormat.NAME);
+                throw new ConfigurationException(message, false);
+            }
+            // clients do not read cassandra.yaml, so they cannot select the format themselves
+            logger.info("internode_compatibility_mode DSE_5_1 selects sstable.selected_format {} in place of {}: " +
+                        "DSE 5.1 only reads the big format", BigFormat.NAME, selectedFormat);
+            conf.sstable.selected_format = BigFormat.NAME;
+        }
+        checkDseFlushAndCompactionCompressors(InternodeCompatibilityMode.DSE_5_1, conf);
+        forceNumericSSTableGenerations(InternodeCompatibilityMode.DSE_5_1, conf);
+    }
+
+    /**
+     * In {@code internode_compatibility_mode: DSE_5_1}, refuses a {@code hints_compression} whose compressor DSE 5.1
+     * cannot build ({@link Dse51HintsCompression}): the node writes its class and options into the descriptor of each
+     * hints file, and a node rolled back to DSE 5.1 would never deliver such a file. It refuses as well
+     * {@code crc_check_chance}, which DSE 5.1 removes with a warning but which has no use in a hints file, and an
+     * option without a value, which DSE 5.1 takes as its default but with which the node cannot build the compressor.
+     * The writer never encrypts a hints file, so there is nothing else to check.
+     */
+    private static void checkDse51HintsCompression(Config conf)
+    {
+        ParameterizedClass compression = conf == null ? null : conf.hints_compression;
+        if (compression == null)
+            return;
+        boolean noOption = compression.parameters == null || compression.parameters.isEmpty();
+        String setting = compression.class_name + (noOption ? "" : " with " + compression.parameters);
+        String crcCheckChance = Dse51HintsCompression.CRC_CHECK_CHANCE;
+        Map<String, String> options = noOption ? null : new HashMap<>(compression.parameters);
+        if (options != null)
+            options.remove(crcCheckChance);
+        String refusal = Dse51HintsCompression.refusal(compression.class_name, options);
+        if (refusal != null)
+            throw new ConfigurationException(String.format("internode_compatibility_mode DSE_5_1 refuses " +
+                                                           "hints_compression %s: %s, so DSE 5.1 could not build " +
+                                                           "the compressor of the hints files written with it, and a " +
+                                                           "node rolled back to DSE 5.1 would never deliver them; " +
+                                                           "set hints_compression to %s, or remove it, in " +
+                                                           "conf/cassandra.yaml, then restart the node",
+                                                           setting, refusal, Dse51HintsCompression.ACCEPTED), false);
+        if (!noOption && compression.parameters.containsKey(crcCheckChance))
+            throw new ConfigurationException(String.format("internode_compatibility_mode DSE_5_1 refuses " +
+                                                           "hints_compression %s: the option %s has no use in a " +
+                                                           "hints file (DSE 5.1 removes it with a warning); remove " +
+                                                           "it from hints_compression in conf/cassandra.yaml, then " +
+                                                           "restart the node", setting, crcCheckChance), false);
+        // an option DSE 5.1 supports without a value: its default in DSE 5.1, but the node cannot build the compressor
+        String noValue = options == null ? null : options.entrySet().stream()
+                                                         .filter(option -> option.getValue() == null)
+                                                         .map(Map.Entry::getKey)
+                                                         .sorted()
+                                                         .findFirst()
+                                                         .orElse(null);
+        if (noValue != null)
+            throw new ConfigurationException(String.format("internode_compatibility_mode DSE_5_1 refuses " +
+                                                           "hints_compression %s: the option %s has no value, and " +
+                                                           "the node cannot build the compressor of its hints files " +
+                                                           "with it; give the option a value or remove it, in " +
+                                                           "conf/cassandra.yaml, then restart the node",
+                                                           setting, noValue), false);
+    }
+
+    /**
+     * Refuses the settings that would make this node, or a tool, flush or compact with a compressor the DSE release
+     * of {@code mode} is not known to read: a compression selector other than the default, and
+     * {@code flush_compression} {@code adaptive} ({@code AdaptiveCompressor}) or {@code none}
+     * ({@code NoopCompressor}).
+     */
+    private static void checkDseFlushAndCompactionCompressors(InternodeCompatibilityMode mode, Config conf)
+    {
+        CassandraRelevantProperties selectorProperty = CassandraRelevantProperties.SSTABLE_COMPRESSION_SELECTOR_CLASS;
+        String compressionSelector = selectorProperty.getString();
+        if (!compressionSelector.isEmpty() && !selectorProperty.getDefaultValue().equals(compressionSelector))
+        {
+            String message = String.format("internode_compatibility_mode %s requires the default compression " +
+                                           "selector, but %s=%s: that class chooses the compressor of new tables, " +
+                                           "flushes and compactions, which %s is not known to read; remove -D%s from " +
+                                           "the JVM options (conf/jvm-server.options or JVM_EXTRA_OPTS for the node, " +
+                                           "conf/jvm-clients.options or JVM_OPTS for a tool), then restart the node " +
+                                           "or run the tool again", mode, selectorProperty.getKey(),
+                                           compressionSelector, mode.source(), selectorProperty.getKey());
+            throw new ConfigurationException(message, false);
+        }
+        Config.FlushCompression flushCompression = conf == null ? null : conf.flush_compression;
+        if (flushCompression == Config.FlushCompression.adaptive || flushCompression == Config.FlushCompression.none)
+        {
+            String compressor = flushCompression == Config.FlushCompression.adaptive ? "AdaptiveCompressor"
+                                                                                     : "NoopCompressor";
+            String message = String.format("internode_compatibility_mode %s requires flush_compression fast or " +
+                                           "table, found %s: flushes would write sstables compressed with %s, which " +
+                                           "%s is not known to read; set flush_compression: fast in " +
+                                           "conf/cassandra.yaml, then restart the node or run the tool again",
+                                           mode, flushCompression, compressor, mode.source());
+            throw new ConfigurationException(message, false);
+        }
+    }
+
+    /**
+     * Forces {@code uuid_sstable_identifiers_enabled} off: the DSE release of {@code mode} only parses numeric
+     * generations.
+     */
+    private static void forceNumericSSTableGenerations(InternodeCompatibilityMode mode, Config conf)
+    {
+        if (conf != null && conf.uuid_sstable_identifiers_enabled)
+        {
+            String message = String.format("internode_compatibility_mode %s forces uuid_sstable_identifiers_enabled " +
+                                           "off: %s only parses numeric sstable generations", mode, mode.source());
+            // clients do not read cassandra.yaml, so they cannot turn the setting off themselves: not worth a warning
+            if (isClientInitialized())
+                logger.info(message);
+            else
+                logger.warn(message);
+            conf.uuid_sstable_identifiers_enabled = false;
+        }
+    }
+
+    /**
+     * Runs once the sstable formats are loaded: {@code BtiFormat} reads the trie version property when its class
+     * initialises, so if that happened before {@link #applyInternodeCompatibilityMode(Config)} set the property, the
+     * node (or tool) would write a version DSE cannot read. Refuse rather than write it. On the daemon path, once the
+     * version is verified, this is also where the DSE_6 mode is announced with a WARN (not for tools and clients).
+     */
+    @VisibleForTesting
+    static void verifyDse6SSTableFormat()
+    {
+        if (!sstableOutputMode.isDse6())
+            return;
+        String trieVersion = InternodeCompatibilityMode.DSE_6_TRIE_INDEX_FORMAT_VERSION;
+        String effective = getSelectedSSTableFormat().getLatestVersion().version;
+        if (!trieVersion.equals(effective))
+            throw new ConfigurationException(String.format("internode_compatibility_mode DSE_6 requires trie index format version %s, but the format " +
+                                                           "was already initialised with %s; start with -D%s=%s", trieVersion, effective,
+                                                           CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION.getKey(), trieVersion), false);
+        // logged once the version is known to be the one written
+        if (internodeCompatibilityMode.isDse6())
+            logger.warn("Running in internode_compatibility_mode DSE_6: the node writes trie {} sstables with numeric generations " +
+                        "and requires paxos_variant v1; it speaks with DSE 6 peers the pre-4.0 internode dialect DSE uses with non-DSE " +
+                        "peers, until the flag is dropped",
+                        effective);
+    }
+
+    /**
+     * Runs once the sstable formats are loaded: {@code BigFormat} chooses the version it writes when its class
+     * initialises, so if that happened before {@link #applyInternodeCompatibilityMode(Config)} applied the DSE_5_1
+     * modes, the node (or tool, or client) would write a version DSE 5.1 cannot read. Refuse rather than write it.
+     */
+    @VisibleForTesting
+    static void verifyDse51SSTableFormat()
+    {
+        if (!sstableOutputMode.isDse51())
+            return;
+        // the big format, which the mode selects (applyDse51SSTableOutput)
+        SSTableFormat<?, ?> big = getSSTableFormats().get(BigFormat.NAME);
+        String effective = big == null ? null : big.getLatestVersion().version;
+        if (!InternodeCompatibilityMode.DSE_51_BIG_VERSION.equals(effective))
+            throw new ConfigurationException(String.format("internode_compatibility_mode DSE_5_1 requires the big " +
+                                                           "sstable version %s, but the format was already " +
+                                                           "initialised with %s, before the mode was applied: " +
+                                                           "the code that started loaded the sstable formats too " +
+                                                           "early, an initialisation order to report; a client sets " +
+                                                           "-Dcassandra.internode_compatibility_mode=DSE_5_1 before " +
+                                                           "it starts",
+                                                           InternodeCompatibilityMode.DSE_51_BIG_VERSION, effective),
+                                             false);
+    }
+
+    /**
+     * On the daemon path, once the sstable formats are loaded, announces the DSE_5_1 mode with a WARN naming the
+     * sstable version the node writes, as the DSE_6 mode is announced by {@link #verifyDse6SSTableFormat()}.
+     */
+    @VisibleForTesting
+    static void announceDse51Mode()
+    {
+        if (!internodeCompatibilityMode.isDse51())
+            return;
+        // the version verifyDse51SSTableFormat makes sure the big format writes
+        logger.warn("Running in internode_compatibility_mode DSE_5_1: the node writes {} {} sstables, which DSE 5.1 " +
+                    "reads, with numeric generations, and requires paxos_variant v1 and storage_compatibility_mode " +
+                    "DSE_5_1; it speaks the pre-4.0 dialect with DSE 5.1 nodes, with the schema frozen (unless " +
+                    "allow_ddl is set; a compressor DSE 5.1 does not read, or a column type this software does " +
+                    "not write for it, is refused even then) and repair and topology changes refused",
+                    BigFormat.NAME, InternodeCompatibilityMode.DSE_51_BIG_VERSION);
     }
 
     private static void applySSTableFormats()
@@ -3460,6 +3910,7 @@ public class DatabaseDescriptor
 
     public static void setPaxosVariant(Config.PaxosVariant variant)
     {
+        checkPaxosVariantAllowed(variant);
         conf.paxos_variant = variant;
     }
 
@@ -5506,6 +5957,77 @@ public class DatabaseDescriptor
     public static void setStorageCompatibilityMode(StorageCompatibilityMode mode)
     {
         storageCompatibilityMode = mode;
+    }
+
+    public static InternodeCompatibilityMode getInternodeCompatibilityMode()
+    {
+        return internodeCompatibilityMode;
+    }
+
+    /**
+     * True while the node runs in {@code internode_compatibility_mode: DSE_6} or {@code DSE_5_1} (never for tools and
+     * clients): the gate of what the two upgrades from DSE share.
+     */
+    public static boolean isDseCompatibilityMode()
+    {
+        return internodeCompatibilityMode.isDse();
+    }
+
+    /**
+     * True while the node runs in {@code internode_compatibility_mode: DSE_5_1} (never for tools and clients): the
+     * gate of what only the upgrade from DSE 5.1 needs.
+     */
+    public static boolean isDse51CompatibilityMode()
+    {
+        return internodeCompatibilityMode.isDse51();
+    }
+
+    /**
+     * True while the node runs in {@code internode_compatibility_mode: DSE_6} (never for tools and clients); the gate
+     * of the code paths only DSE 6 needs, among them the on-disk format DSE 6 reads, DSE's gossip ordinals and states,
+     * the TLS ports, the wire format of the views, the access-control check and the SAI version pin. The pre-4.0
+     * internode dialect and the operations refused during the upgrade are gated by {@link #isDseCompatibilityMode()},
+     * true in {@code DSE_5_1} too (the operations are refused with {@code NONE} too while DSE peers are seen).
+     */
+    public static boolean isDse6CompatibilityMode()
+    {
+        return internodeCompatibilityMode.isDse6();
+    }
+
+    /**
+     * True when {@code internode_compatibility_mode: DSE_6} was requested, for the node and for tools alike (unlike
+     * {@link #isDse6CompatibilityMode()}): the on-disk half of the mode, whose files must stay readable by DSE 6 after a
+     * rollback (see {@link #applyInternodeCompatibilityMode(Config)}).
+     */
+    public static boolean isDse6SSTableOutput()
+    {
+        return sstableOutputMode.isDse6();
+    }
+
+    /**
+     * True when {@code internode_compatibility_mode: DSE_6} or {@code DSE_5_1} was requested, for the node and for
+     * tools alike (unlike {@link #isDseCompatibilityMode()}): what the two sources share of the on-disk half of the
+     * mode, the transaction logs and the statistics a DSE node reads after a rollback.
+     */
+    public static boolean isDseSSTableOutput()
+    {
+        return sstableOutputMode.isDse();
+    }
+
+    /**
+     * True when {@code internode_compatibility_mode: DSE_5_1} was requested, for the node and for tools alike (unlike
+     * {@link #isDse51CompatibilityMode()}): where the on-disk half of the mode differs from that of {@code DSE_6}.
+     */
+    public static boolean isDse51SSTableOutput()
+    {
+        return sstableOutputMode.isDse51();
+    }
+
+    @VisibleForTesting
+    public static void setInternodeCompatibilityMode(InternodeCompatibilityMode mode)
+    {
+        internodeCompatibilityMode = mode;
+        sstableOutputMode = mode;
     }
 
     public static ParameterizedClass getDefaultCompaction()

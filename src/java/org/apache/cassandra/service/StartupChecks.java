@@ -30,6 +30,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -37,10 +38,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
+import com.google.common.base.Splitter;
 import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -53,13 +57,16 @@ import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DataStorageSpec;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.commitlog.CommitLogDescriptor;
 import org.apache.cassandra.db.compaction.LeveledCompactionStrategy;
 import org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy;
 import org.apache.cassandra.db.compaction.UnifiedCompactionStrategy;
@@ -67,13 +74,24 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.sstable.Descriptor;
+import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.io.sstable.SSTableIdFactory;
+import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.UUIDBasedSSTableId;
+import org.apache.cassandra.io.sstable.format.Version;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.io.util.PathUtils;
+import org.apache.cassandra.locator.DynamicEndpointSnitch;
+import org.apache.cassandra.locator.Ec2Snitch;
+import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.SimpleSnitch;
+import org.apache.cassandra.locator.SnitchProperties;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -83,6 +101,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JavaUtils;
 import org.apache.cassandra.utils.INativeLibrary;
 import org.apache.cassandra.utils.SigarLibrary;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.CASSANDRA_JMX_LOCAL_PORT;
 import static org.apache.cassandra.config.CassandraRelevantProperties.COM_SUN_MANAGEMENT_JMXREMOTE_PORT;
@@ -134,6 +153,11 @@ public class StartupChecks
     }
 
     private static final Logger logger = LoggerFactory.getLogger(StartupChecks.class);
+    /**
+     * The first words of the WARN of a post-action that failed, such as the write of a DSE upgrade marker; a
+     * compile-time constant, which the rollback check of the preflight tool quotes without loading this class.
+     */
+    public static final String POST_ACTION_FAILED = "Failed to run startup check post-action on";
     // List of checks to run before starting up. If any test reports failure, startup will be halted.
     private final List<StartupCheck> preFlightChecks = new ArrayList<>();
 
@@ -151,8 +175,15 @@ public class StartupChecks
                                                                       checkMaxMapCount,
                                                                       checkReadAheadKbSetting,
                                                                       checkDataDirs,
+                                                                      checkDsePeersWithoutFlag,
+                                                                      loadDsePeersRecord,
+                                                                      checkDse6Artefacts,
+                                                                      checkDse6GossipedDseVersion,
+                                                                      checkLostNodeSilence,
                                                                       checkSSTablesFormat,
                                                                       checkSystemKeyspaceState,
+                                                                      checkDse6SaiVersionPin,
+                                                                      checkDse6Ec2NamingScheme,
                                                                       checkDatacenter,
                                                                       checkRack,
                                                                       checkLegacyAuthTables,
@@ -178,6 +209,12 @@ public class StartupChecks
         return this;
     }
 
+    @VisibleForTesting
+    List<StartupCheck> getPreFlightChecks()
+    {
+        return ImmutableList.copyOf(preFlightChecks);
+    }
+
     /**
      * Run the configured tests and return a report detailing the results.
      * @throws StartupException if any test determines that the
@@ -197,7 +234,7 @@ public class StartupChecks
             }
             catch (Throwable t)
             {
-                logger.warn("Failed to run startup check post-action on " + test.getStartupCheckType());
+                logger.warn(POST_ACTION_FAILED + ' ' + test.getStartupCheckType());
             }
         }
     }
@@ -554,92 +591,49 @@ public class StartupChecks
             if (options.isDisabled(getStartupCheckType()))
                 return;
             final Set<String> invalid = new HashSet<>();
-            final Set<String> nonSSTablePaths = new HashSet<>();
             final List<String> withIllegalGenId = new ArrayList<>();
-            nonSSTablePaths.add(FileUtils.getCanonicalPath(DatabaseDescriptor.getCommitLogLocation()));
-            nonSSTablePaths.add(FileUtils.getCanonicalPath(DatabaseDescriptor.getSavedCachesLocation()));
-            nonSSTablePaths.add(FileUtils.getCanonicalPath(DatabaseDescriptor.getHintsDirectory()));
 
-            FileVisitor<Path> sstableVisitor = new SimpleFileVisitor<Path>()
-            {
-                public FileVisitResult visitFile(Path path, BasicFileAttributes attrs)
+            walkSSTableFiles(dir -> {
+                // In very old versions of Cassandra, we wouldn't necessarily delete sstables from dropped system tables
+                // which were removed in various major version upgrades (e.g system.Versions in 1.2)
+                String tablePart = staleSystemTableName(dir);
+                if (tablePart == null)
+                    return false;
+
+                String ksPart = SchemaConstants.SYSTEM_KEYSPACE_NAME;
+                String canonicalPath = FileUtils.getCanonicalPath(new File(dir));
+
+                // We can have snapshots of our system tables or snapshots created with a -t tag of "system" that would trigger
+                // this potential warning, so we warn more softly in the case that it's probably a snapshot.
+                if (canonicalPath.contains("snapshot"))
                 {
-                    File file = new File(path);
-                    if (!Descriptor.isValidFile(file))
-                        return FileVisitResult.CONTINUE;
-
-                    try
-                    {
-                        Descriptor desc = Descriptor.fromFileWithComponent(file, false).left;
-                        if (!desc.isCompatible())
-                            invalid.add(file.toString());
-
-                        if (!DatabaseDescriptor.isUUIDSSTableIdentifiersEnabled() && desc.id instanceof UUIDBasedSSTableId)
-                            withIllegalGenId.add(file.toString());
-                    }
-                    catch (Exception e)
-                    {
-                        invalid.add(file.toString());
-                    }
-                    return FileVisitResult.CONTINUE;
+                    logger.info("Found unknown system directory {}.{} at {} that contains the word snapshot. " +
+                                "This may be left over from a previous version of Cassandra or may be normal. " +
+                                " Consider removing after inspection if determined to be unnecessary.",
+                                ksPart, tablePart, canonicalPath);
                 }
-
-                public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException
+                else
                 {
-                    String[] nameParts = FileUtils.getCanonicalPath(new File(dir)).split(java.io.File.separator);
-                    if (nameParts.length >= 2)
-                    {
-                        String tablePart = nameParts[nameParts.length - 1];
-                        String ksPart = nameParts[nameParts.length - 2];
-
-                        if (tablePart.contains("-"))
-                            tablePart = tablePart.split("-")[0];
-
-                        // In very old versions of Cassandra, we wouldn't necessarily delete sstables from dropped system tables
-                        // which were removed in various major version upgrades (e.g system.Versions in 1.2)
-                        if (ksPart.equals(SchemaConstants.SYSTEM_KEYSPACE_NAME) && !SystemKeyspace.ALL_TABLE_NAMES.contains(tablePart))
-                        {
-                            String canonicalPath = FileUtils.getCanonicalPath(new File(dir));
-
-                            // We can have snapshots of our system tables or snapshots created with a -t tag of "system" that would trigger
-                            // this potential warning, so we warn more softly in the case that it's probably a snapshot.
-                            if (canonicalPath.contains("snapshot"))
-                            {
-                                logger.info("Found unknown system directory {}.{} at {} that contains the word snapshot. " +
-                                            "This may be left over from a previous version of Cassandra or may be normal. " +
-                                            " Consider removing after inspection if determined to be unnecessary.",
-                                            ksPart, tablePart, canonicalPath);
-                            }
-                            else
-                            {
-                                logger.warn("Found unknown system directory {}.{} at {} - this is likely left over from a previous " +
-                                            "version of Cassandra and should be removed after inspection.",
-                                            ksPart, tablePart, canonicalPath);
-                            }
-                            return FileVisitResult.SKIP_SUBTREE;
-                        }
-                    }
-
-                    String name = dir.getFileName().toString();
-                    return (name.equals(Directories.SNAPSHOT_SUBDIR)
-                            || name.equals(Directories.BACKUPS_SUBDIR)
-                            || nonSSTablePaths.contains(PathUtils.toCanonicalPath(dir).toString()))
-                           ? FileVisitResult.SKIP_SUBTREE
-                           : FileVisitResult.CONTINUE;
+                    logger.warn("Found unknown system directory {}.{} at {} - this is likely left over from a previous " +
+                                "version of Cassandra and should be removed after inspection.",
+                                ksPart, tablePart, canonicalPath);
                 }
-            };
-
-            for (File dataDir : DatabaseDescriptor.getAllDataFileLocations())
-            {
+                return true;
+            }, file -> {
                 try
                 {
-                    Files.walkFileTree(dataDir.toPath(), sstableVisitor);
+                    Descriptor desc = Descriptor.fromFileWithComponent(file, false).left;
+                    if (!desc.isCompatible())
+                        invalid.add(file.toString());
+
+                    if (!DatabaseDescriptor.isUUIDSSTableIdentifiersEnabled() && desc.id instanceof UUIDBasedSSTableId)
+                        withIllegalGenId.add(file.toString());
                 }
-                catch (IOException e)
+                catch (Exception e)
                 {
-                    throw new StartupException(3, "Unable to verify sstable files on disk", e);
+                    invalid.add(file.toString());
                 }
-            }
+            });
 
             if (!invalid.isEmpty())
                 throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
@@ -658,6 +652,684 @@ public class StartupChecks
                                            Joiner.on(", ").join(withIllegalGenId) + ". If you decide to delete sstables, " +
                                            "and have that data replicated over other healthy nodes, those will be brought" +
                                            "back during repair");
+        }
+    };
+
+    /**
+     * The table part of {@code dir} if it is the directory of a table of the {@code system} keyspace this software
+     * does not know (for example one dropped by an earlier release), null otherwise.
+     */
+    private static String staleSystemTableName(Path dir)
+    {
+        String[] nameParts = FileUtils.getCanonicalPath(new File(dir)).split(java.io.File.separator);
+        if (nameParts.length < 2)
+            return null;
+
+        String tablePart = nameParts[nameParts.length - 1];
+        String ksPart = nameParts[nameParts.length - 2];
+
+        if (tablePart.contains("-"))
+            tablePart = tablePart.split("-")[0];
+
+        return ksPart.equals(SchemaConstants.SYSTEM_KEYSPACE_NAME) && !SystemKeyspace.ALL_TABLE_NAMES.contains(tablePart)
+               ? tablePart
+               : null;
+    }
+
+    /**
+     * Walks every data directory and hands each file with the sstable extension to {@code onSSTableFile}, skipping
+     * snapshots, backups, the commit log, saved caches and hints directories (any of them may be nested in a data
+     * directory) and every directory for which {@code skipDirectory} returns true.
+     */
+    private static void walkSSTableFiles(Predicate<Path> skipDirectory, Consumer<File> onSSTableFile) throws StartupException
+    {
+        final Set<String> nonSSTablePaths = new HashSet<>();
+        nonSSTablePaths.add(FileUtils.getCanonicalPath(DatabaseDescriptor.getCommitLogLocation()));
+        nonSSTablePaths.add(FileUtils.getCanonicalPath(DatabaseDescriptor.getSavedCachesLocation()));
+        nonSSTablePaths.add(FileUtils.getCanonicalPath(DatabaseDescriptor.getHintsDirectory()));
+
+        FileVisitor<Path> sstableVisitor = new SimpleFileVisitor<Path>()
+        {
+            public FileVisitResult visitFile(Path path, BasicFileAttributes attrs)
+            {
+                File file = new File(path);
+                if (Descriptor.isValidFile(file))
+                    onSSTableFile.accept(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs)
+            {
+                if (skipDirectory.test(dir))
+                    return FileVisitResult.SKIP_SUBTREE;
+
+                String name = dir.getFileName().toString();
+                return (name.equals(Directories.SNAPSHOT_SUBDIR)
+                        || name.equals(Directories.BACKUPS_SUBDIR)
+                        || nonSSTablePaths.contains(PathUtils.toCanonicalPath(dir).toString()))
+                       ? FileVisitResult.SKIP_SUBTREE
+                       : FileVisitResult.CONTINUE;
+            }
+        };
+
+        for (File dataDir : DatabaseDescriptor.getAllDataFileLocations())
+        {
+            try
+            {
+                Files.walkFileTree(dataDir.toPath(), sstableVisitor);
+            }
+            catch (IOException e)
+            {
+                throw new StartupException(3, "Unable to verify sstable files on disk", e);
+            }
+        }
+    }
+
+    /** The newest big-format sstable version DSE 6 reads. */
+    private static final String DSE_6_MAX_BIG_VERSION = "me";
+
+    /**
+     * The newest big-format sstable version a start in {@code DSE_5_1} accepts: {@code me}, the version the node, the
+     * offline tools run with its configuration and the clients write in the mode, the newest DSE 5.1 reads.
+     */
+    private static final String DSE_51_MODE_MAX_BIG_VERSION = InternodeCompatibilityMode.DSE_51_BIG_VERSION;
+
+    /**
+     * The newest big-format sstable version this software writes, which a node in {@code DSE_5_1} mode still reads. A
+     * constant, not {@code BigFormat}'s newest readable version, which depends on the storage mode of the JVM.
+     */
+    private static final String NEWEST_BIG_VERSION = "oa";
+
+    /**
+     * With {@code internode_compatibility_mode: DSE_6}, refuses to start if the data directories or the commit log
+     * directory hold a file that shows the node already ran without the mode:
+     * <ul>
+     *     <li>trie ({@code bti}) sstables of a version newer than {@code bb};</li>
+     *     <li>big-format sstables of a version newer than {@code me};</li>
+     *     <li>sstables of any other format;</li>
+     *     <li>sstables with a non-numeric identifier (UUID or ULID): DSE 6 only parses numeric generations;</li>
+     *     <li>commit log segments of a version above the 4.0 line, other than DSE's own {@code 680}.</li>
+     * </ul>
+     * The sstables listed are files a DSE 6 node could not read correctly, or at all, after a rollback of this node,
+     * which would then only be possible from a snapshot. Snapshots and backups are not inspected. The commit log rule
+     * only detects a run without the mode: DSE 6 cannot replay the version 7 segments this node writes in the mode
+     * either, so the commit log, like the hints, is out of the scope of this check and is dealt with by the rollback
+     * procedure (drain, then delete). Paxos v2 state is not looked for: a run without the mode that wrote it also
+     * wrote trie sstables newer than {@code bb}, which are refused.
+     * <p>
+     * The sstable files are classified from the tokens of their names (version, identifier, format), not through
+     * {@link Descriptor}: in this mode the trie format is initialised at version {@code bb} and big at the
+     * {@code HCD_1} version, so {@link Descriptor} rejects a newer file as unreadable by this node before it could be
+     * classified. For the same reason this check runs before {@link #checkSSTablesFormat}: the operator gets the
+     * DSE-specific explanation rather than a request to run upgradesstables.
+     * <p>
+     * Once every check has passed, {@link StartupCheck#postAction} writes the upgrade marker (see
+     * {@link DseUpgradeMarker}), so that a later start without the mode is refused by {@link #checkDsePeersWithoutFlag}.
+     * <p>
+     * The check is a {@code non_configurable_check} on purpose, like {@link #checkDsePeersWithoutFlag}: it only
+     * fires in {@code DSE_6} or {@code DSE_5_1} mode, and an operator must not be able to switch the rollback guarantee
+     * off from the yaml in the middle of the upgrade.
+     * <p>
+     * With {@code internode_compatibility_mode: DSE_5_1} it refuses, with rules of its own, what the node wrote without
+     * that mode ({@link #isSSTableWrittenWithoutDse51Mode}, {@link #isCommitLogSegmentWrittenWithoutDse51Mode}):
+     * sstables of the {@code bti} format, of any other format but {@code big}, of a big version newer than {@code me}
+     * (the version the node and the offline tools write in the mode, the newest DSE 5.1 reads), or with a non-numeric
+     * identifier; commit log segments of a version above the 4.0 line, DSE's {@code 680} included
+     * (DSE 5.1 writes version 6, the node in the mode version 7). Every file listed is one DSE 5.1 could not read after
+     * a rollback. When the list holds big {@code na}, {@code nb} or {@code oa} sstables, the refusal names their
+     * rewrite at {@code me} by {@code sstableupgrade}, run with the node's configuration, as the first remedy
+     * ({@link #DSE51_REWRITE_AT_ME}), the snapshot restore the fallback; otherwise the text is unchanged. Once every
+     * check has passed, the post action writes the marker of the upgrade from DSE 5.1, which a later start in
+     * {@code NONE} or {@code DSE_6} is refused by. When that marker does not exist yet (a new upgrade),
+     * the post action first deletes the record of the values of DSE 5.1's columns of {@code system.local} and
+     * {@code system.peers} an earlier upgrade left ({@link Dse51SystemTables#deleteRecordOfAnEarlierUpgrade}); when
+     * that record cannot be deleted, the marker is not written, and the start is refused
+     * ({@link Dse51SystemTables#loadOrReadAtStart}).
+     */
+    public static final StartupCheck checkDse6Artefacts = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            InternodeCompatibilityMode mode = DatabaseDescriptor.getInternodeCompatibilityMode();
+            if (!mode.isDse())
+                return;
+
+            List<String> unreadableByDse = new ArrayList<>();
+            // in DSE_5_1, the files of the sstables among them that sstableupgrade rewrites at me
+            List<String> rewritableAtMe = new ArrayList<>();
+            // an unknown system table directory holds what DSE itself wrote; checkSSTablesFormat logs it
+            walkSSTableFiles(dir -> staleSystemTableName(dir) != null, file -> {
+                if (mode.isDse6() ? isSSTableUnreadableByDse6(file.name())
+                                  : isSSTableWrittenWithoutDse51Mode(file.name()))
+                {
+                    unreadableByDse.add(file.toString());
+                    // sstableupgrade <keyspace> <table> lists the table's own directory, not those of its indexes
+                    if (mode.isDse51() && isBigSSTableRewrittenAtMe(file.name()) &&
+                        !file.parent().name().startsWith(Directories.SECONDARY_INDEX_NAME_SEPARATOR))
+                        rewritableAtMe.add(file.toString());
+                }
+            });
+
+            File commitLogDirectory = DatabaseDescriptor.getCommitLogLocation();
+            if (commitLogDirectory.exists())
+            {
+                File[] segments = commitLogDirectory.tryList();
+                if (segments == null)
+                    throw new StartupException(3, "Unable to verify commit log segments on disk: cannot list " + commitLogDirectory);
+                for (File segment : segments)
+                {
+                    if (mode.isDse6() ? isCommitLogSegmentWrittenWithoutDse6Mode(segment.name())
+                                      : isCommitLogSegmentWrittenWithoutDse51Mode(segment.name()))
+                        unreadableByDse.add(segment.toString());
+                }
+            }
+
+            if (!unreadableByDse.isEmpty())
+                throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
+                                           "cannot enter " + mode + " compatibility mode: the node already ran " +
+                                           "without it, these files could not be read correctly, or at all, by " +
+                                           mode.source() + " after a rollback: " +
+                                           Joiner.on(", ").join(unreadableByDse) +
+                                           (rewritableAtMe.isEmpty()
+                                            ? ". Restore"
+                                            : DSE51_REWRITE_AT_ME +
+                                              (rewritableAtMe.size() == unreadableByDse.size()
+                                               ? " Otherwise, restore"
+                                               : " Otherwise, and for the other files, restore")) +
+                                           " the node from its pre-upgrade snapshot. Deleting these files instead " +
+                                           "loses this node's copy of their data: do it only if that data is replicated on " +
+                                           "other nodes, and repair the node once the compatibility mode is dropped");
+        }
+
+        @Override
+        public void postAction(StartupChecksOptions options)
+        {
+            InternodeCompatibilityMode mode = DatabaseDescriptor.getInternodeCompatibilityMode();
+            // a new upgrade from DSE 5.1 (its marker absent) does not use the values of DSE 5.1's columns recorded
+            // by an earlier one: the record is deleted before the marker is written; when it cannot be, the marker is
+            // not written and the start is refused (Dse51SystemTables.loadOrReadAtStart)
+            if (mode.isDse51() && !DseUpgradeMarker.exists(mode) && !Dse51SystemTables.deleteRecordOfAnEarlierUpgrade())
+                return;
+            if (mode.isDse())
+                writeUpgradeMarker(mode, () -> DseUpgradeMarker.writeIfAbsent(mode));
+        }
+    };
+
+    /**
+     * The last local deletion time big {@code me} holds, {@code CellData.MAX_DELETION_TIME_2038_LEGACY_CAP}, as the
+     * remedy names it (a literal, so that the remedy stays a compile-time constant; a test checks it against the cap).
+     */
+    @VisibleForTesting
+    static final String DSE51_ME_LAST_TIME = "2038-01-19T03:14:06Z";
+
+    /**
+     * The first remedy of the refusal of {@link #checkDse6Artefacts} in {@code DSE_5_1} when it lists big sstables that
+     * {@code sstableupgrade}, run with the node's configuration, rewrites at {@code me}
+     * ({@link #isBigSSTableRewrittenAtMe}), the one remedy that keeps the node's data without a snapshot restore. The
+     * writer of {@code me} holds no pending repair session, which {@code Upgrader} copies from each sstable: one still
+     * pending repair (a node run without the mode and repaired incrementally) is not rewritten until
+     * {@code sstablerepairedset} clears it. {@code Upgrader} also refuses, in a rewrite at {@code me} of an
+     * {@code oa} sstable, a deletion or expiration time after the cap of {@code CellData}
+     * ({@value #DSE51_ME_LAST_TIME}), which {@code me} cannot hold
+     * ({@code UnfilteredSerializer.checkPre40SSTableDeletionTimes}), so that such an sstable is not rewritten either,
+     * rather than rewritten with a wrong time. For an sstable it does not rewrite, {@code sstableupgrade} prints
+     * "Error upgrading", keeps the sstable and still exits 0, and the next start refuses it again. Left to the
+     * snapshot restore: those sstables, and the sstables of a secondary index, which
+     * {@code sstableupgrade <keyspace> <table>} does not list (nor does it take the name of an index's table).
+     */
+    private static final String DSE51_REWRITE_AT_ME =
+        ". Rewrite the big sstables of a version newer than " + DSE_51_MODE_MAX_BIG_VERSION + " among them at " +
+        DSE_51_MODE_MAX_BIG_VERSION + ", the node stopped: sstableupgrade <keyspace> <table>, run with this node's " +
+        "cassandra.yaml, for each of their tables, then start the node again. Before it, the node stopped: " +
+        "sstablerepairedset --really-set --is-unrepaired <its Data.db file> on an sstable still pending repair " +
+        "(incrementally repaired while the node ran without the mode), which sstableupgrade does not rewrite " +
+        "otherwise. Nor does it rewrite an oa sstable with a deletion or expiration time after " + DSE51_ME_LAST_TIME +
+        ", which " + DSE_51_MODE_MAX_BIG_VERSION + " cannot hold: for an sstable it does not rewrite, it prints " +
+        "\"Error upgrading\", keeps the sstable and still exits 0, and the next start refuses it again. The sstables " +
+        "of a secondary index (the .<index> directories of a table) are not rewritten so either.";
+
+    /** Creates the upgrade marker if it is absent; returns true if this call created it. */
+    @VisibleForTesting
+    interface UpgradeMarkerWrite
+    {
+        boolean writeIfAbsent() throws IOException;
+    }
+
+    /** Writes the DSE 6 upgrade marker with {@code write} and logs the outcome; a failure is logged, not thrown. */
+    @VisibleForTesting
+    static void writeUpgradeMarker(UpgradeMarkerWrite write)
+    {
+        writeUpgradeMarker(InternodeCompatibilityMode.DSE_6, write);
+    }
+
+    /**
+     * Writes the upgrade marker of {@code mode}, {@code DSE_6} or {@code DSE_5_1}, with {@code write} and logs the
+     * outcome; a failure is logged, not thrown.
+     */
+    @VisibleForTesting
+    static void writeUpgradeMarker(InternodeCompatibilityMode mode, UpgradeMarkerWrite write)
+    {
+        Path path = DseUpgradeMarker.path(mode);
+        String source = mode.source();
+        try
+        {
+            if (write.writeIfAbsent())
+                logger.info("{} {}", DseUpgradeMarker.writtenText(mode), path);
+        }
+        catch (IOException | RuntimeException | FSError e)
+        {
+            if (Files.exists(path))
+                logger.warn("Unable to write the content of the {} upgrade marker {}; the file exists, which is all " +
+                            "that matters: a later start with internode_compatibility_mode {} is refused while it does",
+                            source, path, mode.isDse51() ? "NONE or DSE_6" : "NONE", e);
+            else if (mode.isDse51())
+                logger.error("{} {}: unless the file exists, a later start with internode_compatibility_mode " +
+                             "NONE or DSE_6 will not be refused while {} peers may remain; create it by hand. Until " +
+                             "it exists, every start also discards the record of the values of DSE 5.1's columns of " +
+                             "system.local and system.peers",
+                             DseUpgradeMarker.notWrittenText(mode), path, source, e);
+            else
+                logger.error("{} {}: unless the file exists, a later start with internode_compatibility_mode " +
+                             "NONE will not be refused while {} peers may remain; create it by hand",
+                             DseUpgradeMarker.notWrittenText(mode), path, source, e);
+        }
+    }
+
+    /**
+     * Whether {@code fileName}, an sstable component name {@code <version>-<id>-<format>-<component>}, is one DSE 6
+     * could not read: DSE reads trie up to {@code bb}, big up to {@code me}, numeric generations only.
+     * A name that does not have the four parts, or whose version or identifier does not parse, is not classified
+     * here; {@link #checkSSTablesFormat} reports it.
+     */
+    @VisibleForTesting
+    static boolean isSSTableUnreadableByDse6(String fileName)
+    {
+        List<String> tokens = Splitter.on(Descriptor.FILENAME_SEPARATOR).splitToList(fileName);
+        if (tokens.size() != 4)
+            return false;
+
+        String version = tokens.get(0);
+        if (!Version.validate(version))
+            return false;
+
+        SSTableId id;
+        try
+        {
+            id = SSTableIdFactory.instance.fromString(tokens.get(1));
+        }
+        catch (RuntimeException e)
+        {
+            return false;
+        }
+        if (!(id instanceof SequenceBasedSSTableId))
+            return true;
+
+        String format = tokens.get(2);
+        if (BtiFormat.NAME.equals(format))
+            return version.compareTo(InternodeCompatibilityMode.DSE_6_TRIE_INDEX_FORMAT_VERSION) > 0;
+        if (BigFormat.NAME.equals(format))
+            return version.compareTo(DSE_6_MAX_BIG_VERSION) > 0;
+        return true;
+    }
+
+    /**
+     * Whether {@code fileName} is a commit log segment written by a run without the DSE 6 mode: a version above the
+     * 4.0 line other than DSE's own. It is not a readability rule: DSE 6 cannot replay version 7 either, which is what
+     * this node writes in the mode. A name {@link CommitLogDescriptor} does not parse (a legacy segment without a
+     * version, a number out of range) is not classified here; the commit log replay reports it.
+     */
+    @VisibleForTesting
+    static boolean isCommitLogSegmentWrittenWithoutDse6Mode(String fileName)
+    {
+        if (!CommitLogDescriptor.isValid(fileName))
+            return false;
+
+        int version;
+        try
+        {
+            version = CommitLogDescriptor.fromFileName(fileName).version();
+        }
+        catch (RuntimeException e)
+        {
+            return false;
+        }
+        return version > CommitLogDescriptor.VERSION_40 && version != CommitLogDescriptor.VERSION_DSE_68;
+    }
+
+    /**
+     * Whether {@code fileName}, an sstable component name {@code <version>-<id>-<format>-<component>}, is one neither
+     * a node in {@code DSE_5_1} mode nor an offline tool that reads its configuration writes, so one the node wrote
+     * without the mode: a format other than {@code big}, a big version newer than {@code me}, or a non-numeric
+     * identifier; DSE 5.1 reads none of them. A name that does not have the four parts, or whose version or identifier
+     * does not parse, is not classified here, as in {@link #isSSTableUnreadableByDse6}.
+     */
+    @VisibleForTesting
+    static boolean isSSTableWrittenWithoutDse51Mode(String fileName)
+    {
+        List<String> tokens = Splitter.on(Descriptor.FILENAME_SEPARATOR).splitToList(fileName);
+        if (tokens.size() != 4)
+            return false;
+
+        String version = tokens.get(0);
+        if (!Version.validate(version))
+            return false;
+
+        SSTableId id;
+        try
+        {
+            id = SSTableIdFactory.instance.fromString(tokens.get(1));
+        }
+        catch (RuntimeException e)
+        {
+            return false;
+        }
+        if (!(id instanceof SequenceBasedSSTableId))
+            return true;
+
+        if (BigFormat.NAME.equals(tokens.get(2)))
+            return version.compareTo(DSE_51_MODE_MAX_BIG_VERSION) > 0;
+        return true;
+    }
+
+    /**
+     * Whether {@code fileName}, an sstable component name {@code <version>-<id>-<format>-<component>} that
+     * {@link #isSSTableWrittenWithoutDse51Mode} lists, is of a big sstable {@code sstableupgrade}, run with the node's
+     * configuration, rewrites at {@code me}: of a big version newer than {@code me} and not newer than
+     * {@link #NEWEST_BIG_VERSION}, which a node in the mode reads ({@code na}, {@code nb}, {@code oa}), whatever its
+     * identifier (the tool, with the node's configuration, writes numeric ones). The others (another format, a version
+     * the tool does not rewrite or this software does not read) take the snapshot restore. Decided by the names alone,
+     * as the node in the mode reads them, whatever the storage mode of the JVM that runs the check.
+     */
+    @VisibleForTesting
+    static boolean isBigSSTableRewrittenAtMe(String fileName)
+    {
+        if (!isSSTableWrittenWithoutDse51Mode(fileName))
+            return false;
+        List<String> tokens = Splitter.on(Descriptor.FILENAME_SEPARATOR).splitToList(fileName);
+        String version = tokens.get(0);
+        return BigFormat.NAME.equals(tokens.get(2)) && version.compareTo(DSE_51_MODE_MAX_BIG_VERSION) > 0 &&
+               version.compareTo(NEWEST_BIG_VERSION) <= 0;
+    }
+
+    /**
+     * Whether {@code fileName} is a commit log segment a node in {@code DSE_5_1} mode does not write, so one written
+     * without the mode: a version above the 4.0 line, DSE 6's {@code 680} included. DSE 5.1 writes version 6, the node
+     * in the mode version 7; DSE 5.1 replays neither 7 nor any later version. A name {@link CommitLogDescriptor} does
+     * not parse is left to the commit log replay, as in {@link #isCommitLogSegmentWrittenWithoutDse6Mode}.
+     */
+    @VisibleForTesting
+    static boolean isCommitLogSegmentWrittenWithoutDse51Mode(String fileName)
+    {
+        if (!CommitLogDescriptor.isValid(fileName))
+            return false;
+
+        try
+        {
+            return CommitLogDescriptor.fromFileName(fileName).version() > CommitLogDescriptor.VERSION_40;
+        }
+        catch (RuntimeException e)
+        {
+            return false;
+        }
+    }
+
+    /**
+     * With {@code internode_compatibility_mode: DSE_6}, refuses to start when the DSE version this node is to gossip to
+     * DSE nodes ({@code cassandra.internode_compatibility_mode.dse_version}) is not one it may gossip, before the node
+     * contacts any peer, and warns when it gossips none (see {@link DseCompat#gossipedDseVersion}). With
+     * {@code DSE_5_1}, refuses to start when that property is set to anything but 5.1.51, {@code none} included, so
+     * that the node never gossips a value DSE 5.1 cannot parse, nor none.
+     */
+    public static final StartupCheck checkDse6GossipedDseVersion = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            if (!DatabaseDescriptor.isDseCompatibilityMode())
+                return;
+            String dseVersion;
+            try
+            {
+                dseVersion = DseCompat.gossipedDseVersion();
+            }
+            catch (ConfigurationException e)
+            {
+                throw new StartupException(StartupException.ERR_WRONG_CONFIG, e.getMessage());
+            }
+            if (dseVersion == null)
+                logger.warn("This node gossips no DSE version to DSE nodes ({}={}): DSE nodes that stored one for it when it ran DSE send it " +
+                            "the range reads of storage-attached index queries with a verb it cannot receive, unless they run with " +
+                            "-Ddse.disable_endpoint_group_range_reads=true",
+                            CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey(), DseCompat.NO_DSE_VERSION);
+        }
+    };
+
+    /**
+     * Refuses to start when {@code cassandra.internode_compatibility_mode.lost_node_silence_seconds} is set to a value
+     * that is not a whole number of seconds or is below the larger of one minute and twice the ring delay, and logs the
+     * silence when it is set ({@link DseUpgradeGuards#checkLostNodeSilence}). In every mode, since the removal of a node
+     * lost during the DSE upgrade is allowed with {@code NONE} and in the DSE modes; a no-op when the property is not
+     * set. The texts name DSE 5.1 in {@code DSE_5_1}, DSE 6 otherwise.
+     */
+    public static final StartupCheck checkLostNodeSilence = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            long seconds;
+            try
+            {
+                seconds = DseUpgradeGuards.checkLostNodeSilence();
+            }
+            catch (ConfigurationException e)
+            {
+                throw new StartupException(StartupException.ERR_WRONG_CONFIG, e.getMessage());
+            }
+            if (seconds >= 0)
+                logger.info("A node that is down counts as lost during the {} upgrade once nothing has been heard " +
+                            "of it for {} seconds ({}={})", DseCompat.source(), seconds,
+                            CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey(),
+                            seconds);
+        }
+    };
+
+    /**
+     * With {@code internode_compatibility_mode: NONE} (or {@code DSE_5_1}, which does not talk to DSE 6 peers
+     * either), refuses to start while the DSE 6 upgrade marker is present or while the node's own record of DSE 6 peers
+     * ({@link DsePeersRecord}) is not empty: DSE peers may still be in the cluster, and a node without the DSE_6 mode
+     * cannot talk to them. These two files are the only sources of truth here;
+     * no guess is made from release versions. The record is what this node persisted the last time it ran: the
+     * startup checks run before gossip and before any connection, so no live messaging version is known yet. The check
+     * fails closed: a marker whose presence cannot be determined, or a record that cannot be read, refuses the start
+     * as well.
+     * <p>
+     * With {@code NONE} it refuses, in the same way, while the marker or the record of the upgrade from DSE 5.1 exists
+     * (the files {@code DSE_5_1} writes, {@link DseUpgradeMarker#path(InternodeCompatibilityMode)} and
+     * {@link DsePeersRecord#path(InternodeCompatibilityMode)}), naming DSE 5.1 and, among its remedies, {@code DSE_5_1}
+     * with the {@code storage_compatibility_mode} and the {@code big} format it requires. The DSE 6 files are checked
+     * first, and the DSE 5.1 ones only when no DSE 6 file is found (a node of one upgrade has no file of the other,
+     * unless it was started in {@code DSE_6} with the override despite the DSE 5.1 files, below; the DSE 5.1 files are
+     * then refused once the DSE 6 ones are deleted): with the override property set, the WARN names the DSE 6 files
+     * alone, on purpose, so that its text is that of a node of the upgrade from DSE 6 whatever else the metadata
+     * directory holds (one that cannot be read included, where every file "may be present"). A start in {@code DSE_5_1}
+     * is not refused by its own files.
+     * <p>
+     * With {@code DSE_6} it refuses, in the same way, while the marker of the upgrade from DSE 5.1 is present or its
+     * record lists a peer: such a node took part in the upgrade from DSE 5.1, and started in {@code DSE_6} by mistake
+     * it would speak DSE 6's dialect to its DSE 5.1 peers. Only files known to be there ({@code Files.exists}) count,
+     * so that a {@code DSE_6} node that never ran in {@code DSE_5_1} is not affected, nor is one whose metadata
+     * directory is not a directory or cannot be searched, where {@code Files.exists} is false. A record that is there
+     * but cannot be read refuses the start, as with {@code NONE}. The refusal names the remedies of both cases: a node
+     * of the upgrade from DSE 5.1 starts in {@code DSE_5_1} again, and a node of the upgrade from DSE 6 whose DSE 5.1
+     * files are left from an earlier upgrade from DSE 5.1 deletes them once no DSE 5.1 node is left in the cluster, its
+     * peers not speaking DSE 5.1's dialect. The DSE 6 files are not read. With the override property set the start
+     * goes on and writes the DSE 6 upgrade marker, as every start in {@code DSE_6} does, which then refuses the start
+     * in {@code DSE_5_1} until it is deleted; the DSE 5.1 files stay, and refuse a start with {@code NONE} once the
+     * DSE 6 ones are deleted.
+     */
+    public static final StartupCheck checkDsePeersWithoutFlag = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            InternodeCompatibilityMode mode = DatabaseDescriptor.getInternodeCompatibilityMode();
+            if (mode.isDse6())
+            {
+                // only the DSE_5_1 mode writes these files: a node that never ran in it has neither
+                if (Files.exists(DseUpgradeMarker.path(InternodeCompatibilityMode.DSE_5_1)) ||
+                    Files.exists(DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1)))
+                    refuseWhileDsePeersMayRemain(mode, InternodeCompatibilityMode.DSE_5_1);
+                return;
+            }
+            boolean dse6Found = refuseWhileDsePeersMayRemain(mode, InternodeCompatibilityMode.DSE_6);
+            if (!dse6Found && !mode.isDse51())
+                refuseWhileDsePeersMayRemain(mode, InternodeCompatibilityMode.DSE_5_1);
+        }
+    };
+
+    /**
+     * The refusal of {@link #checkDsePeersWithoutFlag} for the upgrade from the DSE release of {@code source},
+     * {@code DSE_6} or {@code DSE_5_1}, to a node in {@code mode}: refuses to start while its marker or its record
+     * exists, unless the override property is set, which logs the evidence at WARN instead.
+     *
+     * @return whether the marker or the record was found (and the override set, since the start is refused otherwise)
+     */
+    private static boolean refuseWhileDsePeersMayRemain(InternodeCompatibilityMode mode,
+                                                        InternodeCompatibilityMode source) throws StartupException
+    {
+        String release = source.source();
+        String ignoreKey = CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS.getKey();
+        Path markerPath = DseUpgradeMarker.path(source);
+        Path recordPath = DsePeersRecord.path(source);
+        boolean marker = DseUpgradeMarker.exists(source);
+        List<String> dsePeers = Collections.emptyList();
+        String recordProblem = null;
+        try
+        {
+            dsePeers = DsePeersRecord.persistedPeers(source);
+        }
+        catch (IOException | RuntimeException e)
+        {
+            // a record that cannot be read may list DSE peers: fail closed, and say so
+            recordProblem = String.valueOf(e);
+        }
+        boolean record = !dsePeers.isEmpty() || recordProblem != null;
+        if (!marker && !record)
+            return false;
+        // DseUpgradeMarker.exists() counts a marker whose presence cannot be checked as present: say so rather than
+        // claim it is there
+        boolean markerChecked = !marker || Files.exists(markerPath);
+        List<String> evidence = new ArrayList<>(2);
+        if (marker)
+            evidence.add("the " + release + " upgrade marker " + markerPath +
+                         (markerChecked ? " is present" : " may be present (its presence cannot be checked)"));
+        if (record)
+            evidence.add("the record of " + release + " peers " + recordPath +
+                         (recordProblem == null ? " listing " + dsePeers + " is present"
+                                                : " cannot be read (" + recordProblem + ')'));
+        String found = String.join(" and ", evidence);
+        if (CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS.getBoolean())
+        {
+            // a node in DSE_6 speaks DSE 6's dialect to them, which does not make them unreachable
+            String consequence = mode.isDse6() ? "will be spoken to as DSE 6 nodes" : "will be unreachable";
+            logger.warn("{} but ignored ({}=true); {} peers, if any, {}",
+                        Character.toUpperCase(found.charAt(0)) + found.substring(1), ignoreKey, release, consequence);
+            return true;
+        }
+        StringBuilder remedy = new StringBuilder();
+        if (marker)
+            remedy.append(markerChecked ? "once every node runs this software, delete the marker"
+                                        : "make the metadata directory readable so that the marker can be checked");
+        if (recordProblem != null)
+            remedy.append(marker ? "; " : "").append("make the record readable");
+        else if (!dsePeers.isEmpty())
+        {
+            remedy.append(marker ? "; " : "");
+            // the node maintains the record of either upgrade while it runs in that mode, so it empties itself
+            remedy.append("the record empties itself once this node has seen every listed peer at messaging ")
+                  .append("version 4.0 or later (run once more with ").append(source)
+                  .append(" after the last upgrade); delete it by hand only after checking that the listed peers ")
+                  .append("have left the cluster");
+            List<String> notAddresses = new ArrayList<>();
+            for (String entry : dsePeers)
+            {
+                if (DsePeersRecord.parseEntry(entry) == null)
+                    notAddresses.add(entry);
+            }
+            // such lines never leave the record by themselves
+            if (!notAddresses.isEmpty())
+                remedy.append("; the entries ").append(notAddresses)
+                      .append(" are not addresses with port (<ip>:<port>) and must be removed from it by hand");
+        }
+        // a configuration refusal whatever the evidence, an unreadable record included: the start without the mode of
+        // the upgrade is what is refused, and that mode is one of its remedies (loadDsePeersRecord, which cannot do
+        // without the record, reports the same file as a disk state error); DSE_5_1 is refused without the storage
+        // mode and the format it requires, so its remedy names them
+        String setting = source.isDse51()
+                         ? source + " with storage_compatibility_mode: " + StorageCompatibilityMode.DSE_5_1 +
+                           " and sstable.selected_format: " + BigFormat.NAME
+                         : source.toString();
+        String remedies;
+        if (mode.isDse6())
+            // the DSE 5.1 files on a node in DSE_6: a node of the upgrade from DSE 5.1 started in DSE_6 by mistake goes
+            // back to DSE_5_1, but one of the upgrade from DSE 6 that kept them from an earlier upgrade from DSE 5.1
+            // has peers that do not speak DSE 5.1's dialect, and deletes them instead
+            remedies = String.format("On a node of the upgrade from %s, set internode_compatibility_mode: %s, or %s. " +
+                                     "On a node of the upgrade from %s whose %s files are left from an earlier " +
+                                     "upgrade from %s, delete those files once no %s node is left in the cluster. " +
+                                     "Or start with -D%s=true",
+                                     release, setting, remedy, mode.source(), release, release, release, ignoreKey);
+        else
+            remedies = String.format("Set internode_compatibility_mode: %s, or %s, or start with -D%s=true",
+                                     setting, remedy, ignoreKey);
+        throw new StartupException(StartupException.ERR_WRONG_CONFIG,
+                                   String.format("internode_compatibility_mode is %s but %s: %s peers may still be " +
+                                                 "in the cluster. %s",
+                                                 mode, found, release, remedies));
+    }
+
+    /**
+     * In {@code DSE_6} mode, refuses to start unless the SAI on-disk version is pinned to the one the cluster's DSE
+     * release writes ({@link Dse6SaiVersionPin}); does nothing in {@code DSE_5_1}, DSE 5.1 having no SAI to pin to. It
+     * reads the node metadata, so it runs after {@link #checkSystemKeyspaceState}, which initialises it: on the first
+     * start in the mode the refusal therefore comes after the import of DSE's node metadata and the scrub of the system
+     * keyspace, both of which leave DSE's files as they are and are repeated harmlessly by the next start. Not
+     * configurable from the yaml, like the other checks of the mode; its own override property is logged at WARN on
+     * every start.
+     */
+    public static final StartupCheck checkDse6SaiVersionPin = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            Dse6SaiVersionPin.verifyAtStartup();
+        }
+    };
+
+    /**
+     * In {@code DSE_6} or {@code DSE_5_1} mode, loads the record of the mode's DSE peers persisted by the previous run
+     * ({@link DsePeersRecord}) before any connection is made, so that a DSE peer that stays down during this run is not
+     * forgotten.
+     */
+    public static final StartupCheck loadDsePeersRecord = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            try
+            {
+                DsePeersRecord.loadAtStartup();
+            }
+            catch (IOException | RuntimeException e)
+            {
+                InternodeCompatibilityMode source = DsePeersRecord.source();
+                String release = source.source();
+                throw new StartupException(StartupException.ERR_WRONG_DISK_STATE,
+                                           "Unable to read the record of " + release + " peers " +
+                                           DsePeersRecord.path(source) + "; make it readable (it lists the " + release +
+                                           " peers of the last run)", e);
+            }
         }
     };
 
@@ -683,6 +1355,39 @@ public class StartupChecks
             {
                 throw new StartupException(StartupException.ERR_WRONG_CONFIG, "Fatal exception during initialization", e);
             }
+        }
+    };
+
+    /**
+     * In {@code DSE_6} or {@code DSE_5_1} mode, warns when the snitch is {@link Ec2Snitch} (or
+     * {@code Ec2MultiRegionSnitch}) with the standard EC2 names ({@code ec2_naming_scheme=standard}, the default): DSE
+     * 6 and DSE 5.1 have no such setting and always used the legacy names ({@code us-east} and {@code 1a} for the zone
+     * {@code us-east-1a}), so a node that ran DSE gets another data center and rack, and {@link #checkDatacenter} and
+     * {@link #checkRack}, which run next, refuse its start unless {@code cassandra.ignore_dc} and
+     * {@code cassandra.ignore_rack} are set ({@code Ec2Snitch.validate} would refuse it later too). A warning, not a
+     * refusal: those checks already refuse a node whose names changed; this one says why, and what to set, before them.
+     */
+    public static final StartupCheck checkDse6Ec2NamingScheme = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options)
+        {
+            InternodeCompatibilityMode mode = DatabaseDescriptor.getInternodeCompatibilityMode();
+            if (!mode.isDse())
+                return;
+            IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
+            if (snitch instanceof DynamicEndpointSnitch)
+                snitch = ((DynamicEndpointSnitch) snitch).subsnitch;
+            if (!(snitch instanceof Ec2Snitch) || ((Ec2Snitch) snitch).usesLegacyNaming())
+                return;
+            logger.warn("{} compatibility mode: {} names this node's data center {} and rack {} with " +
+                        "ec2_naming_scheme=standard, the default; {} always used the legacy EC2 names (data center " +
+                        "us-east and rack 1a for the zone us-east-1a), so the data center and rack checks refuse the " +
+                        "start of a node that ran DSE, unless cassandra.ignore_dc and cassandra.ignore_rack are set. " +
+                        "Set ec2_naming_scheme=legacy in {}, with the dc_suffix of DSE's cassandra-rackdc.properties " +
+                        "when it sets one",
+                        mode.source(), snitch.getClass().getSimpleName(), snitch.getLocalDatacenter(),
+                        snitch.getLocalRack(), mode.source(), SnitchProperties.RACKDC_PROPERTY_FILENAME);
         }
     };
 

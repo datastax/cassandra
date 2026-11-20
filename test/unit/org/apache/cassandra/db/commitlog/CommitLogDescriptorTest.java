@@ -401,6 +401,7 @@ public class CommitLogDescriptorTest
             {
                 case CASSANDRA_4:
                 case HCD_1:
+                case DSE_5_1:
                     // These modes should use VERSION_40 messaging, which maps to commit log VERSION_40
                     Assert.assertEquals("Mode " + mode + " should map to commit log VERSION_40",
                                         CommitLogDescriptor.VERSION_40, expectedVersion);

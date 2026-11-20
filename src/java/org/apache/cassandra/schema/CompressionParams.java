@@ -446,6 +446,19 @@ public final class CompressionParams
         return maxCompressedLength;
     }
 
+    /**
+     * These parameters with every chunk compressed, whatever its ratio: no {@link #MIN_COMPRESS_RATIO}, so no chunk
+     * is stored uncompressed. For the sstable versions before 4.0 (big {@code m*}), whose readers decompress every
+     * chunk and whose compression info has no maximum compressed length.
+     */
+    public CompressionParams withEveryChunkCompressed()
+    {
+        if (maxCompressedLength == Integer.MAX_VALUE)
+            return this;
+        return new CompressionParams(sstableCompressor, chunkLength, Integer.MAX_VALUE, DEFAULT_MIN_COMPRESS_RATIO,
+                                     otherOptions);
+    }
+
     private static Class<?> parseCompressorClass(String className) throws ConfigurationException
     {
         if (className == null || className.isEmpty())

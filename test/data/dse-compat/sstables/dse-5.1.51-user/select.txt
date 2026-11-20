@@ -1,0 +1,66 @@
+Consistency level set to ALL.
+
+ count
+-------
+   197
+
+(1 rows)
+
+Warnings :
+Aggregation query used without partition key
+
+
+ count
+-------
+   500
+
+(1 rows)
+
+Warnings :
+Aggregation query used without partition key
+
+
+ id | v
+----+--------
+ 10 | sasi10
+ 16 | sasi16
+ 13 | sasi13
+ 11 | sasi11
+  1 |  sasi1
+ 19 | sasi19
+ 18 | sasi18
+ 15 | sasi15
+ 14 | sasi14
+ 17 | sasi17
+ 12 | sasi12
+
+(11 rows)
+
+Warnings :
+SASI index was enabled for 'test_ks.sasi_t'. SASI is still in beta, take extra caution when using it in production.
+
+
+ id | ck | v
+----+----+------
+  5 |  1 | d5_1
+  5 |  2 | d5_2
+  1 |  1 | d1_1
+  1 |  2 | d1_2
+  2 |  1 | d2_1
+  2 |  2 | d2_2
+  4 |  1 | d4_1
+  4 |  2 | d4_2
+  3 |  1 | d3_1
+  3 |  2 | d3_2
+
+(10 rows)
+
+ id | a  | b
+----+----+----
+  5 | 50 | s5
+  1 | 10 | s1
+  2 | 20 | s2
+  4 | 40 | s4
+  3 | 30 | s3
+
+(5 rows)

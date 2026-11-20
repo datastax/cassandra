@@ -1,0 +1,451 @@
+/*
+ * Copyright IBM Corp.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.cassandra.hints;
+
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import com.google.common.collect.ImmutableMap;
+import org.junit.BeforeClass;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.RowUpdateBuilder;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
+import org.apache.cassandra.dsecompat.DseFixtures;
+import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
+import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.FileInputStreamPlus;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/**
+ * What the hints catalog does with a hints file left behind by DataStax Enterprise 6 on a node upgraded in place:
+ * nothing. DSE names its files {@code <host id>-<timestamp>-v<version>.hints}, which the catalog's file-name filter
+ * does not match, so the catalog never opens, delivers or moves the file aside as corrupt, in either mode, and logs
+ * nothing about it. Its descriptor has the 3.0 layout but DSE's own version (-1), which this software does not know.
+ * In {@code internode_compatibility_mode: DSE_6} the file is converted when hints dispatch starts, not when the catalog
+ * loads (see {@link DseHintsConversionTest}); with {@code NONE} it is left alone for good.
+ */
+public class DseHintsFileTest
+{
+    /** The gc grace seconds of the hint of {@code dse51Hint}: the default of a table. */
+    private static final int GC_GRACE_SECONDS = 864000;
+
+    @Rule
+    public TemporaryFolder folder = new TemporaryFolder();
+
+    @BeforeClass
+    public static void initialize()
+    {
+        DatabaseDescriptor.daemonInitialization();
+    }
+
+    @Test
+    public void dseHintsFileIsNeitherLoadedNorTouchedWithNone() throws IOException
+    {
+        assertDseFileUntouched(InternodeCompatibilityMode.NONE, DseVersion.DSE_6_8_65);
+    }
+
+    @Test
+    public void dseHintsFileIsNeitherLoadedNorTouchedByTheCatalogInDse6Mode() throws IOException
+    {
+        assertDseFileUntouched(InternodeCompatibilityMode.DSE_6, DseVersion.DSE_6_8_65);
+    }
+
+    @Test
+    public void dse6926HintsFileIsNeitherLoadedNorTouchedWithNone() throws IOException
+    {
+        assertDseFileUntouched(InternodeCompatibilityMode.NONE, DseVersion.DSE_6_9_26);
+    }
+
+    @Test
+    public void dse6926HintsFileIsNeitherLoadedNorTouchedByTheCatalogInDse6Mode() throws IOException
+    {
+        assertDseFileUntouched(InternodeCompatibilityMode.DSE_6, DseVersion.DSE_6_9_26);
+    }
+
+    @Test
+    public void dseHintsFileIsNeitherLoadedNorTouchedInDse51Mode() throws IOException
+    {
+        assertDseFileUntouched(InternodeCompatibilityMode.DSE_5_1, DseVersion.DSE_6_8_65);
+    }
+
+    /**
+     * A hints file DSE 5.1 writes (version 1, the Cassandra 3.0 layout, generated here as DSE 5.1.51 writes it by its
+     * source) is a hints file of this software: the catalog loads it in every mode, logs nothing about it and leaves it
+     * as it is, and nothing takes it for a DSE 6 file to convert; its hints are read at messaging version 10, and at
+     * 11, the version DSE 5.1 writes them at, in {@code DSE_5_1} mode with its storage mode
+     * ({@code DseHintsContentTest} decodes them at 10, {@code Dse51HintsWriterTest} at 11).
+     */
+    @Test
+    public void dse51HintsFileIsLoadedAsAHintsFileOfThisSoftwareInEveryMode() throws IOException
+    {
+        for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+        {
+            File directory = new File(folder.newFolder());
+            UUID hostId = UUID.randomUUID();
+            long timestamp = Clock.Global.currentTimeMillis();
+            List<byte[]> hints = List.of(dse51Hint(timestamp));
+            Path file = DseFixtures.writeDse51HintsFile(directory.toPath(), hostId, timestamp, hints);
+            byte[] before = Files.readAllBytes(file);
+
+            assertThat(file.getFileName().toString()).isEqualTo(hostId + "-" + timestamp + "-1.hints");
+            assertThat(HintsDescriptor.isHintFileName(file)).isTrue();
+            assertThat(HintsCatalog.dseHintsFiles(directory)).isEmpty();
+            HintsDescriptor descriptor = HintsDescriptor.readFromFileQuietly(file).orElseThrow();
+            assertThat(descriptor.version).isEqualTo(HintsDescriptor.VERSION_30);
+            assertThat(messagingVersionIn(mode, descriptor)).isEqualTo(mode.isDse51() ? MessagingService.VERSION_3014
+                                                                                      : MessagingService.VERSION_30);
+            assertThat(descriptor.hostId).isEqualTo(hostId);
+            assertThat(descriptor.parameters).isEmpty();
+            // the statistics companion, read: the number of hints
+            assertThat(descriptor.statistics().totalCount()).isEqualTo(hints.size());
+
+            // nothing logged by the catalog, nor by the descriptor, which reads the statistics file too
+            Logger descriptorLogger = (Logger) LoggerFactory.getLogger(HintsDescriptor.class);
+            ListAppender<ILoggingEvent> descriptorEvents = new ListAppender<>();
+            descriptorEvents.start();
+            descriptorLogger.addAppender(descriptorEvents);
+            try
+            {
+                assertThat(loadAndCollectEvents(directory, mode, 1)).as("log of the catalog load in " + mode).isEmpty();
+            }
+            finally
+            {
+                descriptorLogger.detachAppender(descriptorEvents);
+            }
+            assertThat(descriptorEvents.list).filteredOn(e -> e.getLevel().isGreaterOrEqual(Level.WARN))
+                                             .as("WARN and ERROR of the descriptors in " + mode).isEmpty();
+            assertThat(Files.readAllBytes(file)).isEqualTo(before);
+            assertThat(DseFixtures.hintsRecords(file)).hasSize(1);
+            assertThat(list(directory)).containsExactlyInAnyOrder(file.getFileName().toString(),
+                                                                  hostId + "-" + timestamp + "-1.crc32",
+                                                                  hostId + "-" + timestamp + "-1-Statistics.hints");
+        }
+    }
+
+    /**
+     * The hints file DSE 5.1.51 wrote: the one {@link DseFixtures#writeDse51HintsFile} writes for its host id, its
+     * timestamp and its hints, byte for byte, and a hints file of this software, which the catalog loads in every mode
+     * and leaves as it is. It was copied while DSE still had it open, so it comes without the {@code .crc32} and
+     * {@code -Statistics.hints} companions, as a file DSE 5.1 left open when it was killed would: the copy here is
+     * loaded alone. The catalog logs nothing; the descriptor logs the WARN of an absent statistics companion, and no
+     * ERROR, in every mode. The generated file, with both companions, is
+     * {@link #dse51HintsFileIsLoadedAsAHintsFileOfThisSoftwareInEveryMode}'s.
+     */
+    @Test
+    public void theHintsFileDse51WroteIsTheOneGeneratedAndIsLoadedInEveryMode() throws IOException
+    {
+        Path captured = DseFixtures.dse51().hintsFile();
+        String name = captured.getFileName().toString();
+        UUID hostId = UUID.fromString(name.substring(0, 36));
+        long timestamp = Long.parseLong(name.substring(37, name.length() - "-1.hints".length()));
+        assertThat(hostId).isEqualTo(Dse51Fixtures.HOST_IDS.get(2));
+        List<byte[]> hints = DseFixtures.hintsRecords(captured);
+        assertThat(hints).hasSize(Dse51Fixtures.FIXTURE_HINTS);
+        Path generated = DseFixtures.writeDse51HintsFile(folder.newFolder().toPath(), hostId, timestamp, hints);
+        assertThat(generated.getFileName().toString()).isEqualTo(name);
+        assertThat(Files.readAllBytes(generated)).isEqualTo(Files.readAllBytes(captured));
+
+        for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+        {
+            File directory = new File(folder.newFolder());
+            Path file = Files.copy(captured, directory.toPath().resolve(name));
+            byte[] before = Files.readAllBytes(file);
+
+            assertThat(HintsDescriptor.isHintFileName(file)).isTrue();
+            assertThat(HintsCatalog.dseHintsFiles(directory)).isEmpty();
+            HintsDescriptor descriptor = HintsDescriptor.readFromFileQuietly(file).orElseThrow();
+            assertThat(descriptor.version).isEqualTo(Dse51Fixtures.HINTS_VERSION);
+            assertThat(messagingVersionIn(mode, descriptor)).isEqualTo(mode.isDse51() ? MessagingService.VERSION_3014
+                                                                                      : MessagingService.VERSION_30);
+            assertThat(descriptor.hostId).isEqualTo(hostId);
+            assertThat(descriptor.timestamp).isEqualTo(timestamp);
+            assertThat(descriptor.parameters).isEmpty();
+
+            Logger descriptorLogger = (Logger) LoggerFactory.getLogger(HintsDescriptor.class);
+            ListAppender<ILoggingEvent> descriptorEvents = new ListAppender<>();
+            descriptorEvents.start();
+            descriptorLogger.addAppender(descriptorEvents);
+            try
+            {
+                assertThat(loadAndCollectEvents(directory, mode, 1)).as("log of the catalog load in " + mode).isEmpty();
+            }
+            finally
+            {
+                descriptorLogger.detachAppender(descriptorEvents);
+            }
+            // without its statistics companion the descriptor logs, as for any hints file of this software without it,
+            // the WARN of an absent companion, and starts with empty statistics, which only metrics read; counted
+            // during the catalog load only (the readFromFileQuietly above logs the same WARN)
+            Path statistics = directory.toPath().resolve(name.replaceFirst("\\.hints$", "-Statistics.hints"));
+            assertAbsentStatisticsWarning(descriptorEvents.list, statistics, mode);
+            assertThat(descriptor.statistics()).isSameAs(HintsDescriptor.EMPTY_STATS);
+            assertThat(Files.readAllBytes(file)).isEqualTo(before);
+            assertThat(list(directory)).containsExactly(name);
+        }
+    }
+
+    /**
+     * A hints file of this software whose statistics companion is missing, as when its writer was killed before the
+     * first session closed: with {@code NONE} the catalog loads it, and the descriptor logs the WARN of an absent
+     * companion, as for the file DSE 5.1.51 left open, and no ERROR.
+     */
+    @Test
+    public void aHintsFileOfThisSoftwareWithoutItsStatisticsIsLoadedWithAWarningWithNone() throws IOException
+    {
+        File directory = new File(folder.newFolder());
+        long now = Clock.Global.currentTimeMillis();
+        HintsDescriptor own = new HintsDescriptor(UUID.randomUUID(), now);
+        Mutation mutation = oneRowMutation();
+        try (HintsWriter writer = HintsWriter.create(directory, own);
+             HintsWriter.Session session = writer.newSession(ByteBuffer.allocate(1024)))
+        {
+            session.append(Hint.create(mutation, now));
+        }
+        Path file = directory.toPath().resolve(own.fileName());
+        // with its companion the file has the statistics of its hint
+        assertThat(HintsDescriptor.readFromFileQuietly(file).orElseThrow().statistics().totalCount()).isEqualTo(1);
+        Path statistics = directory.toPath().resolve(own.statisticsFileName());
+        Files.delete(statistics);
+        assertThat(list(directory)).containsExactlyInAnyOrder(own.fileName(), own.checksumFileName());
+
+        Logger descriptorLogger = (Logger) LoggerFactory.getLogger(HintsDescriptor.class);
+        ListAppender<ILoggingEvent> descriptorEvents = new ListAppender<>();
+        descriptorEvents.start();
+        descriptorLogger.addAppender(descriptorEvents);
+        try
+        {
+            assertThat(loadAndCollectEvents(directory, InternodeCompatibilityMode.NONE, 1)).isEmpty();
+        }
+        finally
+        {
+            descriptorLogger.detachAppender(descriptorEvents);
+        }
+        assertAbsentStatisticsWarning(descriptorEvents.list, statistics, InternodeCompatibilityMode.NONE);
+        assertThat(list(directory)).containsExactlyInAnyOrder(own.fileName(), own.checksumFileName());
+        assertThat(HintsDescriptor.readFromFileQuietly(file).orElseThrow().statistics())
+        .isSameAs(HintsDescriptor.EMPTY_STATS);
+    }
+
+    /** The descriptor logged one WARN or ERROR: the WARN of the absent statistics companion, with no stack trace. */
+    private static void assertAbsentStatisticsWarning(List<ILoggingEvent> events, Path statistics,
+                                                      InternodeCompatibilityMode mode)
+    {
+        assertThat(events).filteredOn(e -> e.getLevel().isGreaterOrEqual(Level.WARN))
+                          .as("WARN and ERROR of the descriptors in " + mode)
+                          .singleElement()
+                          .satisfies(e -> {
+                              assertThat(e.getLevel()).isEqualTo(Level.WARN);
+                              assertThat(e.getFormattedMessage())
+                              .isEqualTo("Cannot find stats component `" + statistics + "` for hints descriptor, " +
+                                         "initialising with empty statistics.");
+                              assertThat(e.getThrowableProxy()).isNull();
+                          });
+    }
+
+    /** A hint of one row of a table of its own, as DSE 5.1 writes it: its mutation in the layout of version 12. */
+    private static byte[] dse51Hint(long creationTime) throws IOException
+    {
+        return DseFixtures.dseHint(creationTime, GC_GRACE_SECONDS, DseFixtures.mutation40(oneRowMutation()));
+    }
+
+    /** A mutation of one row of a table of its own. */
+    private static Mutation oneRowMutation()
+    {
+        TableMetadata table = TableMetadata.builder("ks", "t")
+                                           .addPartitionKeyColumn("k", Int32Type.instance)
+                                           .addRegularColumn("v", UTF8Type.instance)
+                                           .build();
+        return new RowUpdateBuilder(table, FBUtilities.timestampMicros(), 1).add("v", "x").build();
+    }
+
+    @Test
+    public void dseHintsDescriptorOf6865IsDsesOwn() throws IOException
+    {
+        assertDescriptorIsDsesOwn(DseVersion.DSE_6_8_65);
+    }
+
+    @Test
+    public void dseHintsDescriptorOf6926IsDsesOwn() throws IOException
+    {
+        assertDescriptorIsDsesOwn(DseVersion.DSE_6_9_26);
+    }
+
+    /** The catalog load logs nothing about DSE files in either mode: in DSE_6 the dispatch start converts them. */
+    @Test
+    public void catalogLoadIsSilentInBothModes() throws IOException
+    {
+        for (InternodeCompatibilityMode mode : new InternodeCompatibilityMode[]{ InternodeCompatibilityMode.NONE, InternodeCompatibilityMode.DSE_6 })
+        {
+            File directory = new File(folder.newFolder());
+            Path dseFile = install(directory, DseVersion.DSE_6_8_65);
+            Path second = install(directory, DseVersion.DSE_6_9_26);
+
+            assertThat(loadAndCollectEvents(directory, mode, 0)).as("log of the catalog load in " + mode).isEmpty();
+            assertThat(list(directory)).containsExactlyInAnyOrder(dseFile.getFileName().toString(), second.getFileName().toString());
+        }
+    }
+
+    @Test
+    public void dse6ModeIgnoresDseCompanionFilesAndLoadsItsOwnHints() throws IOException
+    {
+        File directory = new File(folder.newFolder());
+        // DSE's companion files of a hints file are not hints files
+        String dseBase = UUID.randomUUID() + "-1790335633208-v1";
+        Files.createFile(directory.toPath().resolve(dseBase + "-Statistics.hints"));
+        Files.createFile(directory.toPath().resolve(dseBase + ".crc32"));
+        // a hints file of this software, version 2 as written with storage_compatibility_mode HCD_1
+        HintsDescriptor own = new HintsDescriptor(UUID.randomUUID(), HintsDescriptor.VERSION_40, Clock.Global.currentTimeMillis(), ImmutableMap.of());
+        HintsWriter.create(directory, own).close();
+
+        assertThat(loadAndCollectWarnings(directory, InternodeCompatibilityMode.DSE_6, 1)).isEmpty();
+    }
+
+    private void assertDseFileUntouched(InternodeCompatibilityMode mode, DseVersion version) throws IOException
+    {
+        File directory = new File(folder.newFolder());
+        Path dseFile = install(directory, version);
+        byte[] before = Files.readAllBytes(dseFile);
+
+        assertThat(HintsDescriptor.isHintFileName(dseFile)).isFalse();
+        assertThat(HintsCatalog.dseHintsFiles(directory)).containsExactly(dseFile);
+
+        loadAndCollectWarnings(directory, mode, 0);
+
+        assertThat(Files.readAllBytes(dseFile)).isEqualTo(before);
+        assertThat(list(directory)).containsExactly(dseFile.getFileName().toString());
+    }
+
+    private static void assertDescriptorIsDsesOwn(DseVersion version) throws IOException
+    {
+        Path dseFile = DseFixtures.hintsFile(version);
+        // <host id>-<timestamp>-v1.hints
+        String[] parts = dseFile.getFileName().toString().split("-");
+        UUID hostId = UUID.fromString(String.join("-", parts[0], parts[1], parts[2], parts[3], parts[4]));
+        long timestamp = Long.parseLong(parts[5]);
+
+        HintsDescriptor descriptor;
+        try (FileInputStreamPlus in = new FileInputStreamPlus(dseFile))
+        {
+            descriptor = HintsDescriptor.deserialize(in);
+        }
+        // the header layout is the 3.0 one (version, timestamp, host id, parameters, checksums), but DSE writes -1
+        // as the version, which maps to no messaging version here
+        assertThat(descriptor.hostId).isEqualTo(hostId);
+        assertThat(descriptor.timestamp).isEqualTo(timestamp);
+        assertThat(descriptor.version).isEqualTo(-1);
+        assertThat(descriptor.parameters).isEmpty();
+        assertThatThrownBy(descriptor::messagingVersion).isInstanceOf(AssertionError.class);
+    }
+
+    private static Path install(File directory, DseVersion version) throws IOException
+    {
+        Path source = DseFixtures.hintsFile(version);
+        return Files.copy(source, directory.toPath().resolve(source.getFileName().toString()));
+    }
+
+    private static List<String> list(File directory) throws IOException
+    {
+        try (Stream<Path> files = Files.list(directory.toPath()))
+        {
+            return files.map(p -> p.getFileName().toString()).collect(Collectors.toList());
+        }
+    }
+
+    /** Loads the catalog in the given mode, asserts the number of stores it found, returns its WARN messages. */
+    private static List<String> loadAndCollectWarnings(File directory, InternodeCompatibilityMode mode, int expectedStores)
+    {
+        return messages(loadAndCollectEvents(directory, mode, expectedStores), Level.WARN);
+    }
+
+    private static List<String> messages(List<ILoggingEvent> events, Level level)
+    {
+        return events.stream()
+                     .filter(event -> event.getLevel() == level)
+                     .map(ILoggingEvent::getFormattedMessage)
+                     .collect(Collectors.toList());
+    }
+
+    /**
+     * The messaging version the hints of {@code descriptor} are read at in {@code mode} with the storage mode it
+     * requires: {@code DSE_5_1}'s for {@code DSE_5_1}, the configured one otherwise.
+     */
+    private static int messagingVersionIn(InternodeCompatibilityMode mode, HintsDescriptor descriptor)
+    {
+        StorageCompatibilityMode previous = DatabaseDescriptor.getStorageCompatibilityMode();
+        try
+        {
+            if (mode.isDse51())
+                DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+            return descriptor.messagingVersion();
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(previous);
+        }
+    }
+
+    /** Loads the catalog in the given mode, asserts the number of stores it found, returns what it logged. */
+    private static List<ILoggingEvent> loadAndCollectEvents(File directory, InternodeCompatibilityMode mode, int expectedStores)
+    {
+        Logger logger = (Logger) LoggerFactory.getLogger(HintsCatalog.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        InternodeCompatibilityMode previous = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            HintsCatalog catalog = HintsCatalog.load(directory, ImmutableMap.of());
+            assertThat(catalog.stores().count()).isEqualTo(expectedStores);
+            assertThat(catalog.hasFiles()).isEqualTo(expectedStores > 0);
+            return new ArrayList<>(appender.list);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(previous);
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+    }
+}

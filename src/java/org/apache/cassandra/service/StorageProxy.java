@@ -2381,6 +2381,8 @@ public class StorageProxy implements StorageProxyMBean
                                          QueryInfoTracker.ReadTracker readTracker)
     throws UnavailableException, IsBootstrappingException, ReadFailureException, ReadTimeoutException, InvalidRequestException
     {
+        DseReadGuard.checkReadCommands(group.queries);
+
         ClientRequestsMetrics metrics = ClientRequestsMetricsProvider.instance.metrics(group.metadata().keyspace);
         ColumnFamilyStore cfs = Keyspace.openAndGetStore(group.metadata());
 
@@ -2888,6 +2890,8 @@ public class StorageProxy implements StorageProxyMBean
                                                   Dispatcher.RequestTime requestTime,
                                                   ClientState clientState)
     {
+        DseReadGuard.checkReadCommand(command);
+
         if (DatabaseDescriptor.getPartitionDenylistEnabled() && DatabaseDescriptor.getDenylistRangeReadsEnabled())
         {
             final int denylisted = partitionDenylist.getDeniedKeysInRangeCount(command.metadata().id, command.dataRange().keyRange());
@@ -3470,7 +3474,10 @@ public class StorageProxy implements StorageProxyMBean
                     creationTime -= TimeUnit.MILLISECONDS.convert(Math.max(0, approxTime.now() - mutationCreationTimeNanos), NANOSECONDS);
                 }
                 logger.trace("Adding hints for {} with creation time {} ms", validTargets, creationTime);
-                HintsService.instance.write(hostIds, Hint.create(mutation,  creationTime));
+                // false only for a hint the DSE 5.1 mode's hints files cannot hold: not stored, so neither counted
+                // nor taken as a write at ANY, which then times out as no write took place
+                if (!HintsService.instance.tryWrite(hostIds, Hint.create(mutation,  creationTime)))
+                    return;
                 validTargets.forEach(HintsService.instance.metrics::incrCreatedHints);
                 // Notify the handler only for CL == ANY
                 if (responseHandler != null && responseHandler.replicaPlan.consistencyLevel() == ConsistencyLevel.ANY)
@@ -3914,7 +3921,30 @@ public class StorageProxy implements StorageProxyMBean
     public void setPaxosVariant(String variant)
     {
         Preconditions.checkNotNull(variant);
-        Paxos.setPaxosVariant(Config.PaxosVariant.valueOf(variant));
+        Config.PaxosVariant newVariant = Config.PaxosVariant.valueOf(variant);
+        // the DSE_6 and DSE_5_1 modes accept exactly paxos_variant v1 at startup and refuse any other, and so does
+        // a change at run time (counted and worded as the other upgrade guards while they are active; the check of
+        // Paxos.setPaxosVariant stays, and refuses it in both modes); a NONE node that still sees DSE peers refuses
+        // the v2 variants only, as before the DSE_6 mode required exactly v1
+        boolean refused = DatabaseDescriptor.isDseCompatibilityMode()
+                          ? !DatabaseDescriptor.isDsePaxosVariant(newVariant)
+                          : isPaxosV2Variant(newVariant);
+        if (refused)
+            DseUpgradeGuards.refuseWhileUpgrading("changing paxos_variant to " + newVariant);
+        Paxos.setPaxosVariant(newVariant);
+    }
+
+    /** The variants that run the Paxos v2 protocol, which DSE 6 does not speak. */
+    private static boolean isPaxosV2Variant(Config.PaxosVariant variant)
+    {
+        switch (variant)
+        {
+            case v1:
+            case v1_without_linearizable_reads_or_rejected_writes:
+                return false;
+            default:
+                return true;
+        }
     }
 
     @Override

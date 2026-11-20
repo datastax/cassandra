@@ -301,6 +301,12 @@ public class CommitLogDescriptor
         }
     }
 
+    /** The commit log version of the segment (not a messaging version, see {@link #getMessagingVersion()}). */
+    public int version()
+    {
+        return version;
+    }
+
     public String fileName()
     {
         return FILENAME_PREFIX + version + SEPARATOR + id + FILENAME_EXTENSION;

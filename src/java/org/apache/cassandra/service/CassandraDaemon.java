@@ -45,11 +45,13 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Dse51SystemTables;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SizeEstimatesRecorder;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.SystemKeyspaceMigrator41;
 import org.apache.cassandra.db.commitlog.CommitLog;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
 import org.apache.cassandra.db.virtual.SystemViewsKeyspace;
 import org.apache.cassandra.db.virtual.VirtualKeyspaceRegistry;
 import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
@@ -61,8 +63,11 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.DefaultNameFactory;
+import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.StartupClusterConnectivityChecker;
 import org.apache.cassandra.nodes.Nodes;
+import org.apache.cassandra.schema.Dse51ColumnTypes;
+import org.apache.cassandra.schema.Dse51Compressors;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -278,6 +283,31 @@ public class CassandraDaemon
             exitOrFail(StartupException.ERR_WRONG_DISK_STATE, e.getMessage(), e.getCause());
         }
 
+        // DSE 5.1 compatibility: the values DSE 5.1 wrote to its columns of system.local and system.peers, read
+        // before the first write to system.local, whose flush can start a compaction that rewrites those rows
+        // without them (at the first start in the mode; loaded from its record at the later ones)
+        try
+        {
+            Dse51SystemTables.loadOrReadAtStart();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
+        // DSE 5.1 compatibility: refuse to start on any trace of the DSE features this software does not support, and
+        // on the row a failed UNRESTRICT ROWS on a view leaves, read from the rows of system_schema before the schema
+        // is loaded (its load fails on some of them without naming them) and before the first write to system.local
+        try
+        {
+            Dse6NonCoreTraces.verifyDse51AtStartup();
+            Dse6AccessControlCheck.verifyDse51SchemaRowsAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
         // We need to persist this as soon as possible after startup checks.
         // This should be the first write to SystemKeyspace (CASSANDRA-11742)
         SystemKeyspace.persistLocalMetadata();
@@ -300,6 +330,33 @@ public class CassandraDaemon
             throw e;
         }
 
+        // DSE 6 compatibility: refuse to start on any trace of the DSE features this software does not support (Search,
+        // Graph, Analytics, DSEFS/CFS, Advanced Replication), once the schema is loaded and before any keyspace is opened
+        try
+        {
+            Dse6NonCoreTraces.verifyAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
+        // DSE 5.1 compatibility: refuse to start while a table has a column of a type not written for DSE 5.1, or is
+        // compressed with a compressor DSE 5.1 does not read, encrypted, or given a min_compress_ratio; the column
+        // types first, since one of their remedies, the flag drop, ends the check of the compressors too
+        if (DatabaseDescriptor.isDse51CompatibilityMode())
+        {
+            try
+            {
+                Dse51ColumnTypes.verifyAtStartup();
+                Dse51Compressors.verifyAtStartup();
+            }
+            catch (StartupException e)
+            {
+                exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+            }
+        }
+
         setupVirtualKeyspaces();
 
         try
@@ -309,6 +366,20 @@ public class CassandraDaemon
         catch (StartupException e)
         {
             exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
+        // DSE 5.1 compatibility: refuse to start while an sstable on disk is compressed with a compressor DSE 5.1 does
+        // not read, or encrypted, once the leftovers of the transactions that did not finish are removed
+        if (DatabaseDescriptor.isDse51CompatibilityMode())
+        {
+            try
+            {
+                Dse51Compressors.verifySSTablesAtStartup();
+            }
+            catch (StartupException e)
+            {
+                exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+            }
         }
 
         Keyspace.setInitialized();
@@ -326,6 +397,16 @@ public class CassandraDaemon
                     store.disableAutoCompaction();
                 }
             }
+        }
+
+        // DSE 6 compatibility mode: whether the data of each materialized view can be exchanged with DSE 6 nodes
+        try
+        {
+            DseViewHiddenColumnCatalog.checkViewsAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
         }
 
         try
@@ -390,6 +471,18 @@ public class CassandraDaemon
         // Prepared statements
         QueryProcessor.instance.preloadPreparedStatements();
 
+        // DSE 6 compatibility: refuse to start while DSE access controls this software does not enforce would grant
+        // access if dropped. First pass on this node's replica, here because it reads system_auth: after the schema is
+        // loaded and the commit log replayed, before the node joins the ring.
+        try
+        {
+            Dse6AccessControlCheck.verifyAtStartup();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
+
         // Server-side half of the nodetool extensions (see NodeToolServerExtension): typically registers the MBeans
         // that the commands contributed through NodeToolExtension talk to. Runs before the node joins the ring, so
         // that those commands are available while it bootstraps, like the built-in ones.
@@ -421,6 +514,18 @@ public class CassandraDaemon
 
         if (!FBUtilities.getBroadcastAddressAndPort().equals(InetAddressAndPort.getLoopbackAddress()))
             Gossiper.waitToSettle();
+        // DSE 6 compatibility mode: the cue that the mode is no longer needed (a no-op otherwise)
+        DsePeers.warnIfNoneKnownAtStartup();
+        // DSE 5.1 compatibility: refuse to start while a DSE 5.1 peer gossips a DSE workload this software does not
+        // support, once gossip has settled
+        try
+        {
+            Dse6NonCoreTraces.verifyDse51GossipedWorkloads();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
 
         StorageService.instance.doAuthSetup(false);
 
@@ -448,6 +553,17 @@ public class CassandraDaemon
         }
 
         AuditLogManager.instance.initialize();
+
+        // DSE 6 compatibility, second pass: the same check on a cluster-wide read, now that the node has joined and can reach
+        // the other replicas of system_auth, before any client is served
+        try
+        {
+            Dse6AccessControlCheck.verifyAfterJoin();
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
 
         // schedule periodic background compaction task submission. this is simply a backstop against compactions stalling
         // due to scheduling errors or race conditions

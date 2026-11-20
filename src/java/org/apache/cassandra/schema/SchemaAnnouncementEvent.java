@@ -29,6 +29,7 @@ import javax.annotation.Nullable;
 
 import org.apache.cassandra.audit.AuditLogContext;
 import org.apache.cassandra.cql3.CQLStatement;
+import org.apache.cassandra.cql3.statements.schema.AlterSchemaStatement;
 import org.apache.cassandra.diag.DiagnosticEvent;
 import org.apache.cassandra.locator.InetAddressAndPort;
 
@@ -63,8 +64,8 @@ final class SchemaAnnouncementEvent extends DiagnosticEvent
         this.type = type;
         this.schemaDestinationEndpoints = schemaDestinationEndpoints;
         this.schemaEndpointsIgnored = schemaEndpointsIgnored;
-        if (transformation instanceof CQLStatement) this.statement = (CQLStatement) transformation;
-        else this.statement = null;
+        // the statement of the transformation, also when the DSE 5.1 compatibility mode wraps it
+        this.statement = AlterSchemaStatement.statementOf(transformation);
         this.sender = sender;
     }
 
