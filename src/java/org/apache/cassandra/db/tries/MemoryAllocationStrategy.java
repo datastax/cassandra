@@ -338,7 +338,7 @@ public interface MemoryAllocationStrategy
         @Override
         public IntArrayList indexesInPipeline()
         {
-            IntArrayList res = new IntArrayList();
+            IntArrayList res = new IntArrayList((int) indexCountInPipeline(), -1);
             for (IndexBlockList list = justReleased; list != null; list = list.nextList)
                 res.addAll(new IntArrayList(list.indexes, list.count, -1));
             for (IndexBlockList list = free; list != null; list = list.nextList) // includes awaiting barrier

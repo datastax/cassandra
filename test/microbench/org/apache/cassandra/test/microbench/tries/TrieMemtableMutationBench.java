@@ -27,6 +27,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
@@ -91,6 +92,9 @@ public class TrieMemtableMutationBench extends CQLTester
     @Param({"100000"})
     int rowCount;
 
+    @Param({"false"})
+    boolean blockedBarriers;
+
     public enum Mode
     {
         /// Apply the updates using `Memtable.put`.
@@ -110,6 +114,7 @@ public class TrieMemtableMutationBench extends CQLTester
     TriePartitionUpdater updater;
     Object cellDataBufferManager;
     Field opOrderGroupField;
+    OpOrder.Group barrierBlock;
 
     @Setup(Level.Trial)
     public void setup() throws Throwable
@@ -117,7 +122,7 @@ public class TrieMemtableMutationBench extends CQLTester
         CQLTester.setUpClass();
         DatabaseDescriptor.setAutoSnapshot(false);
         String keyspace = createKeyspace("CREATE KEYSPACE %s with replication = { 'class' : 'SimpleStrategy', 'replication_factor' : 1 } and durable_writes = false");
-        String table = createTable(keyspace, "CREATE TABLE %s (pk bigint, ck bigint, v1 bigint, v2 text, PRIMARY KEY(pk, ck)) with compression = {'enabled': false}");
+        String table = createTable(keyspace, "CREATE TABLE %s (pk bigint, ck bigint, v1 bigint, v2 text, PRIMARY KEY(pk, ck)) with compression = {'enabled': false} and memtable = 'trie';");
         cfs = Keyspace.open(keyspace).getColumnFamilyStore(table);
         cfs.disableAutoCompaction();
         TableMetadata metadata = cfs.metadata();
@@ -215,6 +220,8 @@ public class TrieMemtableMutationBench extends CQLTester
             }
         }
         apply(existing);
+        if (blockedBarriers)
+            barrierBlock = cfs.readOrdering().start();
     }
 
     private static Field findField(Class<?> cls, String name) throws NoSuchFieldException
@@ -238,6 +245,17 @@ public class TrieMemtableMutationBench extends CQLTester
     {
         if (PRINT_DIAGNOSTICS)
             printDiagnostics();
+        if (barrierBlock != null)
+        {
+            barrierBlock.close();
+            barrierBlock = null;
+        }
+
+        OpOrder.Barrier barrier = cfs.keyspace.writeOrder.newBarrier();
+        Memtable.LastCommitLogPosition position = new Memtable.LastCommitLogPosition(CommitLog.instance.getCurrentPosition());
+        memtable.switchOut(barrier, new AtomicReference<>(position));
+        barrier.issue();
+
         memtable.discard();
         memtable = null;
     }
@@ -274,6 +292,7 @@ public class TrieMemtableMutationBench extends CQLTester
     @TearDown(Level.Trial)
     public void teardown() throws Throwable
     {
+        CommitLog.instance.shutdownBlocking();
         CQLTester.tearDownClass();
         CQLTester.cleanup();
     }
