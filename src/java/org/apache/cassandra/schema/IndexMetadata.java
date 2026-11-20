@@ -51,6 +51,7 @@ import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.service.Dse6NonCoreTraces;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDSerializer;
 
@@ -193,7 +194,10 @@ public final class IndexMetadata
             }
             catch (ConfigurationException e)
             {
-                // SecondaryIndexManager loads an index of an unknown class as a NoopIndex under these same two
+                // DSE Search is not supported in the DSE 6 mode, as SecondaryIndexManager refuses to load such an index
+                if (DatabaseDescriptor.isDse6CompatibilityMode() && Dse6NonCoreTraces.isSearchIndexClass(className))
+                    throw new ConfigurationException(Dse6NonCoreTraces.searchIndexRefusal(table.keyspace, table.name, name, className), e);
+                // SecondaryIndexManager loads any other index of an unknown class as a NoopIndex under these same two
                 // conditions; accept it here too, so that the table carrying it can still be altered. There are no
                 // options to validate for it.
                 if (CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE.getBoolean() || DatabaseDescriptor.isDse6CompatibilityMode())
