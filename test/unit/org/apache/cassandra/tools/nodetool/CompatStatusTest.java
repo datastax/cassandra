@@ -32,18 +32,24 @@ import org.mockito.Mockito;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.service.Dse6SaiVersionPin;
 import org.apache.cassandra.service.DsePeersRecord;
+import org.apache.cassandra.service.StartupChecks;
 import org.apache.cassandra.tools.NodeProbe;
 import org.apache.cassandra.tools.Output;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_SAI_VERSION_PIN;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -88,6 +94,7 @@ public class CompatStatusTest extends CQLTester
             assertThat(out).contains("(1 speaking the pre-4.0 dialect)");
             // NONE: the record of DSE peers is not kept, and nothing was refused
             assertThat(out).contains("DSE 6 peers on record        : not maintained (internode_compatibility_mode NONE)\n");
+            assertThat(out).contains("SAI version pinned           : not checked (internode_compatibility_mode NONE)\n");
             assertThat(out).contains("Requests refused (upgrade)   : 0\n");
         }
         finally
@@ -116,11 +123,12 @@ public class CompatStatusTest extends CQLTester
             tool.assertOnCleanExit();
             List<String> lines = Arrays.asList(tool.getStdout().split("\\R"));
             assertThat(lines).contains("Requests refused (upgrade)   : 3");
-            // the peer versions, the record of DSE peers, then the refusals
+            // the peer versions, the record of DSE peers, the SAI pin, then the refusals
             String out = tool.getStdout();
             assertThat(out.indexOf("Peers with a known version")).isNotNegative()
                                                                   .isLessThan(out.indexOf("DSE 6 peers on record        :"));
-            assertThat(out.indexOf("DSE 6 peers on record        :")).isLessThan(out.indexOf("Requests refused (upgrade)"));
+            assertThat(out.indexOf("DSE 6 peers on record        :")).isLessThan(out.indexOf("SAI version pinned           :"));
+            assertThat(out.indexOf("SAI version pinned           :")).isLessThan(out.indexOf("Requests refused (upgrade)"));
             assertThat(lines).contains(String.format("  %-45s %d", "read with an index hint", 1));
             assertThat(lines).contains(String.format("  %-45s %d", "verb PING_REQ to a DSE 6 peer", 2));
         }
@@ -193,6 +201,33 @@ public class CompatStatusTest extends CQLTester
     }
 
     @Test
+    public void printsTheSaiVersionPinInDse6Mode() throws Exception
+    {
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            // before the startup check: unknown
+            Dse6SaiVersionPin.resetStatus();
+            assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout()).contains("SAI version pinned           : unknown (not checked yet)\n");
+
+            // the startup check of the SAI pin: no DSE release is stored in this JVM, the pin is taken as set
+            try (WithProperties pin = new WithProperties().set(SAI_CURRENT_VERSION, "aa").clear(INTERNODE_COMPATIBILITY_MODE_IGNORE_SAI_VERSION_PIN))
+            {
+                StartupChecks.checkDse6SaiVersionPin.execute(new StartupChecksOptions());
+            }
+            assertThat(ToolRunner.invokeNodetool("compatstatus").getStdout())
+            .contains("SAI version pinned           : aa, set explicitly; the DSE release the cluster ran cannot be determined: " +
+                      "no DSE 6 release (4.0.0.<build>) is stored for this node or its saved peers\n");
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+            Dse6SaiVersionPin.resetStatus();
+        }
+    }
+
+    @Test
     public void aDseNodeKnownFromGossipOnlyWithoutTheMode() throws Exception
     {
         InetAddressAndPort dseNode = InetAddressAndPort.getByName("127.0.0.46:7000");
@@ -232,6 +267,7 @@ public class CompatStatusTest extends CQLTester
         Mockito.when(probe.getSSTableFormatVersion()).thenReturn("bti-da");
         Mockito.when(probe.getEndpointMessagingVersions()).thenReturn(Map.of("127.0.0.45:7000", MessagingService.VERSION_3014));
         Mockito.when(probe.getDsePeersOnRecord()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DsePeersOnRecord")));
+        Mockito.when(probe.getDseSaiVersionPin()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseSaiVersionPin")));
         Mockito.when(probe.getDseCompatRefusals()).thenThrow(new UndeclaredThrowableException(new AttributeNotFoundException("DseCompatRefusals")));
 
         new CompatStatus().execute(probe);
@@ -243,6 +279,7 @@ public class CompatStatusTest extends CQLTester
                          "Peers with a known version   : 1 (1 speaking the pre-4.0 dialect)",
                          String.format("  %-45s %d  (pre-4.0 dialect)", "127.0.0.45:7000", MessagingService.VERSION_3014),
                          "DSE 6 peers on record        : unknown (this node does not report them)",
+                         "SAI version pinned           : unknown (this node does not report it)",
                          "Requests refused (upgrade)   : unknown (this node does not report them)");
 
         // any other failure is not hidden
