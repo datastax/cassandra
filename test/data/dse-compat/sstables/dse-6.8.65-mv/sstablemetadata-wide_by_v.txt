@@ -1,0 +1,61 @@
+SSTable: /var/lib/cassandra/data/lab/wide_by_v-aa20e6b0b80b11f1acb39d12a1a4d70a/bb-1-bti
+Partitioner: org.apache.cassandra.dht.Murmur3Partitioner
+Bloom Filter FP chance: 0.01
+Minimum timestamp: 1790249569445870 (09/24/2026 11:32:49)
+Maximum timestamp: 1790249578885369 (09/24/2026 11:32:58)
+SSTable min local deletion time: 2147483647 (no tombstones)
+SSTable max local deletion time: 2147483647 (no tombstones)
+Compressor: org.apache.cassandra.io.compress.LZ4Compressor
+Compression ratio: 0.6098985042102396
+TTL min: 0
+TTL max: 0
+First token: -7329697292252079701 (v3)
+Last token: 8883853216615550592 (v5)
+covered clusterings: [0:0, 9:499]
+Estimated droppable tombstones: 0.0
+SSTable Level: 0
+Repaired at: 0
+Pending repair: --
+Replay positions covered: {CommitLogPosition(segmentId=1790249057411, position=999275)=CommitLogPosition(segmentId=1790249057414, position=24400447)}
+totalColumnsSet: 5000
+totalRows: 5000
+Estimated tombstone drop times: 
+   Drop Time | Count  (%)  Histogram 
+   Percentiles
+   50th      0 
+   75th      0 
+   95th      0 
+   98th      0 
+   99th      0 
+   Min       0 
+   Max       0 
+Partition Size: 
+   Size (bytes)    | Count  (%)  Histogram 
+   14237 (13.9 kB) |     7 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      14237 (13.9 kB)
+   75th      14237 (13.9 kB)
+   95th      14237 (13.9 kB)
+   98th      14237 (13.9 kB)
+   99th      14237 (13.9 kB)
+   Min       11865 (11.6 kB)
+   Max       14237 (13.9 kB)
+Column Count: 
+   Columns | Count  (%)  Histogram 
+   770     |     7 (100) OOOOOOOOOOOOOOOOOOOOOOOOOOOOOO
+   Percentiles
+   50th      770
+   75th      770
+   95th      770
+   98th      770
+   99th      770
+   Min       643
+   Max       770
+Estimated cardinality: 7
+EncodingStats minTTL: 0
+EncodingStats minLocalDeletionTime: 1442880000 (09/22/2015 00:00:00)
+EncodingStats minTimestamp: 1790249569445870 (09/24/2026 11:32:49)
+KeyType: org.apache.cassandra.db.marshal.UTF8Type
+ClusteringTypes: [org.apache.cassandra.db.marshal.Int32Type, org.apache.cassandra.db.marshal.Int32Type]
+StaticColumns: 
+RegularColumns: .v:org.apache.cassandra.db.marshal.UTF8Type
