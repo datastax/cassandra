@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.net;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collections;
@@ -26,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -40,6 +42,7 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.Tracing.TraceType;
@@ -52,6 +55,9 @@ import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
+import static org.apache.cassandra.net.MessagingService.VERSION_30;
+import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.VERSION_50;
 import static org.apache.cassandra.net.MessagingService.VERSION_DSE_68;
@@ -59,6 +65,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_DS_10;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_11;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_12;
 import static org.apache.cassandra.net.MessagingService.VERSION_DS_20;
+import static org.apache.cassandra.net.MessagingService.instance;
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize;
@@ -796,23 +803,32 @@ public class Message<T>
     {
         private static final int CREATION_TIME_SIZE = 4;
 
+        /** Payloads of pre-4.0 responses skipped because no callback was registered for them (DSE 6 compatibility mode). */
+        private static final AtomicLong skippedPayloadsPre40 = new AtomicLong();
+
         private Serializer()
         {
         }
 
         public <T> void serialize(Message<T> message, DataOutputPlus out, int version) throws IOException
         {
-            serializeHeader(message.header, out, version);
-            out.writeUnsignedVInt32(message.payloadSize(version));
-            message.verb().serializer().serialize(message.payload, out, version);
+            if (version >= VERSION_40)
+            {
+                serializePost40(message, out, version);
+            }
+            else
+            {
+                DseCompat.checkPre40Layout(version);
+                serializePre40(message, out, version);
+            }
         }
 
         public <T> Message<T> deserialize(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
         {
-            Header header = deserializeHeader(in, peer, version);
-            skipUnsignedVInt(in); // payload size, not needed by payload deserializer
-            T payload = (T) header.verb.serializer().deserialize(in, version);
-            return new Message<>(header, payload);
+            if (version >= VERSION_40)
+                return deserializePost40(in, peer, version);
+            DseCompat.checkPre40Layout(version);
+            return deserializePre40(in, peer, version);
         }
 
         /**
@@ -822,25 +838,35 @@ public class Message<T>
          */
         public <T> Message<T> deserialize(DataInputPlus in, Header header, int version) throws IOException
         {
-            skipHeader(in);
-            skipUnsignedVInt(in); // payload size, not needed by payload deserializer
-            T payload = (T) header.verb.serializer().deserialize(in, version);
-            return new Message<>(header, payload);
+            if (version >= VERSION_40)
+                return deserializePost40(in, header, version);
+            DseCompat.checkPre40Layout(version);
+            return deserializePre40(in, header, version);
         }
 
         private <T> int serializedSize(Message<T> message, int version)
         {
-            long size = 0;
-            size += serializedHeader(message.header, version);
-            int payloadSize = message.payloadSize(version);
-            size += sizeofUnsignedVInt(payloadSize) + payloadSize;
-            return Ints.checkedCast(size);
+            if (version >= VERSION_40)
+                return serializedSizePost40(message, version);
+            DseCompat.checkPre40Layout(version);
+            return serializedSizePre40(message, version);
         }
 
         /**
          * Size of the next message in the stream. Returns -1 if there aren't sufficient bytes read yet to determine size.
+         *
+         * @param version the messaging version of the connection; below {@link MessagingService#VERSION_40} the
+         *                pre-4.0 layout applies (DSE 6 compatibility mode)
          */
-        int inferMessageSize(ByteBuffer buf, int readerIndex, int readerLimit)
+        int inferMessageSize(ByteBuffer buf, int readerIndex, int readerLimit, int version) throws InvalidLegacyProtocolMagic
+        {
+            if (version >= VERSION_40)
+                return inferMessageSizePost40(buf, readerIndex, readerLimit);
+            DseCompat.checkPre40Layout(version);
+            return inferMessageSizePre40(buf, readerIndex, readerLimit);
+        }
+
+        private int inferMessageSizePost40(ByteBuffer buf, int readerIndex, int readerLimit)
         {
             int index = readerIndex;
 
@@ -895,6 +921,14 @@ public class Message<T>
          */
         Header extractHeader(ByteBuffer buf, InetAddressAndPort from, long currentTimeNanos, int version) throws IOException
         {
+            if (version >= VERSION_40)
+                return extractHeaderPost40(buf, from, currentTimeNanos, version);
+            DseCompat.checkPre40Layout(version);
+            return extractHeaderPre40(buf, from, currentTimeNanos, version);
+        }
+
+        private Header extractHeaderPost40(ByteBuffer buf, InetAddressAndPort from, long currentTimeNanos, int version) throws IOException
+        {
             MonotonicClockTranslation timeSnapshot = approxTime.translate();
 
             int index = buf.position();
@@ -925,6 +959,44 @@ public class Message<T>
         private static long getExpiresAtNanos(long createdAtNanos, long expirationPeriodNanos)
         {
             return createdAtNanos + expirationPeriodNanos;
+        }
+
+        /*
+         * 4.0 ser/deser
+         */
+
+        private <T> void serializePost40(Message<T> message, DataOutputPlus out, int version) throws IOException
+        {
+            serializeHeader(message.header, out, version);
+            out.writeUnsignedVInt32(message.payloadSize(version));
+            // as payloadSize: a response read from a peer at the pre-4.0 dialect carries the generic REQUEST_RSP or
+            // INTERNAL_RSP verb, whose payload serializer is the one of the pending request's response verb
+            message.getPayloadSerializer().serialize(message.payload, out, version);
+        }
+
+        private <T> Message<T> deserializePost40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
+        {
+            Header header = deserializeHeader(in, peer, version);
+            skipUnsignedVInt(in); // payload size, not needed by payload deserializer
+            T payload = (T) header.verb.serializer().deserialize(in, version);
+            return new Message<>(header, payload);
+        }
+
+        private <T> Message<T> deserializePost40(DataInputPlus in, Header header, int version) throws IOException
+        {
+            skipHeader(in);
+            skipUnsignedVInt(in); // payload size, not needed by payload deserializer
+            T payload = (T) header.verb.serializer().deserialize(in, version);
+            return new Message<>(header, payload);
+        }
+
+        private <T> int serializedSizePost40(Message<T> message, int version)
+        {
+            long size = 0;
+            size += serializedHeader(message.header, version);
+            int payloadSize = message.payloadSize(version);
+            size += sizeofUnsignedVInt(payloadSize) + payloadSize;
+            return Ints.checkedCast(size);
         }
 
         private void serializeHeader(Header header, DataOutputPlus out, int version) throws IOException
@@ -972,6 +1044,276 @@ public class Message<T>
             size += sizeofUnsignedVInt(header.flags);
             size += serializedParamsSize(header.params, version);
             return Ints.checkedCast(size);
+        }
+
+        /*
+         * Pre-4.0 ser/deser: the Cassandra 3.0 message layout, spoken with DSE 6 peers at messaging version 11
+         * (DSE 6 compatibility mode).
+         * The header is: protocol magic, int id, int creation time (low 32 bits of the millis), the sender address
+         * without port (1-byte length + address), int verb id, int param count, params (UTF-8 alias, int length,
+         * value), int payload size, payload. There are no flags and no expiration: the flags travel as params
+         * ({@link ParamType#FAILURE_CALLBACK}, {@link ParamType#TRACK_REPAIRED_DATA}) and the expiration is the
+         * verb's timeout. A failure response is a regular response with the {@link ParamType#FAILURE_RESPONSE}
+         * and {@link ParamType#FAILURE_REASON} params and an empty payload.
+         */
+
+        private void serializeHeaderPre40(Header header, DataOutputPlus out, int version) throws IOException
+        {
+            out.writeInt(PROTOCOL_MAGIC);
+            out.writeInt(Ints.checkedCast(header.id));
+            // int cast cuts off the high-order half of the timestamp, which we can assume remains
+            // the same between now and when the recipient reconstructs it.
+            out.writeInt((int) approxTime.translate().toMillisSinceEpoch(header.createdAtNanos));
+            inetAddressAndPortSerializer.serialize(header.from, out, version);
+            out.writeInt(header.verb.toPre40Verb().id);
+            serializeParams(addFlagsToLegacyParams(header.params, header.flags), out, version);
+        }
+
+        private Header deserializeHeaderPre40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
+        {
+            validateLegacyProtocolMagic(in.readInt());
+            int id = in.readInt();
+            long currentTimeNanos = approxTime.now();
+            MonotonicClockTranslation timeSnapshot = approxTime.translate();
+            long creationTimeNanos = calculateCreationTimeNanos(in.readInt(), timeSnapshot, currentTimeNanos);
+            // skip from field
+            inetAddressAndPortSerializer.deserialize(in, version);
+            Verb verb = Verb.fromId(in.readInt());
+            Map<ParamType, Object> params = deserializeParams(in, version);
+            int flags = removeFlagsFromLegacyParams(params);
+            return new Header(id, verb, peer, creationTimeNanos, expiresAtNanosPre40(verb, id, peer, creationTimeNanos), flags, params);
+        }
+
+        private static final int PRE_40_MESSAGE_PREFIX_SIZE = 12; // protocol magic + id + createdAt
+
+        private void skipHeaderPre40(DataInputPlus in) throws IOException
+        {
+            in.skipBytesFully(PRE_40_MESSAGE_PREFIX_SIZE); // magic, id, createdAt
+            in.skipBytesFully(in.readUnsignedByte());      // from
+            in.skipBytesFully(4);                          // verb
+            skipParamsPre40(in);                           // params
+        }
+
+        private int serializedHeaderSizePre40(Header header, int version)
+        {
+            long size = 0;
+            size += PRE_40_MESSAGE_PREFIX_SIZE;
+            size += inetAddressAndPortSerializer.serializedSize(header.from, version);
+            size += sizeof(header.verb.toPre40Verb().id); // refuses a verb the dialect cannot carry, as serialization does
+            size += serializedParamsSize(addFlagsToLegacyParams(header.params, header.flags), version);
+            return Ints.checkedCast(size);
+        }
+
+        private Header extractHeaderPre40(ByteBuffer buf, InetAddressAndPort peer, long currentTimeNanos, int version) throws IOException
+        {
+            MonotonicClockTranslation timeSnapshot = approxTime.translate();
+
+            int index = buf.position();
+
+            validateLegacyProtocolMagic(buf.getInt(index));
+            index += 4; // protocol magic
+
+            long id = buf.getInt(index);
+            index += 4;
+
+            int createdAtMillis = buf.getInt(index);
+            index += 4;
+
+            // skip 'from' field and use the provided one instead
+            inetAddressAndPortSerializer.extract(buf, index);
+            index += 1 + buf.get(index);
+
+            Verb verb = Verb.fromId(buf.getInt(index));
+            index += 4;
+
+            Map<ParamType, Object> params = extractParams(buf, index, version);
+            int flags = removeFlagsFromLegacyParams(params);
+
+            long createdAtNanos = calculateCreationTimeNanos(createdAtMillis, timeSnapshot, currentTimeNanos);
+            long expiresAtNanos = expiresAtNanosPre40(verb, id, peer, createdAtNanos);
+
+            return new Header(id, verb, peer, createdAtNanos, expiresAtNanos, flags, params);
+        }
+
+        /**
+         * A pre-4.0 message has no expiration of its own: a request expires with its verb's timeout, a response (always
+         * one of the generic response verbs in that dialect) with the callback of the request it answers, see
+         * {@link RequestCallbacks#pre40ResponseExpiresAtNanos}.
+         */
+        private static long expiresAtNanosPre40(Verb verb, long id, InetAddressAndPort peer, long createdAtNanos)
+        {
+            return verb == Verb.REQUEST_RSP || verb == Verb.INTERNAL_RSP
+                 ? instance().callbacks.pre40ResponseExpiresAtNanos(id, peer, verb, createdAtNanos)
+                 : verb.expiresAtNanos(createdAtNanos);
+        }
+
+        private <T> void serializePre40(Message<T> message, DataOutputPlus out, int version) throws IOException
+        {
+            if (message.isFailureResponse())
+                message = toPre40FailureResponse(message);
+
+            serializeHeaderPre40(message.header, out, version);
+
+            if (message.payload != null && message.payload != NoPayload.noPayload)
+            {
+                int payloadSize = message.payloadSize(version);
+                out.writeInt(payloadSize);
+                message.getPayloadSerializer().serialize(message.payload, out, version);
+            }
+            else
+            {
+                out.writeInt(0);
+            }
+        }
+
+        private <T> Message<T> deserializePre40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
+        {
+            Header header = deserializeHeaderPre40(in, peer, version);
+            return deserializePre40(in, header, false, version);
+        }
+
+        private <T> Message<T> deserializePre40(DataInputPlus in, Header header, int version) throws IOException
+        {
+            return deserializePre40(in, header, true, version);
+        }
+
+        private <T> Message<T> deserializePre40(DataInputPlus in, Header header, boolean skipHeader, int version) throws IOException
+        {
+            if (skipHeader)
+                skipHeaderPre40(in);
+
+            int payloadSize = in.readInt();
+            T payload = deserializePayloadPre40(in, header, version, getPayloadSerializer(header.verb, header.id, header.from), payloadSize);
+
+            Message<T> message = new Message<>(header, payload);
+
+            return header.params.containsKey(ParamType.FAILURE_RESPONSE)
+                 ? (Message<T>) toPost40FailureResponse(message)
+                 : message;
+        }
+
+        private <T> T deserializePayloadPre40(DataInputPlus in, Header header, int version, IVersionedAsymmetricSerializer<?, T> serializer, int payloadSize) throws IOException
+        {
+            if (payloadSize == 0 || serializer == null)
+            {
+                // if there's no deserializer for the verb, skip the payload bytes to leave
+                // the stream in a clean state (for the next message)
+                if (payloadSize > 0)
+                    onSkippedPayloadPre40(header, payloadSize);
+                in.skipBytesFully(payloadSize);
+                return null;
+            }
+
+            return serializer.deserialize(in, version);
+        }
+
+        /**
+         * A response from a pre-4.0 peer names no verb of its own: its payload can only be read while the callback of
+         * its request is registered. One that arrives after the callback expired (or was never registered, like the
+         * acknowledgement of a one-way message) is skipped, logged at TRACE; a test-visible counter records it.
+         */
+        private static void onSkippedPayloadPre40(Header header, int payloadSize)
+        {
+            skippedPayloadsPre40.incrementAndGet();
+            if (logger.isTraceEnabled())
+                logger.trace("Skipping the {}-byte payload of {} {} from {}: no callback is registered for it",
+                             payloadSize, header.verb, header.id, header.from);
+        }
+
+        @VisibleForTesting
+        static long skippedPayloadsPre40()
+        {
+            return skippedPayloadsPre40.get();
+        }
+
+        private <T> int serializedSizePre40(Message<T> message, int version)
+        {
+            if (message.isFailureResponse())
+                message = toPre40FailureResponse(message);
+
+            long size = 0;
+            size += serializedHeaderSizePre40(message.header, version);
+            int payloadSize = message.payloadSize(version);
+            size += sizeof(payloadSize);
+            size += payloadSize;
+            return Ints.checkedCast(size);
+        }
+
+        /**
+         * The size of the next pre-4.0 message, or -1 when the buffer does not hold enough of it to tell. The lengths and
+         * counts it reads come from the peer: one that no valid message has (a negative one, an address that is neither
+         * IPv4 nor IPv6) fails with {@link InvalidPre40MessageException}, and a message whose lengths already add up to
+         * more than the maximum message size with {@link OversizedMessageException}, before its end is reached; the
+         * sums are made on longs, so that they cannot overflow.
+         */
+        private int inferMessageSizePre40(ByteBuffer buf, int readerIndex, int readerLimit) throws InvalidLegacyProtocolMagic
+        {
+            long index = readerIndex;
+            // protocol magic
+            index += 4;
+            if (index > readerLimit)
+                return -1;
+            validateLegacyProtocolMagic(buf.getInt((int) index - 4));
+
+            // rest of prefix
+            index += PRE_40_MESSAGE_PREFIX_SIZE - 4;
+            // ip address
+            index += 1;
+            if (index > readerLimit)
+                return -1;
+            int addressLength = buf.get((int) index - 1) & 0xFF;
+            if (addressLength != 4 && addressLength != 16)
+                throw new InvalidPre40MessageException("address length " + addressLength + ", neither 4 nor 16");
+            index += addressLength;
+            // verb
+            index += 4;
+            if (index > readerLimit)
+                return -1;
+
+            long paramsSize = extractParamsSizePre40(buf, (int) index, readerLimit, readerIndex);
+            if (paramsSize < 0)
+                return -1;
+            index += paramsSize;
+
+            // payload
+            index += 4;
+
+            if (index > readerLimit)
+                return -1;
+            index += checkPre40Length(buf.getInt((int) index - 4), "payload size");
+
+            long size = index - readerIndex;
+
+            if (size > DatabaseDescriptor.getInternodeMaxMessageSizeInBytes())
+                throw new OversizedMessageException(size);
+            return (int) size;
+        }
+
+        private Message toPre40FailureResponse(Message post40)
+        {
+            Map<ParamType, Object> params = new EnumMap<>(ParamType.class);
+            params.putAll(post40.header.params);
+
+            params.put(ParamType.FAILURE_RESPONSE, LegacyFlag.instance);
+            params.put(ParamType.FAILURE_REASON, post40.payload);
+
+            Header header = new Header(post40.id(), post40.verb().toPre40Verb(), post40.from(), post40.createdAtNanos(), post40.expiresAtNanos(), 0, params);
+            return new Message<>(header, NoPayload.noPayload);
+        }
+
+        private Message<RequestFailureReason> toPost40FailureResponse(Message<?> pre40)
+        {
+            Map<ParamType, Object> params = new EnumMap<>(ParamType.class);
+            params.putAll(pre40.header.params);
+
+            params.remove(ParamType.FAILURE_RESPONSE);
+
+            RequestFailureReason reason = (RequestFailureReason) params.remove(ParamType.FAILURE_REASON);
+            if (null == reason)
+                reason = RequestFailureReason.UNKNOWN;
+
+            Header header = new Header(pre40.id(), Verb.FAILURE_RSP, pre40.from(), pre40.createdAtNanos(), pre40.expiresAtNanos(), pre40.header.flags, params);
+            return new Message<>(header, reason);
         }
 
         /*
@@ -1026,20 +1368,75 @@ public class Message<T>
          * param ser/deser
          */
 
+        private Map<ParamType, Object> addFlagsToLegacyParams(Map<ParamType, Object> params, int flags)
+        {
+            if (flags == 0)
+                return params;
+
+            Map<ParamType, Object> extended = new EnumMap<>(ParamType.class);
+            extended.putAll(params);
+
+            if (MessageFlag.CALL_BACK_ON_FAILURE.isIn(flags))
+                extended.put(ParamType.FAILURE_CALLBACK, LegacyFlag.instance);
+
+            if (MessageFlag.TRACK_REPAIRED_DATA.isIn(flags))
+                extended.put(ParamType.TRACK_REPAIRED_DATA, LegacyFlag.instance);
+
+            return extended;
+        }
+
+        private int removeFlagsFromLegacyParams(Map<ParamType, Object> params)
+        {
+            int flags = 0;
+
+            if (null != params.remove(ParamType.FAILURE_CALLBACK))
+                flags = MessageFlag.CALL_BACK_ON_FAILURE.addTo(flags);
+
+            if (null != params.remove(ParamType.TRACK_REPAIRED_DATA))
+                flags = MessageFlag.TRACK_REPAIRED_DATA.addTo(flags);
+
+            return flags;
+        }
+
+        /** The params of a message that exist in the pre-4.0 dialect: the others are not sent to such a peer. */
+        private static int countParamsPre40(Map<ParamType, Object> params)
+        {
+            int count = 0;
+            for (ParamType type : params.keySet())
+                if (type.legacyAlias != null)
+                    count++;
+            return count;
+        }
+
         private void serializeParams(Map<ParamType, Object> params, DataOutputPlus out, int version) throws IOException
         {
-            out.writeUnsignedVInt32(params.size());
+            if (version >= VERSION_40)
+                out.writeUnsignedVInt32(params.size());
+            else
+                out.writeInt(countParamsPre40(params));
 
             for (Map.Entry<ParamType, Object> kv : params.entrySet())
             {
                 ParamType type = kv.getKey();
-                out.writeUnsignedVInt32(type.id);
+                if (version >= VERSION_40)
+                {
+                    out.writeUnsignedVInt32(type.id);
+                }
+                else
+                {
+                    if (type.legacyAlias == null)
+                        continue;
+                    out.writeUTF(type.legacyAlias);
+                }
 
                 IVersionedSerializer serializer = type.serializer;
                 Object value = kv.getValue();
 
                 int length = Ints.checkedCast(serializer.serializedSize(value, version));
-                out.writeUnsignedVInt32(length);
+                if (version >= VERSION_40)
+                    out.writeUnsignedVInt32(length);
+                else
+                    out.writeInt(length);
 
                 serializer.serialize(value, out, version);
             }
@@ -1047,7 +1444,7 @@ public class Message<T>
 
         private Map<ParamType, Object> deserializeParams(DataInputPlus in, int version) throws IOException
         {
-            int count = in.readUnsignedVInt32();
+            int count = version >= VERSION_40 ? in.readUnsignedVInt32() : in.readInt();
 
             if (count == 0)
                 return NO_PARAMS;
@@ -1056,13 +1453,24 @@ public class Message<T>
 
             for (int i = 0; i < count; i++)
             {
-                ParamType type = ParamType.lookUpById(in.readUnsignedVInt32());
+                String alias = version >= VERSION_40 ? null : in.readUTF();
+                ParamType type = version >= VERSION_40
+                               ? ParamType.lookUpById(in.readUnsignedVInt32())
+                               : ParamType.lookUpByAlias(alias);
 
-                int length = in.readUnsignedVInt32();
+                int length = version >= VERSION_40 ? in.readUnsignedVInt32() : in.readInt();
+                if (version < VERSION_40 && length < 0)
+                    throw new IOException(String.format("The pre-4.0 param %s has a negative declared length of %d bytes", abbreviatedPre40Alias(alias), length));
 
                 if (null != type)
                 {
-                    params.put(type, type.serializer.deserialize(in, version));
+                    // the pre-4.0 FWD_FRM value is a raw address whose length is only known from the param length
+                    if (version < VERSION_40 && type == ParamType.RESPOND_TO)
+                        params.put(type, InetAddressAndPort.FwdFrmSerializer.fwdFrmSerializer.pre40DeserializeWithLength(in, version, length));
+                    else if (version < VERSION_40)
+                        params.put(type, deserializeParamPre40(type, in, version, length));
+                    else
+                        params.put(type, type.serializer.deserialize(in, version));
                 }
                 else
                 {
@@ -1073,9 +1481,71 @@ public class Message<T>
             return params;
         }
 
+        /**
+         * Reads the value of a pre-4.0 param within its declared length: a DSE 6 peer may write a value longer than
+         * what its content needs (the {@code FWD_TO} of a DSE 6.9.26 coordinator is a 128-byte value of which the
+         * targets use only the first bytes, the rest are zeros), so the bytes the serializer
+         * leaves unread are skipped. Cassandra 4.0 and HCD 1.2 read the value with no regard for its length, and so
+         * misread the params after a longer one; this reader does not. A serializer that reads more than the declared
+         * length, or a value cut short by the end of the input, fails the message with an exception naming the param
+         * and the lengths, rather than misframe the params after it; the inbound handler then closes the connection, as
+         * for any message it cannot read.
+         */
+        private static Object deserializeParamPre40(ParamType type, DataInputPlus in, int version, int length) throws IOException
+        {
+            TrackedDataInputPlus tracked = new TrackedDataInputPlus(in);
+            Object value;
+            try
+            {
+                value = type.serializer.deserialize(tracked, version);
+            }
+            catch (EOFException e)
+            {
+                // the count holds only the reads that succeeded: from the declared length on, the serializer wanted more;
+                // below it, the failed read may have wanted bytes of the value, or bytes past it
+                long read = tracked.getBytesRead();
+                throw paramEndOfInput(read >= length
+                                      ? String.format("The serializer of the pre-4.0 param %s needs more than its declared length of %d bytes: it read %d bytes, then reached the end of the input",
+                                                      type.legacyAlias, length, read)
+                                      : String.format("The input ended while the serializer of the pre-4.0 param %s was reading its value: it had read %d of the %d declared bytes",
+                                                      type.legacyAlias, read, length), e);
+            }
+
+            long read = tracked.getBytesRead();
+            if (read > length)
+                throw new IOException(String.format("The serializer of the pre-4.0 param %s read %d bytes, more than its declared length of %d bytes",
+                                                    type.legacyAlias, read, length));
+            if (read < length)
+            {
+                try
+                {
+                    in.skipBytesFully((int) (length - read));
+                }
+                catch (EOFException e)
+                {
+                    throw paramEndOfInput(String.format("The value of the pre-4.0 param %s is cut short: the input ends before its declared length of %d bytes (its serializer read %d bytes)",
+                                                        type.legacyAlias, length, read), e);
+                }
+            }
+            return value;
+        }
+
+        /** A pre-4.0 param name as an error names it: at most its first 64 characters, as the peer may send 65535. */
+        private static String abbreviatedPre40Alias(String alias)
+        {
+            return alias.length() <= 64 ? alias : alias.substring(0, 64) + "...";
+        }
+
+        private static EOFException paramEndOfInput(String message, EOFException cause)
+        {
+            EOFException eof = new EOFException(message);
+            eof.initCause(cause);
+            return eof;
+        }
+
         private Map<ParamType, Object> extractParams(ByteBuffer buf, int readerIndex, int version) throws IOException
         {
-            long count = getUnsignedVInt(buf, readerIndex);
+            long count = version >= VERSION_40 ? getUnsignedVInt(buf, readerIndex) : buf.getInt(readerIndex);
 
             if (count == 0)
                 return NO_PARAMS;
@@ -1104,23 +1574,83 @@ public class Message<T>
             }
         }
 
+        private void skipParamsPre40(DataInputPlus in) throws IOException
+        {
+            int count = in.readInt();
+
+            for (int i = 0; i < count; i++)
+            {
+                in.skipBytesFully(in.readUnsignedShort()); // the name, written by writeUTF: an unsigned short length
+                in.skipBytesFully(in.readInt());
+            }
+        }
+
         private long serializedParamsSize(Map<ParamType, Object> params, int version)
         {
-            long size = computeUnsignedVIntSize(params.size());
+            long size = version >= VERSION_40
+                      ? computeUnsignedVIntSize(params.size())
+                      : sizeof(countParamsPre40(params));
 
             for (Map.Entry<ParamType, Object> kv : params.entrySet())
             {
                 ParamType type = kv.getKey();
+                if (version < VERSION_40 && type.legacyAlias == null)
+                    continue;
                 Object value = kv.getValue();
 
                 long valueLength = type.serializer.serializedSize(value, version);
 
-                size += sizeofUnsignedVInt(type.id) + sizeofUnsignedVInt(valueLength);
+                if (version >= VERSION_40)
+                    size += sizeofUnsignedVInt(type.id) + sizeofUnsignedVInt(valueLength);
+                else
+                    size += sizeof(type.legacyAlias) + 4;
 
                 size += valueLength;
             }
 
             return size;
+        }
+
+        /**
+         * The size of the params of a pre-4.0 message, or -1 when the buffer does not hold all of them; see
+         * {@link #inferMessageSizePre40} for the lengths it refuses. {@code messageStart} is where the message starts, for
+         * the maximum message size.
+         */
+        private long extractParamsSizePre40(ByteBuffer buf, int readerIndex, int readerLimit, int messageStart)
+        {
+            long index = readerIndex;
+
+            index += 4;
+            if (index > readerLimit)
+                return -1;
+            int paramsCount = checkPre40Length(buf.getInt((int) index - 4), "param count");
+
+            for (int i = 0; i < paramsCount; i++)
+            {
+                // try to read length and skip to the end of the param name
+                index += 2;
+
+                if (index > readerLimit)
+                    return -1;
+                index += buf.getShort((int) index - 2) & 0xFFFF; // the name, written by writeUTF: an unsigned short length
+                // try to read length and skip to the end of the param value
+                index += 4;
+                if (index > readerLimit)
+                    return -1;
+                index += checkPre40Length(buf.getInt((int) index - 4), "param length");
+                if (index - messageStart > DatabaseDescriptor.getInternodeMaxMessageSizeInBytes())
+                    throw new OversizedMessageException(index - messageStart);
+            }
+
+            return index - readerIndex;
+        }
+
+        /** A length or count read from a pre-4.0 message, refused when it is negative. */
+        private static int checkPre40Length(int value, String what)
+        {
+            if (value < 0)
+                throw new InvalidPre40MessageException(what + ' ' + value);
+            return value;
         }
 
         private int extractParamsSize(ByteBuffer buf, int readerIndex, int readerLimit)
@@ -1159,7 +1689,40 @@ public class Message<T>
 
     private IVersionedAsymmetricSerializer<T, ?> getPayloadSerializer()
     {
-        return verb().serializer();
+        return getPayloadSerializer(verb(), id(), from());
+    }
+
+    // Verb#serializer() is null for the generic pre-4.0 response verbs REQUEST_RSP and INTERNAL_RSP, which a DSE 6
+    // peer uses for every response: the payload serializer is then the one of the response verb
+    // of the request the callback was registered for.
+    private static <In, Out> IVersionedAsymmetricSerializer<In, Out> getPayloadSerializer(Verb verb, long id, InetAddressAndPort from)
+    {
+        IVersionedAsymmetricSerializer<In, Out> serializer = verb.serializer();
+        return null != serializer
+             ? serializer
+             : instance().callbacks.responseSerializer(id, from);
+    }
+
+    /**
+     * The sizes at the pre-4.0 versions 10 and 11, used in DSE 6 compatibility mode only: allocated on first use, so
+     * that the mode costs a message a single reference when it is off.
+     */
+    private Pre40Sizes pre40Sizes;
+
+    private static final class Pre40Sizes
+    {
+        private final int[] serializedSizes = new int[2];
+        private final int[] payloadSizes = { -1, -1 };
+    }
+
+    private Pre40Sizes pre40Sizes(int version)
+    {
+        if (!DseCompat.enabled())
+            throw new IllegalStateException("Unkown serialization version " + version);
+        Pre40Sizes sizes = pre40Sizes;
+        if (sizes == null)
+            pre40Sizes = sizes = new Pre40Sizes();
+        return sizes;
     }
 
     private int serializedSize40;
@@ -1177,6 +1740,15 @@ public class Message<T>
     {
         switch (version)
         {
+            case VERSION_30:
+            case VERSION_3014:
+            {
+                int[] sizes = pre40Sizes(version).serializedSizes;
+                int index = version - VERSION_30;
+                if (sizes[index] == 0)
+                    sizes[index] = serializer.serializedSize(this, version);
+                return sizes[index];
+            }
             case VERSION_40:
                 if (serializedSize40 == 0)
                     serializedSize40 = serializer.serializedSize(this, VERSION_40);
@@ -1222,6 +1794,15 @@ public class Message<T>
     {
         switch (version)
         {
+            case VERSION_30:
+            case VERSION_3014:
+            {
+                int[] sizes = pre40Sizes(version).payloadSizes;
+                int index = version - VERSION_30;
+                if (sizes[index] < 0)
+                    sizes[index] = serializer.payloadSize(this, version);
+                return sizes[index];
+            }
             case VERSION_40:
                 if (payloadSize40 < 0)
                     payloadSize40 = serializer.payloadSize(this, VERSION_40);
@@ -1259,6 +1840,17 @@ public class Message<T>
     {
         if (payload == other.payload)
         {
+            Pre40Sizes otherPre40 = other.pre40Sizes;
+            if (otherPre40 != null)
+            {
+                // sizes cached in the mode are copied even if the mode was turned off since
+                Pre40Sizes sizes = pre40Sizes;
+                if (sizes == null)
+                    pre40Sizes = sizes = new Pre40Sizes();
+                for (int i = 0; i < sizes.payloadSizes.length; i++)
+                    if (otherPre40.payloadSizes[i] > 0)
+                        sizes.payloadSizes[i] = otherPre40.payloadSizes[i];
+            }
             if (other.payloadSize40 > 0)
                 payloadSize40 = other.payloadSize40;
             if (other.payloadSize50 > 0)
@@ -1278,9 +1870,21 @@ public class Message<T>
 
     static class OversizedMessageException extends RuntimeException
     {
-        OversizedMessageException(int size)
+        OversizedMessageException(long size)
         {
             super("Message of size " + size + " bytes exceeds allowed maximum of " + DatabaseDescriptor.getInternodeMaxMessageSizeInBytes() + " bytes");
+        }
+    }
+
+    /**
+     * A pre-4.0 message (DSE 6 compatibility mode) with a length or count that no valid message has: the stream cannot
+     * be framed any further, and the connection is closed.
+     */
+    static class InvalidPre40MessageException extends RuntimeException
+    {
+        InvalidPre40MessageException(String what)
+        {
+            super("Invalid pre-4.0 message: " + what);
         }
     }
 }

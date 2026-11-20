@@ -1,0 +1,22 @@
+
+ keyspace_name | view_name   | base_table_name | include_all_columns | version | where_clause
+---------------+-------------+-----------------+---------------------+---------+-----------------------------------------------------
+       test_ks |   base_by_v |            base |                True |       1 | v IS NOT NULL AND pk IS NOT NULL AND ck IS NOT NULL
+       test_ks | legacy_by_v |     legacy_base |                True |       0 | v IS NOT NULL AND pk IS NOT NULL AND ck IS NOT NULL
+
+(2 rows)
+
+ keyspace_name | table_name | column_name | clustering_order | column_name_bytes | kind    | position | required_for_liveness | type
+---------------+------------+-------------+------------------+-------------------+---------+----------+-----------------------+------
+       test_ks |  base_by_v |          .v |             none |            0x2e76 | regular |       -1 |                  True | text
+
+(1 rows)
+
+ keyspace_name | table_name  | column_name | clustering_order | column_name_bytes | kind          | position | required_for_liveness | type
+---------------+-------------+-------------+------------------+-------------------+---------------+----------+-----------------------+------
+       test_ks | legacy_by_v |           a |             none |              0x61 |       regular |       -1 |                 False |  int
+       test_ks | legacy_by_v |          ck |              asc |            0x636b |    clustering |        1 |                 False |  int
+       test_ks | legacy_by_v |          pk |              asc |            0x706b |    clustering |        0 |                 False |  int
+       test_ks | legacy_by_v |           v |             none |              0x76 | partition_key |        0 |                 False | text
+
+(4 rows)

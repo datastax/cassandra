@@ -259,6 +259,12 @@ public final class CreateIndexStatement extends AlterSchemaStatement
             throw ire(INDEX_DUPLICATE_OF_EXISTING, index.name, equalIndex.name);
         }
 
+        // IndexMetadata#validate accepts an unknown custom class in DSE 6 compatibility mode, so that the no-op
+        // indexes loaded for the DSE index types left in the schema do not make their table un-alterable; a new
+        // index must still name a class that exists
+        if (attrs.isCustom && DatabaseDescriptor.isDse6CompatibilityMode())
+            FBUtilities.classForName(className, "custom indexer");
+
         TableMetadata newTable = table.withSwapped(table.indexes.with(index));
         newTable.validate();
 

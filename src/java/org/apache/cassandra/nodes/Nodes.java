@@ -223,8 +223,20 @@ public class Nodes
         if (!DatabaseDescriptor.isDaemonInitialized() || NODES_DISABLE_PERSISTING_TO_SYSTEM_KEYSPACE.getBoolean())
             return INodesPersistence.NO_NODES_PERSISTENCE;
         if (CC4NodesFileReader.hasCC4NodesDirectory())
-            return new CC4UpgradeNodesPersistence();
+            return nodesDirectoryImport();
         return new NodesPersistence();
+    }
+
+    /**
+     * The import of the {@code nodes} directory of the metadata directory: DSE's files in
+     * {@code internode_compatibility_mode: DSE_6} or after an import made in it ({@link Dse6UpgradeNodesPersistence}),
+     * else CC4's ({@link CC4UpgradeNodesPersistence}).
+     */
+    @VisibleForTesting
+    static NodesPersistence nodesDirectoryImport()
+    {
+        return Dse6UpgradeNodesPersistence.handlesNodesDirectory() ? new Dse6UpgradeNodesPersistence()
+                                                                   : new CC4UpgradeNodesPersistence();
     }
 
     @VisibleForTesting

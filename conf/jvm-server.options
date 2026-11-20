@@ -101,6 +101,11 @@
 # Imposes an upper bound on hint lifetime below the normal min gc_grace_seconds
 #-Dcassandra.maxHintTTL=max_hint_ttl_in_seconds
 
+# The SAI on-disk version the node writes. Required while upgrading in place from DataStax
+# Enterprise 6 (internode_compatibility_mode: DSE_6), until the flag is dropped: aa for DSE 6.8,
+# ca for DSE 6.9, so that a node rolled back to DSE reads the index files this node wrote.
+#-Dcassandra.sai.latest.version=aa
+
 ########################
 # GENERAL JVM SETTINGS #
 ########################

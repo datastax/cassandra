@@ -25,12 +25,15 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -140,7 +143,12 @@ public abstract class ReadResponse
     protected static ByteBuffer makeDigest(UnfilteredPartitionIterator iterator, ReadCommand command)
     {
         Digest digest = Digest.forReadResponse();
-        UnfilteredPartitionIterators.digest(iterator, digest, command.digestVersion());
+        // a read of a materialized view with a DSE 6 replica: digested as DSE digests the rows it holds for the same data
+        ColumnMetadata dseHidden = DseViewWireFormat.digestHiddenColumn(command);
+        if (dseHidden == null)
+            UnfilteredPartitionIterators.digest(iterator, digest, command.digestVersion());
+        else
+            DseViewWireFormat.digest(DseViewWireFormat.withHiddenCells(iterator, dseHidden), digest, dseHidden);
         return ByteBuffer.wrap(digest.digest());
     }
 
@@ -193,17 +201,49 @@ public abstract class ReadResponse
     // built on the owning node responding to a query
     private static class LocalDataResponse extends DataResponse
     {
+        /** In DSE 6 compatibility mode only, null without it: serializes the data again for a pre-4.0 peer. */
+        private final Pre40Data pre40;
+
         private LocalDataResponse(UnfilteredPartitionIterator iter, ReadCommand command, RepairedDataInfo rdi)
         {
-            super(build(iter, command.columnFilter()),
-                  rdi.getDigest(), rdi.isConclusive(),
-                  MessagingService.current_version,
-                  DeserializationHelper.Flag.LOCAL);
+            this(forCoordinator(iter, command), DseViewWireFormat.responseColumnFilter(command), rdi.getDigest(),
+                 rdi.isConclusive());
         }
 
         private LocalDataResponse(UnfilteredPartitionIterator iter, ColumnFilter selection)
         {
-            super(build(iter, selection), null, false, MessagingService.current_version, DeserializationHelper.Flag.LOCAL);
+            this(iter, selection, null, false);
+        }
+
+        private LocalDataResponse(UnfilteredPartitionIterator iter,
+                                  ColumnFilter selection,
+                                  ByteBuffer repairedDataDigest,
+                                  boolean isRepairedDigestConclusive)
+        {
+            super(build(iter, selection),
+                  repairedDataDigest, isRepairedDigestConclusive,
+                  MessagingService.current_version,
+                  DeserializationHelper.Flag.LOCAL);
+            // the data is read again with the very table and filter it was built with (the table of the iterator,
+            // which build() has consumed, is still at hand)
+            pre40 = DseCompat.enabled() ? new Pre40Data(iter.metadata(), selection) : null;
+        }
+
+        @Override
+        ByteBuffer pre40Data(int version)
+        {
+            return pre40 == null ? super.pre40Data(version) : pre40.at(version, super.pre40Data(version));
+        }
+
+        /**
+         * The data of the response as the coordinator reads it: as it is, except for a read of a materialized view sent
+         * by a DSE 6 coordinator, whose rows carry DSE's hidden cells, and which is serialized with the column filter that
+         * coordinator sent ({@link DseViewWireFormat}).
+         */
+        private static UnfilteredPartitionIterator forCoordinator(UnfilteredPartitionIterator iter, ReadCommand command)
+        {
+            ColumnMetadata dseHidden = DseViewWireFormat.responseHiddenColumn(command);
+            return dseHidden == null ? iter : DseViewWireFormat.withHiddenCells(iter, dseHidden);
         }
 
         private static ByteBuffer build(UnfilteredPartitionIterator iter, ColumnFilter selection)
@@ -212,6 +252,73 @@ public abstract class ReadResponse
             {
                 UnfilteredPartitionIterators.serializerForIntraNode().serialize(iter, selection, buffer, MessagingService.current_version);
                 return buffer.buffer();
+            }
+            catch (IOException e)
+            {
+                // We're serializing in memory so this shouldn't happen
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    /**
+     * The data of a local response serialized again at a pre-4.0 version, for a DSE 6 peer. It is built at the current
+     * version, whose layout of the partitions is that of 3.0 but for the encoding of a LIVE deletion time, which a
+     * 32-bit reader takes for a deletion
+     * ({@link SerializationHeader#writeDeletionTime(DeletionTime, DataOutputPlus, int)}). The message is sized, then
+     * written: the last serialization is kept for the second call. The data is read again with the column filter it
+     * was built with, so that it is serialized again as built: for a read of a materialized view by a DSE 6
+     * coordinator the data is already in DSE's encoding, with DSE's hidden cells, and the filter is the one that
+     * coordinator sent ({@link DseViewWireFormat#responseColumnFilter}), which fetches the hidden column, so the
+     * hidden cells are read as cells of a fetched column and kept. The cost, in DSE 6 compatibility mode only: one more
+     * small object per local data response, and for a response to a DSE 6 peer one more deserialization and
+     * serialization of its data, and a second copy of it, kept as long as the response.
+     */
+    private static final class Pre40Data
+    {
+        private final TableMetadata metadata;
+        private final ColumnFilter selection;
+        private volatile Serialized last;
+
+        /** The data serialized at {@link #version}. */
+        private static final class Serialized
+        {
+            private final int version;
+            private final ByteBuffer data;
+
+            private Serialized(int version, ByteBuffer data)
+            {
+                this.version = version;
+                this.data = data;
+            }
+        }
+
+        private Pre40Data(TableMetadata metadata, ColumnFilter selection)
+        {
+            this.metadata = metadata;
+            this.selection = selection;
+        }
+
+        /** {@code data}, serialized at the current version, serialized at {@code version}. */
+        private ByteBuffer at(int version, ByteBuffer data)
+        {
+            Serialized serialized = last;
+            if (serialized != null && serialized.version == version)
+                return serialized.data;
+
+            try (DataInputBuffer in = new DataInputBuffer(data, true);
+                 UnfilteredPartitionIterator iterator =
+                     UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in,
+                                                                                      MessagingService.current_version,
+                                                                                      metadata,
+                                                                                      selection,
+                                                                                      DeserializationHelper.Flag.LOCAL);
+                 DataOutputBuffer out = new DataOutputBuffer())
+            {
+                UnfilteredPartitionIterators.serializerForIntraNode().serialize(iterator, selection, out, version);
+                ByteBuffer atVersion = out.buffer();
+                last = new Serialized(version, atVersion);
+                return atVersion;
             }
             catch (IOException e)
             {
@@ -264,10 +371,14 @@ public abstract class ReadResponse
                 // Note that the command parameter shadows the 'command' field and this is intended because
                 // the later can be null (for RemoteDataResponse as those are created in the serializers and
                 // those don't have easy access to the command). This is also why we need the command as parameter here.
+                // a DSE 6 replica serialized its data with the column filter it was sent (DseViewWireFormat)
+                ColumnFilter selection = DseCompat.isPre40Layout(dataSerializationVersion)
+                                         ? DseViewWireFormat.columnFilterFor(command, dataSerializationVersion)
+                                         : command.columnFilter();
                 return UnfilteredPartitionIterators.serializerForIntraNode().deserialize(in,
                                                                                          dataSerializationVersion,
                                                                                          command.metadata(),
-                                                                                         command.columnFilter(),
+                                                                                         selection,
                                                                                          flag);
             }
             catch (IOException e)
@@ -275,6 +386,15 @@ public abstract class ReadResponse
                 // We're deserializing in memory so this shouldn't happen
                 throw new RuntimeException(e);
             }
+        }
+
+        /**
+         * The data as sent at {@code version}, a pre-4.0 version (DSE 6 compatibility mode): that of a local response
+         * serialized again at that version, as built otherwise.
+         */
+        ByteBuffer pre40Data(int version)
+        {
+            return data;
         }
 
         public boolean mayIncludeRepairedDigest()
@@ -294,6 +414,25 @@ public abstract class ReadResponse
 
         public ByteBuffer digest(ReadCommand command)
         {
+            // The data of a materialized view from a DSE 6 replica, when the digests are DSE's: digested as that replica
+            // holds it, with the primary key liveness DSE gave its rows, which reading the data replaces by the liveness
+            // of their hidden cells.
+            ColumnMetadata dseHidden = DseViewWireFormat.digestHiddenColumn(command);
+            if (dseHidden != null && DseCompat.isPre40Layout(dataSerializationVersion))
+            {
+                Digest digest = Digest.forReadResponse();
+                try
+                {
+                    DseViewWireFormat.digestDseData(data, dataSerializationVersion, command, dseHidden, digest);
+                }
+                catch (IOException e)
+                {
+                    // We're deserializing in memory so this shouldn't happen
+                    throw new RuntimeException(e);
+                }
+                return ByteBuffer.wrap(digest.digest());
+            }
+
             try (UnfilteredPartitionIterator iterator = makeIterator(command))
             {
                 return makeDigest(iterator, command);
@@ -310,7 +449,8 @@ public abstract class ReadResponse
     {
         public void serialize(ReadResponse response, DataOutputPlus out, int version) throws IOException
         {
-            assert version >= MessagingService.VERSION_40;
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= MessagingService.VERSION_40;
             boolean isDigest = response instanceof DigestResponse;
             ByteBuffer digest = isDigest ? ((DigestResponse)response).digest : ByteBufferUtil.EMPTY_BYTE_BUFFER;
             ByteBufferUtil.writeWithVIntLength(digest, out);
@@ -325,17 +465,23 @@ public abstract class ReadResponse
                 // repaired sstables were read (but they might be on other replicas).
                 // If the coordinator did not request this info, the response contains an empty digest
                 // and a true for the isConclusive flag.
-                ByteBufferUtil.writeWithVIntLength(response.repairedDataDigest(), out);
-                out.writeBoolean(response.isRepairedDigestConclusive());
+                // The pre-4.0 layout (the DSE 6 dialect, which has no repaired-data tracking) omits them altogether.
+                if (!pre40)
+                {
+                    ByteBufferUtil.writeWithVIntLength(response.repairedDataDigest(), out);
+                    out.writeBoolean(response.isRepairedDigestConclusive());
+                }
 
-                ByteBuffer data = ((DataResponse)response).data;
+                // a pre-4.0 peer (DSE 6) gets the data serialized at its version (see DataResponse#pre40Data)
+                ByteBuffer data = pre40 ? ((DataResponse) response).pre40Data(version) : ((DataResponse) response).data;
                 ByteBufferUtil.writeWithVIntLength(data, out);
             }
         }
 
         public ReadResponse deserialize(DataInputPlus in, int version) throws IOException
         {
-            assert version >= MessagingService.VERSION_40;
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= MessagingService.VERSION_40;
             ByteBuffer digest = ByteBufferUtil.readWithVIntLength(in);
             if (digest.hasRemaining())
                 return new DigestResponse(digest);
@@ -343,9 +489,18 @@ public abstract class ReadResponse
             // A data response may also contain a digest of the portion of its payload
             // that comes from the replica's repaired set, along with a flag indicating
             // whether or not the digest may be influenced by unrepaired/pending
-            // repaired data
-            digest = ByteBufferUtil.readWithVIntLength(in);
-            boolean repairedDigestConclusive = in.readBoolean();
+            // repaired data; a pre-4.0 peer (DSE 6) sends neither
+            boolean repairedDigestConclusive;
+            if (!pre40)
+            {
+                digest = ByteBufferUtil.readWithVIntLength(in);
+                repairedDigestConclusive = in.readBoolean();
+            }
+            else
+            {
+                digest = ByteBufferUtil.EMPTY_BYTE_BUFFER;
+                repairedDigestConclusive = true;
+            }
 
             ByteBuffer data = ByteBufferUtil.readWithVIntLength(in);
             return new RemoteDataResponse(data, digest, repairedDigestConclusive, version);
@@ -353,7 +508,8 @@ public abstract class ReadResponse
 
         public long serializedSize(ReadResponse response, int version)
         {
-            assert version >= MessagingService.VERSION_40;
+            boolean pre40 = DseCompat.isPre40Layout(version);
+            assert pre40 || version >= MessagingService.VERSION_40;
             boolean isDigest = response instanceof DigestResponse;
             ByteBuffer digest = isDigest ? ((DigestResponse)response).digest : ByteBufferUtil.EMPTY_BYTE_BUFFER;
             long size = ByteBufferUtil.serializedSizeWithVIntLength(digest);
@@ -362,13 +518,17 @@ public abstract class ReadResponse
             {
                 // From 4.0, a coordinator may request an additional info about the repaired data
                 // that makes up the response.
-                size += ByteBufferUtil.serializedSizeWithVIntLength(response.repairedDataDigest());
-                size += 1;
+                if (!pre40)
+                {
+                    size += ByteBufferUtil.serializedSizeWithVIntLength(response.repairedDataDigest());
+                    size += 1;
+                }
 
                 // In theory, we should deserialize/re-serialize if the version asked is different from the current
                 // version as the content could have a different serialization format. So far though, we haven't made
-                // change to partition iterators serialization since 3.0 so we skip this.
-                ByteBuffer data = ((DataResponse)response).data;
+                // change to partition iterators serialization since 3.0 so we skip this, except for a pre-4.0 peer
+                // (DSE 6), which reads a LIVE deletion time only in its own encoding (see DataResponse#pre40Data).
+                ByteBuffer data = pre40 ? ((DataResponse) response).pre40Data(version) : ((DataResponse) response).data;
                 size += ByteBufferUtil.serializedSizeWithVIntLength(data);
             }
             return size;

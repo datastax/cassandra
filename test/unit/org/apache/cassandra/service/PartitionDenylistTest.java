@@ -25,13 +25,16 @@ import org.junit.Test;
 
 import org.apache.cassandra.ServerTestUtils;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
 import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.statements.schema.CreateTableStatement;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
+import org.apache.cassandra.schema.PartitionDenylist;
 import org.apache.cassandra.schema.SchemaTestUtil;
 import org.apache.cassandra.schema.Tables;
 
@@ -140,6 +143,44 @@ public class PartitionDenylistTest
         assertThatThrownBy(() -> process("SELECT * FROM " + ks_cql + ".table1 WHERE keyone='bbb' and keytwo='ccc'", ConsistencyLevel.ONE))
                            .isInstanceOf(InvalidRequestException.class)
                            .hasMessageContaining("Unable to read denylisted partition");
+    }
+
+    /**
+     * In the DSE 6 compatibility mode the denylist is off, whatever partition_denylist_enabled says (its table is created
+     * once the mode is dropped): nothing is denied, and loading it or changing it is refused with the reason.
+     */
+    @Test
+    public void testDenylistOffInDse6Mode()
+    {
+        String unavailable = "the partition denylist is unavailable: table system_distributed.partition_denylist is missing in " +
+                             "internode_compatibility_mode DSE_6 (DSE 6 does not have it): the replicated system keyspaces keep DSE 6's " +
+                             "definitions during the upgrade, and this software creates its own tables in them at the first start with " +
+                             "internode_compatibility_mode NONE";
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        long refusedBefore = DseCompatRefusals.count(PartitionDenylist.REFUSED_IN_DSE6);
+        int attemptsBefore = StorageProxy.instance.getPartitionDenylistLoadAttempts();
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+            // the key denylisted by setup() is not denied in the mode
+            process("SELECT * FROM " + ks_cql + ".table1 WHERE keyone='bbb' and keytwo='ccc'", ConsistencyLevel.ONE);
+            Assert.assertFalse(StorageProxy.instance.isKeyDenylisted(ks_cql, "table1", "bbb:ccc"));
+
+            assertThatThrownBy(() -> denylist("table1", "aaa:bbb")).isInstanceOf(IllegalStateException.class).hasMessage(unavailable);
+            assertThatThrownBy(() -> removeDenylist(ks_cql, "table1", "bbb:ccc")).isInstanceOf(IllegalStateException.class).hasMessage(unavailable);
+            assertThatThrownBy(PartitionDenylistTest::refreshList).isInstanceOf(IllegalStateException.class).hasMessage(unavailable);
+            Assert.assertEquals(refusedBefore + 3, DseCompatRefusals.count(PartitionDenylist.REFUSED_IN_DSE6));
+
+            // the start-up load is skipped, not retried
+            StorageProxy.instance.initialLoadPartitionDenylist();
+            Assert.assertEquals(attemptsBefore, StorageProxy.instance.getPartitionDenylistLoadAttempts());
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+        }
+        // without the mode the key is denied again
+        testReadDenylisted();
     }
 
     @Test
