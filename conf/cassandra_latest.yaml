@@ -2280,7 +2280,19 @@ storage_compatibility_mode: NONE
 # generations too, without the storage mode and paxos checks. Clients that do not read this file
 # (CQLSSTableWriter, sstableloader) inherit it only through the system property below. Remove the
 # setting (or set NONE) with a rolling restart once every node runs this software.
+# Set to DSE_5_1 on every node of a cluster that is being upgraded in place from DataStax
+# Enterprise 5.1.51. So far this mode only checks the settings: it requires
+# storage_compatibility_mode HCD_1, sstable format big (selected_format: big in the sstable
+# section), paxos_variant v1 (also at runtime), the default compression selector and
+# flush_compression fast or table, refuses to start while a table is compressed with another
+# compressor than LZ4Compressor, SnappyCompressor or DeflateCompressor (the ones DSE 5.1 reads),
+# and forces uuid_sstable_identifiers_enabled off. The node still writes big sstables of version
+# nb, which DSE 5.1 does not read, and does not connect to DSE 5.1 nodes. Offline tools that read
+# this file inherit the checks of the sstable format, the compression selector and
+# flush_compression, and the numeric generations (they write big oa sstables, without the storage
+# mode); clients that set the system property below get the big format selected instead of
+# refused.
 # The system property cassandra.internode_compatibility_mode overrides this setting.
-# Possible values: NONE (default), DSE_6.
+# Possible values: NONE (default), DSE_6, DSE_5_1.
 #
 #internode_compatibility_mode: NONE

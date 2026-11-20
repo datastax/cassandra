@@ -28,15 +28,27 @@ package org.apache.cassandra.config;
  * states, and refuses the operations a mixed cluster cannot run (topology changes, repair, sstable rewrites, schema
  * changes).
  * <p>
+ * {@link #DSE_5_1} is the mode of the in-place upgrade of a DataStax Enterprise 5.1.51 cluster. So far it only checks
+ * the settings: it requires {@code storage_compatibility_mode: HCD_1}, the {@code big} sstable format and
+ * {@code paxos_variant: v1}, writes numeric sstable generations, refuses the compressors DSE 5.1 does not read, and
+ * refuses the authenticators and authorizers that read tables of {@code system_auth} DSE 5.1 does not have. The node
+ * still writes big sstables of version {@code nb}, which DSE 5.1 does not read, and speaks no pre-4.0 dialect, so it
+ * cannot connect to DSE 5.1 nodes. Offline tools inherit the checks of the on-disk settings only (they write big
+ * {@code oa}, without the storage mode); clients, which do not read {@code cassandra.yaml}, get the {@code big} format
+ * and numeric generations forced.
+ * <p>
  * The mode is removed with a rolling restart once every node runs this software.
  */
 public enum InternodeCompatibilityMode
 {
     /** Only the native dialects of this software; the default. */
-    NONE,
+    NONE(null),
 
     /** The in-place upgrade from DataStax Enterprise 6.8/6.9; see the class comment. */
-    DSE_6;
+    DSE_6("DSE 6"),
+
+    /** The in-place upgrade from DataStax Enterprise 5.1.51; see the class comment. */
+    DSE_5_1("DSE 5.1");
 
     /**
      * The trie index format version written while in {@link #DSE_6} mode: DSE's own current version.
@@ -45,8 +57,37 @@ public enum InternodeCompatibilityMode
      */
     public static final String DSE_6_TRIE_INDEX_FORMAT_VERSION = "bb";
 
+    private final String source;
+
+    InternodeCompatibilityMode(String source)
+    {
+        this.source = source;
+    }
+
+    /** True for {@link #DSE_6}. */
     public boolean isDse6()
     {
         return this == DSE_6;
+    }
+
+    /** True for {@link #DSE_5_1}. */
+    public boolean isDse51()
+    {
+        return this == DSE_5_1;
+    }
+
+    /** True for a mode of an upgrade from DSE: {@link #DSE_6} or {@link #DSE_5_1}. */
+    public boolean isDse()
+    {
+        return source != null;
+    }
+
+    /**
+     * The DSE release the mode upgrades from, as the texts of the mode name it ({@code DSE 6}, {@code DSE 5.1});
+     * null for {@link #NONE}.
+     */
+    public String source()
+    {
+        return source;
     }
 }
