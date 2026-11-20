@@ -292,6 +292,7 @@
         <string>-XX:+ParallelRefProcEnabled</string>
         <string>-XX:MaxTenuringThreshold=1</string>
         <string>-XX:G1HeapRegionSize=16m</string>
+        <string>-XX:-UseBASE64Intrinsics</string>
 
         <string>--add-exports java.base/jdk.internal.misc=ALL-UNNAMED</string>
         <string>--add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED</string>
@@ -334,6 +335,7 @@
         <string>-XX:+ParallelRefProcEnabled</string>
         <string>-XX:MaxTenuringThreshold=1</string>
         <string>-XX:G1HeapRegionSize=16m</string>
+        <string>-XX:-UseBASE64Intrinsics</string>
 
         <string>--add-exports java.base/jdk.internal.misc=ALL-UNNAMED</string>
         <string>--add-exports java.management.rmi/com.sun.jmx.remote.internal.rmi=ALL-UNNAMED</string>
@@ -380,6 +382,7 @@
         <string>-XX:G1HeapRegionSize=16m</string>-->
         <string>-XX:G1RSetUpdatingPauseTimePercent=5</string>
         <string>-XX:MaxGCPauseMillis=100</string>
+        <string>-XX:-UseBASE64Intrinsics</string>
 
         <!-- Copy-paste for now these options from cndb/docker-entrypoint.sh; we will verify later whether we
          want all of them for tests-->
