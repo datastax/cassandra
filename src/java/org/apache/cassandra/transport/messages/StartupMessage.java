@@ -24,6 +24,7 @@ import io.netty.buffer.ByteBuf;
 
 import org.apache.cassandra.auth.IAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.*;
@@ -146,7 +147,7 @@ public class StartupMessage extends Message.Request
     }
 
     @Override
-    public String toString()
+    public String toString(Redaction redaction)
     {
         return "STARTUP " + options;
     }

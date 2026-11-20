@@ -38,6 +38,7 @@ import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.NumberType;
+import org.apache.cassandra.db.marshal.RedactionUtil;
 import org.apache.cassandra.db.marshal.StringType;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -280,7 +281,11 @@ public abstract class Constants
         public Value prepare(String keyspace, ColumnSpecification receiver) throws InvalidRequestException
         {
             if (!testAssignment(keyspace, receiver).isAssignable())
-                throw new InvalidRequestException(String.format("Invalid %s constant (%s) for \"%s\" of type %s", type, text, receiver.name, receiver.type.asCQL3Type()));
+            {
+                String format = "Invalid %s constant (%s) for \"%s\" of type %s";
+                throw new InvalidRequestException(String.format(format, type, text, receiver.name, receiver.type.asCQL3Type()),
+                                                  String.format(format, type, RedactionUtil.redact(text.length()), receiver.name, receiver.type.asCQL3Type()));
+            }
 
             return new Value(parsedValue(receiver.type));
         }

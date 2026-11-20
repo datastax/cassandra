@@ -142,6 +142,7 @@ public class DatabaseDescriptorRefTest
     "org.apache.cassandra.db.commitlog.CommitLogSegmentManagerStandard",
     "org.apache.cassandra.db.compaction.unified.Reservations$Type",
     "org.apache.cassandra.db.guardrails.GuardrailsConfig",
+    "org.apache.cassandra.db.marshal.RedactionUtil$WithRedactedMessage",
     "org.apache.cassandra.dht.IPartitioner",
     "org.apache.cassandra.exceptions.CassandraException",
     "org.apache.cassandra.exceptions.ConfigurationException",

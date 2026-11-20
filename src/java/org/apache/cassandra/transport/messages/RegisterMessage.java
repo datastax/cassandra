@@ -22,6 +22,7 @@ import java.util.List;
 
 import io.netty.buffer.ByteBuf;
 
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.transport.*;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -85,7 +86,7 @@ public class RegisterMessage extends Message.Request
     }
 
     @Override
-    public String toString()
+    public String toString(Redaction redaction)
     {
         return "REGISTER " + eventTypes;
     }

@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.cql3.functions.FunctionName;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.exceptions.*;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.transport.*;
@@ -462,7 +463,20 @@ public class ErrorMessage extends Message.Response
     @Override
     public String toString()
     {
-        return "ERROR " + error.code() + ": " + error.getMessage();
+        return toString(Redaction.NONE);
+    }
+
+    /**
+     * The message of the exception is only added when no redaction is requested, since it can contain sensitive data,
+     * such as the values that made a function fail.
+     */
+    @Override
+    public String toString(Redaction redaction)
+    {
+        String result = "ERROR " + error.code();
+        if (redaction == Redaction.NONE)
+            result += ": " + error.getMessage();
+        return result;
     }
 
     public static RuntimeException wrap(Throwable t, int streamId)

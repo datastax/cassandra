@@ -24,6 +24,15 @@ public class InvalidRequestException extends RequestValidationException
         super(ExceptionCode.INVALID, msg);
     }
 
+    /**
+     * @param msg the message for the client, possibly containing sensitive data
+     * @param redactedMessage the same message without sensitive data, so it can be written to logs
+     */
+    public InvalidRequestException(String msg, String redactedMessage)
+    {
+        super(ExceptionCode.INVALID, msg, redactedMessage);
+    }
+
     public InvalidRequestException(String msg, Throwable t)
     {
         super(ExceptionCode.INVALID, msg, t);

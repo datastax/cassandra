@@ -422,6 +422,29 @@ public abstract class Tracing extends ExecutorLocals.Impl
     }
 
     /**
+     * Traces a message with an argument that contains sensitive data, such as user-provided values.
+     * <p>
+     * The message formatted with {@code sensitiveArg} is the one recorded in the trace events sent to the client.
+     * The message formatted with {@code redactedArg} is the one that can be written to the server logs, so it
+     * shouldn't contain sensitive data.
+     * <p>
+     * Since both arguments are built by the caller, callers where building them is expensive should check
+     * {@link #isTracing()} first.
+     *
+     * @param message the message format, with a single {@code {}} placeholder for the argument
+     * @param sensitiveArg the argument for the message sent to the client, possibly containing sensitive data
+     * @param redactedArg the same argument without any sensitive data
+     */
+    public static void traceSensitive(String message, String sensitiveArg, String redactedArg)
+    {
+        final TraceState state = instance.get();
+        if (state == null) // inline isTracing to avoid implicit two calls to state.get()
+            return;
+
+        state.traceSensitive(message, sensitiveArg, redactedArg);
+    }
+
+    /**
      * Called for non-local traces (traces that are not initiated by local node == coordinator).
      */
     public abstract void trace(ClientState clientState, ByteBuffer sessionId, String message, int ttl);
