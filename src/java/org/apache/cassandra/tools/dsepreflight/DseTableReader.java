@@ -23,8 +23,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 import java.util.regex.Pattern;
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -57,13 +58,15 @@ import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**
- * Reads the rows of one table from the sstables DSE left in a node's data directories, offline and read-only: the
- * sstables of committed transactions only ({@link LifecycleTransaction#getFiles}), opened without validation, which
- * neither rebuilds nor saves any component. The table is described by the serialization headers of its sstables (the
- * union of their columns, with the types DSE wrote), so that a column DSE has and this software does not, such as the
- * {@code restricted} set of DSE's {@code system_auth.role_permissions}, is read too; the primary key columns are named
- * by the caller. The sstables are merged as a node merges them, so rows deleted later (a keyspace DSE dropped, for
- * instance) are not returned.
+ * Reads the rows of one table from a node's sstables, offline and read-only: those of the data directories or of a
+ * snapshot of the table, or one sstable on its own ({@link #readSSTable}), written by DSE or by HCD 2.0. Only the
+ * sstables of committed transactions are read ({@link LifecycleTransaction#getFiles}), only in the trie format, and they
+ * are opened without validation, which neither rebuilds nor saves any component. The table is described by the
+ * serialization headers of its sstables (the union of their columns, with the types they were written with), so that a
+ * column DSE has and this software does not, such as the {@code restricted} set of DSE's
+ * {@code system_auth.role_permissions}, is read too; the primary key columns are named by the caller. The sstables read
+ * together are merged as a node merges them, so rows deleted later (a keyspace DSE dropped, for instance) are not
+ * returned.
  */
 final class DseTableReader
 {
@@ -101,29 +104,64 @@ final class DseTableReader
      */
     static TableRows read(List<File> dataDirectories, String keyspace, String table, List<String> partitionKey, List<String> clustering) throws IOException
     {
+        return read(dataDirectories, null, keyspace, table, partitionKey, clustering);
+    }
+
+    /**
+     * Reads every live row of {@code keyspace.table} from the data directories, or, when {@code snapshot} is not null,
+     * from the snapshot of that name of the table ({@code <table directory>/snapshots/<snapshot>}) instead; the table is
+     * {@link TableRows#found} when a directory of it (of the snapshot) exists.
+     *
+     * @see #read(List, String, String, List, List)
+     */
+    static TableRows read(List<File> dataDirectories, @Nullable String snapshot, String keyspace, String table, List<String> partitionKey, List<String> clustering) throws IOException
+    {
         List<Descriptor> descriptors = new ArrayList<>();
-        boolean found = descriptors(dataDirectories, keyspace, table, descriptors);
+        boolean found = descriptors(dataDirectories, snapshot, keyspace, table, descriptors);
         List<String> names = new ArrayList<>(descriptors.size());
         for (Descriptor descriptor : descriptors)
             names.add(descriptor.baseFile().toString());
         if (descriptors.isEmpty())
             return new TableRows(List.of(), names, found);
-        // only the trie formats DSE 6 writes are opened: opening an sstable of the big format loads its summary, which
-        // deletes a Summary.db it cannot load and may rewrite TOC.txt (the scan of the data directories reports such
-        // sstables, which DSE must rewrite with upgradesstables)
         for (Descriptor descriptor : descriptors)
-            if (!(descriptor.version.format instanceof BtiFormat))
-                throw new IOException(descriptor.baseFile() + " is in the " + descriptor.version.format.name() + " format, which this tool does not " +
-                                      "read: run nodetool upgradesstables on DSE first");
+            checkTrieFormat(descriptor);
 
         TableMetadata metadata = metadataFromHeaders(keyspace, table, descriptors, partitionKey, clustering);
         List<UntypedResultSet.Row> rows = new ArrayList<>();
-        rows(descriptors, metadata, rows::add);
+        rows(descriptors, metadata, (row, cells) -> rows.add(row));
         return new TableRows(rows, names, found);
     }
 
-    /** The descriptors of the sstables of committed transactions in one table directory. */
-    private static List<Descriptor> sstablesIn(File directory)
+    /**
+     * Passes every live row of one sstable on its own, described by its own serialization header, to {@code consumer}, one
+     * at a time, with its live cells (for their timestamps and expiry): the rows a node reading that sstable alone would
+     * return, never all held in memory.
+     *
+     * @throws IOException when the sstable cannot be read, or is not in a trie format
+     * @throws RuntimeException when the sstable cannot be decoded
+     */
+    static void readSSTable(Descriptor descriptor, List<String> partitionKey, List<String> clustering, BiConsumer<UntypedResultSet.Row, Row> consumer) throws IOException
+    {
+        checkTrieFormat(descriptor);
+        TableMetadata metadata = metadataFromHeaders(descriptor.ksname, descriptor.cfname, List.of(descriptor), partitionKey, clustering);
+        rows(List.of(descriptor), metadata, consumer);
+    }
+
+    /**
+     * Refuses an sstable that is not in a trie format, before anything of it is opened: opening an sstable of the big
+     * format loads its summary, which deletes a Summary.db it cannot load and may rewrite or create TOC.txt, even offline.
+     * Neither DSE 6 nor HCD 2.0 in {@code DSE_6} mode writes the big format, and the node inspection reports the big
+     * sstables left by an earlier release as blocking.
+     */
+    private static void checkTrieFormat(Descriptor descriptor) throws IOException
+    {
+        if (!(descriptor.version.format instanceof BtiFormat))
+            throw new IOException(descriptor.baseFile() + " is in the " + descriptor.version.format.name() + " format, which this tool does not read: " +
+                                  "opening it could delete or rewrite some of its files");
+    }
+
+    /** The descriptors of the sstables of committed transactions in one directory: a table directory, or a snapshot of one. */
+    static List<Descriptor> sstablesIn(File directory)
     {
         List<Descriptor> descriptors = new ArrayList<>();
         // a transaction log that cannot be read fails the read: the schema must be exact, and the startup of HCD 2.0 would
@@ -136,8 +174,8 @@ final class DseTableReader
         return descriptors;
     }
 
-    /** Passes the live rows of the sstables given, merged as a node merges them, to {@code consumer}. */
-    private static void rows(List<Descriptor> descriptors, TableMetadata metadata, Consumer<UntypedResultSet.Row> consumer) throws IOException
+    /** Passes the live rows of the sstables given, merged as a node merges them, to {@code consumer}, each with its live cells. */
+    private static void rows(List<Descriptor> descriptors, TableMetadata metadata, BiConsumer<UntypedResultSet.Row, Row> consumer) throws IOException
     {
         List<SSTableReader> readers = new ArrayList<>(descriptors.size());
         List<UnfilteredPartitionIterator> scanners = new ArrayList<>(descriptors.size());
@@ -166,7 +204,7 @@ final class DseTableReader
                         while (partition.hasNext())
                         {
                             Row row = partition.next();
-                            consumer.accept(UntypedResultSet.Row.fromInternalRow(metadata, partition.partitionKey(), row));
+                            consumer.accept(UntypedResultSet.Row.fromInternalRow(metadata, partition.partitionKey(), row), row);
                         }
                     }
                 }
@@ -190,17 +228,18 @@ final class DseTableReader
     static TableMetadata metadataFromSSTables(List<File> dataDirectories, String keyspace, String table, List<String> partitionKey, List<String> clustering) throws IOException
     {
         List<Descriptor> descriptors = new ArrayList<>();
-        descriptors(dataDirectories, keyspace, table, descriptors);
+        descriptors(dataDirectories, null, keyspace, table, descriptors);
         if (descriptors.isEmpty())
             throw new IllegalStateException("no sstable of " + keyspace + '.' + table + " in " + dataDirectories);
         return metadataFromHeaders(keyspace, table, descriptors, partitionKey, clustering);
     }
 
     /**
-     * Adds the descriptors of the sstables of committed transactions of {@code keyspace.table} in the data directories to
-     * {@code descriptors}; returns whether a directory of the table exists.
+     * Adds the descriptors of the sstables of committed transactions of {@code keyspace.table} in the data directories
+     * (in its snapshot {@code snapshot}, when not null) to {@code descriptors}; returns whether a directory of the table
+     * (of the snapshot) exists.
      */
-    private static boolean descriptors(List<File> dataDirectories, String keyspace, String table, List<Descriptor> descriptors)
+    private static boolean descriptors(List<File> dataDirectories, @Nullable String snapshot, String keyspace, String table, List<Descriptor> descriptors)
     {
         boolean found = false;
         for (File dataDirectory : dataDirectories)
@@ -210,8 +249,11 @@ final class DseTableReader
                 continue;
             for (File tableDirectory : keyspaceDirectory.listUnchecked(f -> f.isDirectory() && (isDirectoryOf(f.name(), table) || f.name().equals(table))))
             {
+                File directory = snapshot == null ? tableDirectory : new File(new File(tableDirectory, Directories.SNAPSHOT_SUBDIR), snapshot);
+                if (!directory.isDirectory())
+                    continue;
                 found = true;
-                descriptors.addAll(sstablesIn(tableDirectory));
+                descriptors.addAll(sstablesIn(directory));
             }
         }
         return found;
@@ -224,6 +266,12 @@ final class DseTableReader
     static boolean isDirectoryOf(String name, String table)
     {
         return name.length() == table.length() + 33 && name.startsWith(table + '-') && TABLE_ID.matcher(name.substring(table.length() + 1)).matches();
+    }
+
+    /** Whether a directory named {@code name} is the directory of some table named with its id, {@code <table>-<table id>}. */
+    static boolean isTableDirectoryName(String name)
+    {
+        return name.length() > 33 && isDirectoryOf(name, name.substring(0, name.length() - 33));
     }
 
     /**
