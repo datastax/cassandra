@@ -123,6 +123,51 @@ public class ReplicaFilteringWithStaticsTest extends TestBaseImpl
     }
 
     @Test
+    public void testDisjunctionAcrossStaticAndRegularColumns()
+    {
+        testDisjunctionAcrossStaticAndRegularColumns(false);
+    }
+
+    @Test
+    public void testDisjunctionAcrossStaticAndRegularColumnsSAI()
+    {
+        testDisjunctionAcrossStaticAndRegularColumns(true);
+    }
+
+    public void testDisjunctionAcrossStaticAndRegularColumns(boolean sai)
+    {
+        String table = "static_or_regular" + (sai ? "_sai" : "");
+        CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s." + table + " (pk int, ck int, s int static, v int, PRIMARY KEY (pk, ck)) WITH read_repair = 'NONE'"));
+        disableCompaction(CLUSTER, KEYSPACE, table);
+
+        if (sai)
+        {
+            CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s." + table + "(s) USING 'sai'"));
+            CLUSTER.schemaChange(withKeyspace("CREATE INDEX ON %s." + table + "(v) USING 'sai'"));
+            SAIUtil.waitForIndexQueryableOnFirstNode(CLUSTER, KEYSPACE);
+        }
+
+        CLUSTER.coordinator(1).execute(withKeyspace("INSERT INTO %s." + table + " (pk, ck, s, v) VALUES (1, 1, 1, 10)"), ALL);
+        CLUSTER.coordinator(1).execute(withKeyspace("INSERT INTO %s." + table + " (pk, ck, s, v) VALUES (2, 1, 2, 20)"), ALL);
+        CLUSTER.coordinator(1).execute(withKeyspace("INSERT INTO %s." + table + " (pk, ck, s, v) VALUES (3, 1, 3, 30)"), ALL);
+
+        // Only one replica knows that this row now matches, and only another one that its partition doesn't match anymore
+        CLUSTER.get(1).executeInternal(withKeyspace("UPDATE %s." + table + " USING TIMESTAMP " + (Long.MAX_VALUE / 2) + " SET v = 40 WHERE pk = 3 AND ck = 1"));
+        CLUSTER.get(2).executeInternal(withKeyspace("UPDATE %s." + table + " USING TIMESTAMP " + (Long.MAX_VALUE / 2) + " SET s = 9 WHERE pk = 1"));
+
+        String filtering = sai ? "" : " ALLOW FILTERING";
+
+        // A row matches with no match of its static row, so the filter at the coordinator must not drop its partition.
+        assertRows(CLUSTER.coordinator(1).executeWithPaging(withKeyspace("SELECT pk, ck FROM %s." + table + " WHERE s = 8 OR v = 20" + filtering), ALL, 1),
+                   row(2, 1));
+        assertRows(CLUSTER.coordinator(1).executeWithPaging(withKeyspace("SELECT pk, ck FROM %s." + table + " WHERE s = 2 OR v = 40" + filtering), ALL, 1),
+                   row(2, 1), row(3, 1));
+        // Both conditions of a branch must match.
+        assertRows(CLUSTER.coordinator(1).executeWithPaging(withKeyspace("SELECT pk, ck FROM %s." + table + " WHERE (s = 1 AND v = 10) OR v = 20" + filtering), ALL, 1),
+                   row(2, 1));
+    }
+
+    @Test
     public void testMissingStaticRowWithNonStaticExpression()
     {
         testMissingStaticRowWithNonStaticExpression(false);
