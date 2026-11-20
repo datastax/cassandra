@@ -363,7 +363,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
                 if (dseVersion.find())
                     description.append(", DSE ").append(dseVersion.group(1));
             }
-            result.put(e.getKey().getHostAddressAndPort(), description.append(", ").append(identification(identified.get(e.getKey()))).toString());
+            result.put(e.getKey().getHostAddressAndPort(), description.append(", ").append(ordinals(identified.get(e.getKey()))).toString());
         }
         // the other identified peers: identified by a handshake, with no gossip state yet, a state without NET_VERSION
         // (after a restart) or a NET_VERSION of an earlier life (a node of this software rolled back to DSE)
@@ -374,15 +374,15 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
             if (e.getKey().equals(self) || result.containsKey(key) || DsePeers.hasLeftTheRing(state))
                 continue;
             VersionedValue netVersion = state == null ? null : state.getApplicationState(ApplicationState.NET_VERSION);
-            result.put(key, "NET_VERSION " + (netVersion == null ? "unknown" : netVersion.value) + ", " + identification(e.getValue()));
+            result.put(key, "NET_VERSION " + (netVersion == null ? "unknown" : netVersion.value) + ", " + ordinals(e.getValue()));
         }
         return result;
     }
 
-    /** Whether {@link DsePeers} identified a peer as a DSE node, and by what (null when it did not). */
-    private static String identification(String evidence)
+    /** Which ordinals gossip with a peer uses, from what {@link DsePeers} identified it by (null when it did not). */
+    private static String ordinals(String evidence)
     {
-        return evidence == null ? "not identified as DSE by a handshake" : "identified as DSE (" + evidence + ')';
+        return evidence == null ? "gossip ordinals: this software's (not identified as DSE yet)" : "gossip ordinals: DSE's (" + evidence + ')';
     }
 
     @Override
