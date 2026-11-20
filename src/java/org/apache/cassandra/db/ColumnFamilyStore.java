@@ -173,6 +173,7 @@ import org.apache.cassandra.sensors.RequestTracker;
 import org.apache.cassandra.sensors.Type;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.CacheService;
+import org.apache.cassandra.service.DseUpgradeGuards;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.service.paxos.PaxosRepairHistory;
@@ -1083,7 +1084,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean, Memtable.Owner
     @Override
     public void loadNewSSTables()
     {
-
+        DseUpgradeGuards.refuseWhileUpgrading("refresh");
         SSTableImporter.Options options = SSTableImporter.Options.options().resetLevel(true).build();
         sstableImporter.importNewSSTables(options);
     }
