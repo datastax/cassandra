@@ -1,0 +1,6 @@
+ADD:[/dev/shm/cassandra/data/txn_ks/txn-0a90f7d0d9ca11f197644fa0c9d7f524/me-5-big,0,8][2432998224]
+REMOVE:[/dev/shm/cassandra/data/txn_ks/txn-0a90f7d0d9ca11f197644fa0c9d7f524/me-1-big,1793959727055,8][3751798068]
+REMOVE:[/dev/shm/cassandra/data/txn_ks/txn-0a90f7d0d9ca11f197644fa0c9d7f524/me-4-big,1793959737286,8][2469911268]
+REMOVE:[/dev/shm/cassandra/data/txn_ks/txn-0a90f7d0d9ca11f197644fa0c9d7f524/me-2-big,1793959731145,8][4258145387]
+REMOVE:[/dev/shm/cassandra/data/txn_ks/txn-0a90f7d0d9ca11f197644fa0c9d7f524/me-3-big,1793959734397,8][4042352149]
+COMMIT:[,0,0][2613697770]

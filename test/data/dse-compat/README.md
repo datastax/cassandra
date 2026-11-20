@@ -1,14 +1,17 @@
 # Artefacts written by real DataStax Enterprise nodes
 
-These files are the test fixtures of the DSE 6 internode compatibility mode
-(`internode_compatibility_mode: DSE_6`, see `docs/dse-to-cc5/`). They were produced by running DSE,
+These files are the test fixtures of the DSE 6 and DSE 5.1 internode compatibility modes
+(`internode_compatibility_mode: DSE_6` and `DSE_5_1`, see `docs/dse-to-cc5/`). They were produced by running DSE,
 never by hand (the one exception, `conf/`, is the configuration the lab's Ansible rendered for a DSE
-node), and are read through `org.apache.cassandra.dsecompat.DseFixtures`. Two DSE versions:
+node), and are read through `org.apache.cassandra.dsecompat.DseFixtures`. Three DSE versions, two of them DSE 6 (the
+DSE 5.1.51 fixtures of the DSE 5.1 series, `dse-5.1.51*`, come from local clusters and have their own section,
+with the edits it declares, at the end):
 
 | Directory suffix | DSE build | `RELEASE_VERSION` | relative messaging version | origin |
 |---|---|---|---|---|
 | `dse-6.8.65` | 6.8.65, the public release (no build hash recorded) | `4.0.0.6865` | 4 | three-node lab cluster `dse-lab` (192.168.57.11–13, DC `dc1`) |
 | `dse-6.9.26` | 6.9.26-0c77b67 (tag `6.9.26`, commit `0c77b67`) | `4.0.0.6926` | 6 | four different clusters, see below |
+| `dse-5.1.51` | 5.1.51 | `3.11.3.5151` | none (messaging version 11) | three local clusters, see the DSE 5.1.51 section |
 
 The 6.9.26 fixtures come from four clusters: `nodes/dse-6.9.26/` from a two-node cluster on the loopback
 interface (127.0.0.1 and 127.0.0.2, DC `Cassandra`, cluster `Test Cluster`; collection answer A28),
@@ -531,3 +534,302 @@ line; DSE core with internal authentication through `DseAuthenticator`, `DseAuth
 `DseRoleManager`, `GossipingPropertyFileSnitch`, NodeSync off in the YAML, `internode_compression: all`),
 and the `ds_version.txt` of its DSE installation (`/opt/dse`), `DSVersion=6.8.65-4a7b9eb`. The
 directories in `cassandra.yaml` are the node's (`/var/lib/cassandra/...`); the tests move them.
+
+## DSE 5.1.51 (`*/dse-5.1.51*`)
+
+The fixtures of the DSE 5.1 series (`internode_compatibility_mode: DSE_5_1`), read through
+`DseFixtures.dse51()` (`org.apache.cassandra.dsecompat.Dse51Fixtures`), not through `DseVersion`, whose values
+the DSE 6 tests iterate. Every file was written by real DSE 5.1.51 nodes, or is the unchanged output of DSE's own
+`nodetool`, `cqlsh` or `sstablemetadata`, except where a paragraph below names an edit. `RELEASE_VERSION`
+`3.11.3.5151`, `dse_version` `5.1.51`, messaging version 11 (no relative version: the handshake is Apache 3.11's),
+commit log version 6, hints version 1, sstables big `me` with numeric generations.
+
+### How the nodes ran
+
+Three local clusters on the loopback interface (127.0.51.x), on Java 8 (Temurin `1.8.0_512`), not the lab: the
+steps of the lab playbooks `dse-write-t-sstable.yml`, `dse-fetch-commitlog-hints.yml` and `capture-handshake.yml`
+were run by hand, as the paragraphs below describe (the relay below in place of `tcpdump`). Each node had its own
+copy of `resources/cassandra/conf` and `resources/dse/conf` (passed with `CASSANDRA_CONF` and `DSE_CONF`), its own
+data, commit log, hints, saved caches, CDC and log directories, a heap of 1 GB (`MAX_HEAP_SIZE`; 2 GB for the
+Search and Graph node) and its own JMX port (the `JMX_PORT` line of its `cassandra-env.sh`, which is not a
+fixture); it was started with `bin/dse cassandra -p <pid file>`, stopped with `nodetool drain` and a SIGTERM (but
+for the first stop of node 1, a SIGTERM without a drain), and killed with SIGKILL where a paragraph says so. Every
+other setting is as DSE installs it (`conf/dse-5.1.51/`). DSE's own `cqlsh` and `nodetool` ran the
+statements and the captures; `cqlsh` ran on Python 3.10 at its default consistency `ONE`, unless a statement sets
+one.
+
+Three clusters, each named `Test Cluster`, DSE's default, with the default `DseSimpleSnitch`:
+
+| cluster | nodes | data center / rack | fixtures |
+|---|---|---|---|
+| three nodes, Cassandra workload only | listen and native addresses 127.0.51.1–3, broadcast addresses 127.0.51.11–13 | `Cassandra` / `rack1` | every directory named `dse-5.1.51` but those below |
+| one node started with `dse cassandra -s -g` (Search and Graph) | 127.0.51.21 | `SearchGraph` / `rack1` | `gossip/dse-5.1.51-search-graph/`, `system/dse-5.1.51-search-graph/` |
+| one node, Cassandra workload only | 127.0.51.31 | `Cassandra` / `rack1` | `txn/dse-5.1.51/` |
+
+DSE requires one workload per data center, so the Search and Graph node is a cluster of its own rather than a
+second data center. No node set `num_tokens` (DSE's `cassandra.yaml` comments it out), so each holds one random token:
+
+| node | host id | token |
+|---|---|---|
+| 1 (127.0.51.11) | `c8896567-fb1e-4ce9-bb92-c8a31586e679` | `1021152624147296821` |
+| 2 (127.0.51.12) | `a7314433-9ca0-4bbc-9d7a-6163c4ce7ce9` | `-1824726619835567993` |
+| 3 (127.0.51.13) | `1971c79a-2f22-4458-8f99-61dab1d68f7f` | `-2751153962405162262` |
+| Search and Graph (127.0.51.21) | `5f5e669a-efde-460d-bba4-5a89e25f26c3` | `-231011715724534521` |
+
+Node 1 was the seed. `server_id`, which DSE derives from a network interface, is the same on every node.
+
+### The relay, in place of `tcpdump`
+
+No packet capture was possible, so the internode bytes were taken by a user-space TCP relay. Each
+node of the three-node cluster had `broadcast_address` 127.0.51.1N while it listened on 127.0.51.N (N = 1 to 3).
+The relay listened on 127.0.51.1N, port 7000 (and DSE's port 8609, forwarded without a record), and forwarded each
+accepted connection to 127.0.51.N, port 7000, appending every byte of each direction, unchanged and in order, to a
+file per connection and direction. The nodes therefore reached each other only through it, and every storage-port
+connection of the cluster, from its first byte, was recorded. DSE opened its connections from 127.0.0.1 (it binds
+no source address), so a connection is told by the address the connecting node puts in its handshake. The nodes
+name each other by their broadcast addresses: `system.peers`, gossip and the bytes carry 127.0.51.11–13. The
+relay was a small program of the capture, not kept in the tree: a thread per direction of each connection,
+reading from one socket, appending what it read to the direction's file, then writing it unchanged to the other
+socket, and closing the other side's output at the end of its input. The
+fixtures below were cut from those files at message boundaries, with the messages' own framing (the Apache 3.11
+framing: magic `CA 55 2D FA`, a 4-byte id, a 4-byte timestamp, the sender's address with a 1-byte length, the
+4-byte verb ordinal, the parameters, the 4-byte payload size, the payload).
+
+### Order of the run on the three-node cluster
+
+1. The three nodes started, node 1 first (node 1 twice: stopped after its first start to move its JMX port).
+2. Identity and `system.local` / `system.peers` (sections `gossip/` and `system/`).
+3. The user data set (section `sstables/dse-5.1.51-user/`).
+4. With node 3 down, the fixture keyspace; then node 3 restarted, node 1 killed and restarted (`commitlog/`,
+   `hints/`, `handshake/`).
+5. Three repairs (`messages/`), a batch left in `system.batches` and two lightweight transactions (`batches/`,
+   `paxos/`).
+6. Authentication and authorization on, then grants, restrictions and reads (`schema/`, `messages/`).
+7. The configuration copied (`conf/`); node 1 restarted once more, which failed (section `schema/`); every node
+   stopped.
+
+### `gossip/dse-5.1.51/` and `gossip/dse-5.1.51-search-graph/`
+
+`gossipinfo-node<N>.txt`: `nodetool gossipinfo` of node N right after the three nodes had joined (step 2);
+`gossipinfo.txt`: the same on the Search and Graph node after its start. `nodetool version` printed
+`ReleaseVersion: 3.11.3.5151` on every node (recorded here, not kept as a fixture). The nodetool of DSE 5.1.51
+prints DSE's state under the Apache 3.11 name of its ordinal (9), `X_11_PADDING`: a JSON object with `dse_version`
+`"5.1.51"`, `workloads` and `workload` (`"Cassandra"` and `"Cassandra"`; on the Search and Graph node
+`"SearchGraphCassandra"` and `"Search"`), `active` the string `"true"`, `server_id`, `graph` the JSON boolean
+(`false`; `true` on the Search and Graph node) and, on the three-node cluster, `health`. `NET_VERSION` is `11`. The
+same states appear in the bytes of `messages/dse-5.1.51/gossip-digest-ack.txt`.
+
+### `system/dse-5.1.51/` and `system/dse-5.1.51-search-graph/`
+
+`select-local-peers-node<N>.txt` (and `select-local-peers.txt`): `cqlsh` with `EXPAND ON` of `SELECT * FROM
+system.local` and `SELECT * FROM system.peers` on that node (step 2). The table directories, named as in the data
+directory, hold the `system.local` and `system.peers` sstables of node 1 (of the Search and Graph node):
+
+* `flushed/`: every sstable the two directories held right after `nodetool flush system`: `local` generations 27
+  (written at the node's start, a header naming all 22 regular columns, 21 cells set) and 28 (the flush: a header
+  naming only `data_center`, `dse_version`, `graph`, `server_id`, `workload` and `workloads`), `peers` generations
+  1 (written at the node's second start from the commit log of its first run, which ended without a drain: no row,
+  a partition deletion of the node's own address, 127.0.51.11) and 2 (the flush, both peers); on the Search and
+  Graph node `local` 13 and 14 and `peers` 1, a partition deletion of its own address, 127.0.51.21.
+* `compacted/`: the same directories after `nodetool compact system local` and `nodetool compact system peers`:
+  `local` 29 and `peers` 3, whose headers name every column, the five DSE ones (`dse_version`, `graph`,
+  `server_id`, `workload`, `workloads`) included; `local` 15 on the Search and Graph node, whose `peers` held no
+  sstable after the compaction.
+
+`sstablemetadata-flushed.txt`, `sstablemetadata-compacted.txt` (and `sstablemetadata.txt`): DSE's
+`sstablemetadata` of each sstable, run on the copies, each output after a line `=== <table dir>/<Data file>`; the
+path it prints on the `SSTable:` line was cut to `system/<table dir>/<sstable>`. In the Search and Graph
+node's single file the header lines are `=== compacted/<table dir>/<Data file>` and
+`=== flushed/<table dir>/<Data file>`. `workloads` is a
+`frozen<set<text>>` in both tables.
+
+### `sstables/dse-5.1.51-user/`
+
+The user sstables of node 1, one flush each (`nodetool flush test_ks` after the statements), in
+`test_ks/<table>-<id>/` as in the data directory:
+
+```
+CREATE KEYSPACE IF NOT EXISTS test_ks WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 3};
+-- the collection table of `sstables/<version>-t/` above, without its SAI index (DSE 5.1 has none):
+CREATE TYPE IF NOT EXISTS test_ks.addr (street text, zip int);
+CREATE TABLE IF NOT EXISTS test_ks.t (...);   -- the 200 inserts and three deletions of that section
+CREATE TABLE IF NOT EXISTS test_ks.wide (pk int, ck int, v text, PRIMARY KEY (pk, ck));
+CREATE MATERIALIZED VIEW IF NOT EXISTS test_ks.wide_by_v AS SELECT pk, ck, v FROM test_ks.wide
+    WHERE v IS NOT NULL AND pk IS NOT NULL AND ck IS NOT NULL PRIMARY KEY (v, pk, ck);
+CREATE TABLE IF NOT EXISTS test_ks.sasi_t (id int PRIMARY KEY, v text);
+CREATE CUSTOM INDEX IF NOT EXISTS sasi_t_v ON test_ks.sasi_t (v) USING 'org.apache.cassandra.index.sasi.SASIIndex';
+CREATE TABLE IF NOT EXISTS test_ks.compact_dense (id int, ck int, v text, PRIMARY KEY (id, ck)) WITH COMPACT STORAGE;
+CREATE TABLE IF NOT EXISTS test_ks.compact_static (id int PRIMARY KEY, a int, b text) WITH COMPACT STORAGE;
+-- for p in 0..9, for r in 0..49:
+INSERT INTO test_ks.wide (pk, ck, v) VALUES (<p>, <r>, 'v<r % 7>');
+-- for i in 1..20:
+INSERT INTO test_ks.sasi_t (id, v) VALUES (<i>, 'sasi<i>');
+-- for i in 1..5: for c in 1..2:
+INSERT INTO test_ks.compact_dense (id, ck, v) VALUES (<i>, <c>, 'd<i>_<c>');
+INSERT INTO test_ks.compact_static (id, a, b) VALUES (<i>, <10 * i>, 's<i>');
+```
+
+Table ids: `t` `6facf040-d9c7-11f1-9bf3-35f92a6d7d8d`, `wide` `70c51702-d9c7-11f1-9bf3-35f92a6d7d8d`,
+`wide_by_v` `712d4eb0-d9c7-11f1-9bf3-35f92a6d7d8d`, `sasi_t` `71b56a71-d9c7-11f1-9bf3-35f92a6d7d8d`,
+`compact_dense` `72b5ea81-d9c7-11f1-9bf3-35f92a6d7d8d`, `compact_static` `72ffc4c0-d9c7-11f1-9bf3-35f92a6d7d8d`.
+Each directory holds one sstable, generation 1, LZ4 compression; `sasi_t`'s has the SASI index file
+`me-1-big-SI_sasi_t_v.db` beside the eight components, which its TOC does not list. `select.txt` is what `cqlsh`
+answered at `CONSISTENCY ALL` for `count(*)` of `t` (197) and of `wide_by_v` (500), `sasi_t` `WHERE v LIKE
+'sasi1%'` (11 rows) and `SELECT *` of the two compact tables. `sstablemetadata.txt`: as above, paths cut to
+`test_ks/<table dir>/<sstable>`.
+
+### `commitlog/dse-5.1.51/`, `commitlog/dse-5.1.51-killed/` and `hints/dse-5.1.51/`
+
+As `dse-fetch-commitlog-hints.yml` does for DSE 6: node 3 drained and stopped; once node 1 saw it down, the
+collection table of `sstables/<version>-t/` written through node 1 at `CONSISTENCY ONE` into keyspace
+`test_ks_fixture` (`SimpleStrategy`, RF 3; table id `b6aa4f10-d9c7-11f1-9bf3-35f92a6d7d8d`); 20 seconds later
+(commit log sync period and hints flush period: 10 seconds each) node 1's active segment was copied gzipped
+(`commitlog/dse-5.1.51/CommitLog-6-1793958236846.log.gz`) and its hints file
+(`hints/dse-5.1.51/1971c79a-2f22-4458-8f99-61dab1d68f7f-1793958749068-1.hints`: version 1, the host id of node 3,
+parameters `{}`, 203 hints, all of the fixture table, framed as in the DSE 6 files). Node 1 still had the file
+open when it was copied; the hints directory held no other file then (no `.crc32`).
+
+Then node 3 was started again; node 1 delivered and deleted the hints file, and its endpoint state persister wrote
+node 3's states, its DSE columns among them, to `system.peers`. At least 12 seconds after node 3 was up again,
+node 1 was killed with SIGKILL, without a drain, and both segments of its commit log directory were copied gzipped
+(`commitlog/dse-5.1.51-killed/`): `CommitLog-6-1793958236846.log.gz`, the segment above, whose first 237 184 bytes
+are those of the earlier copy and whose next 2 103 bytes hold the later writes, among them the persister's
+mutations of `system.peers` for 127.0.51.13, then for 127.0.51.12 (`dse_version` `5.1.51` among their cells);
+and `CommitLog-6-1793958236847.log.gz`, the next segment, holding its 20-byte header only. Node 1 was then
+started again and replayed the segments.
+
+### `handshake/dse-5.1.51.txt`
+
+Two storage-port connections opened at the restart of node 3 above, as the relay recorded them: the one node 1
+opened to node 3, then the one node 3 opened to node 1 (the first of the restart). Per connection: `msg1`
+(`CA 55 2D FA 00 00 0B 00`: the magic, then the version 11 in bits 8-15, no compression, no streaming), `msg2`
+(the 4-byte version 11), `msg3` (the 4-byte version 11 and the connecting node's address, with a 1-byte length,
+nothing else: no DSE parameters) and `message1`, the whole first message, a `GOSSIP_DIGEST_SYN`. The lines starting
+with `#` were written by the extraction.
+
+### `messages/dse-5.1.51/`
+
+Whole messages, one per line (`<name> <verb> <from> <to> <hex>`), in send order; the lines starting with `#`
+were written by the extraction. `REPAIR_MESSAGE` is verb 32; the first payload byte is the type (0
+`VALIDATION_REQUEST` to 6 `SNAPSHOT`; 7 `CLEANUP` was never sent). Each repair ran on node 1 on the table
+`test_ks.rep` (`id int PRIMARY KEY, v text`, id `5ab1bbc0-d9c8-11f1-9d05-ff904c15f3ab`), after making node 3
+inconsistent: hinted handoff disabled on nodes 1 and 2 (`nodetool disablehandoff`), node 3 drained and stopped, ten
+rows written through node 1 at `CONSISTENCY ONE`, node 3 started, hinted handoff enabled again.
+
+* A first `nodetool repair test_ks rep` reported `incremental: false` and `parallelism: parallel`: DSE 5.1.51's
+  default is a full repair. Its messages are not kept: the same types as below, but `SNAPSHOT`.
+* `repair-incremental.txt`: `nodetool repair -inc test_ks rep` (`incremental: true`, parallel): 12 messages,
+  `PREPARE_MESSAGE`, `VALIDATION_REQUEST`, `VALIDATION_COMPLETE`, `SYNC_REQUEST`, `SYNC_COMPLETE` and
+  `ANTICOMPACTION_REQUEST` between node 1 and each of nodes 2 and 3.
+* `repair-full-sequential.txt`: `nodetool repair -full -seq test_ks rep`: 14 messages, the same with `SNAPSHOT`
+  after `PREPARE_MESSAGE`. DSE 5.1.51 sends `ANTICOMPACTION_REQUEST` for a full repair too. In both files
+  `PREPARE_MESSAGE`, `SNAPSHOT` and `ANTICOMPACTION_REQUEST` carry the parameter `CAL_BAC`, the other types none.
+* `rlac-read.txt`: the reads node 1 sent to node 2 for the reads of the role `reader` (section `schema/`) at
+  `CONSISTENCY ALL`: `SELECT * FROM test_ks.rlac WHERE region = 'EU'` (a `READ`, verb 3) and `SELECT * FROM
+  test_ks.rlac` (a `RANGE_SLICE`, verb 9). The `READ` is a digest request (flags `01`, digest version 11), the
+  `RANGE_SLICE` a data request. Each carries the parameter `CAL_BAC` and, as the only expression of its row filter,
+  DSE's row-level access control expression: the kind byte `04` (a user expression), the 4-byte id under which the
+  receiver registers the expression class (`00000000`: DSE registers it first), the 2-byte length `0012`, then the
+  role and its authentication scheme (`0006 "reader" 0008 "INTERNAL"`). Which of DSE's expression versions these
+  bytes are was not told apart by the capture. Node 3 received the same bytes but the message id. Both answered the
+  two `EU` rows; the read of `region = 'US'` was refused (`Unauthorized`).
+* `gossip-digest-ack.txt`: the `GOSSIP_DIGEST_ACK` (verb 15) node 1 sent to node 3 in the restart above, carrying
+  the full states of the three nodes, each with `RELEASE_VERSION` `3.11.3.5151` and the DSE state (ordinal 9).
+
+### `batches/dse-5.1.51/` and `paxos/dse-5.1.51/`
+
+`system.batches` of node 2: the node 3 JVM was stopped with SIGSTOP and, right after, `CONSISTENCY ALL; BEGIN BATCH
+INSERT INTO test_ks.bt (id, v) VALUES (1, 'b1'); INSERT INTO test_ks.bt (id, v) VALUES (2, 'b2'); APPLY BATCH;`
+ran through node 1 (`test_ks.bt`: `id int PRIMARY KEY, v text`, id `feac0910-d9c8-11f1-9d05-ff904c15f3ab`); the
+batch log write timed out (`write_type BATCH_LOG`, consistency `TWO`) and `cqlsh` retried once, so node 2 held two
+batches; `nodetool flush system batches` on node 2 wrote the sstable `batches-<id>/me-1-big-*` and
+`select-batches.txt` is `SELECT id, mutations, version, writetime(version) FROM system.batches` there (version 11).
+Node 3 was resumed with SIGCONT.
+
+`system.paxos` of node 1, after `INSERT INTO test_ks.lwt (id, v) VALUES (1, 1) IF NOT EXISTS;
+UPDATE test_ks.lwt SET v = 2 WHERE id = 1 IF v = 1; INSERT INTO test_ks.lwt (id, v) VALUES (2, 1) IF NOT EXISTS;`
+through node 1 (`test_ks.lwt`: `id int PRIMARY KEY, v int`, id `ff56c801-d9c8-11f1-9d05-ff904c15f3ab`):
+`select-paxos.txt` is `SELECT row_key, cf_id, in_progress_ballot, proposal_ballot, proposal, proposal_version,
+most_recent_commit_at, most_recent_commit, most_recent_commit_version, writetime(most_recent_commit_at),
+ttl(most_recent_commit_at) FROM system.paxos` (two rows, both versions 11, no proposal, TTL 864000), then
+`nodetool flush system paxos` wrote `paxos-<id>/me-1-big-*`.
+
+### `schema/dse-5.1.51/`
+
+Authentication and authorization were then turned on in `dse.yaml` on every node (`authentication_options`
+enabled with `default_scheme: internal`, `role_management_options` `mode: internal`, `authorization_options`
+enabled with `allow_row_level_security: true`; `cassandra.yaml` already names `DseAuthenticator`, `DseAuthorizer`
+and `DseRoleManager`), applied by a drain and restart of each node in turn. As the superuser, through node 1:
+
+```
+CREATE TABLE IF NOT EXISTS test_ks.rlac (region text, id int, v text, PRIMARY KEY (region, id));
+INSERT INTO test_ks.rlac (region, id, v) VALUES ('EU', 1, 'eu1');
+INSERT INTO test_ks.rlac (region, id, v) VALUES ('EU', 2, 'eu2');
+INSERT INTO test_ks.rlac (region, id, v) VALUES ('US', 1, 'us1');
+CREATE MATERIALIZED VIEW IF NOT EXISTS test_ks.rlac_by_v AS SELECT region, id, v FROM test_ks.rlac
+    WHERE region IS NOT NULL AND id IS NOT NULL AND v IS NOT NULL PRIMARY KEY (v, region, id);
+CREATE ROLE IF NOT EXISTS reader WITH PASSWORD = '<random, not recorded>' AND LOGIN = true;
+CREATE ROLE IF NOT EXISTS writer WITH LOGIN = false;
+GRANT MODIFY ON TABLE test_ks.t TO writer;
+GRANT SELECT ON KEYSPACE test_ks TO writer;
+RESTRICT ROWS ON test_ks.rlac USING region;
+GRANT SELECT ON 'EU' ROWS IN test_ks.rlac TO reader;
+RESTRICT ROWS ON test_ks.rlac_by_v USING region;
+GRANT SELECT ON 'EU' ROWS IN test_ks.rlac_by_v TO reader;
+-- extensions-restricted.txt taken here
+UNRESTRICT ROWS ON test_ks.rlac_by_v;
+```
+
+Table ids: `rlac` `a592c7f0-d9c9-11f1-9381-4ff58d61cdfc`, `rlac_by_v` `a6158c80-d9c9-11f1-9381-4ff58d61cdfc`.
+`extensions-restricted.txt`: `SELECT keyspace_name, table_name, extensions FROM system_schema.tables` and the same
+of `system_schema.views` for `test_ks` on node 1: `{'DSE_RLACA': 0x726567696f6e}` (the bytes of `region`) on
+`rlac` and on `rlac_by_v`. The `UNRESTRICT ROWS` on the view failed on node 1, twice, with a server error
+(`java.lang.AssertionError` in `Schema.addTable`, called from DSE's `UnRestrictRowsStatement.announceMigration`).
+`extensions-after-unrestrict.txt`, the same selects afterwards: node 1 then held a row of `system_schema.tables`
+named `rlac_by_v` (the view's id, no extension) beside the view, which kept its extension.
+`extensions-per-node.txt`: the rows of `rlac` and `rlac_by_v` in both tables on each node, each node's output
+after a line `--- node <N>` added by the capture: the restriction of the table reached every node, the one of the
+view and the table row stayed on node 1. At the end of the run node 1, restarted after a drain, did not start:
+`java.lang.RuntimeException: Attempting to load already loaded view test_ks.rlac_by_v` (`Schema.load`).
+
+`sstables/`: after `nodetool flush system_schema` and `nodetool flush system_auth` on node 1, every
+`system_schema` table directory and `system_auth/role_permissions-<id>` of node 1, as in its data directory
+(`system_auth.roles`, which holds password hashes, is left out; `role_members` had no sstable; DSE 5.1.51 has no
+`resource_role_permissons_index`). `select-system-auth.txt`: `cqlsh` of `SELECT *` of `role_permissions`, of
+`resource_role_permissons_index` (refused: `unconfigured table`; the path of the input file `cqlsh` printed before
+the error was cut to its name), of `role, member` of `role_members` (no row) and of
+`role, is_superuser, can_login, member_of` of `roles`. The grants include the `PROXY.EXECUTE` and `PROXY.LOGIN`
+that DSE gives the creator of a role, and the `rows/EU/data/test_ks/rlac` and `rows/EU/data/test_ks/rlac_by_v`
+resources of the row grants.
+
+The reads of `messages/dse-5.1.51/rlac-read.txt` came next, by the role `reader` through node 1.
+
+### `txn/dse-5.1.51/`
+
+The transaction log of a compaction on the third cluster's node. DSE writes the absolute path of each sstable into
+the records, so that node's data directory was `/dev/shm/cassandra/data`. Keyspace `txn_ks` (`SimpleStrategy`, RF
+1), table `txn (pk int, ck int, v text, PRIMARY KEY (pk, ck))` (id `0a90f7d0-d9ca-11f1-9764-4fa0c9d7f524`),
+automatic compaction disabled, four flushes of 2 000 rows each (`v` 1 000 random hexadecimal characters), then
+`nodetool setcompactionthroughput 1` and `nodetool compact txn_ks txn`, while a loop copied every `*_txn_*.log` of
+the table directory each time its content changed. `in-progress/` holds the log as it was while the compaction ran
+(its `ADD` record of `me-5-big`), `committed/` as it was just before DSE deleted it: the `ADD`, a `REMOVE` of each
+of `me-1-big` to `me-4-big` and the `COMMIT`. Each record ends with Apache 3.11's checksum, a CRC32 over the path,
+the type, the update time (low then high half) and the number of files. A test that hands these logs to this
+software's transaction log code must first move the record paths to its own directory and compute the checksums
+again by that rule, so that nothing acts on `/dev/shm/cassandra/data`.
+
+### `conf/dse-5.1.51/`
+
+`installed/`: `cassandra.yaml`, `jvm.options`, `cassandra-rackdc.properties` and `dse.yaml` as DSE installs them,
+unchanged (`start_rpc: true`). `running/`: the same four files of node 1 at the end of the run, where the
+paths of the node's directories (`data_file_directories`, `commitlog_directory`, `saved_caches_directory`,
+`hints_directory`, `cdc_raw_directory`) were cut to `<node directory>/<name>` (the files are the node's own
+configuration as the capture edited it before the node's first start: its item of `data_file_directories` is
+indented by four spaces where the installed file has five); they differ from the installed ones
+in those lines, `listen_address`, `broadcast_address`, `rpc_address` and the seeds of `cassandra.yaml`, and the
+authentication, role management and authorization lines of `dse.yaml` above.
+
+Not fixtures, recorded here: `java -version` printed `openjdk version "1.8.0_512"` (Temurin, build
+`1.8.0_512-b09`); no installed file of DSE is a netty-tcnative library: the server's netty is
+`netty-all-4.0.54.1.dse.jar`, whose only native library is the epoll transport
+(`META-INF/native/libnetty_transport_native_epoll_x86_64.so`).
