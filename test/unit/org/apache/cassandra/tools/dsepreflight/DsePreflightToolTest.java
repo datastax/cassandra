@@ -25,6 +25,8 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+
 import org.apache.cassandra.tools.OfflineToolUtils;
 import org.apache.cassandra.tools.ToolRunner;
 import org.apache.cassandra.tools.ToolRunner.ToolResult;
@@ -59,7 +61,7 @@ public class DsePreflightToolTest extends OfflineToolUtils
         assertThat(tool.getStdout()).contains("Result: READY").contains("SAI on-disk version to pin: aa");
         assertThat(node.fingerprint()).isEqualTo(before);
 
-        NodeReport report = JsonUtils.JSON_OBJECT_MAPPER.readValue(Files.readAllBytes(json), NodeReport.class);
+        NodeReport report = ClusterAggregate.READER.readValue(Files.readAllBytes(json));
         assertThat(report.result).isEqualTo(NodeReport.READY);
         assertThat(report.findings).noneMatch(f -> f.code.equals("SSTABLE_FORMAT") || f.code.equals("UNREADABLE_SCHEMA"));
         assertThat(report.findings).anyMatch(f -> f.code.equals("VIEWS_HANDLED") && f.message.contains("lab.wide_by_v"));
@@ -70,6 +72,32 @@ public class DsePreflightToolTest extends OfflineToolUtils
         assertCLSMNotLoaded();
         assertServerNotLoaded();
         assertNoUnexpectedThreadsStarted(OPTIONAL_THREADS, false);
+    }
+
+    /**
+     * The aggregate mode through {@code main}, on the report of one fixture node: it reads the report only, and blocks
+     * for the DSE peers that have none.
+     */
+    @Test
+    public void theAggregateRunsAsAnOfflineClientThroughMain() throws IOException
+    {
+        DseNodeFixture node = DseNodeFixture.create(temporaryFolder.newFolder().toPath());
+        Path reports = temporaryFolder.newFolder("reports").toPath();
+        ToolResult inspection = ToolRunner.invokeClass(DsePreflight.class, node.args("--json", reports.resolve("node1.json").toString()));
+        assertThat(inspection.getExitCode()).as("%s%s", inspection.getStdout(), inspection.getStderr()).isEqualTo(DsePreflight.EXIT_READY);
+
+        Path json = temporaryFolder.getRoot().toPath().resolve("aggregate.json");
+        ToolResult tool = ToolRunner.invokeClass(DsePreflight.class, "--aggregate", reports.toString(), "--json", json.toString());
+        assertThat(tool.getExitCode()).as("%s%s", tool.getStdout(), tool.getStderr()).isEqualTo(DsePreflight.EXIT_BLOCKED);
+        assertThat(tool.getStdout()).contains("Reports read: 1, in 1 data center").contains("Result: BLOCKED").contains("[MISSING_REPORT]");
+        Map<String, Object> aggregate = JsonUtils.JSON_OBJECT_MAPPER.readValue(Files.readAllBytes(json), new TypeReference<Map<String, Object>>() {});
+        assertThat(aggregate).containsEntry("kind", NodeReport.AGGREGATE).containsEntry("result", NodeReport.BLOCKED).containsEntry("reports_read", 1);
+
+        assertSchemaNotLoaded();
+        assertKeyspaceNotLoaded();
+        assertSystemKSNotLoaded();
+        assertCLSMNotLoaded();
+        assertServerNotLoaded();
     }
 
     @Test
