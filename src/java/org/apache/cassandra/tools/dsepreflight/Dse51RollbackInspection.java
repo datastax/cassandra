@@ -66,8 +66,9 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.rootCause;
  * The rollback check of {@code dsepreflight} ({@code --rollback-check}): whether a node of HCD 2.0 in
  * {@code DSE_5_1} mode, drained and stopped, can go back to DSE 5.1.51 with what HCD 2.0 left on its disks. Run from
  * the unpacked HCD 2.0 tarball, before the restore of {@code system} and {@code system_schema} and before DSE 5.1
- * starts; it reads file names, the descriptors of the hints files, the entries of the commit log segments (counted,
- * never decoded) and the {@code system.local} and {@code system.peers} sstables of the data directories (from scratch
+ * starts; it reads file names, the hints files of version 1 to their end (framed as DSE 5.1.51 reads them, the
+ * mutations never decoded, {@link Dse51HintsFileCheck}), the entries of the commit log segments (counted, never
+ * decoded) and the {@code system.local} and {@code system.peers} sstables of the data directories (from scratch
  * copies, {@link DseTableReader#readBig}), and never writes to the node's files.
  * <p>
  * It refuses the rollback (blocking findings) while DSE 5.1.51 could not start on the files left, or would lose or
@@ -75,8 +76,12 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.rootCause;
  * generation ({@link Dse51NodeInspector#sstableProblem}), a transaction log, a commit log segment that holds a
  * mutation (a drain leaves none, so the node was not drained after it was written: the rollback removes the commit
  * log) or that cannot be read to its end, a hints file of a version other than 1 (by its name or by its descriptor),
- * one whose descriptor is empty or cannot be read, no snapshot of DSE 5.1's {@code system} and
- * {@code system_schema} tables with sstables of {@code system.local} and {@code system_schema.keyspaces} (the one
+ * one whose descriptor is empty or cannot be read, one of version 1 that DSE 5.1.51 would set aside as corrupt,
+ * stopping the node by its disk failure policy, or never deliver (a size whose checksum does not match, zeros after
+ * the last entry, a name other than its descriptor's, a compression DSE 5.1.51 cannot build or an encryption
+ * parameter), one of version 1 that the check cannot read to its end here (an I/O error, an encrypting compressor of
+ * DSE 5.1.51, a compressor or a block this JVM cannot build, run or hold), no snapshot of DSE 5.1's {@code system}
+ * and {@code system_schema} tables with sstables of {@code system.local} and {@code system_schema.keyspaces} (the one
  * given with {@code --snapshot}, else the only complete {@code pre-hcd-<timestamp>} one; several refuse), a metadata
  * directory without the DSE 5.1 upgrade marker, which HCD 2.0 writes at its first start in {@code DSE_5_1} mode (the
  * directory read is then not HCD 2.0's, or the start was refused before the marker was written, which only the logs
@@ -97,12 +102,13 @@ import static org.apache.cassandra.tools.dsepreflight.NodeInspector.rootCause;
  * descriptor names, with a warning for a target that the node's {@code system.peers} does not show running DSE 5.1
  * (DSE 5.1.51 dispatches a file only to a peer that gossips its own schema version, which a node of HCD 2.0 does not;
  * a peer with no release recorded is counted with them), and one for a target in neither {@code system.local} nor
- * {@code system.peers}. It warns about the SAI component files left (DSE 5.1.51 ignores them and removes them with
- * their sstable), and about a commit log, hints or given saved caches directory that does not exist (it may not be
- * HCD 2.0's), and lists what the rollback removes before DSE 5.1 starts (the commit log segments, the saved caches of
- * {@code --saved-caches-dir}, else of DSE's {@code saved_caches_directory}, the record and its temporary file) and
- * what it keeps (the marker, the record of DSE 5.1 peers, the copies of unreadable records, the hints files of
- * version 1 with their companions, the snapshot).
+ * {@code system.peers}, and one for a file of which DSE 5.1.51 would drop some hints alone (a partial entry at its
+ * end, a hint whose checksum does not match). It warns about the SAI component files left (DSE 5.1.51 ignores them
+ * and removes them with their sstable), and about a commit log, hints or given saved caches directory that does not
+ * exist (it may not be HCD 2.0's), and lists what the rollback removes before DSE 5.1 starts (the commit log segments,
+ * the saved caches of {@code --saved-caches-dir}, else of DSE's {@code saved_caches_directory}, the record and its
+ * temporary file) and what it keeps (the marker, the record of DSE 5.1 peers, the copies of unreadable records, the
+ * hints files of version 1 with their companions, the snapshot).
  */
 final class Dse51RollbackInspection
 {
@@ -703,6 +709,9 @@ final class Dse51RollbackInspection
         sorted.sort(Comparator.comparing(File::name));
         List<String> otherVersions = new ArrayList<>();
         List<String> unreadableDescriptors = new ArrayList<>();
+        List<String> damaged = new ArrayList<>();
+        List<String> unverified = new ArrayList<>();
+        List<String> truncated = new ArrayList<>();
         Map<String, List<String>> byHostId = new TreeMap<>();
         for (File file : sorted)
         {
@@ -735,6 +744,29 @@ final class Dse51RollbackInspection
                 otherVersions.add(file.name() + " (version " + header.version + " by its descriptor)");
                 continue;
             }
+            // read to its end as DSE 5.1.51 frames it: a damaged file is not kept, a truncated one is
+            Dse51HintsFileCheck.Outcome outcome;
+            try
+            {
+                outcome = Dse51HintsFileCheck.check(file.toPath());
+            }
+            catch (IOException | RuntimeException | LinkageError e)
+            {
+                unverified.add(file.name() + " (" + rootCause(e) + ')');
+                continue;
+            }
+            if (outcome.damaged != null)
+            {
+                damaged.add(file.name() + " (" + outcome.damaged + ')');
+                continue;
+            }
+            if (outcome.unverified != null)
+            {
+                unverified.add(file.name() + " (" + outcome.unverified + ')');
+                continue;
+            }
+            if (outcome.truncated != null)
+                truncated.add(file.name() + " (" + outcome.truncated + ')');
             // DSE 5.1 dispatches a file to the host its descriptor names
             byHostId.computeIfAbsent(header.hostId.toString(), h -> new ArrayList<>()).add(file.name());
         }
@@ -755,6 +787,29 @@ final class Dse51RollbackInspection
                                   "listpendinghints, the targets up), or remove them, with their companions, and " +
                                   "repair the tables they hold once the cluster runs one release; then drain the " +
                                   "node and run this check again"));
+        if (!damaged.isEmpty())
+            findings.add(blocking("HINTS_DAMAGED",
+                                  "hints files of version " + HINTS_VERSION + " that DSE 5.1.51 would set aside as " +
+                                  "corrupt, handing the error to its disk failure policy (stop in the cassandra.yaml " +
+                                  "DSE 5.1.51 ships, which stops the node's transports), or would never deliver: " +
+                                  list(damaged),
+                                  "move them, with their companions, out of the hints directory before DSE 5.1 " +
+                                  "starts, and repair the tables of their targets once the cluster runs one release"));
+        if (!unverified.isEmpty())
+            findings.add(blocking("HINTS_UNVERIFIED",
+                                  "hints files of version " + HINTS_VERSION + " this check could not read to their " +
+                                  "end here: " + list(unverified) + "; whether DSE 5.1.51 delivers them is not known",
+                                  RUN_AS_HCD_USER + ", on a host where the compressor of the files loads and with a " +
+                                  "heap that holds their blocks, and run this check again; or move them, with their " +
+                                  "companions, out of the hints directory before DSE 5.1 starts, and repair the " +
+                                  "tables of their targets once the cluster runs one release"));
+        if (!truncated.isEmpty())
+            findings.add(warning("HINTS_TRUNCATED",
+                                 "hints files of version " + HINTS_VERSION + " of which DSE 5.1.51 would drop some " +
+                                 "hints, with a warning, and deliver the others: " + list(truncated) + "; it drops " +
+                                 "a partial entry at the end of a file and a hint whose checksum does not match",
+                                 "the rollback goes on; repair the tables of their targets once the cluster runs " +
+                                 "one release"));
         if (byHostId.isEmpty())
             return;
         Map<String, Target> targets = targets();

@@ -24,6 +24,8 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -68,6 +70,32 @@ public class HintSerializerGetKeyspaceFromBufferTest
                             .add("val", "v")
                             .build();
         return Hint.create(mutation, now / 1000);
+    }
+
+    /**
+     * A hint serialized at messaging version 11, as the DSE 5.1 compatibility mode writes them (its mutation's
+     * modification count, then the table id), peeked at 11 as the dispatcher does for a target at 11.
+     */
+    @Test
+    public void testReturnsCorrectKeyspaceAtVersion11() throws IOException
+    {
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try
+        {
+            Hint hint = createHint("key11");
+            ByteBuffer buf;
+            try (DataOutputBuffer dob = new DataOutputBuffer())
+            {
+                Hint.serializer.serialize(hint, dob, MessagingService.VERSION_3014);
+                buf = dob.buffer();
+            }
+            assertEquals(KEYSPACE, Hint.serializer.getKeyspaceFromBuffer(buf, MessagingService.VERSION_3014));
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
     }
 
     @Test

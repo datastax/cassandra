@@ -121,7 +121,11 @@ auto_hints_cleanup_enabled: false
 
 # Compression to apply to the hint files. If omitted, hints files
 # will be written uncompressed. LZ4, Snappy, and Deflate compressors
-# are supported.
+# are supported. In internode_compatibility_mode DSE_5_1 the node refuses to
+# start unless the class is LZ4Compressor, SnappyCompressor or DeflateCompressor,
+# by its short name or under org.apache.cassandra.io.compress, with no option but
+# lz4_compressor_type (fast or high) and lz4_high_compressor_level (1 to 17) for
+# LZ4Compressor: DSE 5.1 never delivers a hints file whose compressor it cannot build.
 #hints_compression:
 #   - class_name: LZ4Compressor
 #     parameters:
@@ -2344,9 +2348,10 @@ drop_compact_storage_enabled: false
 # ** UPGRADING:   The cluster monitors the version of each node during this interim stage. This has a cost but ensures
 #                all new features, formats, versions, etc. are enabled safely.
 # ** NONE:        Start with all the new features and formats enabled.
-# ** DSE_5_1:     Writes big sstables of version me, which DSE 5.1 reads, refuses the bti format, and otherwise
-#                stays compatible with the 4.x line like HCD_1; only together with internode_compatibility_mode
-#                DSE_5_1, which requires it (see below), for an in-place upgrade from DataStax Enterprise 5.1.51;
+# ** DSE_5_1:     Writes big sstables of version me and hints files of version 1, which DSE 5.1 reads, refuses
+#                the bti format, and otherwise stays compatible with the 4.x line like HCD_1; only together with
+#                internode_compatibility_mode DSE_5_1, which requires it (see below), for an in-place upgrade
+#                from DataStax Enterprise 5.1.51;
 #                set back to HCD_1, with internode_compatibility_mode NONE, at the flag drop.
 #
 # A typical upgrade would be:
@@ -2397,9 +2402,14 @@ storage_compatibility_mode: HCD_1
 # (sstables of the bti format or another format than big, big sstables newer than me, non-numeric
 # generations, commit log segments above version 7); DSE 5.1's replayed commit log segments are
 # renamed with the suffix .replayed, and transaction logs and sstable statistics are written as DSE
-# 5.1 reads them. It connects to DSE 5.1 nodes in their pre-4.0 dialect (messaging version 11),
-# freezes the schema (no DDL unless the system property
-# -Dcassandra.internode_compatibility_mode.allow_ddl=true is set; a CREATE or ALTER with a
+# 5.1 reads them. Every hints file is written at hints version 1, its mutations at messaging
+# version 11, as DSE 5.1 reads them; a hint they cannot hold (a deletion or expiration time past
+# 2038, or a size above what the hints buffer takes) is not stored, counted by nodetool
+# compatstatus and logged, and its tables are to be repaired once the cluster runs one release;
+# hints_compression is refused unless DSE 5.1 can build its compressor (see hints_compression);
+# after the flag drop the hints files of version 1 left are delivered. It connects to DSE 5.1
+# nodes in their pre-4.0 dialect (messaging version 11), freezes the schema (no DDL unless the
+# system property -Dcassandra.internode_compatibility_mode.allow_ddl=true is set; a CREATE or ALTER with a
 # compressor or a column type DSE 5.1 does not read is refused even then), refuses repair and the
 # topology changes, and neither sends its schema to DSE 5.1 nodes nor applies theirs. It gossips its
 # DSE state in the form DSE 5.1 writes it, with the dse_version 5.1.51 (the only value the system
