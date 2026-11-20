@@ -20,6 +20,7 @@ package org.apache.cassandra;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.tools.ant.BuildException;
 import org.apache.tools.ant.taskdefs.ExecuteWatchdog;
@@ -49,6 +50,9 @@ public class JStackJUnitTask extends JUnitTask
 
     private static class JStackWatchDog extends ExecuteWatchdog
     {
+        private static final long KILL_GRACE_SECONDS = 60;
+
+        private Process process;
         private long pid;
 
         public JStackWatchDog(long timeout)
@@ -64,12 +68,33 @@ public class JStackJUnitTask extends JUnitTask
         @Override
         public synchronized void start(Process process)
         {
+            this.process = process;
             this.pid = getPid(process);
             super.start(process);
         }
 
         @Override
         public synchronized void timeoutOccured(Watchdog w)
+        {
+            printJStack();
+            super.timeoutOccured(w); // sends SIGTERM
+
+            // A shutdown hook can block the JVM from exiting after SIGTERM, and ant would then wait on it forever
+            try
+            {
+                if (process.waitFor(KILL_GRACE_SECONDS, TimeUnit.SECONDS))
+                    return;
+            }
+            catch (InterruptedException e)
+            {
+                Thread.currentThread().interrupt();
+            }
+            System.err.println("Test JVM " + pid + " did not exit " + KILL_GRACE_SECONDS + "s after SIGTERM, sending SIGKILL. Thread dump:");
+            printJStack();
+            process.destroyForcibly();
+        }
+
+        private void printJStack()
         {
             if (pid > 0)
             {
@@ -95,7 +120,6 @@ public class JStackJUnitTask extends JUnitTask
                     e.printStackTrace();
                 }
             }
-            super.timeoutOccured(w);
         }
 
         private long getPid(Process process)
