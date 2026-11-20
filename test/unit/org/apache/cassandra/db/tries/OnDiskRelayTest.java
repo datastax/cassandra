@@ -255,11 +255,19 @@ public class OnDiskRelayTest
                                            "ff 01 02 f5", 9,          // prefix with content X<1; child at 9 - 4 = 5
                                            "ff 02 02 f5", 13),        // prefix with content X<2; child at 13 - 4 = 9
                                     CHAINED_PREFIXES);
+        // prefix → relay -> leaf
+        assertRootRejectedAsCorrupt(vector("ff 01 02", 3,             // leaf X<1
+                                           "00 f8", 5,                // relay; starts 3 → 3 (the leaf)
+                                           "ff 02 02 f5", 9),         // prefix with content X<2 and a child, which is
+                                    //   at 9 - 4 = 5 (the relay)
+                                    PREFIX_TO_LEAF);
+
         // prefix → relay → prefix
         assertRootRejectedAsCorrupt(vector("ff 01 02 f4", 4,          // prefix with content X<1, no child
                                            "00 f8", 6,                // relay; starts 4 → 4 (the prefix)
                                            "ff 02 02 f5", 10),        // prefix with content X<2; child at 10 - 4 = 6
                                     CHAINED_PREFIXES);
+
         // The same with content on the ascent side, and on both, in the tries that can have it. (For a deletion-aware
         // trie the ascent side is the pointer to the deletion branch, here with the distance 2.)
         ByteBuffer ascentToLeaf = vector("ff 01 02", 3,               // leaf X<1
@@ -1706,7 +1714,7 @@ public class OnDiskRelayTest
     private static final String RELAY_CHAIN = "relay chain";
 
     /// What the node that follows a prefix node is rejected for, as the message starts.
-    private static final String PREFIX_TO_LEAF = "prefix to leaf";
+    private static final String PREFIX_TO_LEAF = "chained prefix to leaf";
     private static final String CHAINED_PREFIXES = "chained prefix nodes";
 
     private static void assertRejectedAsCorrupt(String description, String problem, ThrowingRunnable read)

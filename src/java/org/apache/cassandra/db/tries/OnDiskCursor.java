@@ -249,8 +249,6 @@ public class OnDiskCursor<T> implements Cursor<T>
         this.nodeCode = readByteBefore(nodePos);
         this.postCodePos = nodePos - 1;
         this.currentImpl = OnDiskReadNodeType.selectNodeImpl(nodeCode);
-        if (currentImpl == OnDiskReadNodeType.LEAF)
-            throw corrupt("prefix to leaf at " + (currentFullNodePostCodePos + 1));
         this.currentImpl.load(this); // may modify currentEncodedPosition
     }
 

@@ -33,6 +33,9 @@ enum OnDiskReadNodeType
         @Override
         public void load(OnDiskCursor<?> state)
         {
+            if (state.currentFullNodePostCodePos != state.postCodePos)
+                throw OnDiskCursor.corrupt("chained prefix to leaf nodes at " + state.currentFullNodePostCodePos);
+
             if (state.swapContentSides)
             {
                 if (Cursor.isRootPosition(state.currentEncodedPosition))
@@ -634,6 +637,8 @@ enum OnDiskReadNodeType
             switch (state.contentStyle)
             {
                 case UNORDERED:
+                    if (!hasDescent || hasAscent)
+                        throw OnDiskCursor.corrupt("unordered prefix node with invalid flags descent " + hasDescent + " ascent " + hasAscent);
                     break;
                 case ORDERED:
                     if (hasAscent && hasDescent)
