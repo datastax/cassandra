@@ -86,6 +86,15 @@ otherwise the node does not start ("Invalid yaml. Please remove properties [...]
       `memtable.configurations` and its `default` entry instead.
     - `commitlog_sync_batch_window_in_ms`, `commitlog_periodic_queue_size`, `concurrent_replicates` and
       `native_transport_max_negotiable_protocol_version`, removed in 5.0.
+Behaviour that differs from HCD 1.2:
+    - Existing tables with a duration where values are sorted (in a primary key column, or in the keys or elements of
+      a non-frozen map or set) now always load, from `system_schema`, from a peer's schema and from sstable headers,
+      and can be altered. Apache Cassandra creates such tables (e.g. `s set<frozen<tuple<duration, int>>>`), and so did
+      nodes before CNDB-9753 (e.g. `pk frozen<map<duration, text>>`). Loading such a column logs a warning, at most
+      once per hour per column. `cassandra.types.map.duration_in_map_compatibility_mode` from main-4.0 (CNDB-9753),
+      which HCD 1.2 needs to load durations in map keys, is no longer needed, because such schemas and sstables
+      always load, and the property is ignored. CREATE TABLE, ALTER TABLE ADD and ALTER TYPE still reject such a type
+      for a new column, and slice restrictions and CREATE INDEX on such a column are still rejected.
 
 5.0.9
 =====

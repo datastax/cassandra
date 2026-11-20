@@ -61,6 +61,7 @@ import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.NoSpamLogger;
 import org.apache.cassandra.utils.Simulate;
 
 import static java.lang.String.format;
@@ -1246,9 +1247,15 @@ public final class SchemaKeyspace
             type = ReversedType.getInstance(type);
 
         ByteBuffer columnNameBytes = row.getBytes("column_name_bytes");
-        type.validateForColumn(columnNameBytes, kind.isPrimaryKeyKind(), isCounterTable, false, false);
+        type.validateForColumn(columnNameBytes, kind.isPrimaryKeyKind(), isCounterTable, false, true);
 
         ColumnIdentifier name = new ColumnIdentifier(columnNameBytes, row.getString("column_name"));
+        if (type.hasSortedDuration(kind.isPrimaryKeyKind()))
+            NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, "sorted duration " + keyspace + '.' + table + '.' + name,
+                             1, TimeUnit.HOURS,
+                             "Column {}.{}.{} of type {} has a duration in a sorted position. The type is accepted " +
+                             "for existing data, but cannot be used in new schema.",
+                             keyspace, table, name, type.asCQL3Type());
 
         ColumnMask mask = null;
         String query = format("SELECT * FROM %s.%s WHERE keyspace_name = ? AND table_name = ? AND column_name = ?",
