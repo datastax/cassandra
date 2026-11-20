@@ -21,12 +21,14 @@ package org.apache.cassandra.io.sstable.format;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
 
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
+import org.apache.cassandra.UpdateBuilder;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.index.SecondaryIndexManager;
@@ -34,11 +36,15 @@ import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.IVerifier;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.OutputHandler;
+import org.apache.cassandra.utils.memory.BufferPoolExhaustedException;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
@@ -387,6 +393,32 @@ public class SortedTableVerifierTest
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    public void testVerifyBufferPoolExhaustedException()
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(TABLE);
+        UpdateBuilder.create(cfs.metadata(), "k1").newRow("c1").add("val", "v1").applyUnsafe();
+        cfs.forceBlockingFlush(ColumnFamilyStore.FlushReason.UNIT_TESTS);
+
+        SSTableReader sstable = cfs.getLiveSSTables().iterator().next();
+        SSTableReader spySstable = spy(sstable);
+        doThrow(new BufferPoolExhaustedException("Simulated buffer pool exhaustion")).when(spySstable).decorateKey(any(ByteBuffer.class));
+
+        OutputHandler outputHandler = mock(OutputHandler.class);
+        IVerifier.Options options = IVerifier.options()
+                                             .invokeDiskFailurePolicy(true)
+                                             .extendedVerification(true)
+                                             .build();
+
+        try (IVerifier verifier = spySstable.getVerifier(cfs, outputHandler, false, options))
+        {
+            assertThatThrownBy(verifier::verify)
+                .isInstanceOf(BufferPoolExhaustedException.class)
+                .isNotInstanceOf(CorruptSSTableException.class);
+            assertFalse("SSTable must not be marked suspect on buffer pool exhaustion", sstable.isMarkedSuspect());
         }
     }
 }
