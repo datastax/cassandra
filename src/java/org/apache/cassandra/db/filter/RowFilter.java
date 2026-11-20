@@ -663,7 +663,7 @@ public class RowFilter
             if (disjunction.expressions.isEmpty() && disjunction.children.isEmpty())
                 return FilterElement.REJECT_ALL;
 
-            return flattenOrBuild(disjunction);
+            return RowFilterSimplifier.simplify(flattenOrBuild(disjunction), table, indexHints);
         }
 
         /**
@@ -692,7 +692,7 @@ public class RowFilter
                     conjunction.children.add(childElement);
             }
 
-            return flattenOrBuild(conjunction);
+            return RowFilterSimplifier.simplify(flattenOrBuild(conjunction), table, indexHints);
         }
 
         /**
@@ -1237,7 +1237,7 @@ public class RowFilter
          *   <li>NEQ eliminates a single-point interval (e.g. {@code x >= 0 AND x <= 0 AND x != 0})</li>
          * </ul>
          */
-        private boolean isUnsatisfiable()
+        boolean isUnsatisfiable()
         {
             // CQL validation forbids combining an equality with any other relation on the same column or map element
             // (e.g. x = 2 AND x > 5), so there is no need to check an equality against the slice bounds.
@@ -1308,7 +1308,7 @@ public class RowFilter
          * or {@code null} if the expression should not be considered when looking for empty intervals.
          */
         @Nullable
-        private static AbstractType<?> boundValueType(Expression expression, TableMetadata table, IndexHints hints)
+        static AbstractType<?> boundValueType(Expression expression, TableMetadata table, IndexHints hints)
         {
             Operator op = expression.operator;
             if (!op.isSlice() && op != Operator.EQ && op != Operator.NEQ)
