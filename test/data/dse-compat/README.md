@@ -112,11 +112,16 @@ deletion) and the two of partition 3 (range deletion, inclusive at both ends); t
 removes no row. That leaves 196 live regular rows (`DseFixtures.COLLECTION_TABLE_LIVE_REGULAR_ROWS`).
 The static row of partition 3 (`s = 30`) survives the range deletion, so `SELECT count(*) FROM t`
 answers 197 (`COLLECTION_TABLE_COUNT_STAR`: one extra row for the one static-only partition,
-`COLLECTION_TABLE_STATIC_ONLY_PARTITIONS`). `WHERE v = 'val50'` returns (25, ck2). Trie format `bb`,
-numeric generation 1, with the SAI components in the `aa` naming (6.8.65, `SAI_…`) and the `ca`
-naming (6.9.26, `SAI+ca+…`). Produced by the lab playbook `dse-write-t-sstable.yml` (6.8.65) and by
-the collector (A29), both with the statements above. Both sets were read by this tree in the lab,
-cold, with the index served in place (plan §6.17).
+`COLLECTION_TABLE_STATIC_ONLY_PARTITIONS`). Trie format `bb`, numeric generation 1, with the SAI
+components in the `aa` naming (6.8.65, `SAI_…`) and the `ca` naming (6.9.26, `SAI+ca+…`). The 6.8.65
+set was produced by the lab playbook `dse-write-t-sstable.yml` with the statements above, and
+`WHERE v = 'val50'` returns (25, ck2) there. The 6.9.26 set was produced by the collector (A29) with
+the same deletions and the same live rows, but other values: in partitions 4 to 100, `v` is
+`'val<2 * i + j>'` and `n` is 100 times that number (so `WHERE v = 'val50'` returns (24, ck2) there),
+and the lists and static values differ from the statements above too (the static row of partition 3
+holds `s = 30` in both sets); partition 2 has `v = 'val4'` for `ck2`, and the cell `v` of `ck1`
+(`'val3'`) deleted, as listed. Both sets were read by this tree in the lab, cold, with the index
+served in place (plan §6.17); `DseSaiFormatCompatibilityTest` reads them in the tests.
 
 ## `sstables/dse-6.8.65-mv/`
 

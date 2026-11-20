@@ -152,7 +152,8 @@ public final class DseFixtures
      * {@code DELETE v FROM t WHERE id = 2 AND ck = 'ck1'} and
      * {@code DELETE FROM t WHERE id = 3 AND ck >= 'ck1' AND ck <= 'ck2'}: 196 live regular rows, plus the
      * static row of partition 3 that survives the range deletion, so {@code SELECT count(*)} answers 197;
-     * {@code v = 'val50'} is row (25, ck2).
+     * {@code v = 'val50'} is row (25, ck2) in the 6.8.65 set, (24, ck2) in the 6.9.26 set, whose values differ
+     * ({@code test/data/dse-compat/README.md}).
      */
     public static Path sstableDirectory(DseVersion version)
     {
