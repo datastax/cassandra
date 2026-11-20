@@ -91,6 +91,9 @@ public class Schema implements SchemaProvider
     public static final Schema instance = new Schema();
 
     private volatile Keyspaces distributedKeyspaces = Keyspaces.none();
+    // distributedKeyspaces without LocalStrategy (the same object when none has it), see getNonLocalStrategyKeyspaces();
+    // written only by setDistributedKeyspaces, under the Schema monitor, after distributedKeyspaces
+    private volatile Keyspaces nonLocalStrategyKeyspaces = Keyspaces.none();
 
     private final Keyspaces localKeyspaces;
 
@@ -172,7 +175,7 @@ public class Schema implements SchemaProvider
         else
             reload(previous, ksm);
 
-        distributedKeyspaces = distributedKeyspaces.withAddedOrUpdated(ksm);
+        setDistributedKeyspaces(distributedKeyspaces.withAddedOrUpdated(ksm));
     }
 
     private synchronized void loadNew(KeyspaceMetadata ksm)
@@ -267,6 +270,28 @@ public class Schema implements SchemaProvider
     }
 
     /**
+     * The {@link #distributedKeyspaces()} whose replication strategy is not {@link LocalStrategy}: the keyspaces
+     * that own token ranges. This is every distributed keyspace except the local keyspaces a DataStax Enterprise 6
+     * node leaves in the schema ({@link SchemaConstants#DSE_LOCAL_STRATEGY_KEYSPACE_NAMES}), outside tests the only
+     * ones that load with {@code LocalStrategy}; they must not be streamed, repaired, moved or sampled as ring data.
+     */
+    public Keyspaces getNonLocalStrategyKeyspaces()
+    {
+        return nonLocalStrategyKeyspaces;
+    }
+
+    private synchronized void setDistributedKeyspaces(Keyspaces keyspaces)
+    {
+        // distributedKeyspaces first, so that a reader that finds a newly added keyspace in the filtered list also
+        // finds its metadata; while a keyspace is dropped, the filtered list may name it a moment longer, as any
+        // snapshot of the keyspace names taken before the drop does
+        distributedKeyspaces = keyspaces;
+        nonLocalStrategyKeyspaces = keyspaces.stream().anyMatch(ksm -> ksm.params.replication.klass == LocalStrategy.class)
+                                    ? keyspaces.filter(ksm -> ksm.params.replication.klass != LocalStrategy.class)
+                                    : keyspaces;
+    }
+
+    /**
      * Compute the largest gc grace seconds amongst all the tables
      * @return the largest gcgs.
      */
@@ -286,7 +311,7 @@ public class Schema implements SchemaProvider
      */
     private synchronized void unload(KeyspaceMetadata ksm)
     {
-        distributedKeyspaces = distributedKeyspaces.without(ksm.name);
+        setDistributedKeyspaces(distributedKeyspaces.without(ksm.name));
 
         this.tableMetadataRefCache = tableMetadataRefCache.withRemovedRefs(ksm);
 
@@ -605,7 +630,7 @@ public class Schema implements SchemaProvider
     {
         result = localDiff(result);
         assert CassandraRelevantProperties.TEST_ALLOW_LOCAL_STRATEGY.getBoolean()
-               || result.after.getKeyspaces().stream().noneMatch(ksm -> ksm.params.replication.klass == LocalStrategy.class) : "LocalStrategy should not be used";
+               || result.after.getKeyspaces().stream().noneMatch(Schema::isRefusedLocalStrategyKeyspace) : "LocalStrategy should not be used";
         schemaChangeNotifier.notifyPreChanges(result);
         merge(result.diff, dropData);
         updateVersion(result.after.getVersion());
@@ -797,6 +822,16 @@ public class Schema implements SchemaProvider
         return updateHandler instanceof DefaultSchemaUpdateHandler
                ? ((DefaultSchemaUpdateHandler) updateHandler).getOutstandingSchemaVersions()
                : Collections.emptyMap();
+    }
+
+    /**
+     * The distributed schema refuses {@link LocalStrategy}, which is reserved to the keyspaces this software defines
+     * itself, except for the local keyspaces of a DataStax Enterprise 6 node upgraded in place
+     * ({@link SchemaConstants#isDseLocalStrategyKeyspace}), accepted whatever the configuration of the node.
+     */
+    private static boolean isRefusedLocalStrategyKeyspace(KeyspaceMetadata ksm)
+    {
+        return ksm.params.replication.klass == LocalStrategy.class && !SchemaConstants.isDseLocalStrategyKeyspace(ksm.name);
     }
 
     /**
