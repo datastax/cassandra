@@ -1620,6 +1620,11 @@ public class NodeProbe implements AutoCloseable
         return msProxy.getDsePeersOnRecord();
     }
 
+    public Map<String, List<String>> getDseAccessControlCheck()
+    {
+        return msProxy.getDseAccessControlCheck();
+    }
+
     public String getDseSaiVersionPin()
     {
         return msProxy.getDseSaiVersionPin();

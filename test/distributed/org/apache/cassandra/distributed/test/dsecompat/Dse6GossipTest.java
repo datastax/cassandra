@@ -18,6 +18,9 @@ package org.apache.cassandra.distributed.test.dsecompat;
 
 import java.net.UnknownHostException;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -42,6 +45,8 @@ import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
@@ -295,8 +300,13 @@ public class Dse6GossipTest extends TestBaseImpl
             }
             cluster.get(2).shutdown().get();
             cluster.get(1).shutdown().get();
-            cluster.get(1).startup();
-            cluster.get(2).startup();
+            // the in-JVM instances start one at a time: the first one's cluster-wide access-control check cannot
+            // reach the replicas of system_auth on the other, still down, so it relies on the check of its own replica
+            try (WithProperties localCheck = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_LOCAL_CHECK_ONLY, true))
+            {
+                cluster.get(1).startup();
+                cluster.get(2).startup();
+            }
 
             for (int node = 1; node <= 2; node++)
             {
@@ -322,6 +332,53 @@ public class Dse6GossipTest extends TestBaseImpl
             cluster.coordinator(2).execute("INSERT INTO " + KEYSPACE + ".t (k, v) VALUES (1, 'one')", ConsistencyLevel.ALL);
             assertThat(cluster.coordinator(1).execute("SELECT v FROM " + KEYSPACE + ".t WHERE k = 1", ConsistencyLevel.ALL))
             .isEqualTo(new Object[][]{ { "one" } });
+        }
+    }
+
+    /**
+     * The cluster-wide pass of the access-control check must not run before the replicas of system_auth can be reached,
+     * or it refuses the start: it retries while they come up. Node 1 restarts while node 2, which holds part of
+     * system_auth, is down; its start waits, and completes once node 2 is back.
+     */
+    @Test
+    public void theAccessControlCheckWaitsForTheReplicasOfSystemAuth() throws Throwable
+    {
+        ExecutorService starter = Executors.newSingleThreadExecutor();
+        // the DSE_6 mode sets the trie sstable version as a system property the in-JVM instances share: restored at the end
+        // a subnet of its own: in-JVM clusters of other suites on 127.0.0.x must not reach these nodes
+        try (WithProperties trieVersion = new WithProperties().clear(TRIE_INDEX_FORMAT_VERSION);
+             Cluster cluster = formerDseNodes(Cluster.build(2)
+                                                     .withSubnet(12)
+                                                     .withConfig(config -> formerDseNode(config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL)))))
+        {
+            long mark = cluster.get(1).logs().mark();
+            cluster.get(2).shutdown().get();
+            cluster.get(1).shutdown().get();
+            try (WithProperties wait = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_RESTRICTIONS_CHECK_WAIT_SECONDS, 240))
+            {
+                Future<?> first = starter.submit(() -> cluster.get(1).startup());
+                // node 1 cannot read system_auth at LOCAL_QUORUM without node 2: it retries
+                await().atMost(3, TimeUnit.MINUTES).pollInterval(1, TimeUnit.SECONDS)
+                       .until(() -> !cluster.get(1).logs().grep(mark, "The startup check of the DSE access controls could not read system_auth.role_permissions " +
+                                                                      "at LOCAL_QUORUM \\(attempt 1: .*\\); retrying in 5 s, for up to 240 s").getResult().isEmpty());
+                assertThat(first.isDone()).as("node 1 is still starting").isFalse();
+                cluster.get(2).startup();
+                first.get(4, TimeUnit.MINUTES);
+            }
+            assertThat(cluster.get(1).logs().grep(mark, "The startup check of the DSE access controls read system_auth.role_permissions at LOCAL_QUORUM on attempt \\d+").getResult())
+            .hasSize(1);
+            for (int node = 1; node <= 2; node++)
+            {
+                int n = node;
+                await().atMost(1, TimeUnit.MINUTES).pollInterval(1, TimeUnit.SECONDS).untilAsserted(() -> {
+                    String status = cluster.get(n).nodetoolResult("status").getStdout();
+                    assertThat(Pattern.compile("^UN ", Pattern.MULTILINE).matcher(status).results().count()).as("node " + n + ":\n" + status).isEqualTo(2);
+                });
+            }
+        }
+        finally
+        {
+            starter.shutdownNow();
         }
     }
 
