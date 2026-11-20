@@ -93,7 +93,9 @@ public class DseViewHiddenColumnCatalogTest extends CQLTester
     @AfterClass
     public static void restoreDdlFreeze()
     {
-        allowDdl.close();
+        // null when the class setup failed before it set the property: nothing to restore, and the real error stays the only one
+        if (allowDdl != null)
+            allowDdl.close();
     }
 
     private static final String VIEW_QUERY = "CREATE MATERIALIZED VIEW %s AS SELECT * FROM %s " +
@@ -339,7 +341,7 @@ public class DseViewHiddenColumnCatalogTest extends CQLTester
         long refusedBefore = DseCompatRefusals.count(DseViewHiddenColumnCatalog.REFUSED_VIEW);
         String failure = "DSE 6 compatibility mode: cannot read DSE's system_schema.hidden_columns from the data directories of this node " +
                          "(no data directory holds " + TABLE_DIRECTORY + ": " + List.of(DatabaseDescriptor.getAllDataFileLocations()) +
-                         " are not the data directories of a node that ran DSE 6); a node in DSE 6 compatibility mode with materialized views does not start";
+                         " are not the data directories of a node that ran DSE 6); the data of materialized views is not exchanged with DSE 6 nodes";
         assertThatThrownBy(DseViewHiddenColumnCatalog::instance).isInstanceOf(IllegalStateException.class).hasMessage(failure);
         // the failure is kept, and each call that meets it is counted
         assertThatThrownBy(DseViewHiddenColumnCatalog::instance).isInstanceOf(IllegalStateException.class).hasMessage(failure);
@@ -441,11 +443,11 @@ public class DseViewHiddenColumnCatalogTest extends CQLTester
     }
 
     /**
-     * At startup in DSE 6 compatibility mode, the node refuses the views whose DSE data it cannot read as DSE does: one
+     * At startup in DSE 6 compatibility mode, the node refuses the views whose data it cannot exchange with DSE 6 nodes: one
      * with another hidden column, and one whose DSE sstables name a hidden column DSE's table does not list here.
      */
     @Test
-    public void startupRefusesTheViewsWhoseDataCannotBeRead() throws Throwable
+    public void startupRefusesTheViewsWhoseDataCannotBeExchanged() throws Throwable
     {
         Path importRoot = Files.createTempDirectory("dse-view-startup");
         try
@@ -463,7 +465,7 @@ public class DseViewHiddenColumnCatalogTest extends CQLTester
             String keyOnly = createView("CREATE MATERIALIZED VIEW %s AS SELECT pk, ck FROM %s WHERE pk IS NOT NULL AND ck IS NOT NULL PRIMARY KEY (ck, pk)");
             dseHiddenColumns.put(Pair.create(KEYSPACE, keyOnly), List.of(new HiddenColumn(".v", "regular", false, "text")));
             TableMetadata keyOnlyView = getColumnFamilyStore(KEYSPACE, keyOnly).metadata();
-            // a view DSE keeps no hidden column for, and no DSE sstable: read as it is
+            // a view DSE keeps no hidden column for, and no DSE sstable: exchanged as it is
             TableMetadata legacy = getColumnFamilyStore(KEYSPACE, createView(VIEW_QUERY)).metadata();
             // a view DSE keeps no hidden column for according to the table, but whose DSE sstable names .v
             createTable("CREATE TABLE %s (pk int, ck int, v text, PRIMARY KEY (pk, ck))");
@@ -476,12 +478,11 @@ public class DseViewHiddenColumnCatalogTest extends CQLTester
             assertThat(problems).extracting(problem -> problem.diskState).containsExactly(false, true);
             assertThat(problems).extracting(problem -> problem.message).containsExactly("DSE 6 compatibility mode: DSE keeps the hidden columns [.v text (regular)] for materialized view " + KEYSPACE + '.' + keyOnly +
                                                  "; this software only reproduces the hidden column of a regular base column in the view primary key, and " +
-                                                 "refuses the view's data rather than return wrong view rows. " + REMEDY,
+                                                 "refuses to exchange the view's data with DSE 6 nodes rather than return or store wrong view rows. " + REMEDY,
                                                  "DSE 6 compatibility mode: the sstable " + fixtureStore.getLiveSSTables().iterator().next().descriptor +
                                                  " of materialized view " + KEYSPACE + '.' + fixtureView + ", written by DSE, holds the hidden column .v, but " +
                                                  "DSE's system_schema.hidden_columns on this node lists no hidden column for the view; the data directories of " +
-                                                 "this node do not hold the table DSE wrote, and this software cannot tell which hidden columns DSE keeps in " +
-                                                 "the view's data");
+                                                 "this node do not hold the table DSE wrote, and this software cannot exchange the view's data with DSE 6 nodes");
             DseViewHiddenColumnCatalog.setInstance(catalog);
             // the problems of every view of the schema, whichever the order of the schema, with the exit code of the
             // data directories at fault
