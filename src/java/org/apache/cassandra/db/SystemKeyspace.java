@@ -294,6 +294,8 @@ public final class SystemKeyspace
                 + "truncated_at map<uuid, blob>,"
                 + "PRIMARY KEY ((key)))"
                 ).recordDeprecatedSystemColumn("thrift_version", UTF8Type.instance)
+                // the columns DSE 5.1 adds, so that the sstables it wrote are read (Dse51SystemTables)
+                .recordDeprecatedSystemColumns(Dse51SystemTables.COLUMNS)
                 .build();
 
     // Used by CNDB
@@ -512,6 +514,8 @@ public final class SystemKeyspace
             + "schema_version uuid,"
             + "tokens set<varchar>,"
             + "PRIMARY KEY ((peer)))")
+            // the columns DSE 5.1 adds, so that the sstables it wrote are read (Dse51SystemTables)
+            .recordDeprecatedSystemColumns(Dse51SystemTables.COLUMNS)
             .build();
 
     /** @deprecated See CASSANDRA-7544 */
