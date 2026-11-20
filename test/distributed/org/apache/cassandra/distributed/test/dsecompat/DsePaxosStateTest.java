@@ -31,11 +31,13 @@ import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
+import org.apache.cassandra.distributed.api.NodeToolResult;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.PaxosRow;
 import org.apache.cassandra.dsecompat.DseFixtures.Statement;
+import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.service.paxos.Ballot;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
@@ -55,11 +57,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * ({@link DseFixtures#paxosRows()}, the replicas of a DSE 6.8.65 test cluster being upgraded in place, with their ballots
  * moved to an hour ago). In {@code NONE}, Paxos repair completes without errors, commits an accepted proposal of an
  * upgraded coordinator and leaves those DSE proposed to the next lightweight transaction (Paxos v1) or loses them (Paxos
- * v2). In {@code DSE_6}, which the nodes enter on a restart as on an upgrade, the test runs no repair: serial reads
- * complete the rounds instead, and only Paxos v1 runs, the only variant DSE 6 peers have. In both modes a row of a DSE
- * version this software does not know, deleted on every replica as its error says and flushed, leaves the lightweight
- * transactions of its partition (and in {@code NONE} the repairs) working, lightweight transactions on those partitions
- * work through every coordinator, and no node logs a decoding error.
+ * v2). In {@code DSE_6}, which the nodes enter on a restart as on an upgrade, the guards of the mode refuse the
+ * repairs: serial reads complete the rounds instead, and only Paxos v1 runs, the only variant DSE 6 peers have. In both
+ * modes a row of a DSE version this software does not know, deleted on every replica as its error says and flushed,
+ * leaves the lightweight transactions of its partition (and in {@code NONE} the repairs) working, lightweight
+ * transactions on those partitions work through every coordinator, and no node logs a decoding error.
  */
 public class DsePaxosStateTest extends TestBaseImpl
 {
@@ -77,7 +79,7 @@ public class DsePaxosStateTest extends TestBaseImpl
     @Test
     public void paxosV1InDse6() throws Throwable
     {
-        // the nodes enter the mode on a restart, as on an upgrade
+        // the nodes enter the mode on a restart, as on an upgrade: the guards of the mode refuse a fresh start in it
         repairAndLwtOnDsePaxosState(false, true, c -> c.set("storage_compatibility_mode", "HCD_1")
                                                        .set("uuid_sstable_identifiers_enabled", false)
                                                        .set("paxos_variant", "v1"));
@@ -169,7 +171,7 @@ public class DsePaxosStateTest extends TestBaseImpl
 
             if (dse6)
             {
-                // the schema is in place: every node enters the mode on a restart, on the state above
+                // the schema is in place (the mode freezes it): every node enters the mode on a restart, on the state above
                 // (each start waits for gossip to settle, so every node sees the others up before the reads below)
                 for (IInvokableInstance node : cluster)
                 {
@@ -180,8 +182,8 @@ public class DsePaxosStateTest extends TestBaseImpl
             }
 
             // Paxos repair of every key, then the other repairs with their Paxos step, which flooded the logs with
-            // AssertionErrors before the fix (in DSE_6 the test runs no repair, and the rounds are completed by serial
-            // reads below)
+            // AssertionErrors before the fix (in DSE_6 the guards of the mode refuse repairs, and the rounds are completed by
+            // serial reads below)
             repairAndCheckLogs(cluster, dse6);
             Object[][] dseBatch = { row("u1", fromDse.casBatchValue()), row("u3", fromDse.casBatchValue()) };
             Object[][] upgradedBatch = { row("u1", fromUpgraded.casBatchValue()), row("u3", fromUpgraded.casBatchValue()) };
@@ -248,12 +250,37 @@ public class DsePaxosStateTest extends TestBaseImpl
         for (String keyspace : new String[]{ "lab", "bbtest" })
         {
             if (dse6)
-                continue; // no repair: serial reads complete the rounds, only the logs are checked
+            {
+                long[] refusedBefore = refusedRepairs(cluster);
+                for (NodeToolResult refused : new NodeToolResult[]{ cluster.get(1).nodetoolResult("repair", "--paxos-only", keyspace),
+                                                                    cluster.get(2).nodetoolResult("repair", "-full", keyspace),
+                                                                    cluster.get(3).nodetoolResult("repair", keyspace) })
+                {
+                    refused.asserts().failure();
+                    assertThat(refused.getStderr()).contains("repair is refused while the DSE 6 upgrade is in progress " +
+                                                             "(internode_compatibility_mode: DSE_6")
+                                                   .contains("finish the upgrade of every node and drop the mode first");
+                }
+                // each node refused and counted its own repair
+                long[] refusedAfter = refusedRepairs(cluster);
+                for (int i = 0; i < refusedAfter.length; i++)
+                    assertThat(refusedAfter[i]).describedAs("node " + (i + 1)).isEqualTo(refusedBefore[i] + 1);
+                continue;
+            }
             cluster.get(1).nodetoolResult("repair", "--paxos-only", keyspace).asserts().success();
             cluster.get(2).nodetoolResult("repair", "-full", keyspace).asserts().success();
             cluster.get(3).nodetoolResult("repair", keyspace).asserts().success(); // incremental
         }
         for (IInvokableInstance node : cluster)
             assertThat(node.logs().grep(DECODING_ERRORS).getResult()).describedAs("node " + node.config().num()).isEmpty();
+    }
+
+    /** The repairs each node refused, as counted for {@code nodetool compatstatus}, in node order. */
+    private static long[] refusedRepairs(Cluster cluster)
+    {
+        long[] refused = new long[cluster.size()];
+        for (int i = 0; i < refused.length; i++)
+            refused[i] = cluster.get(i + 1).callOnInstance(() -> DseCompatRefusals.count("repair"));
+        return refused;
     }
 }

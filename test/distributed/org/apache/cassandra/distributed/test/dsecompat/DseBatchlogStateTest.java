@@ -54,7 +54,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * (the mutations of the DSE 6.8.65 and 6.9.26 hints fixtures, tagged with DSE's messaging versions 1024 and 1536) behind
  * a batch that cannot be decoded: the batchlog replay of the first node applies DSE's batches on both replicas, removes
  * them, and keeps the undecodable one with its ERROR, in {@code DSE_6} and in {@code NONE}. In {@code DSE_6} the nodes enter
- * the mode on a restart, as on an upgrade, after the schema is created.
+ * the mode on a restart, as on an upgrade, after the schema is created: the guards of the mode refuse a fresh start in
+ * it, and DDL.
  */
 public class DseBatchlogStateTest extends TestBaseImpl
 {
@@ -70,7 +71,7 @@ public class DseBatchlogStateTest extends TestBaseImpl
     @Test
     public void replayInDse6() throws Throwable
     {
-        // the nodes enter the mode on a restart, as on an upgrade
+        // the nodes enter the mode on a restart, as on an upgrade: the guards of the mode refuse a fresh start in it
         replayDseBatches(true, c -> c.set("storage_compatibility_mode", "HCD_1").set("uuid_sstable_identifiers_enabled", false));
     }
 
@@ -114,7 +115,7 @@ public class DseBatchlogStateTest extends TestBaseImpl
                                  DseFixtures.fixtureTableId(DseVersion.DSE_6_9_26));
             if (dse6)
             {
-                // the schema is in place: every node enters the mode on a restart
+                // the schema is in place (the mode freezes it): every node enters the mode on a restart
                 for (IInvokableInstance node : cluster)
                 {
                     node.shutdown().get();

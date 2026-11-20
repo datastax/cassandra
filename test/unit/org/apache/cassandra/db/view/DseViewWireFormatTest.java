@@ -115,10 +115,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 public class DseViewWireFormatTest extends CQLTester
 {
-    /**
-     * These tests create tables in DSE_6 mode, with the property reserved for schema changes in the mode set, as the
-     * tests of the mode do.
-     */
+    /** These tests create tables in DSE_6 mode, whose schema freeze is not what they test. */
     private static WithProperties allowDdl;
 
     @BeforeClass

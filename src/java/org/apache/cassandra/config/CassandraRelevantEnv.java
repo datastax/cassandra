@@ -28,7 +28,9 @@ public enum CassandraRelevantEnv
      */
     JAVA_HOME ("JAVA_HOME"),
     CIRCLECI("CIRCLECI"),
-    CASSANDRA_SKIP_SYNC("CASSANDRA_SKIP_SYNC")
+    CASSANDRA_SKIP_SYNC("CASSANDRA_SKIP_SYNC"),
+    /** The installation directory of DataStax Enterprise, read by the DSE 6 preflight inspection ({@code tools/bin/dsepreflight}). */
+    DSE_HOME("DSE_HOME")
 
     ;
 
