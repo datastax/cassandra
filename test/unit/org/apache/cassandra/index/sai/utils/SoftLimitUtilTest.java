@@ -23,6 +23,7 @@ import java.util.Random;
 import org.apache.commons.math3.distribution.BinomialDistribution;
 import org.junit.Test;
 
+import static org.apache.cassandra.index.sai.utils.SoftLimitUtil.expectedSubsetItems;
 import static org.apache.cassandra.index.sai.utils.SoftLimitUtil.softLimit;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -171,5 +172,30 @@ public class SoftLimitUtilTest
         return n > 0
                ? 1.0 - distribution.cumulativeProbability(n - 1)
                : 1.0;
+    }
+
+    @Test
+    public void expectedSubsetItemsEdgeCases()
+    {
+        assertEquals(0, expectedSubsetItems(0, 0.5, 0.999));
+        assertEquals(0, expectedSubsetItems(100, 0.0, 0.999));
+        assertEquals(0, expectedSubsetItems(100, 0.5, 0.0));
+        assertEquals(100, expectedSubsetItems(100, 1.0, 0.999));
+        assertEquals(1000, expectedSubsetItems(1000, 1.0, 0.5));
+    }
+
+    @Test
+    public void expectedSubsetItemsValues()
+    {
+        // For N=2 (p=0.5) and L=100, mean is 50, with 99.9% confidence it should be between 60 and 70
+        int n2 = expectedSubsetItems(100, 0.5, 0.999);
+        assertTrue("Expected between 60 and 70, got " + n2, n2 >= 60 && n2 <= 70);
+
+        // For N=5 (p=0.2) and L=1000, mean is 200, with 99.9% confidence it should be between 230 and 260
+        int n5 = expectedSubsetItems(1000, 0.2, 0.999);
+        assertTrue("Expected between 230 and 260, got " + n5, n5 >= 230 && n5 <= 260);
+
+        // Result should never exceed totalItems
+        assertEquals(10, expectedSubsetItems(10, 0.9, 0.999));
     }
 }

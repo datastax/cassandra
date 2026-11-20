@@ -199,7 +199,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
         this.nextClusterings = new InsertionOrderedNavigableSet<>(cfs.metadata().comparator);
-        var tableMetrics = new Plan.TableMetrics(estimateTotalAvailableRows(ranges),
+        queryContext.setEstimatedRowsInQueryRange(estimateTotalRows(ranges));
+        var tableMetrics = new Plan.TableMetrics(estimateTotalRows(),
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
@@ -1068,21 +1069,38 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
-     * Returns the total count of rows in the sstables which overlap with any of the given ranges
-     * and the rows in the memtables restricted to the queried token ranges. Token ranges are
-     * approximated to full shards, according to the way how TrieMemtableIndex shards the indexes.
+     * Estimates the number of rows in all memtables and sstables, regardless of the query key range.
      */
-    private long estimateTotalAvailableRows(List<DataRange> ranges)
+    private long estimateTotalRows()
     {
         long rows = 0;
         for (Memtable memtable : cfs.getAllMemtables())
             rows += Memtable.estimateRowCount(memtable);
-
         for (SSTableReader sstable : cfs.getLiveSSTables())
-            for (DataRange range : ranges)
-                if (RangeUtil.intersects(sstable, range.keyRange()))
-                    rows += sstable.getTotalRows();
+            rows += sstable.getTotalRows();
+        return rows;
+    }
 
+    /**
+     * Estimates the number of rows in all memtables and sstables that fall into any of the given ranges.
+     * <p>
+     * It does no I/O, it only uses ring arithmetic: rows are assumed to be uniformly distributed over the whole
+     * ring in memtables, and over the tokens between the first and the last token in sstables. Therefore, for each
+     * range only the fraction of rows corresponding to the fraction of the token span covered by the range is counted.
+     * A range is assumed to match at least one partition in each memtable and each intersecting sstable.
+     */
+    private long estimateTotalRows(List<DataRange> ranges)
+    {
+        long rows = 0;
+        for (DataRange range : ranges)
+        {
+            for (Memtable memtable : cfs.getAllMemtables())
+                rows += RangeUtil.estimateRowsInRange(memtable, range.keyRange());
+
+            for (SSTableReader sstable : cfs.getLiveSSTables())
+                if (RangeUtil.intersects(sstable, range.keyRange()))
+                    rows += RangeUtil.estimateRowsInRange(sstable, range.keyRange());
+        }
         return rows;
     }
 

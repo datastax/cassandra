@@ -122,6 +122,12 @@ public class QueryContext
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
 
+    /**
+     * Estimated number of rows (in all sstables and memtables) within the key range of the query,
+     * or -1 if not known. Set by the query controller before the indexes are searched.
+     */
+    private long estimatedRowsInQueryRange = -1;
+
     /** Metrics about the query plan. */
     private PlanInfo queryPlanInfo;
 
@@ -144,6 +150,20 @@ public class QueryContext
     public int rowLimit()
     {
         return command == null ? Integer.MAX_VALUE : command.limits().count();
+    }
+
+    /**
+     * @return estimated number of rows (in all sstables and memtables) within the key range of the query,
+     * or -1 if not known
+     */
+    public long estimatedRowsInQueryRange()
+    {
+        return estimatedRowsInQueryRange;
+    }
+
+    public void setEstimatedRowsInQueryRange(long rows)
+    {
+        this.estimatedRowsInQueryRange = rows;
     }
 
     public long totalQueryTimeNs()

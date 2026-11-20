@@ -23,6 +23,7 @@ import java.util.Comparator;
 import java.util.List;
 import javax.annotation.concurrent.NotThreadSafe;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.agrona.collections.LongHashSet;
 import org.apache.cassandra.index.sai.disk.PostingList;
 import org.apache.cassandra.io.util.FileUtils;
@@ -135,6 +136,12 @@ public final class LazyMergePostingList implements PostingList
     public int size()
     {
         return size;
+    }
+
+    @VisibleForTesting
+    public int capacity()
+    {
+        return capacity;
     }
 
     @Override
