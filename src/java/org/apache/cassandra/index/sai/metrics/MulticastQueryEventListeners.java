@@ -61,6 +61,13 @@ public final class MulticastQueryEventListeners
         }
 
         @Override
+        public void onPostingListMergeQueueCapacityChange(int oldCapacity, int newCapacity)
+        {
+            ctx.onPostingListMergeQueueCapacityChange(oldCapacity, newCapacity);
+            listener.onPostingListMergeQueueCapacityChange(oldCapacity, newCapacity);
+        }
+
+        @Override
         public QueryEventListener.PostingListEventListener postingListEventListener()
         {
             return postingListEventListener;
@@ -138,6 +145,20 @@ public final class MulticastQueryEventListeners
             ctx.addBkdPostingsDecodes(postingDecoded);
             listener.postingDecoded(postingDecoded);
         }
+
+        @Override
+        public void onPostingListOpen()
+        {
+            ctx.onPostingListOpen();
+            listener.onPostingListOpen();
+        }
+
+        @Override
+        public void onPostingListClose()
+        {
+            ctx.onPostingListClose();
+            listener.onPostingListClose();
+        }
     }
 
     public static class Multicast2TriePostingListEventListener implements QueryEventListener.PostingListEventListener
@@ -163,6 +184,20 @@ public final class MulticastQueryEventListeners
         {
             ctx.addTriePostingsDecodes(postingDecoded);
             listener.postingDecoded(postingDecoded);
+        }
+
+        @Override
+        public void onPostingListOpen()
+        {
+            ctx.onPostingListOpen();
+            listener.onPostingListOpen();
+        }
+
+        @Override
+        public void onPostingListClose()
+        {
+            ctx.onPostingListClose();
+            listener.onPostingListClose();
         }
     }
 }

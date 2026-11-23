@@ -372,6 +372,12 @@ public class TableQueryMetrics
         /** Number of times the query has advanced into a trie (literal or key) posting list. */
         public final Histogram postingsDecodes;
 
+        /** Number of trie posting lists opened during the query. */
+        public final Histogram openPostingLists;
+
+        /** Maximum capacity of the lazy merge posting list queue observed during the query. */
+        public final Histogram maxPostingListMergeQueueSize;
+
         /** Number of BKD (numeric) merged posting lists visited by the query. */
         public final Histogram kdTreePostingsNumPostings;
 
@@ -421,6 +427,8 @@ public class TableQueryMetrics
 
             postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), true);
             postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
+            openPostingLists = Metrics.histogram(createMetricName("OpenPostingLists"), false);
+            maxPostingListMergeQueueSize = Metrics.histogram(createMetricName("MaxPostingListMergeQueueSize"), false);
 
             kdTreePostingsSkips = Metrics.histogram(createMetricName("KDTreePostingsSkips"), true);
             kdTreePostingsNumPostings = Metrics.histogram(createMetricName("KDTreePostingsNumPostings"), false);
@@ -454,6 +462,8 @@ public class TableQueryMetrics
             {
                 postingsSkips.update(snapshot.triePostingsSkips);
                 postingsDecodes.update(snapshot.triePostingsDecodes);
+                openPostingLists.update(snapshot.totalPostingListsOpen);
+                maxPostingListMergeQueueSize.update(snapshot.maxPostingListMergeQueueCapacity);
             }
 
             // Record numeric index cache metrics.

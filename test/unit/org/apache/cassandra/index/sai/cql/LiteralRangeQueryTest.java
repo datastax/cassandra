@@ -36,10 +36,15 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.v1.TermsReader;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
+import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Tests range ({@code <}, {@code <=}, {@code >}, {@code >=}) queries on {@code text}/{@code ascii} columns with a
@@ -822,6 +827,58 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
         execute("INSERT INTO %s (pk, l) VALUES (?, ?)", 1, list("a"));
         assertInvalidMessage("has an index but does not support the operators specified in the query",
                              "SELECT pk FROM %s WHERE l > ['a']");
+    }
+
+    @Test
+    public void testOpenPostingListsBoundedByLimit()
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        disableCompaction();
+
+        int numSSTables = 4;
+        int rowsPerSSTable = 250;
+        for (int sstable = 0; sstable < numSSTables; sstable++)
+        {
+            for (int i = 0; i < rowsPerSSTable; i++)
+            {
+                int pk = sstable * rowsPerSSTable + i;
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, String.format("val_%05d", pk));
+            }
+            flush();
+        }
+
+        StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore());
+        TableQueryMetrics.PerQuery allMetrics = group.queryMetrics().perQueryMetrics.get(TableQueryMetrics.QueryKind.ALL);
+        long initialOpenPostingLists = allMetrics.openPostingLists.getCount();
+        long initialMergeQueueHist = allMetrics.maxPostingListMergeQueueSize.getCount();
+
+        StorageAttachedIndex saiIndex = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.listIndexes().iterator().next();
+        ColumnQueryMetrics.TrieIndexMetrics trieMetrics = (ColumnQueryMetrics.TrieIndexMetrics) saiIndex.getIndexContext().getColumnQueryMetrics();
+
+        long initialAllocations = trieMetrics.postingListMergeQueueAllocations.getCount();
+
+        UntypedResultSet result = execute("SELECT pk FROM %s WHERE v >= 'val_00000' AND v <= 'val_00999' LIMIT 100");
+        assertEquals(100, result.size());
+
+        long allocations = trieMetrics.postingListMergeQueueAllocations.getCount() - initialAllocations;
+        long totalCapacity = trieMetrics.totalPostingListMergeQueueCapacity.getCount();
+        long reallocations = trieMetrics.postingListMergeQueueReallocations.getCount();
+        long currentOpen = trieMetrics.currentOpenPostingLists.getCount();
+
+        assertEquals(numSSTables, allocations);
+        assertEquals(0, totalCapacity);
+        assertEquals(0, reallocations);
+        assertEquals(0, currentOpen);
+        assertEquals(initialOpenPostingLists + 1, allMetrics.openPostingLists.getCount());
+        assertEquals(initialMergeQueueHist + 1, allMetrics.maxPostingListMergeQueueSize.getCount());
+        assertTrue(allMetrics.openPostingLists.getSnapshot().getMax() > 0);
+
+        // Each segment expects ~41 rows from SoftLimitUtil (limit 100, fraction ~0.25, confidence 0.9999),
+        // resulting in initCapacity = ~82 per segment (~330 total across 4 SSTables).
+        // Without limit, total capacity would be 4 * (2 * 250) = 2000.
+        assertTrue(allMetrics.maxPostingListMergeQueueSize.getSnapshot().getMax() >= 70 &&
+                   allMetrics.maxPostingListMergeQueueSize.getSnapshot().getMax() <= 100);
     }
 
     private void insertRandomRows(Map<Integer, String> rows, int from, int to)

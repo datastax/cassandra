@@ -83,6 +83,12 @@ public interface QueryEventListener
          * Returns events listener for trie postings.
          */
         PostingListEventListener postingListEventListener();
+
+        /**
+         * When a lazy merge posting list queue capacity changes (0 -> initCapacity on allocation,
+         * oldCapacity -> newCapacity on resize, and capacity -> 0 on deallocation).
+         */
+        default void onPostingListMergeQueueCapacityChange(int oldCapacity, int newCapacity) { }
     }
 
     /**
@@ -99,6 +105,16 @@ public interface QueryEventListener
          * When a posting is successfully read from disk and decoded.
          */
         void postingDecoded(long postingsDecoded);
+
+        /**
+         * When an individual posting list is opened.
+         */
+        default void onPostingListOpen() { }
+
+        /**
+         * When an individual posting list is closed.
+         */
+        default void onPostingListClose() { }
 
         PostingListEventListener NO_OP = new PostingListEventListener()
         {

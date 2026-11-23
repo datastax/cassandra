@@ -140,6 +140,8 @@ public class RangeUtilTest
         when(memtable.getEstimatedAverageRowSize()).thenReturn(10L);
         when(memtable.getLiveDataSize()).thenReturn(rows * 10);
         when(memtable.partitionCount()).thenReturn(partitions);
+        when(memtable.minPartitionKey()).thenReturn(new BufferDecoratedKey(Murmur3Partitioner.MINIMUM, ByteBufferUtil.EMPTY_BYTE_BUFFER));
+        when(memtable.maxPartitionKey()).thenReturn(new BufferDecoratedKey(new LongToken(Murmur3Partitioner.MAXIMUM), ByteBufferUtil.EMPTY_BYTE_BUFFER));
         return memtable;
     }
 
@@ -383,5 +385,15 @@ public class RangeUtilTest
         Token nonOverlappingLeft = ByteOrderedPartitioner.instance.getToken(ByteBufferUtil.bytes("z1"));
         Token nonOverlappingRight = ByteOrderedPartitioner.instance.getToken(ByteBufferUtil.bytes("z2"));
         assertEquals(0, RangeUtil.estimateRowsInRange(sstable, new Range<>(nonOverlappingLeft.minKeyBound(), nonOverlappingRight.maxKeyBound())));
+
+        // the same applies to memtables
+        Memtable memtable = mock(Memtable.class);
+        when(memtable.getEstimatedAverageRowSize()).thenReturn(10L);
+        when(memtable.getLiveDataSize()).thenReturn(ROWS * 10);
+        when(memtable.partitionCount()).thenReturn(PARTITIONS);
+        when(memtable.minPartitionKey()).thenReturn(new BufferDecoratedKey(min, ByteBufferUtil.EMPTY_BYTE_BUFFER));
+        when(memtable.maxPartitionKey()).thenReturn(new BufferDecoratedKey(max, ByteBufferUtil.EMPTY_BYTE_BUFFER));
+        assertEquals(ROWS, RangeUtil.estimateRowsInRange(memtable, new Range<>(left.minKeyBound(), right.maxKeyBound())));
+        assertEquals(0, RangeUtil.estimateRowsInRange(memtable, new Range<>(nonOverlappingLeft.minKeyBound(), nonOverlappingRight.maxKeyBound())));
     }
 }

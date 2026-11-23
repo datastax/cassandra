@@ -509,7 +509,8 @@ public class TermsReader implements Closeable
                 int initCapacity = (int) Math.min(Math.max(2L * expectedRows, minLazyPostingLists), maxLazyPostingLists);
                 return new LazyMergePostingList(new RangePostingLists(postingsInput, postingsSummaryInput),
                                                 initCapacity,
-                                                maxLazyPostingLists);
+                                                maxLazyPostingLists,
+                                                listener::onPostingListMergeQueueCapacityChange);
             }
             catch (Throwable t)
             {

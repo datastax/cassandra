@@ -63,6 +63,7 @@ public final class LazyMergePostingList implements PostingList
 {
     /** The source that supplies the posting list IDs and opens the individual posting lists. */
     private final Source source;
+    private final AllocationListener allocationListener;
     /** The maximum number of posting lists that are open at any time. */
     private final int maxCapacity;
     /** The total number of postings in all matching posting lists, including duplicate postings. */
@@ -83,6 +84,7 @@ public final class LazyMergePostingList implements PostingList
      * scan, and {@link Long#MAX_VALUE} if the queue left out no posting list.
      */
     private long bound;
+    private boolean closed;
 
     /**
      * Creates a posting list that lazily merges the posting lists of the source. It takes ownership of the source.
@@ -97,12 +99,30 @@ public final class LazyMergePostingList implements PostingList
                                 int initCapacity,
                                 int maxCapacity) throws IOException
     {
+        this(source, initCapacity, maxCapacity, AllocationListener.NO_OP);
+    }
+
+    public LazyMergePostingList(Source source,
+                                int initCapacity,
+                                int maxCapacity,
+                                AllocationListener allocationListener) throws IOException
+    {
         this.source = source;
         this.maxCapacity = Math.max(1, maxCapacity);
         this.capacity = Math.max(1, Math.min(initCapacity, maxCapacity));
+        this.allocationListener = allocationListener != null ? allocationListener : AllocationListener.NO_OP;
         this.queue = new CandidateQueue(capacity);
+        this.allocationListener.onCapacityChange(0, capacity);
         this.bound = 0;
-        refill(0);
+        try
+        {
+            refill(0);
+        }
+        catch (Throwable t)
+        {
+            this.allocationListener.onCapacityChange(capacity, 0);
+            throw t;
+        }
     }
 
     @Override
@@ -147,8 +167,12 @@ public final class LazyMergePostingList implements PostingList
     @Override
     public void close()
     {
+        if (closed)
+            return;
+        closed = true;
         FileUtils.closeQuietly(queue.candidates());
         FileUtils.closeQuietly(source);
+        allocationListener.onCapacityChange(capacity, 0);
     }
 
     /**
@@ -174,9 +198,11 @@ public final class LazyMergePostingList implements PostingList
     private void resize(int newCapacity) throws IOException
     {
         // A view over the heap array of the old queue. The old queue is dropped below, so nothing modifies the array.
+        int oldCapacity = capacity;
         List<Candidate> retained = queue.candidates();
         queue = new CandidateQueue(newCapacity);
         capacity = newCapacity;
+        allocationListener.onCapacityChange(oldCapacity, newCapacity);
 
         int i = 0;
         try
@@ -493,4 +519,24 @@ public final class LazyMergePostingList implements PostingList
         @Override
         void close() throws IOException;
     }
+
+
+    /**
+     * Listener for memory allocation and resizing lifecycle events of the candidate queue in a {@link LazyMergePostingList}.
+     */
+    public interface AllocationListener
+    {
+        AllocationListener NO_OP = (oldCapacity, newCapacity) -> {};
+
+        /**
+         * Called when the candidate queue capacity changes.
+         * Initial allocation passes {@code oldCapacity = 0}, resizing passes {@code oldCapacity} and {@code newCapacity},
+         * and deallocation on close passes {@code newCapacity = 0}.
+         *
+         * @param oldCapacity the previous capacity of the candidate queue, or 0 on initial allocation
+         * @param newCapacity the new capacity of the candidate queue, or 0 on deallocation
+         */
+        void onCapacityChange(int oldCapacity, int newCapacity);
+    }
+
 }

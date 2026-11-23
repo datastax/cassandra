@@ -33,10 +33,15 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
+import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Tests {@code LIKE '<prefix>%'} queries on string columns with a non-analyzed SAI index across the
@@ -329,6 +334,59 @@ public class LikePrefixTest extends SAITester
                              "SELECT pk FROM %s WHERE l LIKE 'a%%'");
         // collections keep working with their supported operators
         assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE l CONTAINS 'abc'"), row(1));
+    }
+
+    @Test
+    public void testOpenPostingListsBoundedByLimit()
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        disableCompaction();
+
+        int numSSTables = 4;
+        int rowsPerSSTable = 250;
+        for (int sstable = 0; sstable < numSSTables; sstable++)
+        {
+            for (int i = 0; i < rowsPerSSTable; i++)
+            {
+                int pk = sstable * rowsPerSSTable + i;
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, String.format("prefix_%05d", pk));
+            }
+            flush();
+        }
+
+        StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore());
+        TableQueryMetrics.PerQuery allMetrics = group.queryMetrics().perQueryMetrics.get(TableQueryMetrics.QueryKind.ALL);
+        long initialOpenPostingLists = allMetrics.openPostingLists.getCount();
+        long initialMergeQueueHist = allMetrics.maxPostingListMergeQueueSize.getCount();
+
+        StorageAttachedIndex saiIndex = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.listIndexes().iterator().next();
+        ColumnQueryMetrics.TrieIndexMetrics trieMetrics = (ColumnQueryMetrics.TrieIndexMetrics) saiIndex.getIndexContext().getColumnQueryMetrics();
+
+        long initialAllocations = trieMetrics.postingListMergeQueueAllocations.getCount();
+        long initialCapacity = trieMetrics.totalPostingListMergeQueueCapacity.getCount();
+
+        UntypedResultSet result = execute("SELECT pk FROM %s WHERE v LIKE 'prefix_%%' LIMIT 100");
+        assertEquals(100, result.size());
+
+        long allocations = trieMetrics.postingListMergeQueueAllocations.getCount() - initialAllocations;
+        long totalCapacity = trieMetrics.totalPostingListMergeQueueCapacity.getCount() - initialCapacity;
+        long reallocations = trieMetrics.postingListMergeQueueReallocations.getCount();
+        long currentOpen = trieMetrics.currentOpenPostingLists.getCount();
+
+        assertEquals(numSSTables, allocations);
+        // Each segment expects ~41 rows from SoftLimitUtil (limit 100, fraction ~0.25, confidence 0.9999),
+        // resulting in initCapacity = ~82 per segment (~330 total across 4 SSTables).
+        // Without limit, total capacity would be 4 * (2 * 250) = 2000.
+        assertTrue("Total capacity (" + totalCapacity + ") should be bounded near ~330 and far below 2000",
+                   totalCapacity >= numSSTables * 70 && totalCapacity <= numSSTables * 100);
+        assertEquals(0, reallocations);
+        assertEquals(0, currentOpen);
+        assertEquals(initialOpenPostingLists + 1, allMetrics.openPostingLists.getCount());
+        assertEquals(initialMergeQueueHist + 1, allMetrics.maxPostingListMergeQueueSize.getCount());
+        assertTrue(allMetrics.openPostingLists.getSnapshot().getMax() > 0);
+        assertTrue(allMetrics.maxPostingListMergeQueueSize.getSnapshot().getMax() >= 70 &&
+                   allMetrics.maxPostingListMergeQueueSize.getSnapshot().getMax() <= 100);
     }
 
     private void insertRandomRows(Map<Integer, String> rows, int from, int to)
