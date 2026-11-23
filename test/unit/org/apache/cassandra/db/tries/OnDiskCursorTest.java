@@ -37,6 +37,7 @@ import org.apache.cassandra.io.util.ByteBufferRebufferer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.Rebufferer;
 import org.apache.cassandra.io.util.RebufferingInputStream;
+import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.ReflectionUtils;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.vint.VIntCoding;
@@ -221,7 +222,7 @@ public class OnDiskCursorTest
         RangeTrie<TestRangeState> trie = RangeTrie.branch(branchKey, VERSION, new TestRangeState(branchKey, false, 1, 1));
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            OnDiskTrieWriter.write(trie, true, TrieUtil.RANGE_SERDE, out);
+            OnDiskTrieWriter.write(trie, TrieUtil.RANGE_SERDE, out);
             ByteBuffer buffer = out.asNewBuffer();
             int[] reads = new int[1];
             OnDiskCursor.DataDeserializer<TestRangeState> deserializer = (rdr, length) -> {
@@ -257,7 +258,7 @@ public class OnDiskCursorTest
             new TestRangeState(TrieUtil.directComparable("c"), 1, -1))));
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            OnDiskTrieWriter.write(trie, true, TrieUtil.RANGE_SERDE, out);
+            OnDiskTrieWriter.write(trie, TrieUtil.RANGE_SERDE, out);
             ByteBuffer buffer = out.asNewBuffer();
             int[] reads = new int[1];
             OnDiskCursor.DataDeserializer<TestRangeState> deserializer = (rdr, length) -> {
@@ -293,7 +294,7 @@ public class OnDiskCursorTest
             new TestRangeState(TrieUtil.directComparable("bc"), 2, -1))));
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            OnDiskTrieWriter.write(trie, true, TrieUtil.RANGE_SERDE, out);
+            OnDiskTrieWriter.write(trie, TrieUtil.RANGE_SERDE, out);
             ByteBuffer buffer = out.asNewBuffer();
             int[] reads = new int[1];
             OnDiskCursor.DataDeserializer<TestRangeState> deserializer = (rdr, length) -> {
@@ -345,7 +346,7 @@ public class OnDiskCursorTest
             new TestRangeState(TrieUtil.directComparable("bc"), 2, -1))));
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            OnDiskTrieWriter.write(trie, true, TrieUtil.RANGE_SERDE, out);
+            OnDiskTrieWriter.write(trie, TrieUtil.RANGE_SERDE, out);
             ByteBuffer buffer = out.asNewBuffer();
             AtomicReference<OnDiskRangeCursor<TestRangeState>> closed = new AtomicReference<>();
             List<Rebufferer> closedCursorRebufferers = new ArrayList<>();
@@ -415,37 +416,44 @@ public class OnDiskCursorTest
                                                   Direction.FORWARD, OnDiskCursor.ContentStyle.UNORDERED, buffer.limit()));
     }
 
-    /// An unordered trie only has content on the descent side. A prefix node with a child that claims content for
-    /// the ascent side, with or without some for the descent side, is not one such a trie is written with; the same
-    /// bytes are well-formed as an ordered trie.
+    /// A plain trie, ordered or not, only has content on the descent side (see "Stopping on the ascent path" in
+    /// `Trie.md`). A prefix node that claims content for the ascent side, with or without some for the descent side and
+    /// with or without a child, is not one such a trie is written with; the same bytes are well-formed as a range trie.
     @Test
-    public void testAscentContentInUnorderedTrieIsRejected()
+    public void testAscentContentInPlainTrieIsRejected()
     {
         byte chain = (byte) OnDiskWriteNodeType.CHAIN_BITS;
-        int prefix = OnDiskWriteNodeType.PREFIX_BITS | OnDiskWriteNodeType.PREFIX_HAS_CHILD;
-        // an empty leaf, the chain "a" that leads to it, and a prefix node with a byte of ascent content
-        ByteBuffer ascentOnly = ByteBuffer.wrap(new byte[]{ 0,
-                                                            'a', chain,
-                                                            0, 1, (byte) (prefix | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT) });
-        // the same with a byte of content on each side
-        ByteBuffer both = ByteBuffer.wrap(new byte[]{ 0,
-                                                      'a', chain,
-                                                      0, 1, 0, 1, (byte) (prefix
-                                                                          | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT
-                                                                          | OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT) });
-        for (ByteBuffer buffer : new ByteBuffer[]{ ascentOnly, both })
+        int ascent = OnDiskWriteNodeType.PREFIX_BITS | OnDiskWriteNodeType.PREFIX_HAS_ASCENT_CONTENT;
+        int both = ascent | OnDiskWriteNodeType.PREFIX_HAS_DESCENT_CONTENT;
+        int child = OnDiskWriteNodeType.PREFIX_HAS_CHILD;
+        // A prefix node with a byte of ascent content, and one with a byte of content on each side, first without
+        // children and then with an empty leaf below them, which the chain "a" leads to.
+        byte[][] vectors = { { 0, 1, (byte) ascent },
+                             { 0, 1, 0, 1, (byte) both },
+                             { 0, 'a', chain, 0, 1, (byte) (ascent | child) },
+                             { 0, 'a', chain, 0, 1, 0, 1, (byte) (both | child) } };
+        for (byte[] vector : vectors)
             for (Direction direction : Direction.values())
             {
-                UncheckedIOException thrown =
-                    assertThrows(UncheckedIOException.class,
-                                 () -> new OnDiskCursor<Void>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
-                                                              direction, OnDiskCursor.ContentStyle.UNORDERED, buffer.limit()));
-                assertTrue(thrown.getCause().getMessage(), thrown.getCause().getMessage().contains("unordered prefix node"));
+                ByteBuffer buffer = ByteBuffer.wrap(vector);
+                for (OnDiskCursor.ContentStyle plain : new OnDiskCursor.ContentStyle[]{ OnDiskCursor.ContentStyle.UNORDERED, OnDiskCursor.ContentStyle.ORDERED })
+                {
+                    UncheckedIOException thrown =
+                        assertThrows(UncheckedIOException.class,
+                                     () -> new OnDiskCursor<Void>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                                  direction, plain, buffer.limit()));
+                    String message = thrown.getCause().getMessage();
+                    assertTrue(message, message.contains(plain == OnDiskCursor.ContentStyle.UNORDERED ? "unordered prefix node" : " ordered prefix node"));
+                }
 
-                OnDiskCursor<Void> ordered = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
-                                                                direction, OnDiskCursor.ContentStyle.ORDERED, buffer.limit());
-                assertEquals(1, Cursor.depth(ordered.advance()));
-                ordered.close();
+                try (OnDiskCursor<Void> range = new OnDiskCursor<>((rdr, length) -> null, new ByteBufferRebufferer(buffer), VERSION,
+                                                                   direction, OnDiskCursor.ContentStyle.RANGE, buffer.limit()))
+                {
+                    int steps = 0;
+                    while (!Cursor.isExhausted(range.advance()))
+                        ++steps;
+                    assertTrue(Hex.bytesToHex(vector) + " " + direction, steps <= 2);
+                }
             }
     }
 

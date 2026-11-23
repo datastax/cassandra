@@ -31,7 +31,6 @@ import java.util.Random;
 import java.util.function.Function;
 
 import com.google.common.collect.ImmutableList;
-import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -107,13 +106,6 @@ public class OnDiskTrieTest
     }
 
     @Test
-    public void testRootReturnOnly() throws TrieSpaceExhaustedException
-    {
-        Assume.assumeTrue(isOrdered);
-        testEntries("^");
-    }
-
-    @Test
     public void testWithRootContent() throws TrieSpaceExhaustedException
     {
         testEntries("", "abc", "abd");
@@ -137,22 +129,6 @@ public class OnDiskTrieTest
         }
 
         testEntries(entries.toArray(String[]::new));
-    }
-
-    @Test
-    public void testPrefixes() throws TrieSpaceExhaustedException
-    {
-        // InMemoryTrie does not support alternate content (i.e. content can be on ascent or descent path but not both)
-        // TODO: check full prefix functionality with range trie.
-        Assume.assumeTrue(isOrdered);
-        testEntries("abcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", // descend-side only (not leaf because of long content
-                    "abbbb^", // ascend-side only
-//                    "abaaa", "abaaa^", // ascend- and descend-side, no child
-                    "abdddd", "abddddeeeeee",   // descend-side prefix
-                    "abeeee^", "abeeeeffffff", // ascend-side prefix
-//                    "abfff", "abfff^", "abfffhijklmn" // ascend- and descend-side with substructure
-                    "zzz"
-        );
     }
 
     @Test
@@ -537,15 +513,9 @@ public class OnDiskTrieTest
         for (String test : tests)
         {
             String testKey = test;
-            boolean afterBranch = false;
-            if (test.endsWith("~")) // ascend-side content
-            {
-                testKey = test.substring(0, test.length() - 1);
-                afterBranch = true;
-            }
             ByteComparable.Preencoded e = mapping.apply(testKey);
             System.out.println("Adding " + asString(e) + ": " + test);
-            inMemTrie.putRecursive(e, test, afterBranch, (x, y) -> y);
+            inMemTrie.putRecursive(e, test, (x, y) -> y);
         }
 
         try (FileTries.Plain<String> trie = TrieUtil.onDiskFileRoundtrip(inMemTrie, isOrdered, TrieUtil.STRING_SERDE, TrieUtil.STRING_SERDE, kind))

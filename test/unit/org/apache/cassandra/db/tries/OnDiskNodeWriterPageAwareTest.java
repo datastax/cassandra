@@ -32,6 +32,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.tries.OnDiskCursor.ContentStyle;
 import org.apache.cassandra.db.tries.OnDiskTrieVerifier.Result;
 import org.apache.cassandra.db.tries.OnDiskTrieVerifier.Type;
 import org.apache.cassandra.io.util.ByteBufferRebufferer;
@@ -40,6 +41,9 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 
+import static org.apache.cassandra.db.tries.OnDiskCursor.ContentStyle.RANGE;
+import static org.apache.cassandra.db.tries.OnDiskCursor.ContentStyle.UNORDERED;
+import static org.apache.cassandra.db.tries.OnDiskTrieWriter.plainStyle;
 import static org.apache.cassandra.db.tries.TrieUtil.RANGE_SERDE;
 import static org.apache.cassandra.db.tries.TrieUtil.STRING_SERDE;
 import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
@@ -382,20 +386,20 @@ public class OnDiskNodeWriterPageAwareTest
 
     /// Serializes the trie into an output with pages of the given size (0 for one without pages), in which
     /// `startOffset` bytes have already been written.
-    static <T> Written write(BaseTrie<T, ?, ?> trie, boolean isOrdered, OnDiskTrieWriter.DataSerializer<T> serializer,
+    static <T> Written write(BaseTrie<T, ?, ?> trie, ContentStyle contentStyle, OnDiskTrieWriter.DataSerializer<T> serializer,
                              OnDiskNodeWriter.Type type, int pageSize, int startOffset) throws IOException
     {
-        return write(trie, isOrdered, serializer, type::create, pageSize, startOffset);
+        return write(trie, contentStyle, serializer, type::create, pageSize, startOffset);
     }
 
-    static <T> Written write(BaseTrie<T, ?, ?> trie, boolean isOrdered, OnDiskTrieWriter.DataSerializer<T> serializer,
+    static <T> Written write(BaseTrie<T, ?, ?> trie, ContentStyle contentStyle, OnDiskTrieWriter.DataSerializer<T> serializer,
                              NodeWriters writers, int pageSize, int startOffset) throws IOException
     {
         DataOutputBuffer out = newOutput(pageSize, startOffset);
         long root;
         try (Cursor<T> cursor = trie.cursor(Direction.REVERSE))
         {
-            root = new OnDiskTrieWriter<>(writers.create(out, serializer), isOrdered).writeFrom(cursor);
+            root = new OnDiskTrieWriter<>(writers.create(out, serializer), contentStyle).writeFrom(cursor);
         }
         if (root > 0)
             assertEquals("The root is where the output is left", out.position(), root);
@@ -406,12 +410,12 @@ public class OnDiskNodeWriterPageAwareTest
 
     static Written writePageAware(Trie<String> trie, boolean isOrdered, int pageSize) throws IOException
     {
-        return write(trie, isOrdered, STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, 0);
+        return write(trie, plainStyle(isOrdered), STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, 0);
     }
 
     static Written writeImmediate(Trie<String> trie, boolean isOrdered) throws IOException
     {
-        return write(trie, isOrdered, STRING_SERDE, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0);
+        return write(trie, plainStyle(isOrdered), STRING_SERDE, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0);
     }
 
     /// What the verifier must find in the serialized form of a trie: its content with the paths that lead to it.
@@ -921,7 +925,7 @@ public class OnDiskNodeWriterPageAwareTest
         for (int i = 0; i < 30; ++i)
         {
             RangeTrie<TestRangeState> trie = randomRangeTrie(rand, 1 + rand.nextInt(i < 10 ? 5 : 200));
-            Written written = write(trie, true, RANGE_SERDE, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0);
+            Written written = write(trie, RANGE, RANGE_SERDE, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0);
             Result result = checkRange("Immediate, seed " + SEED + " range trie " + i, trie, written);
             assertEquals(0, result.relays);
             totals.add(result);
@@ -939,21 +943,21 @@ public class OnDiskNodeWriterPageAwareTest
 
     /// When nothing needs to be laid out and chains are not folded, the page-aware writer must write exactly what the
     /// immediate writer does, wherever in the page the trie starts.
-    private static <T> void assertSameAsImmediate(String message, BaseTrie<T, ?, ?> trie, boolean isOrdered, OnDiskTrieWriter.DataSerializer<T> serializer) throws IOException
+    private static <T> void assertSameAsImmediate(String message, BaseTrie<T, ?, ?> trie, ContentStyle contentStyle, OnDiskTrieWriter.DataSerializer<T> serializer) throws IOException
     {
         for (int startOffset : new int[]{ 0, 13 })
         {
             String at = message + " at offset " + startOffset;
-            Written immediate = write(trie, isOrdered, serializer, OnDiskNodeWriter.Type.IMMEDIATE, 0, startOffset);
+            Written immediate = write(trie, contentStyle, serializer, OnDiskNodeWriter.Type.IMMEDIATE, 0, startOffset);
             assertTrue(at, immediate.root < HUGE_PAGE);
-            Written unfolded = write(trie, isOrdered, serializer, PAGE_AWARE_WITHOUT_FOLDING, HUGE_PAGE, startOffset);
+            Written unfolded = write(trie, contentStyle, serializer, PAGE_AWARE_WITHOUT_FOLDING, HUGE_PAGE, startOffset);
             assertEquals(at, immediate.root, unfolded.root);
             if (immediate.root == 0)
                 continue;
             assertArrayEquals(at, immediate.bytes(), unfolded.bytes());
 
             // Folding chains can only remove single-transition chain nodes.
-            Written folded = write(trie, isOrdered, serializer, OnDiskNodeWriter.Type.PAGE_AWARE, HUGE_PAGE, startOffset);
+            Written folded = write(trie, contentStyle, serializer, OnDiskNodeWriter.Type.PAGE_AWARE, HUGE_PAGE, startOffset);
             assertTrue(at, folded.size() <= immediate.size());
             Result foldedResult = folded.verify();
             foldedResult.assertValid(at);
@@ -971,10 +975,10 @@ public class OnDiskNodeWriterPageAwareTest
             boolean ordered = i % 2 == 0;
             Trie<String> trie = i % 3 == 0 ? generatedKeysTrie(rand, ordered, 1 + rand.nextInt(300))
                                            : randomTrie(rand, ordered, rand.nextInt(i < 50 ? 20 : 1000));
-            assertSameAsImmediate("Seed " + SEED + " trie " + i, trie, ordered, STRING_SERDE);
+            assertSameAsImmediate("Seed " + SEED + " trie " + i, trie, plainStyle(ordered), STRING_SERDE);
         }
         for (int i = 0; i < 80; ++i)
-            assertSameAsImmediate("Seed " + SEED + " range trie " + i, randomRangeTrie(rand, 1 + rand.nextInt(i < 20 ? 5 : 300)), true, RANGE_SERDE);
+            assertSameAsImmediate("Seed " + SEED + " range trie " + i, randomRangeTrie(rand, 1 + rand.nextInt(i < 20 ? 5 : 300)), RANGE, RANGE_SERDE);
 
         int variant = 0;
         for (int fanout : FANOUTS)
@@ -982,19 +986,19 @@ public class OnDiskNodeWriterPageAwareTest
             {
                 ++variant;
                 Trie<String> trie = wideTrie(variant % 2 == 0, variant % 3 == 0 ? new byte[0] : bytes("pq"), fanout, variant % 4 < 2, below, variant % 5 < 3, variant % 7 * 12);
-                assertSameAsImmediate("Fanout " + fanout + " variant " + variant, trie, variant % 2 == 0, STRING_SERDE);
+                assertSameAsImmediate("Fanout " + fanout + " variant " + variant, trie, plainStyle(variant % 2 == 0), STRING_SERDE);
             }
         for (int length : CHAIN_LENGTHS)
             for (int shape = 0; shape < CHAIN_SHAPES; ++shape)
                 for (boolean ordered : new boolean[]{ false, true })
-                    assertSameAsImmediate("Chain " + length + " shape " + shape, chainTrie(ordered, length, shape), ordered, STRING_SERDE);
+                    assertSameAsImmediate("Chain " + length + " shape " + shape, chainTrie(ordered, length, shape), plainStyle(ordered), STRING_SERDE);
         for (boolean ordered : new boolean[]{ false, true })
         {
-            assertSameAsImmediate("Empty", newTrie(ordered), ordered, STRING_SERDE);
-            assertSameAsImmediate("Root only", trie(ordered, "", "root"), ordered, STRING_SERDE);
-            assertSameAsImmediate("Path", pathTrie(ordered, 100), ordered, STRING_SERDE);
-            assertSameAsImmediate("Comb", combTrie(ordered, 100, 'c'), ordered, STRING_SERDE);
-            assertSameAsImmediate("Payloads", payloadTrie(ordered, 4096), ordered, STRING_SERDE);
+            assertSameAsImmediate("Empty", newTrie(ordered), plainStyle(ordered), STRING_SERDE);
+            assertSameAsImmediate("Root only", trie(ordered, "", "root"), plainStyle(ordered), STRING_SERDE);
+            assertSameAsImmediate("Path", pathTrie(ordered, 100), plainStyle(ordered), STRING_SERDE);
+            assertSameAsImmediate("Comb", combTrie(ordered, 100, 'c'), plainStyle(ordered), STRING_SERDE);
+            assertSameAsImmediate("Payloads", payloadTrie(ordered, 4096), plainStyle(ordered), STRING_SERDE);
         }
     }
 
@@ -1039,7 +1043,7 @@ public class OnDiskNodeWriterPageAwareTest
             for (int i = 0; i < 60; ++i)
             {
                 RangeTrie<TestRangeState> trie = randomRangeTrie(rand, 1 + rand.nextInt(i < 20 ? 6 : i < 50 ? 100 : 1500));
-                Written written = write(trie, true, RANGE_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, 0);
+                Written written = write(trie, RANGE, RANGE_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, 0);
                 totals.add(checkRange("Seed " + SEED + " range trie " + i + " page size " + pageSize, trie, written));
             }
             assertExercisesPaging("Random range tries with page size " + pageSize, totals);
@@ -1266,9 +1270,9 @@ public class OnDiskNodeWriterPageAwareTest
     public void testChainFolding() throws IOException
     {
         Trie<String> trie = trie(false, "abc", "1", "abcdef", "2");
-        Written immediate = write(trie, false, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0);
-        Written unfolded = write(trie, false, ONE_BYTE_SERIALIZER, PAGE_AWARE_WITHOUT_FOLDING, 4096, 0);
-        Written folded = write(trie, false, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0);
+        Written immediate = write(trie, UNORDERED, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0);
+        Written unfolded = write(trie, UNORDERED, ONE_BYTE_SERIALIZER, PAGE_AWARE_WITHOUT_FOLDING, 4096, 0);
+        Written folded = write(trie, UNORDERED, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0);
         assertEquals("02 01  66 65 41  64 40  01 01 f5  63 62 61 42".replace(" ", ""), Hex.bytesToHex(immediate.bytes()));
         assertEquals("02 01  66 65 41  64 40  01 01 f5  63 62 61 42".replace(" ", ""), Hex.bytesToHex(unfolded.bytes()));
         // the chain "ef" becomes "def" and the chain node for "d" disappears
@@ -1294,12 +1298,12 @@ public class OnDiskNodeWriterPageAwareTest
 
         // A child that is directly below its parent has no chain to add the transition to.
         Trie<String> direct = trie(false, "abc", "1", "abcd", "2");
-        assertArrayEquals(write(direct, false, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0).bytes(),
-                          write(direct, false, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0).bytes());
+        assertArrayEquals(write(direct, UNORDERED, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0).bytes(),
+                          write(direct, UNORDERED, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0).bytes());
         // Neither is anything folded into one of several children.
         Trie<String> several = trie(false, "abc", "1", "abcdef", "2", "abcxyz", "3");
-        assertArrayEquals(write(several, false, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0).bytes(),
-                          write(several, false, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0).bytes());
+        assertArrayEquals(write(several, UNORDERED, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0).bytes(),
+                          write(several, UNORDERED, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0).bytes());
     }
 
     /// Folding repeats at every level: each node of a path of nodes with content gives its transition to the next.
@@ -1346,7 +1350,7 @@ public class OnDiskNodeWriterPageAwareTest
                 String message = "Child chain of " + childChain;
                 Written immediate = writeImmediate(trie, ordered);
                 Result immediateResult = check(message, trie, ordered, immediate);
-                Written folded = write(trie, ordered, STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0);
+                Written folded = write(trie, plainStyle(ordered), STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0);
                 Result foldedResult = check(message, trie, ordered, folded);
 
                 // The immediate writer has the chain "p", the chain "q" and the child's chain in pieces of up to 64.
@@ -1393,7 +1397,7 @@ public class OnDiskNodeWriterPageAwareTest
             assertArrayEquals(bytes("wxyz"), chain.transitions);
 
             // Without folding the relay stands in for the child of the chain node of the transition.
-            Written unfolded = write(trie, ordered, STRING_SERDE, PAGE_AWARE_WITHOUT_FOLDING, 64, 0);
+            Written unfolded = write(trie, plainStyle(ordered), STRING_SERDE, PAGE_AWARE_WITHOUT_FOLDING, 64, 0);
             Result unfoldedResult = check("Unfolded child in an earlier page", trie, ordered, unfolded);
             assertEquals(1, unfoldedResult.relays);
             assertEquals(0, unfoldedResult.relaysBelowPrefix);
@@ -1465,15 +1469,15 @@ public class OnDiskNodeWriterPageAwareTest
         // "ab" has the child "q", which leads to content, and the child "c", which does not and is walked second
         Trie<String> trie = trie(false, "abqrs", "1", "abc", "0").mapValues(v -> v.equals("0") ? null : v);
         Trie<String> plain = trie(false, "abqrs", "1");
-        Written immediate = write(trie, false, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0);
-        Written unfolded = write(trie, false, ONE_BYTE_SERIALIZER, PAGE_AWARE_WITHOUT_FOLDING, 4096, 0);
-        Written pageAware = write(trie, false, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0);
+        Written immediate = write(trie, UNORDERED, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.IMMEDIATE, 0, 0);
+        Written unfolded = write(trie, UNORDERED, ONE_BYTE_SERIALIZER, PAGE_AWARE_WITHOUT_FOLDING, 4096, 0);
+        Written pageAware = write(trie, UNORDERED, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0);
         // the leaf with its chain "rs", the node "ab" as the chain "q", and the chain "ab" that leads to it
         assertEquals("01 01  73 72 41  71 40  62 61 41".replace(" ", ""), Hex.bytesToHex(immediate.bytes()));
         assertEquals("01 01  73 72 41  71 40  62 61 41".replace(" ", ""), Hex.bytesToHex(unfolded.bytes()));
         // the leaf with the chain "abqrs"
         assertEquals("01 01  73 72 71 62 61 44".replace(" ", ""), Hex.bytesToHex(pageAware.bytes()));
-        assertArrayEquals(write(plain, false, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0).bytes(), pageAware.bytes());
+        assertArrayEquals(write(plain, UNORDERED, ONE_BYTE_SERIALIZER, OnDiskNodeWriter.Type.PAGE_AWARE, 4096, 0).bytes(), pageAware.bytes());
         pageAware.verify().assertValid("Node with only a child");
 
         String[][] shapes = {
@@ -1566,7 +1570,7 @@ public class OnDiskNodeWriterPageAwareTest
             assertArrayEquals(bytes("zwxyz"), chain.transitions);
 
             // Without folding the node is a chain node, which is what the relay in front of the root leads to.
-            Written unfolded = write(hideDeadEnds(full), ordered, STRING_SERDE, PAGE_AWARE_WITHOUT_FOLDING, 64, 0);
+            Written unfolded = write(hideDeadEnds(full), plainStyle(ordered), STRING_SERDE, PAGE_AWARE_WITHOUT_FOLDING, 64, 0);
             check("Unfolded node with only a child", withoutDeadEnds, ordered, unfolded);
         }
     }
@@ -1612,7 +1616,7 @@ public class OnDiskNodeWriterPageAwareTest
                 totals.add(check(message, withoutDeadEnds, ordered, writePageAware(withDeadEnds, ordered, pageSize)));
             // Without folding these nodes are written as the immediate writer writes them.
             int pageSize = PAGE_SIZES[rand.nextInt(PAGE_SIZES.length)];
-            check(message, withoutDeadEnds, ordered, write(withDeadEnds, ordered, STRING_SERDE, PAGE_AWARE_WITHOUT_FOLDING, pageSize, 0));
+            check(message, withoutDeadEnds, ordered, write(withDeadEnds, plainStyle(ordered), STRING_SERDE, PAGE_AWARE_WITHOUT_FOLDING, pageSize, 0));
         }
         if (VERBOSE)
             System.out.println("Random tries with dead ends: " + triesWithNodesWithOnlyAChild + " with nodes with only a child, " + totals);
@@ -1697,11 +1701,11 @@ public class OnDiskNodeWriterPageAwareTest
                 for (boolean ordered : new boolean[]{ false, true })
                 {
                     // write() checks that nothing is written
-                    assertEquals(0, write(newTrie(ordered), ordered, STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset).root);
-                    assertEquals(0, write(InMemoryRangeTrie.<TestRangeState>shortLived(VERSION), true, RANGE_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset).root);
+                    assertEquals(0, write(newTrie(ordered), plainStyle(ordered), STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset).root);
+                    assertEquals(0, write(InMemoryRangeTrie.<TestRangeState>shortLived(VERSION), RANGE, RANGE_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset).root);
                     // a trie with nodes but no content
                     Trie<String> unproductive = trie(ordered, "abc", "x", "abd", "x").mapValues(v -> null);
-                    assertEquals(0, write(unproductive, ordered, STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset).root);
+                    assertEquals(0, write(unproductive, plainStyle(ordered), STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset).root);
                 }
     }
 
@@ -1716,7 +1720,7 @@ public class OnDiskNodeWriterPageAwareTest
                 for (boolean ordered : new boolean[]{ false, true })
                 {
                     Trie<String> trie = trie(ordered, "", "root");
-                    Written written = write(trie, ordered, STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset);
+                    Written written = write(trie, plainStyle(ordered), STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset);
                     Result result = check("Root only at " + startOffset + " page size " + pageSize, trie, ordered, written);
                     assertEquals(1, result.nodes);
                     assertEquals(1, result.count(Type.LEAF));
@@ -1729,7 +1733,7 @@ public class OnDiskNodeWriterPageAwareTest
                 // a range that covers everything: a boundary on each side of the root
                 RangeTrie<TestRangeState> trie = TestRangeState.fromList(Arrays.asList(new TestRangeState(key(new byte[0]), false, -1, 1),
                                                                                        new TestRangeState(key(new byte[0]), true, 1, -1)));
-                Written written = write(trie, true, RANGE_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset);
+                Written written = write(trie, RANGE, RANGE_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset);
                 Result result = checkRange("Range root only at " + startOffset + " page size " + pageSize, trie, written);
                 assertEquals(1, result.nodes);
                 assertEquals(2, result.contents);
@@ -1916,7 +1920,7 @@ public class OnDiskNodeWriterPageAwareTest
             {
                 int rest = pageSize - startOffset;
                 Trie<String> trie = trie(ordered, "a", "A".repeat(rest - 1), "b", "B".repeat(19));
-                Written written = write(trie, ordered, STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset);
+                Written written = write(trie, plainStyle(ordered), STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset);
                 String message = String.format("Start offset %d %s", startOffset, ordered ? "ordered" : "unordered");
                 Result result = check(message, trie, ordered, written);
                 message += ": " + result;
@@ -2113,7 +2117,7 @@ public class OnDiskNodeWriterPageAwareTest
         });
         try
         {
-            long root = OnDiskTrieWriter.write(skipping, ordered, STRING_SERDE, out, OnDiskNodeWriter.Type.PAGE_AWARE);
+            long root = OnDiskTrieWriter.write(skipping, plainStyle(ordered), STRING_SERDE, out, OnDiskNodeWriter.Type.PAGE_AWARE);
             assertEquals(out.position(), root);
             assertEquals(1, out.skips.size());
             Result result = out.verifier().verify(root);

@@ -1104,7 +1104,7 @@ public class TrieUtil
         try
         {
             DataOutputBuffer out = kind.newOutput();
-            long root = OnDiskTrieWriter.write(trie, true, serializer, out, kind.nodeWriterType);
+            long root = OnDiskTrieWriter.write(trie, serializer, out, kind.nodeWriterType);
             return OnDiskRangeTrie.open(out.asNewBuffer(), deserializer, VERSION, root);
         }
         catch (IOException e)
@@ -1153,7 +1153,7 @@ public class TrieUtil
         try
         {
             DataOutputBuffer out = kind.newOutput();
-            OnDiskTrieWriter.write(trie, true, serializer, out, kind.nodeWriterType);
+            OnDiskTrieWriter.write(trie, serializer, out, kind.nodeWriterType);
             return FileTries.openRange(toFile(out), deserializer);
         }
         catch (IOException e)
@@ -1194,7 +1194,7 @@ public class TrieUtil
     {
         try
         {
-            File file = OnDiskTrieWriter.write(trie, true, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
+            File file = OnDiskTrieWriter.write(trie, serializer, new File(java.io.File.createTempFile("intersection", ".trie")));
             return FileTries.openRange(file, deserializer);
         }
         catch (IOException e)

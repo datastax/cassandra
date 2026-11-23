@@ -339,7 +339,7 @@ extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> 
                 else
                     position = mutationCursor.advance();
 
-                assert !Cursor.isOnReturnPath(position) : "Return path in forward direction can only be used in range tries.";
+                rejectReturnPath(position);
                 depth = Cursor.depth(position);
                 if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth))
                     break;
@@ -409,7 +409,7 @@ extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> 
             // The first forcedCopyDepth and applyContent are already called.
             long position = mutationCursor.advance();
             int depth = Cursor.depth(position);
-            assert !Cursor.isOnReturnPath(position) : "Return path in forward direction can only be used in range tries.";
+            rejectReturnPath(position);
 
             // Below is the same as the main loop in `apply`, slightly rearranged and ignoring deletion branches.
             while (state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth, initialDepth))
@@ -421,6 +421,7 @@ extends InMemoryBaseTrie<T, DeletionAwareCursor<T, D>, DeletionAwareTrie<T, D>> 
 
                 applyContent((position & Cursor.MAY_HAVE_CONTENT_BIT) != 0 ? mutationCursor.content() : null);
                 position = mutationCursor.advance();
+                rejectReturnPath(position);
                 depth = Cursor.depth(position);
             }
             assert state.currentDepth == initialDepth;

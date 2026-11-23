@@ -476,8 +476,10 @@ Note that for code simplicity we store content indexes as pointers, i.e. with th
 given content index. In the example above, `contentArray[1]` is encoded as `~1` i.e. `0xFFFFFFFE`.
 
 Alternate branch pointers can store a link to another branch of the trie. They are used by deletion-aware tries to store
-deletion branches and are ignored by other types of tries. Another possible application of these would be to implement
-non-deterministic tries.
+deletion branches, and range tries use the field to hold the content presented after the node's branch (see
+[below](#range-tries)). Plain tries, ordered or not, do not use it: they have at most one content per node, presented
+before the branch in forward walks (see "Stopping on the ascent path" in [Trie.md](Trie.md)). Another possible
+application of these would be to implement non-deterministic tries.
 
 ![graph](InMemoryTrie.md.g4.svg)
 

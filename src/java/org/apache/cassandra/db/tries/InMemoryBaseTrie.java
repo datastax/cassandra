@@ -1451,7 +1451,7 @@ public abstract class InMemoryBaseTrie<T, C extends Cursor<T>, Q extends BaseTri
                 applyContent((position & Cursor.MAY_HAVE_CONTENT_BIT) != 0 ? mutationCursor.content() : null);
 
                 position = mutationCursor.advance();
-                assert !Cursor.isOnReturnPath(position) : "Return path in forward direction can only be used in range tries.";
+                rejectReturnPath(position);
                 depth = Cursor.depth(position);
                 if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth))
                     break;
@@ -1559,6 +1559,21 @@ public abstract class InMemoryBaseTrie<T, C extends Cursor<T>, Q extends BaseTri
         }
     }
 
+    /// Whether this trie can hold content presented after a node's branch in forward walks, i.e. on the return path
+    /// in forward direction. This is only true for range tries (including the deletion branches of a deletion-aware one).
+    protected boolean allowsContentAfterBranch()
+    {
+        return false;
+    }
+
+    /// Rejects a position on the return path of the forward walk of a trie that is being applied to a trie that cannot
+    /// hold content after a branch (see [#allowsContentAfterBranch]).
+    static void rejectReturnPath(long position)
+    {
+        if (Cursor.isOnReturnPath(position))
+            throw new IllegalArgumentException("Return path position " + Cursor.toString(position) + " in non-range trie.");
+    }
+
     /// Map-like put method, using a fast recursive implementation through the key bytes. May run into stack overflow if
     /// the trie becomes too deep. When the correct position in the trie has been reached, the value will be resolved
     /// with the given function before being placed in the trie (even if there's no pre-existing content in this trie).
@@ -1569,9 +1584,10 @@ public abstract class InMemoryBaseTrie<T, C extends Cursor<T>, Q extends BaseTri
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putRecursive(ByteComparable key, R value, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    public <R> void putRecursive(ByteComparable key, R value, final UpsertTransformer<T, R> transformer)
+    throws TrieSpaceExhaustedException
     {
-        putRecursive(key, value, false, transformer);
+        putRecursiveInternal(key, value, false, transformer);
     }
 
 
@@ -1583,14 +1599,14 @@ public abstract class InMemoryBaseTrie<T, C extends Cursor<T>, Q extends BaseTri
     /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
     /// the memtable trie.
     /// @param contentAfterBranch Whether the content should be placed after descendants in forward iteration order.
-    /// Setting this to true only makes sense with ordered or range tries (i.e. where [#presentContentOnDescentPath] is
-    /// false).
+    /// Only range tries can hold such content (see [#allowsContentAfterBranch]); other tries throw
+    /// [IllegalArgumentException] if this is true.
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putRecursive(ByteComparable key, R value, boolean contentAfterBranch, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    <R> void putRecursiveInternal(ByteComparable key, R value, boolean contentAfterBranch, final UpsertTransformer<T, R> transformer)
+    throws TrieSpaceExhaustedException
     {
-        assert !(contentAfterBranch && presentContentOnDescentPath) : "After branch placement only makes sense with range or ordered tries";
         try
         {
             int newRoot = putRecursive(root, key.asComparableBytes(byteComparableVersion), value, contentAfterBranch, transformer);

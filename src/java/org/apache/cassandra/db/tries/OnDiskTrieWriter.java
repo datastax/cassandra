@@ -25,9 +25,18 @@ import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.SequentialWriter;
 
 /// Serializes a plain or range trie in the on-disk trie format; see [OnDiskBaseTrieWriter] and
-/// [OnDiskTrie.md](./OnDiskTrie.md). Content goes in the descent- or ascent-side slot of its node, according to the
-/// path the walk presents it on. The layout of the result is determined by the [OnDiskNodeWriter] the nodes are
-/// given to.
+/// [OnDiskTrie.md](./OnDiskTrie.md). The writer is told what it writes with an [OnDiskCursor.ContentStyle], as the
+/// readers are, and content goes in the descent- or ascent-side slot of its node according to that style and the path
+/// the walk presents it on. The layout of the result is determined by the [OnDiskNodeWriter] the nodes are given to.
+///
+/// A plain trie, ordered or not, has at most one content per node, which it presents before the node's branch in
+/// forward walks (see "Stopping on the ascent path" in [Trie.md](./Trie.md)). Walked in reverse, as the writer walks,
+/// an unordered one thus presents all of its content on the descent path and an ordered one all of it on the return
+/// path. Content on the other path means that what is given is not a plain trie of the given style: it has content
+/// after a branch, which only range tries can have (the merged view of a deletion-aware trie, for example, is a [Trie]
+/// that does), or it is ordered differently. Either way the writer rejects it with an [IllegalArgumentException], as
+/// the file would not read back as the trie it was written from. The check is made when the walk reaches the content,
+/// so part of the trie may have been written by then.
 public class OnDiskTrieWriter<T> extends OnDiskBaseTrieWriter<T>
 {
     public interface DataSerializer<T>
@@ -39,21 +48,43 @@ public class OnDiskTrieWriter<T> extends OnDiskBaseTrieWriter<T>
         void serialize(DataOutputPlus out, T value) throws IOException;
     }
 
-    /// Create a writer that writes each node as soon as it is complete.
-    public OnDiskTrieWriter(DataOutputPlus out, DataSerializer<T> dataSerializer, boolean swapAscentAndDescentSides)
+    /// Create a writer of tries of the given content style that writes each node as soon as it is complete.
+    public OnDiskTrieWriter(DataOutputPlus out, DataSerializer<T> dataSerializer, OnDiskCursor.ContentStyle contentStyle)
     {
-        this(new OnDiskNodeWriterImmediate<>(out, dataSerializer), swapAscentAndDescentSides);
+        this(new OnDiskNodeWriterImmediate<>(out, dataSerializer), contentStyle);
     }
 
-    /// Create a writer that gives the nodes of the trie to the given node writer.
-    public OnDiskTrieWriter(OnDiskNodeWriter<T> nodeWriter, boolean swapAscentAndDescentSides)
+    /// Create a writer of tries of the given content style that gives their nodes to the given node writer.
+    public OnDiskTrieWriter(OnDiskNodeWriter<T> nodeWriter, OnDiskCursor.ContentStyle contentStyle)
     {
-        super(nodeWriter, swapAscentAndDescentSides);
+        super(nodeWriter, checkStyle(contentStyle));
+    }
+
+    private static OnDiskCursor.ContentStyle checkStyle(OnDiskCursor.ContentStyle contentStyle)
+    {
+        if (contentStyle == OnDiskCursor.ContentStyle.ALTERNATE_BRANCH)
+            throw new IllegalArgumentException("Deletion-aware tries must be written by OnDiskDeletionAwareTrieWriter");
+        return contentStyle;
+    }
+
+    /// The style for a plain trie, ordered or not.
+    static OnDiskCursor.ContentStyle plainStyle(boolean isOrdered)
+    {
+        return isOrdered ? OnDiskCursor.ContentStyle.ORDERED : OnDiskCursor.ContentStyle.UNORDERED;
     }
 
     private void content(T content, long position)
     {
-        if (Cursor.isOnReturnPath(position))
+        boolean onReturnPath = Cursor.isOnReturnPath(position);
+        // In this reverse walk a plain unordered trie presents its content on the descent path, and an ordered one on
+        // the return path. Content on the other path is after its node's branch, or the trie is not ordered as given.
+        if (contentStyle != OnDiskCursor.ContentStyle.RANGE && onReturnPath != swapAscentAndDescentSides)
+        {
+            String style = swapAscentAndDescentSides ? "ordered" : "unordered";
+            throw new IllegalArgumentException("A trie written as a plain " + style + " one presents content on the "
+                                               + "wrong side of a branch at " + Cursor.toString(position).trim());
+        }
+        if (onReturnPath)
             ascentContent(content);
         else
             descentContent(content);
@@ -81,20 +112,41 @@ public class OnDiskTrieWriter<T> extends OnDiskBaseTrieWriter<T>
         return rootPosition;
     }
 
-    /// Serialize a trie into `out`, writing each node as soon as it is complete. Returns the position of the root,
-    /// which is the position of `out` when this returns, or 0 if the trie is empty; a non-empty trie always writes at
-    /// least one byte, so its root is never 0. The value can be given to the readers as is: they take a root of 0 as
-    /// the empty trie.
-    public static <T> long write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, DataOutputPlus out) throws IOException
+    /// Serialize a plain trie into `out`, writing each node as soon as it is complete. Returns the position of the
+    /// root, which is the position of `out` when this returns, or 0 if the trie is empty; a non-empty trie always
+    /// writes at least one byte, so its root is never 0. The value can be given to the readers as is: they take a root
+    /// of 0 as the empty trie.
+    public static <T> long write(Trie<T> trie, boolean isOrdered, DataSerializer<T> serializer, DataOutputPlus out) throws IOException
     {
         return write(trie, isOrdered, serializer, out, OnDiskNodeWriter.Type.IMMEDIATE);
     }
 
-    /// Serialize a trie into `out` with the layout the given type of node writer produces. Returns the position of
-    /// the root as above.
-    public static <T> long write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, DataOutputPlus out, OnDiskNodeWriter.Type nodeWriterType) throws IOException
+    /// Serialize a plain trie into `out` with the layout the given type of node writer produces. Returns the position
+    /// of the root as above.
+    public static <T> long write(Trie<T> trie, boolean isOrdered, DataSerializer<T> serializer, DataOutputPlus out, OnDiskNodeWriter.Type nodeWriterType) throws IOException
     {
-        OnDiskTrieWriter<T> fw = new OnDiskTrieWriter<>(nodeWriterType.create(out, serializer), isOrdered);
+        return write(trie, plainStyle(isOrdered), serializer, out, nodeWriterType);
+    }
+
+    /// Serialize a range trie into `out`, writing each node as soon as it is complete. Returns the position of the
+    /// root as above.
+    public static <S extends RangeState<S>> long write(RangeTrie<S> trie, DataSerializer<S> serializer, DataOutputPlus out) throws IOException
+    {
+        return write(trie, serializer, out, OnDiskNodeWriter.Type.IMMEDIATE);
+    }
+
+    /// Serialize a range trie into `out` with the layout the given type of node writer produces. Returns the position
+    /// of the root as above.
+    public static <S extends RangeState<S>> long write(RangeTrie<S> trie, DataSerializer<S> serializer, DataOutputPlus out, OnDiskNodeWriter.Type nodeWriterType) throws IOException
+    {
+        return write(trie, OnDiskCursor.ContentStyle.RANGE, serializer, out, nodeWriterType);
+    }
+
+    /// Serialize a trie of the given content style into `out` with the layout the given type of node writer produces.
+    /// Returns the position of the root as above.
+    public static <T> long write(BaseTrie<T, ?, ?> trie, OnDiskCursor.ContentStyle contentStyle, DataSerializer<T> serializer, DataOutputPlus out, OnDiskNodeWriter.Type nodeWriterType) throws IOException
+    {
+        OnDiskTrieWriter<T> fw = new OnDiskTrieWriter<>(nodeWriterType.create(out, serializer), contentStyle);
         try (Cursor<T> c = trie.cursor(Direction.REVERSE))
         {
             // An empty trie leaves the stream untouched and has no root.
@@ -102,16 +154,31 @@ public class OnDiskTrieWriter<T> extends OnDiskBaseTrieWriter<T>
         }
     }
 
-    public static <T> File write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, File file) throws IOException
+    public static <T> File write(Trie<T> trie, boolean isOrdered, DataSerializer<T> serializer, File file) throws IOException
     {
         return write(trie, isOrdered, serializer, file, OnDiskNodeWriter.Type.IMMEDIATE);
     }
 
-    public static <T> File write(BaseTrie<T, ?, ?> trie, boolean isOrdered, DataSerializer<T> serializer, File file, OnDiskNodeWriter.Type nodeWriterType) throws IOException
+    public static <T> File write(Trie<T> trie, boolean isOrdered, DataSerializer<T> serializer, File file, OnDiskNodeWriter.Type nodeWriterType) throws IOException
+    {
+        return write(trie, plainStyle(isOrdered), serializer, file, nodeWriterType);
+    }
+
+    public static <S extends RangeState<S>> File write(RangeTrie<S> trie, DataSerializer<S> serializer, File file) throws IOException
+    {
+        return write(trie, serializer, file, OnDiskNodeWriter.Type.IMMEDIATE);
+    }
+
+    public static <S extends RangeState<S>> File write(RangeTrie<S> trie, DataSerializer<S> serializer, File file, OnDiskNodeWriter.Type nodeWriterType) throws IOException
+    {
+        return write(trie, OnDiskCursor.ContentStyle.RANGE, serializer, file, nodeWriterType);
+    }
+
+    public static <T> File write(BaseTrie<T, ?, ?> trie, OnDiskCursor.ContentStyle contentStyle, DataSerializer<T> serializer, File file, OnDiskNodeWriter.Type nodeWriterType) throws IOException
     {
         try (SequentialWriter writer = new SequentialWriter(file))
         {
-            write(trie, isOrdered, serializer, writer, nodeWriterType);
+            write(trie, contentStyle, serializer, writer, nodeWriterType);
             writer.finish();
             return file;
         }

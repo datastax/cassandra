@@ -95,10 +95,9 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>> extends O
     OnDiskDeletionAwareTrieWriter(OnDiskNodeWriter<T> nodeWriter,
                                   OnDiskTrieWriter.DataSerializer<D> deletionSerializer)
     {
-        // Never ordered: OnDiskDeletionAwareTrie always reads the data trie with isOrdered = false, and an ordered
-        // write would swap the two content slots, putting the live content where the reader expects the branch
-        // pointer.
-        super(nodeWriter, false);
+        // As OnDiskDeletionAwareTrie reads it: live content in the descent-side slot, never swapped, and the branch
+        // pointer in the ascent-side one.
+        super(nodeWriter, OnDiskCursor.ContentStyle.ALTERNATE_BRANCH);
         this.deletionSerializer = deletionSerializer;
     }
 
@@ -183,12 +182,10 @@ public class OnDiskDeletionAwareTrieWriter<T, D extends RangeState<D>> extends O
     /// walk of the data trie is on.
     private void writeDeletionBranch(RangeCursor<D> branch) throws IOException
     {
-        // Always written ordered, independently of the data trie: a deletion branch is a range
-        // trie, it is read back through OnDiskRangeCursor, and that always reads with
-        // isOrdered = true. Writing it unordered loses the ascent-path stops and the read-back
-        // positions disagree on ON_RETURN_PATH_BIT.
+        // Always written as a range trie, independently of the data trie: a deletion branch is one, and it is read
+        // back through OnDiskRangeCursor, which reads the RANGE content style.
         if (branchWriter == null)
-            branchWriter = new OnDiskTrieWriter<>(nodeWriter.nested(deletionSerializer), true);
+            branchWriter = new OnDiskTrieWriter<>(nodeWriter.nested(deletionSerializer), OnDiskCursor.ContentStyle.RANGE);
         // A nested trie in the same stream. Its nodes are written before the node that will reference them, so
         // the pointer to its root is a backward one like every other.
         branchWriter.writeFrom(branch);

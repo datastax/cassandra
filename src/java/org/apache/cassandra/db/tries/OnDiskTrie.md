@@ -75,6 +75,9 @@ the bytes of the content, instead relying on a pluggable deserializer.
 
 This node type cannot handle leaves with content 64 bytes or longer. These are encoded using the generic content type.
 
+The node code bits for a leaf node must be 0, because trie reads rely on the fact that the node code of a leaf node
+is readable as a variable-length integer.
+
 Example: `00 00 00 01 04` could encode a 32-bit integer payload with value 1.
 
 ### Chain nodes (code `01nnnnnn`)
@@ -179,7 +182,11 @@ The generic content node has three flags specifying:
 
 The exact meaning of descent and ascent path is determined by the specific trie type:
 - Plain tries do not contain ascent-side data (unordered ones always present content on the descent path, and ordered
-  ones present it on the ascent path when walked in reverse).
+  ones present it on the ascent path when walked in reverse). They have at most one content per node, presented before
+  the node's branch in forward walks (see "Stopping on the ascent path" in [Trie.md](Trie.md)), so only the
+  descent-side slot is used. The readers of both kinds reject a node with ascent-side content as corrupt, and the
+  writer, given the `UNORDERED` or `ORDERED` content style, rejects a trie that presents content after a branch, or
+  that is not ordered as it says, with an `IllegalArgumentException`.
 - Range tries may have both ascent- and descent-side content. When the trie is walked in the forward direction, the
   two are presented according to the name; when it is walked in reverse, the two are swapped.
 - Deletion-aware tries do not have ascent-side data in their live path, but instead store pointers to deletion branches

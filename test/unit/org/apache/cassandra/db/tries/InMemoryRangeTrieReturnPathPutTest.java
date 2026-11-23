@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -130,8 +131,21 @@ public class InMemoryRangeTrieReturnPathPutTest
               after("", 2, -1));
     }
 
-    record Marker(String key, boolean afterBranch, int left, int right)
+    final static class Marker
     {
+        private final String key;
+        private final boolean afterBranch;
+        private final int left;
+        private final int right;
+
+        Marker(String key, boolean afterBranch, int left, int right)
+        {
+            this.key = key;
+            this.afterBranch = afterBranch;
+            this.left = left;
+            this.right = right;
+        }
+
         TestRangeState state()
         {
             return new TestRangeState(comparable(key), afterBranch, left, right);
@@ -141,6 +155,44 @@ public class InMemoryRangeTrieReturnPathPutTest
         public String toString()
         {
             return '"' + key + '"' + (afterBranch ? "↑" : "") + ' ' + left + '/' + right;
+        }
+
+        public String key()
+        {
+            return key;
+        }
+
+        public boolean afterBranch()
+        {
+            return afterBranch;
+        }
+
+        public int left()
+        {
+            return left;
+        }
+
+        public int right()
+        {
+            return right;
+        }
+
+        @Override
+        public boolean equals(Object obj)
+        {
+            if (obj == this) return true;
+            if (obj == null || obj.getClass() != this.getClass()) return false;
+            var that = (Marker) obj;
+            return Objects.equals(this.key, that.key) &&
+                   this.afterBranch == that.afterBranch &&
+                   this.left == that.left &&
+                   this.right == that.right;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(key, afterBranch, left, right);
         }
     }
 

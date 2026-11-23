@@ -534,16 +534,16 @@ public class OnDiskNodeWriterRandomizedTest
     {
         final String description;
         final BaseTrie<T, ?, ?> source;
-        final boolean isOrdered;
+        final OnDiskCursor.ContentStyle contentStyle;
         final OnDiskTrieWriter.DataSerializer<T> serializer;
         final Reader<T> reader;
         final List<byte[]> keys;
 
-        Case(String description, BaseTrie<T, ?, ?> source, boolean isOrdered, OnDiskTrieWriter.DataSerializer<T> serializer, Reader<T> reader, List<byte[]> keys)
+        Case(String description, BaseTrie<T, ?, ?> source, OnDiskCursor.ContentStyle contentStyle, OnDiskTrieWriter.DataSerializer<T> serializer, Reader<T> reader, List<byte[]> keys)
         {
             this.description = description;
             this.source = source;
-            this.isOrdered = isOrdered;
+            this.contentStyle = contentStyle;
             this.serializer = serializer;
             this.reader = reader;
             this.keys = keys;
@@ -566,26 +566,21 @@ public class OnDiskNodeWriterRandomizedTest
         Random rand = generator(seed, shape, repetition);
         Keys keys = shape.keys(rand, page);
         return plainCase(String.format("seed %d shape %s#%d %s page %d", seed, shape, repetition, ordered ? "ordered" : "unordered", page),
-                         keys, ordered, rand);
+                         keys, ordered);
     }
 
-    private static Case<String> plainCase(String description, Keys keys, boolean ordered, Random rand)
+    private static Case<String> plainCase(String description, Keys keys, boolean ordered)
     {
         InMemoryTrie<String> trie = ordered ? InMemoryTrie.shortLivedOrdered(VERSION) : InMemoryTrie.shortLived(VERSION);
         int index = 0;
         try
         {
+            // Plain tries, ordered or not, only have content before the branch of its key in forward walks; the other
+            // content slot of the on-disk nodes is exercised by the range tries.
             for (Map.Entry<byte[], Integer> entry : keys.payloadSizes.entrySet())
-            {
-                // In an ordered trie content can also be placed after the branch below its key, where a forward walk
-                // presents it on the return path and the on-disk node holds it in its other content slot. (Not on both
-                // sides of the same key: the cursor of a plain in-memory trie only looks at one content per node.)
-                boolean afterBranch = ordered && rand.nextInt(3) == 0;
                 trie.putRecursive(comparable(entry.getKey()),
                                   new String(payload(index++, entry.getValue()), StandardCharsets.US_ASCII),
-                                  afterBranch,
                                   (existing, update) -> update);
-            }
         }
         catch (TrieSpaceExhaustedException e)
         {
@@ -594,7 +589,7 @@ public class OnDiskNodeWriterRandomizedTest
 
         return new Case<>(description + ": " + keys.payloadSizes.size() + " keys",
                           trie,
-                          ordered,
+                          OnDiskTrieWriter.plainStyle(ordered),
                           STRING_SERDE,
                           (buffer, root) -> new OnDiskTrie<>(new ByteBufferRebufferer(buffer), STRING_SERDE, VERSION, ordered, root),
                           new ArrayList<>(keys.payloadSizes.keySet()));
@@ -679,7 +674,7 @@ public class OnDiskNodeWriterRandomizedTest
 
         return new Case<>(String.format("seed %d range shape %s#%d page %d: %d keys, %d markers", seed, shape, repetition, page, keys.payloadSizes.size(), markers),
                           trie,
-                          true,
+                          OnDiskCursor.ContentStyle.RANGE,
                           RANGE_SERDE,
                           (buffer, root) -> new OnDiskRangeTrie<>(new ByteBufferRebufferer(buffer), RANGE_SERDE, VERSION, root),
                           new ArrayList<>(keys.payloadSizes.keySet()));
@@ -711,7 +706,7 @@ public class OnDiskNodeWriterRandomizedTest
         {
             for (int i = 0; i < offset; ++i)
                 out.writeByte(TrieUtil.PagedDataOutputBuffer.PADDING);
-            long root = OnDiskTrieWriter.write(trie, testCase.isOrdered, testCase.serializer, out, kind.nodeWriterType);
+            long root = OnDiskTrieWriter.write(trie, testCase.contentStyle, testCase.serializer, out, kind.nodeWriterType);
             byte[] bytes = out.toByteArray();
             assertEquals("Root position reported by " + kind, bytes.length == offset ? 0 : bytes.length, root);
             return new Written(bytes, root);
@@ -1287,7 +1282,7 @@ public class OnDiskNodeWriterRandomizedTest
             {
                 immediateTail = tailCursor(immediate, tailDirection);
                 testedTail = tailCursor(tested, tailDirection);
-                sourceTail = source != null && true ? source.tailCursor(tailDirection) : null;
+                sourceTail = source != null ? source.tailCursor(tailDirection) : null;
                 return new Walk<>(this, immediateTail, testedTail, sourceTail);
             }
             catch (Throwable t)
@@ -1431,14 +1426,14 @@ public class OnDiskNodeWriterRandomizedTest
                 for (Map.Entry<byte[], Integer> entry : shape.keys(rand, 4096).payloadSizes.entrySet())
                     keys.add(concat(prefix, entry.getKey()), entry.getValue());
             }
-        Case<String> testCase = plainCase(String.format("seed %d file-backed %s", FILE_SEED, ordered ? "ordered" : "unordered"), keys, ordered, rand);
+        Case<String> testCase = plainCase(String.format("seed %d file-backed %s", FILE_SEED, ordered ? "ordered" : "unordered"), keys, ordered);
 
         File immediateFile = FileUtils.createTempFile("immediate", ".trie");
         File pageAwareFile = FileUtils.createTempFile("pageaware", ".trie");
         try
         {
-            OnDiskTrieWriter.write(testCase.source, ordered, STRING_SERDE, immediateFile);
-            OnDiskTrieWriter.write(testCase.source, ordered, STRING_SERDE, pageAwareFile, OnDiskNodeWriter.Type.PAGE_AWARE);
+            OnDiskTrieWriter.write(testCase.source, testCase.contentStyle, STRING_SERDE, immediateFile, OnDiskNodeWriter.Type.IMMEDIATE);
+            OnDiskTrieWriter.write(testCase.source, testCase.contentStyle, STRING_SERDE, pageAwareFile, OnDiskNodeWriter.Type.PAGE_AWARE);
             byte[] immediateBytes = Files.readAllBytes(immediateFile.toPath());
             assertTrue(testCase.description + ": the trie is expected to take a few hundred kilobytes, took " + immediateBytes.length,
                        immediateBytes.length > 200_000 && pageAwareFile.length() > 200_000);

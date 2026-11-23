@@ -36,13 +36,22 @@ public class OnDiskCursor<T> implements Cursor<T>
     /// asked to advance or skip. Must compare smaller than valid encoded positions.
     static final long NO_CHILD = Long.MIN_VALUE;
 
-    enum ContentStyle
+    /// What the two content slots of the nodes of an on-disk trie hold, and on which path of a walk their content is
+    /// presented. The readers and the writers are both given it. See [OnDiskTrie.md](./OnDiskTrie.md) for the slots,
+    /// and "Stopping on the ascent path" in [Trie.md](./Trie.md) for why only range tries can use both.
+    public enum ContentStyle
     {
-        /// no ascend-side data
+        /// A plain unordered trie: content in the descent-side slot only, presented on the descent path in both
+        /// directions.
         UNORDERED,
-        /// ordered, forward content in descend side, reverse in ascend side slot
+        /// A plain ordered trie: content in the descent-side slot only, presented on the descent path in forward walks
+        /// and on the return path in reverse ones.
         ORDERED,
-        /// unordered, deletion branch in ascend-side slot
+        /// A range trie: content in both slots, presented on the path of the slot's name in forward walks and on the
+        /// other path in reverse ones.
+        RANGE,
+        /// The data trie of a deletion-aware trie: unordered content in the descent-side slot, and the pointer to the
+        /// node's deletion branch in the ascent-side slot.
         ALTERNATE_BRANCH
     }
 
@@ -105,7 +114,7 @@ public class OnDiskCursor<T> implements Cursor<T>
         this.rdr = new SharedStream(deserializer);
         this.byteComparableVersion = byteComparableVersion;
         this.contentStyle = contentStyle;
-        this.swapContentSides = contentStyle == ContentStyle.ORDERED && !direction.isForward();
+        this.swapContentSides = (contentStyle == ContentStyle.ORDERED || contentStyle == ContentStyle.RANGE) && !direction.isForward();
     }
 
     class SharedStream extends RebufferingInputStream
@@ -421,14 +430,6 @@ public class OnDiskCursor<T> implements Cursor<T>
         currentPos -= vintlen + len;
         return rdr.deserialize(currentPos, len);
     }
-
-    void getContentAtPosWithLength(long currentPos, int len)
-    {
-        content = rdr.deserialize(currentPos - len, len);
-        if (content != null)
-            currentEncodedPosition |= MAY_HAVE_CONTENT_BIT;
-    }
-
 
     int getStackDepth(int stackIndex)
     {

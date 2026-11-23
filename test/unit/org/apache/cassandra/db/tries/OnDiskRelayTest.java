@@ -268,19 +268,22 @@ public class OnDiskRelayTest
                                            "ff 02 02 f5", 10),        // prefix with content X<2; child at 10 - 4 = 6
                                     CHAINED_PREFIXES);
 
-        // The same with content on the ascent side, and on both, in the tries that can have it. (For a deletion-aware
-        // trie the ascent side is the pointer to the deletion branch, here with the distance 2.)
+        // The same with content on the ascent side, and on both, in the tries that can have it: range tries, as plain
+        // tries only use the descent side, and deletion-aware ones, where the ascent side is the pointer to the
+        // deletion branch, here with the distance 2.
         ByteBuffer ascentToLeaf = vector("ff 01 02", 3,               // leaf X<1
-                                         "02 01 f3", 6);              // prefix with ascent content 2 and a child,
+                                         "01 ff 02 f3", 7);           // prefix with ascent content 1<X and a child,
+                                                                      //   which is at 7 - 4 = 3 (the leaf)
+        ByteBuffer branchToLeaf = vector("ff 01 02", 3,               // leaf X<1
+                                         "02 01 f3", 6);              // prefix with branch pointer 2 and a child,
                                                                       //   which is at 6 - 3 = 3 (the leaf)
         ByteBuffer bothToPrefix = vector("ff 01 02 f4", 4,            // prefix with content X<1, no child
                                          "03 ff 02 02 03 02 f7", 11); // prefix with ascent content 3<X, descent
                                                                       //   content 2<X<3 and a child at 11 - 7 = 4
         for (Direction direction : Direction.values())
         {
-            assertRejectedAsCorrupt(direction + " ordered", PREFIX_TO_LEAF, () -> plainCursor(ascentToLeaf, direction, true));
-            assertRejectedAsCorrupt(direction + " data", PREFIX_TO_LEAF, () -> dataCursor(ascentToLeaf, direction));
-            assertRejectedAsCorrupt(direction + " ordered", CHAINED_PREFIXES, () -> plainCursor(bothToPrefix, direction, true));
+            assertRejectedAsCorrupt(direction + " range", PREFIX_TO_LEAF, () -> rangeCursor(ascentToLeaf, direction));
+            assertRejectedAsCorrupt(direction + " data", PREFIX_TO_LEAF, () -> dataCursor(branchToLeaf, direction));
             assertRejectedAsCorrupt(direction + " range", CHAINED_PREFIXES, () -> rangeCursor(bothToPrefix, direction));
         }
 

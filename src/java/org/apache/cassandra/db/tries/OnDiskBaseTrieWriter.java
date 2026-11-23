@@ -37,6 +37,10 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 abstract class OnDiskBaseTrieWriter<T> extends TriePathReconstructor
 {
     final OnDiskNodeWriter<T> nodeWriter;
+    /// What the nodes' content slots hold; see [OnDiskCursor.ContentStyle].
+    final OnDiskCursor.ContentStyle contentStyle;
+    /// True for the ordered styles. The walk is in reverse, so what they present before a branch in forward walks
+    /// arrives on the return path and goes in the descent-side slot, and the other way round.
     final boolean swapAscentAndDescentSides;
 
     OnDiskNodeWriter.Node<T>[] nodesOnPath = new OnDiskNodeWriter.Node[32];
@@ -49,10 +53,12 @@ abstract class OnDiskBaseTrieWriter<T> extends TriePathReconstructor
     /// trie it is attached to, possibly some time after its walk completes.
     long rootPosition = 0;
 
-    OnDiskBaseTrieWriter(OnDiskNodeWriter<T> nodeWriter, boolean swapAscentAndDescentSides)
+    OnDiskBaseTrieWriter(OnDiskNodeWriter<T> nodeWriter, OnDiskCursor.ContentStyle contentStyle)
     {
         this.nodeWriter = nodeWriter;
-        this.swapAscentAndDescentSides = swapAscentAndDescentSides;
+        this.contentStyle = contentStyle;
+        this.swapAscentAndDescentSides = contentStyle == OnDiskCursor.ContentStyle.ORDERED
+                                         || contentStyle == OnDiskCursor.ContentStyle.RANGE;
     }
 
     // On the way down we only collect the path, in TriePathReconstructor. A node is created when content or an

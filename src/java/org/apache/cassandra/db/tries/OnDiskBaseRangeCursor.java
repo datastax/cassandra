@@ -39,13 +39,13 @@ abstract class OnDiskBaseRangeCursor<S extends RangeState<S>> extends OnDiskCurs
     /// A cursor positioned at `root`, the root of a range trie.
     OnDiskBaseRangeCursor(DataDeserializer<S> deserializer, RebuffererFactory rebuffererFactory, ByteComparable.Version byteComparableVersion, Direction direction, long root)
     {
-        super(deserializer, rebuffererFactory, byteComparableVersion, direction, ContentStyle.ORDERED, root);
+        super(deserializer, rebuffererFactory, byteComparableVersion, direction, ContentStyle.RANGE, root);
     }
 
     /// A cursor that is not yet positioned; the subclass descends into its root itself.
     OnDiskBaseRangeCursor(DataDeserializer<S> deserializer, RebuffererFactory rebuffererFactory, ByteComparable.Version byteComparableVersion, Direction direction)
     {
-        super(deserializer, rebuffererFactory, byteComparableVersion, direction, ContentStyle.ORDERED);
+        super(deserializer, rebuffererFactory, byteComparableVersion, direction, ContentStyle.RANGE);
     }
 
     /// Set the active state from the content at the cursor's root, which the cursor must be positioned on.

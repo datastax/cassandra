@@ -37,15 +37,16 @@ abstract class OnDiskWriteNodeType
 {
     // Note: Any changes to bits must be reflected in OnDiskReadNodeType.IMPLEMENTATIONS.
 
-    static final int LEAF_BITS = 0b00000000;
+    // Note: Leaf code _must_ have zeroes in its higher two bits to ensure it can be read as a vint length.
+    static final int LEAF_BITS = 0b00 << 6;
 
-    static final int PREFIX_BITS = 0b11110000;
+    static final int PREFIX_BITS = 0b11110 << 3;
 
     static class Chain extends OnDiskWriteNodeType
     {
         Chain()
         {
-            super(0b01000000);
+            super(0b01 << 6);
         }
 
         @Override
@@ -115,7 +116,7 @@ abstract class OnDiskWriteNodeType
     {
         Dense(int bytesPerPointer)
         {
-            super(0b11101000, bytesPerPointer);
+            super(0b11101 << 3, bytesPerPointer);
         }
 
         @Override
@@ -159,7 +160,7 @@ abstract class OnDiskWriteNodeType
     {
         Bitmap(int bytesPerPointer)
         {
-            super(0b11100000, bytesPerPointer);
+            super(0b11100 << 3, bytesPerPointer);
         }
 
         @Override
@@ -195,7 +196,7 @@ abstract class OnDiskWriteNodeType
     {
         Sparse(int bytesPerPointer)
         {
-            super(0b10000000 | (bytesPerPointer - 1));
+            super((0b10 << 6) | (bytesPerPointer - 1));
         }
 
         int bpp()
@@ -233,7 +234,7 @@ abstract class OnDiskWriteNodeType
 
         WithRelay(int bytesPerPointer, OnDiskWriteNodeType parent)
         {
-            super(0b11111000, bytesPerPointer);
+            super(0b11111 << 3, bytesPerPointer);
             this.parent = parent;
         }
 

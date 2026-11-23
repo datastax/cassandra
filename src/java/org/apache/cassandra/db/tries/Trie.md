@@ -286,6 +286,23 @@ flipped for reverse iteration to ensure that it is visited after the descent pat
 Return path positions are valid positions for jumps, and will be stopped on if a `skipTo` call finds one to be closest
 to the requested position. They cannot have children.
 
+A plain trie, ordered or not, has at most one content value per node, and presents it on the descent path, before the
+node's branch, when walked forward; an ordered trie only differs in presenting it after the branch when walked in
+reverse. A plain trie never presents content to the right of a branch, i.e. on the return path of a forward walk, and
+never has content on both sides of the same node. Only range tries and trie sets do (see [Range tries](#range-tries)),
+because their boundaries can apply after a branch. This is why the in-memory and on-disk plain tries store a single
+content slot per node, as does the data of deletion-aware tries.
+
+Something that does not satisfy this is not a plain trie, even if it is presented through the `Trie` interface, and
+converting it to one of the stored plain tries is an error. An example is the merged view of a deletion-aware trie
+(`DeletionAwareTrie.mergedTrie`), which presents the deletion boundaries that apply after a branch on its return path.
+`InMemoryTrie` and `InMemoryDeletionAwareTrie` throw an `IllegalArgumentException` when the walk of a trie given to
+`apply` (and thus `putSingleton`) reaches a position on the return path. As the check is made during the walk, the
+trie may then hold part of what precedes that position. `putRecursive` throws the same, before changing anything, if
+asked to place content after a branch in anything other than a range trie. `OnDiskTrieWriter` is told which kind of
+trie it writes with a content style (`UNORDERED` and `ORDERED` for plain tries, `RANGE` for range tries), throws the
+same for content a plain trie of that style cannot have, and the on-disk readers reject such content as corrupt.
+
 Their usages will be further detailed in the [sections on sets](#trie-sets); there are also
 [alternative approaches we considered during development](#return-stop-alternatives).
 

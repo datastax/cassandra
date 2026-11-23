@@ -130,7 +130,7 @@ public class OnDiskRangeTrieTest
     private void testWideNode(int prefixLength, int[] transitions, int suffixLength) throws IOException
     {
         InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(prefixLength, transitions, suffixLength));
-        File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")), kind.nodeWriterType);
+        File file = OnDiskTrieWriter.write(expected, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")), kind.nodeWriterType);
 
         try (FileTries.Range<TestRangeState> actual = FileTries.openRange(file, RANGE_SERDE))
         {
@@ -234,7 +234,7 @@ public class OnDiskRangeTrieTest
         final int prefixLength = 2;
         final int suffixLength = 4;
         InMemoryRangeTrie<TestRangeState> expected = TestRangeState.fromList(markers(prefixLength, BITMAP_TRANSITIONS, suffixLength));
-        File file = OnDiskTrieWriter.write(expected, true, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")), kind.nodeWriterType);
+        File file = OnDiskTrieWriter.write(expected, RANGE_SERDE, new File(java.io.File.createTempFile("rangetrie", ".trie")), kind.nodeWriterType);
 
         ChannelProxy channel = new ChannelProxy(file);
         TrieUtil.CountingRebuffererFactory factory = new TrieUtil.CountingRebuffererFactory(FileTries.openChunkReader(channel));
@@ -326,7 +326,7 @@ public class OnDiskRangeTrieTest
             byte[] bytes;
             try (DataOutputBuffer out = kind.newOutput())
             {
-                OnDiskTrieWriter.write(TestRangeState.fromList(TestRangeState.verify(markers)), true, RANGE_SERDE, out, kind.nodeWriterType);
+                OnDiskTrieWriter.write(TestRangeState.fromList(TestRangeState.verify(markers)), RANGE_SERDE, out, kind.nodeWriterType);
                 bytes = out.toByteArray();
             }
             // Over the bytes as written the walk must go through, which also shows that the skips it makes are valid.

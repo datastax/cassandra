@@ -154,6 +154,7 @@ public class TrieColumnFilter
                     // include only the subselection
                     for (ColumnSubselection ss : subselection)
                     {
+                        // FIXME: This should be protected against stack overflow.
                         trie.putRecursive(TrieBackedRow.cellKey(id, column, ss.startInclusive()), INCLUDED_START, false, TrieColumnFilter::addNew);
                         trie.putRecursive(TrieBackedRow.cellKey(id, column, ss.endInclusive()), INCLUDED_END, true, TrieColumnFilter::addNew);
                     }

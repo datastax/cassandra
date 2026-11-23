@@ -56,6 +56,11 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 ///     between the two methods above, where some external property can be used to decide if the keys are short enough
 ///     to permit recursive execution.
 ///
+///     Like every plain trie, ordered or not, this trie has at most one content per node, presented before the node's
+///     branch in forward walks. A trie given to `apply` that presents a position after a branch (i.e. on the return
+///     path of a forward walk), such as the merged view of a deletion-aware trie, is rejected with an
+///     [IllegalArgumentException] when the walk reaches that position.
+///
 ///     Because it uses 32-bit pointers in byte buffers, this trie has a fixed size limit of 2GB.
 public class InMemoryTrie<T> extends InMemoryBaseTrie<T, Cursor<T>, Trie<T>> implements Trie<T>
 {
@@ -473,7 +478,7 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T, Cursor<T>, Trie<T>> imp
     public <S extends RangeState<S>> RangeMutator<T, S> rangeMutator(UpsertTransformer<T, S> transformer,
                                                                      Predicate<NodeFeatures<S>> needsForcedCopy)
     {
-        return new RangeMutator<>(applyState, transformer, needsForcedCopy, null);
+        return rangeMutator(transformer, needsForcedCopy, null);
     }
 
     /// Creates a set mutator that can be used to apply multiple deletions to the trie.

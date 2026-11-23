@@ -25,6 +25,7 @@ import java.util.Arrays;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.junit.function.ThrowingRunnable;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -38,6 +39,7 @@ import static org.apache.cassandra.db.tries.TrieUtil.VERSION;
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 /// Pins the bytes [OnDiskTrieWriter] produces against the worked examples in `OnDiskTrie.md`. The round-trip suites
@@ -74,11 +76,11 @@ public class OnDiskTrieWriterTest
     {
         InMemoryTrie<Integer> trie = isOrdered ? InMemoryTrie.shortLivedOrdered(VERSION) : InMemoryTrie.shortLived(VERSION);
         for (int i = 0; i < keysAndValues.length; i += 2)
-            trie.putRecursive(key((String) keysAndValues[i]), (Integer) keysAndValues[i + 1], false, (x, y) -> y);
+            trie.putRecursive(key((String) keysAndValues[i]), (Integer) keysAndValues[i + 1], (x, y) -> y);
         return trie;
     }
 
-    static byte[] write(BaseTrie<Integer, ?, ?> trie, boolean isOrdered) throws IOException
+    static byte[] write(Trie<Integer> trie, boolean isOrdered) throws IOException
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
@@ -188,7 +190,7 @@ public class OnDiskTrieWriterTest
         StringBuilder expected = new StringBuilder();
         for (int i = 1; i < 256; ++i)
         {
-            trie.putRecursive(ByteComparable.preencoded(VERSION, new byte[]{ (byte) i }), 0, false, (x, y) -> y);
+            trie.putRecursive(ByteComparable.preencoded(VERSION, new byte[]{ (byte) i }), 0, (x, y) -> y);
             expected.append("00 ");     // the leaves, each an empty leaf code
         }
         for (int i = 254; i >= 0; --i)
@@ -284,7 +286,7 @@ public class OnDiskTrieWriterTest
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            OnDiskTrieWriter.write(trie, true, POINT_SERDE, out);
+            OnDiskTrieWriter.write(trie, POINT_SERDE, out);
             return out.toByteArray();
         }
     }
@@ -452,7 +454,7 @@ public class OnDiskTrieWriterTest
         InMemoryTrie<byte[]> trie = InMemoryTrie.shortLived(VERSION);
         for (int b = 0x10; b <= 0xff; ++b)
             trie.putRecursive(ByteComparable.preencoded(VERSION, new byte[]{ (byte) b }),
-                              new byte[b == 0x10 ? 558 : 270], false, (x, y) -> y);
+                              new byte[b == 0x10 ? 558 : 270], (x, y) -> y);
 
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
@@ -484,7 +486,7 @@ public class OnDiskTrieWriterTest
         InMemoryTrie<byte[]> trie = InMemoryTrie.shortLived(VERSION);
         for (int b = 0x00; b <= 0xff; ++b)
             trie.putRecursive(ByteComparable.preencoded(VERSION, new byte[]{ (byte) b }),
-                              new byte[b == 0x00 ? 253 : 254], false, (x, y) -> y);
+                              new byte[b == 0x00 ? 253 : 254], (x, y) -> y);
 
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
@@ -558,7 +560,7 @@ public class OnDiskTrieWriterTest
             int pointerBytes = valueSize == 0 ? 1 : 2;
             InMemoryTrie<Integer> trie = InMemoryTrie.shortLived(VERSION);
             for (int i = 0; i < 256; ++i)
-                trie.putRecursive(ByteComparable.preencoded(VERSION, new byte[]{ (byte) i }), valueSize, false, (x, y) -> y);
+                trie.putRecursive(ByteComparable.preencoded(VERSION, new byte[]{ (byte) i }), valueSize, (x, y) -> y);
 
             byte[] bytes = writeSized(trie);    // which also walks the result in both directions
             assertEquals(256 * childSize + 255 * pointerBytes + 32 + 1, bytes.length);
@@ -595,7 +597,7 @@ public class OnDiskTrieWriterTest
     {
         InMemoryTrie<Integer> trie = InMemoryTrie.shortLived(VERSION);
         for (int i = 0; i < sizes.length; ++i)
-            trie.putRecursive(ByteComparable.preencoded(VERSION, new byte[]{ (byte) i }), sizes[i], false, (x, y) -> y);
+            trie.putRecursive(ByteComparable.preencoded(VERSION, new byte[]{ (byte) i }), sizes[i], (x, y) -> y);
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             OnDiskTrieWriter.write(trie, false, SIZED_SERIALIZER, out);
@@ -619,10 +621,10 @@ public class OnDiskTrieWriterTest
         try (DataOutputBuffer expected = new DataOutputBuffer();
              DataOutputBuffer out = new DataOutputBuffer())
         {
-            OnDiskTrieWriter.write(first, true, TrieUtil.RANGE_SERDE, expected);
-            OnDiskTrieWriter.write(second, true, TrieUtil.RANGE_SERDE, expected);
+            OnDiskTrieWriter.write(first, TrieUtil.RANGE_SERDE, expected);
+            OnDiskTrieWriter.write(second, TrieUtil.RANGE_SERDE, expected);
 
-            OnDiskTrieWriter<TestRangeState> writer = new OnDiskTrieWriter<>(out, TrieUtil.RANGE_SERDE, true);
+            OnDiskTrieWriter<TestRangeState> writer = new OnDiskTrieWriter<>(out, TrieUtil.RANGE_SERDE, OnDiskCursor.ContentStyle.RANGE);
             try (Cursor<TestRangeState> c = first.cursor(Direction.REVERSE))
             {
                 writer.writeFrom(c);
@@ -655,5 +657,64 @@ public class OnDiskTrieWriterTest
             TrieUtil.assertTriesEqual(trie(false), OnDiskTrie.open(buffer, oneByte, VERSION, false, emptyRoot));
             TrieUtil.assertTriesEqual(trie(false, "a", 1), OnDiskTrie.open(buffer, oneByte, VERSION, false, root));
         }
+    }
+
+    /// A plain trie, ordered or not, only has content before a node's branch in forward walks (see "Stopping on the
+    /// ascent path" in `Trie.md`). Something that presents content after one is not written as a plain trie, whether it
+    /// is a range trie seen through the [Trie] interface or the merged view of a deletion-aware trie. The same range
+    /// trie is written as what it is.
+    @Test
+    public void testPlainWriteRejectsContentAfterBranch() throws Exception
+    {
+        InMemoryRangeTrie<TestRangeState> range = InMemoryRangeTrie.shortLived(VERSION);
+        range.putRecursive(key("a"), new TestRangeState(key("a"), false, -1, 1), false, (x, y) -> y);
+        range.putRecursive(key("ab"), new TestRangeState(key("ab"), false, 1, 2), false, (x, y) -> y);
+        range.putRecursive(key("a"), new TestRangeState(key("a"), true, 2, -1), true, (x, y) -> y);
+        Trie<TestRangeState> rangeAsPlain = range::cursor;
+        Trie<String> merged = InMemoryTrieReturnPathRejectionTest.mergedViewWithDeletionAfterBranch();
+
+        for (TrieUtil.OnDiskWriterKind kind : TrieUtil.MAIN_ON_DISK_WRITER_KINDS)
+            for (boolean isOrdered : new boolean[]{ false, true })
+            {
+                assertRejected(() -> OnDiskTrieWriter.write(rangeAsPlain, isOrdered, TrieUtil.RANGE_SERDE, kind.newOutput(), kind.nodeWriterType));
+                assertRejected(() -> OnDiskTrieWriter.write(merged, isOrdered, TrieUtil.STRING_SERDE, kind.newOutput(), kind.nodeWriterType));
+            }
+
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            long root = OnDiskTrieWriter.write(range, TrieUtil.RANGE_SERDE, out);
+            TrieUtil.assertTriesEqual(range, OnDiskRangeTrie.open(out.asNewBuffer(), TrieUtil.RANGE_SERDE, VERSION, root));
+        }
+    }
+
+    /// The style a plain trie is written with must be its own. Walked in reverse, an ordered trie presents the content
+    /// of each key after the key's branch and an unordered one before it, and neither can be stored as the other:
+    /// what the other style's slot would get is read back as content after the branch.
+    @Test
+    public void testPlainWriteRejectsOtherOrdering() throws Exception
+    {
+        for (boolean isOrdered : new boolean[]{ false, true })
+        {
+            InMemoryTrie<Integer> trie = trie(isOrdered, "a", 1, "ab", 2);
+            assertRejected(() -> OnDiskTrieWriter.write(trie, !isOrdered, BYTE_SERIALIZER, new DataOutputBuffer()));
+
+            byte[] bytes = write(trie, isOrdered);
+            OnDiskCursor.DataDeserializer<Integer> oneByte = (rdr, length) -> (int) rdr.readByte();
+            TrieUtil.assertTriesEqual(trie, OnDiskTrie.open(ByteBuffer.wrap(bytes), oneByte, VERSION, isOrdered, bytes.length));
+        }
+    }
+
+    /// The data trie of a deletion-aware trie has its own writer.
+    @Test
+    public void testAlternateBranchStyleIsNotWrittenHere()
+    {
+        assertThrows(IllegalArgumentException.class,
+                     () -> new OnDiskTrieWriter<>(new DataOutputBuffer(), BYTE_SERIALIZER, OnDiskCursor.ContentStyle.ALTERNATE_BRANCH));
+    }
+
+    private static void assertRejected(ThrowingRunnable write)
+    {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class, write);
+        assertTrue(e.getMessage(), e.getMessage().contains("content on the wrong side"));
     }
 }
