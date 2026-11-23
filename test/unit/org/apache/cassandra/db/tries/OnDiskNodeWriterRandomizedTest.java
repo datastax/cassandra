@@ -32,7 +32,6 @@ import java.util.TreeMap;
 
 import org.agrona.DirectBuffer;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.cassandra.config.CassandraRelevantProperties;
@@ -78,34 +77,6 @@ public class OnDiskNodeWriterRandomizedTest
 
     /// The seeds of the file-backed test.
     private static final long FILE_SEED = 18906L;
-
-    /// [OnDiskCursor#skipTo] does not stop on a return-path position that it is asked to skip to, see
-    /// [#testSkipToReturnPathPosition]. The cursors over the two on-disk tries are still compared with each other
-    /// after such a skip, but the cursor over the source trie has to leave the walk. To be set when that is fixed.
-    private static final boolean READER_STOPS_ON_REQUESTED_RETURN_PATH = false;
-
-    /// [OnDiskCursor#encodedPosition] keeps returning the last position of the walk after the cursor has returned the
-    /// exhausted position, see [#testPositionAfterExhaustion]. The positions that the cursors return are compared in
-    /// any case; this is whether the position they report afterwards is also checked when exhausted. To be set when
-    /// that is fixed.
-    private static final boolean READER_REPORTS_EXHAUSTED_POSITION = false;
-
-    /// A plain on-disk trie that is empty asserts when the tail of its root is taken in the direction opposite to the
-    /// cursor's, see [#testTailOfEmptyTrie]. Until that is fixed, no tails are taken in empty tries.
-    private static final boolean EMPTY_TRIE_GIVES_TAILS = false;
-
-    /// The cursor of [InMemoryRangeTrie] gets the state it is in after a skip, and the content of the roots of its
-    /// tails, wrong for nodes whose only marker is one placed after the branch, see
-    /// [#testInMemoryRangeStateAfterSkip]. Until that is fixed a source range trie only takes part in walks that
-    /// neither skip nor take tails, and is left out of the [RangeTrie#applicableRange] and [BaseTrie#tailTrie]
-    /// comparisons.
-    private static final boolean IN_MEMORY_RANGE_TRIE_FINDS_NEAREST_MARKER = false;
-
-    /// A tail of an on-disk range trie taken where a range is closed starts in the state of the cursor it was taken
-    /// from, see [#testRangeTailWhereRangeCloses], which the verification that [RangeTrie#cursor] adds to cursors
-    /// does not let through. Until that is fixed the tails of range cursors are taken without that verification, and
-    /// [BaseTrie#tailTrie], which cannot be made to do the same, is not called on range tries.
-    private static final boolean READER_RANGE_TAIL_STARTS_WITHOUT_STATE = false;
 
     /// The page size that sizes the payloads of the tries written by the immediate writer alone.
     private static final int NOMINAL_PAGE = 256;
@@ -801,18 +772,6 @@ public class OnDiskNodeWriterRandomizedTest
     private static <T> void compareTries(BaseTrie<T, ?, ?> source, BaseTrie<T, ?, ?> readImmediate, BaseTrie<T, ?, ?> readTested, List<byte[]> keys, Random rand)
     {
         compareContentWalks(source, readImmediate, readTested);
-        if (keys.isEmpty() && !EMPTY_TRIE_GIVES_TAILS)
-        {
-            for (Direction direction : Direction.values())
-            {
-                try (Walk<T> walk = Walk.over(readImmediate, readTested, source, direction))
-                {
-                    walk.start();
-                    walk.advance();
-                }
-            }
-            return;
-        }
 
         boolean small = keys.size() <= 40;
         for (Direction direction : Direction.values())
@@ -978,11 +937,6 @@ public class OnDiskNodeWriterRandomizedTest
     /// Compares the tries that [BaseTrie#tailTrie] gives for some keys, and the tails of those.
     private static <T> void compareTailTries(BaseTrie<T, ?, ?> source, BaseTrie<T, ?, ?> readImmediate, BaseTrie<T, ?, ?> readTested, List<byte[]> keys, Random rand, int count, int nesting)
     {
-        if (readImmediate instanceof RangeTrie && !READER_RANGE_TAIL_STARTS_WITHOUT_STATE)
-            return;
-        if (source instanceof RangeTrie && !IN_MEMORY_RANGE_TRIE_FINDS_NEAREST_MARKER)
-            source = null;
-
         for (int i = 0; i < count; ++i)
         {
             byte[] key = probeKey(rand, keys);
@@ -1050,7 +1004,7 @@ public class OnDiskNodeWriterRandomizedTest
                 Object applicableTested = ((RangeTrie<?>) readTested).applicableRange(comparable(key));
                 assertTrue("applicableRange" + at + " in the trie under test: " + abbreviate(applicableTested) + " instead of " + abbreviate(applicable),
                            identical(applicable, applicableTested));
-                if (source != null && IN_MEMORY_RANGE_TRIE_FINDS_NEAREST_MARKER)
+                if (source != null)
                     assertEquals("applicableRange" + at + " in the immediate trie",
                                  ((RangeTrie<?>) source).applicableRange(comparable(key)),
                                  applicable);
@@ -1215,8 +1169,6 @@ public class OnDiskNodeWriterRandomizedTest
         long skipTo(long target)
         {
             record('s', target);
-            if (Cursor.isOnReturnPath(target) && !READER_STOPS_ON_REQUESTED_RETURN_PATH || !sourceCanSkip())
-                dropSource();
             immediatePosition = immediatePath.arrive(immediate.skipTo(target));
             testedPosition = testedPath.arrive(tested.skipTo(target));
             if (source != null)
@@ -1335,7 +1287,7 @@ public class OnDiskNodeWriterRandomizedTest
             {
                 immediateTail = tailCursor(immediate, tailDirection);
                 testedTail = tailCursor(tested, tailDirection);
-                sourceTail = source != null && sourceCanSkip() ? source.tailCursor(tailDirection) : null;
+                sourceTail = source != null && true ? source.tailCursor(tailDirection) : null;
                 return new Walk<>(this, immediateTail, testedTail, sourceTail);
             }
             catch (Throwable t)
@@ -1347,23 +1299,7 @@ public class OnDiskNodeWriterRandomizedTest
 
         private static <T> Cursor<T> tailCursor(Cursor<T> cursor, Direction tailDirection)
         {
-            if (!READER_RANGE_TAIL_STARTS_WITHOUT_STATE)
-                while (cursor instanceof VerificationCursor.Range)
-                    cursor = ((VerificationCursor.Plain<T, ? extends Cursor<T>>) cursor).source;
             return cursor.tailCursor(tailDirection);
-        }
-
-        private boolean sourceCanSkip()
-        {
-            return IN_MEMORY_RANGE_TRIE_FINDS_NEAREST_MARKER || !(source instanceof RangeCursor);
-        }
-
-        /// Stops comparing with the source trie.
-        private void dropSource()
-        {
-            if (source != null)
-                source.close();
-            source = null;
         }
 
         private void record(char call, long argument)
@@ -1411,13 +1347,11 @@ public class OnDiskNodeWriterRandomizedTest
             position = immediatePosition;
 
             boolean exhausted = Cursor.isExhausted(position);
-            if (!exhausted || READER_REPORTS_EXHAUSTED_POSITION)
-            {
-                if (immediate.encodedPosition() != position)
-                    throw failure("Cursor over the immediate trie returned the position " + Cursor.toString(position) + " and reports " + Cursor.toString(immediate.encodedPosition()));
-                if (tested.encodedPosition() != position)
-                    throw failure("Cursor over the trie under test returned the position " + Cursor.toString(position) + " and reports " + Cursor.toString(tested.encodedPosition()));
-            }
+            if (immediate.encodedPosition() != position)
+                throw failure("Cursor over the immediate trie returned the position " + Cursor.toString(position) + " and reports " + Cursor.toString(immediate.encodedPosition()));
+            if (tested.encodedPosition() != position)
+                throw failure("Cursor over the trie under test returned the position " + Cursor.toString(position) + " and reports " + Cursor.toString(tested.encodedPosition()));
+
             T content = exhausted ? null : immediate.content();
             if (!exhausted && !identical(content, tested.content()))
                 throw failure("Content at " + Cursor.toString(position) + " after " + immediatePath + " is " + abbreviate(tested.content())
@@ -1519,16 +1453,8 @@ public class OnDiskNodeWriterRandomizedTest
                     assertTrue("A cursor over a file is expected to hold a buffer", BufferPools.forNetworking().usedSizeInBytes() > buffersInUse);
                 }
 
-                // TrieUtil.assertTriesEqual does not close the cursors it makes; do the same walks with ones that are.
-                for (Direction direction : Direction.values())
-                {
-                    try (Walk<String> walk = Walk.over(readImmediate, readPageAware, testCase.source, direction))
-                    {
-                        walk.start();
-                        while (!Cursor.isExhausted(walk.position))
-                            walk.advance();
-                    }
-                }
+                TrieUtil.assertTriesEqual(testCase.source, readPageAware);
+                TrieUtil.assertTriesEqual(readImmediate, readPageAware);
 
                 try (DataOutputBuffer out = new DataOutputBuffer())
                 {
@@ -1643,7 +1569,6 @@ public class OnDiskNodeWriterRandomizedTest
     /// position with the root position of the direction it is asked for instead of its own, and fails its assertion
     /// when the two are not the same. This is what the reverse walk of the [BaseTrie#tailTrie] of an empty on-disk
     /// trie does.
-    @Ignore("Known issue, independent of the node writers: Cursor.Empty.tailCursor checks its position against the root of the direction asked for")
     @Test
     public void testTailOfEmptyTrie()
     {
@@ -1707,7 +1632,6 @@ public class OnDiskNodeWriterRandomizedTest
     /// it looks for in the before-branch slot of each prefix node on the way down. A node that only has a marker
     /// after its branch keeps it in that same slot, with a flag that the walk obeys and this search does not. The
     /// marker that closes a range after the branch of "a" is thus found before the one that opens it at "ab".
-    @Ignore("Known issue in InMemoryRangeTrie, independent of the on-disk tries: the state after a skip takes an after-branch marker stored in the content slot for a before-branch one")
     @Test
     public void testInMemoryRangeStateAfterSkip() throws Exception
     {

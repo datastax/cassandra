@@ -691,7 +691,7 @@ interface Cursor<T> extends Closeable
         @Override
         public Cursor<T> tailCursor(Direction direction)
         {
-            assert compare(position, Cursor.rootPosition(direction)) == 0 : "tailTrie called on exhausted cursor";
+            assert !isExhausted(position) : "tailTrie called on exhausted cursor";
             return new Empty<>(direction, byteComparableVersion);
         }
 

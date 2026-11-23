@@ -418,7 +418,10 @@ abstract class OnDiskWriteNodeType
     }
 
     /// Choose the node type for the given number of children, and the given maximum distance to a child, when
-    /// the first child (i.e. the last entry in the children array) immediately precedes it.
+    /// the first child (i.e. the last entry in the children array) immediately precedes it. This will never return
+    /// a type that includes a relay.
+    ///
+    /// This is the same as `selectChildrenType(furthestDelta, 0, pointerCount, false)`.
     static OnDiskWriteNodeType selectChildrenType(long furthestDelta, int pointerCount)
     {
         if (pointerCount == 1)

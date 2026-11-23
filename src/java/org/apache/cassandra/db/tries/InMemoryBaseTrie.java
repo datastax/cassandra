@@ -769,7 +769,10 @@ public abstract class InMemoryBaseTrie<T, C extends Cursor<T>, Q extends BaseTri
 
     protected int createContentNode(int contentId, int child, boolean isSafeChain) throws TrieSpaceExhaustedException
     {
-        return createPrefixNode(contentId, NONE, child, isSafeChain);
+        if (!shouldPresentAfterBranch(contentId))
+            return createPrefixNode(contentId, NONE, child, isSafeChain);
+        else
+            return createPrefixNode(NONE, contentId, child, isSafeChain);
     }
 
     protected int createPrefixNode(int contentId, int alternateBranch, int child, boolean isSafeChain) throws TrieSpaceExhaustedException
@@ -1669,8 +1672,11 @@ public abstract class InMemoryBaseTrie<T, C extends Cursor<T>, Q extends BaseTri
             if (newContent == null)
                 return contentId;
 
-            // Convert this to prefix node to be able to store both.
-            return createPrefixNode(contentId, addContent(newContent, contentAfterBranch), NONE, false);
+            // Convert this to prefix node to be able to store both, each in the slot for its side of the branch.
+            int newContentId = addContent(newContent, contentAfterBranch);
+            return contentAfterBranch
+                   ? createPrefixNode(contentId, newContentId, NONE, false)
+                   : createPrefixNode(newContentId, contentId, NONE, false);
         }
     }
 

@@ -33,6 +33,9 @@ public class OnDiskTrieWriter<T> extends OnDiskBaseTrieWriter<T>
     public interface DataSerializer<T>
     {
         /// Writes `value` to `out`. The writer takes the content's length from how far `out` moved.
+        ///
+        /// Note: Implementations cannot assume that `out` is the file the trie is written to. In particular, its
+        /// position will likely be different from the position where the content ends up in the file.
         void serialize(DataOutputPlus out, T value) throws IOException;
     }
 

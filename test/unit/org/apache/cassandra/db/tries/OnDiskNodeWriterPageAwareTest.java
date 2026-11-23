@@ -47,6 +47,7 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /// Tests of the layout [OnDiskNodeWriterPageAware] produces.
@@ -67,6 +68,8 @@ public class OnDiskNodeWriterPageAwareTest
     private static final byte PADDING = TrieUtil.PagedDataOutputBuffer.PADDING;
     /// What the output is filled with before a trie that does not start at offset 0.
     private static final byte FILLER = 0x5A;
+    /// Set to print the statistics the tests gather about the layouts they make.
+    private static final boolean VERBOSE = false;
 
     @BeforeClass
     public static void setUp()
@@ -999,7 +1002,8 @@ public class OnDiskNodeWriterPageAwareTest
 
     private static void assertExercisesPaging(String message, Totals totals)
     {
-        System.out.println("DEBUG " + message + ": " + totals);
+        if (VERBOSE)
+            System.out.println(message + ": " + totals);
         assertTrue(message + " must have tries of more than one page: " + totals, totals.multiPage > 0);
         assertTrue(message + " must have relays: " + totals, totals.relays > 0);
         assertTrue(message + " must have padding: " + totals, totals.paddingBytes > 0);
@@ -1610,7 +1614,8 @@ public class OnDiskNodeWriterPageAwareTest
             int pageSize = PAGE_SIZES[rand.nextInt(PAGE_SIZES.length)];
             check(message, withoutDeadEnds, ordered, write(withDeadEnds, ordered, STRING_SERDE, PAGE_AWARE_WITHOUT_FOLDING, pageSize, 0));
         }
-        System.out.println("DEBUG Random tries with dead ends: " + triesWithNodesWithOnlyAChild + " with nodes with only a child, " + totals);
+        if (VERBOSE)
+            System.out.println("Random tries with dead ends: " + triesWithNodesWithOnlyAChild + " with nodes with only a child, " + totals);
         assertTrue(totals.toString(), triesWithNodesWithOnlyAChild > 50);
         assertTrue(totals.toString(), totals.multiPage > 250);
         assertTrue(totals.toString(), totals.relays > 1000);
@@ -1662,7 +1667,8 @@ public class OnDiskNodeWriterPageAwareTest
                     totals.add(check(message, expected, ordered, writePageAware(slice, ordered, pageSize)));
             }
         }
-        System.out.println("DEBUG Random slices: " + slices + " slices, " + totals);
+        if (VERBOSE)
+            System.out.println("Random slices: " + slices + " slices, " + totals);
         assertTrue(totals.toString(), slices > 80);
         assertTrue(totals.toString(), totals.relays > 100);
     }
@@ -1869,7 +1875,8 @@ public class OnDiskNodeWriterPageAwareTest
             Result unpacked = new OnDiskTrieVerifier(immediate.data).pagesForStatisticsOnly(pageSize).verify(immediate.root);
             unpacked.assertStructurallyValid(message);
             message += ": " + result + " compared to immediate " + unpacked;
-            System.out.println("DEBUG Layout quality " + message);
+            if (VERBOSE)
+                System.out.println("Layout quality " + message);
 
             assertTrue(message, result.pages >= 10);
             // No node is larger than a page here, so none may cross a page boundary.
@@ -1892,6 +1899,49 @@ public class OnDiskNodeWriterPageAwareTest
             assertTrue(message, result.maxPathPageCrossings <= 2);
             assertTrue(message, result.pathPageCrossings <= unpacked.pathPageCrossings);
         }
+    }
+
+    /// The children of a node that is laid out are written largest first, each in what remains of the current page if
+    /// it fits there, and a child that needs exactly what remains fits. Here the root has the leaves "a" and "b", which
+    /// hold `n` bytes of content each and thus take `n + 1` bytes: "a" exactly the rest of the 64-byte page the trie
+    /// starts in, at offset 0 or 16, and "b" 20. Together with the root they do not fit a page, so the root lays them
+    /// out: "a" fills its page to the end and "b" starts the next one, and nothing is padded. Passing over "a" would
+    /// write "b" first and pad the rest of the page, which "a" no longer fits.
+    @Test
+    public void testChildExactlyFillingThePage() throws IOException
+    {
+        int pageSize = 64;
+        for (int startOffset : new int[]{ 0, 16 })
+            for (boolean ordered : new boolean[]{ false, true })
+            {
+                int rest = pageSize - startOffset;
+                Trie<String> trie = trie(ordered, "a", "A".repeat(rest - 1), "b", "B".repeat(19));
+                Written written = write(trie, ordered, STRING_SERDE, OnDiskNodeWriter.Type.PAGE_AWARE, pageSize, startOffset);
+                String message = String.format("Start offset %d %s", startOffset, ordered ? "ordered" : "unordered");
+                Result result = check(message, trie, ordered, written);
+                message += ": " + result;
+
+                assertEquals(message, 0, result.paddingBytes);
+                OnDiskTrieVerifier.Node a = leafWithContentLength(result, rest - 1);
+                assertEquals(message, startOffset, a.start);
+                assertEquals(message, pageSize, a.end);
+                OnDiskTrieVerifier.Node b = leafWithContentLength(result, 19);
+                assertEquals(message, pageSize, b.start);
+                assertEquals(message, pageSize + 20, b.end);
+            }
+    }
+
+    private static OnDiskTrieVerifier.Node leafWithContentLength(Result result, int length)
+    {
+        OnDiskTrieVerifier.Node found = null;
+        for (OnDiskTrieVerifier.Node node : result.allNodes)
+            if (node.type == Type.LEAF && node.descentLength == length)
+            {
+                assertNull("More than one leaf with " + length + " bytes of content: " + result, found);
+                found = node;
+            }
+        assertNotNull("No leaf with " + length + " bytes of content: " + result, found);
+        return found;
     }
 
     // Sizes that depend on the position
@@ -2017,6 +2067,10 @@ public class OnDiskNodeWriterPageAwareTest
         /// The distances that the pointers leading from one side of the skipped range to the other cover.
         final TreeSet<Long> distancesOverSkip = new TreeSet<>();
         boolean hasRelayOverSkip;
+        /// The same for the pointers to deletion branches, which are not among the above.
+        final TreeSet<Long> branchDistancesOverSkip = new TreeSet<>();
+        /// The most bytes taken by any pointer to a deletion branch.
+        int maxBranchPointerBytes;
 
         WrittenWithSkip(Result result, long skipStart, long skipEnd)
         {
@@ -2025,6 +2079,12 @@ public class OnDiskNodeWriterPageAwareTest
             this.skipEnd = skipEnd;
             for (OnDiskTrieVerifier.Node node : result.allNodes)
             {
+                if (node.deletionBranch >= 0)
+                {
+                    maxBranchPointerBytes = Math.max(maxBranchPointerBytes, node.ascentLength);
+                    if (node.start >= skipEnd && node.deletionBranch <= skipStart)
+                        branchDistancesOverSkip.add(node.start - node.deletionBranch);
+                }
                 if (node.pointerBytes == 0 || node.start < skipEnd)
                     continue;
                 // the first child of a sparse or bitmap node has no pointer
@@ -2148,7 +2208,8 @@ public class OnDiskNodeWriterPageAwareTest
                 String summary = String.format("%d-byte pointers, page size %d: %d tries, %d with a distance one below the boundary, %d at the boundary, " +
                                                "%d with longer relays, %d with a misplaced node in the last page",
                                                bytes + 1, pageSize, tries, withLargestBelowBoundary, withSmallestAtBoundary, withLongerRelays, withMisplacedRoot);
-                System.out.println("DEBUG Skipped positions: " + summary);
+                if (VERBOSE)
+                    System.out.println("Skipped positions: " + summary);
                 assertTrue(summary, withLargestBelowBoundary > 0 && withSmallestAtBoundary > 0 && withLongerRelays > 0);
             }
         }
@@ -2195,6 +2256,236 @@ public class OnDiskNodeWriterPageAwareTest
                 String summary = String.format("%d-byte pointers, page size %d: %d with shorter pointers, %d with longer relays",
                                                bytes + 1, pageSize, withShorterPointers, withLongerRelays);
                 assertTrue(summary, withLongerRelays > 0);
+                // with the larger steps the lower distances are all below the boundary only when pages are small
+                assertTrue(summary, withShorterPointers > 0 || pageSize > 64);
+            }
+        }
+    }
+
+    private static final int WRITTEN_BRANCH_SHAPES = 4;
+
+    /// A deletion-aware trie in which the deletion branch of the node "m" is written before "m" is completed, because
+    /// the marker at the root of the branch is larger than a page. The node is then in memory with the position of its
+    /// branch while the walk goes on to "k", and whatever is written for "k" makes the pointer to the branch longer
+    /// than it was when the size of "m" was first worked out. This is [#writtenChildrenTrie] for the pointer in the
+    /// ascent-side slot of a prefix node rather than the ones to its children.
+    ///
+    /// @param largeRoot true to give the root enough other children for it to be laid out rather than written whole
+    static DeletionAwareTrie<String, TestRangeState> writtenBranchTrie(int shape, int pageSize, String valueOfK, boolean largeRoot)
+    {
+        InMemoryTrie<String> live = newTrie(false);
+        switch (shape)
+        {
+            case 0:
+                // content and the branch: a prefix node without a child
+                put(live, "m", "content");
+                break;
+            case 1:
+                // the branch and a child in memory: a prefix node without descent-side content
+                put(live, "mx", "small");
+                break;
+            case 2:
+                // content, the branch and a child that is also written, after the branch and thus closer to "m"
+                put(live, "m", "content");
+                put(live, "mx", "B".repeat(pageSize + 3));
+                break;
+            default:
+                // content, the branch and two children in memory
+                put(live, "m", "content");
+                put(live, "mx", "small");
+                put(live, "my", "small");
+                break;
+        }
+        put(live, "k", valueOfK);
+        put(live, "a", "first");
+        if (largeRoot)
+            for (int i = 0; i < 8; ++i)
+                put(live, concat(new byte[0], (i < 4 ? 'b' : 'p') + i), "S".repeat(pageSize / 4));
+
+        InMemoryDeletionAwareTrie<String, TestRangeState> trie = InMemoryDeletionAwareTrie.shortLived(VERSION);
+        InMemoryDeletionAwareTrie<String, TestRangeState>.Mutator<String, TestRangeState> mutator =
+            trie.mutator((existing, update) -> update,
+                         (existing, update) -> update,
+                         (existing, deletion) -> existing,
+                         (deletion, inserted) -> inserted,
+                         true,
+                         features -> false,
+                         features -> false);
+        try
+        {
+            mutator.apply(DeletionAwareTrie.wrap(live));
+            mutator.apply(DeletionAwareTrie.deletionBranch(key(bytes("m")), VERSION, wholeBranchDeletion(pageSize)));
+        }
+        catch (TrieSpaceExhaustedException e)
+        {
+            throw new AssertionError(e);
+        }
+        return trie;
+    }
+
+    /// A range trie that deletes everything in the branch it is attached to. The position of a [TestRangeState] is
+    /// only a label that is serialized with it, and the one of the opening marker makes it larger than a page.
+    static RangeTrie<TestRangeState> wholeBranchDeletion(int pageSize)
+    {
+        InMemoryRangeTrie<TestRangeState> branch = InMemoryRangeTrie.shortLived(VERSION);
+        try
+        {
+            branch.putRecursive(ByteComparable.EMPTY, new TestRangeState(key(repeat('D', pageSize + 3)), false, -1, 1), false, (existing, update) -> update);
+            branch.putRecursive(ByteComparable.EMPTY, new TestRangeState(ByteComparable.EMPTY, true, 1, -1), true, (existing, update) -> update);
+        }
+        catch (TrieSpaceExhaustedException e)
+        {
+            throw new AssertionError(e);
+        }
+        return branch;
+    }
+
+    /// Writes [#writtenBranchTrie] with the given number of positions skipped when the walk reaches "k", and checks
+    /// the result with the verifier.
+    private static WrittenWithSkip writeBranchWithSkip(String message, int shape, int pageSize, long gap, boolean largeRoot) throws IOException
+    {
+        DeletionAwareTrie<String, TestRangeState> trie = writtenBranchTrie(shape, pageSize, SKIP, largeRoot);
+        SkippingOutput out = new SkippingOutput(pageSize);
+        DeletionAwareTrie<String, TestRangeState> skipping = trie.mapValues(v ->
+        {
+            if (SKIP.equals(v) && out.skips.isEmpty())
+                out.skip(gap);
+            return v;
+        });
+        try
+        {
+            long root = OnDiskDeletionAwareTrieWriter.write(skipping, STRING_SERDE, RANGE_SERDE, out, OnDiskNodeWriter.Type.PAGE_AWARE);
+            assertEquals(out.position(), root);
+            assertEquals(1, out.skips.size());
+            Result result = out.verifier().deletionAware().verify(root);
+            assertValid("Verification", result, true);
+            assertEquals("Deletion branches: " + result, 1, result.deletionBranches);
+            assertEquals("Pointers wider than necessary: " + result, 0, result.nodesWithOversizedPointers);
+            return new WrittenWithSkip(result, out.skips.get(0)[0], out.skips.get(0)[1]);
+        }
+        catch (Throwable t)
+        {
+            throw new AssertionError(message + ": " + t, t);
+        }
+    }
+
+    private static int maxBranchPointerBytes(Result result)
+    {
+        int bytes = 0;
+        for (OnDiskTrieVerifier.Node node : result.allNodes)
+            if (node.deletionBranch >= 0)
+                bytes = Math.max(bytes, node.ascentLength);
+        return bytes;
+    }
+
+    /// The same as [#testPointersGrowingWhileNodeIsInMemory] for the pointer to a deletion branch that is written
+    /// before its node is. The skipped range moves the node, and with it the distance to its branch, to either side of
+    /// each value where the pointer needs one more byte, up to the full 8 bytes.
+    @Test
+    public void testBranchPointerGrowingWhileNodeIsInMemory() throws IOException
+    {
+        for (int bytes = 1; bytes < 8; ++bytes)
+        {
+            long boundary = 1L << (8 * bytes);
+            for (int pageSize : new int[]{ 64, 256, 4096 })
+            {
+                int tries = 0;
+                int withLargestBelowBoundary = 0;
+                int withSmallestAtBoundary = 0;
+                for (int shape = 0; shape < WRITTEN_BRANCH_SHAPES; ++shape)
+                    for (boolean largeRoot : new boolean[]{ true, false })
+                    {
+                        String message = String.format("Shape %d page size %d %s gap ", shape, pageSize, largeRoot ? "large root" : "small root");
+
+                        // Find what the rest of the trie adds to the skipped distance, to try the distances that place
+                        // the pointer around the boundary.
+                        long base = Math.max(0, boundary - 3L * pageSize);
+                        WrittenWithSkip first = writeBranchWithSkip(message + base, shape, pageSize, base, largeRoot);
+                        assertEquals(message + base + ": the branch must be on one side of the skipped range and its node on the other, " + first.result,
+                                     1, first.branchDistancesOverSkip.size());
+                        long added = first.branchDistancesOverSkip.first() - base;
+                        TreeSet<Long> gaps = new TreeSet<>();
+                        gaps.add(boundary + 2);
+                        for (long gap = boundary - added - 2; gap <= boundary - added + 1; ++gap)
+                            if (gap >= 0)
+                                gaps.add(gap);
+
+                        for (long gap : gaps)
+                        {
+                            WrittenWithSkip written = writeBranchWithSkip(message + Long.toHexString(gap), shape, pageSize, gap, largeRoot);
+                            String details = message + Long.toHexString(gap) + ": " + written.result;
+                            ++tries;
+                            assertEquals(details, 1, written.branchDistancesOverSkip.size());
+                            long distance = written.branchDistancesOverSkip.first();
+                            if (distance == boundary - 1)
+                                ++withLargestBelowBoundary;
+                            if (distance == boundary)
+                                ++withSmallestAtBoundary;
+                            assertEquals(details, OnDiskBaseTrieWriter.bytesFor(distance), written.maxBranchPointerBytes);
+                            if (gap >= boundary)
+                                assertEquals(details, bytes + 1, written.maxBranchPointerBytes);
+                        }
+                    }
+                String summary = String.format("%d-byte branch pointers, page size %d: %d tries, %d with a distance one below the boundary, %d at the boundary",
+                                               bytes + 1, pageSize, tries, withLargestBelowBoundary, withSmallestAtBoundary);
+                if (VERBOSE)
+                    System.out.println("Skipped positions before a deletion branch: " + summary);
+                assertTrue(summary, withLargestBelowBoundary > 0 && withSmallestAtBoundary > 0);
+            }
+        }
+    }
+
+    /// The same with distances made of real content, so that the result can also be read back.
+    @Test
+    public void testBranchPointerGrowingWhileNodeIsInMemoryReadBack() throws IOException
+    {
+        for (int bytes = 1; bytes <= 3; ++bytes)
+        {
+            int boundary = 1 << (8 * bytes);
+            for (int pageSize : new int[]{ 64, 256, 4096 })
+            {
+                // The content of "k" must be larger than a page to be written before "m" is. With 16MB of it, try
+                // only some of the combinations.
+                if (boundary - 90 <= pageSize || bytes == 3 && pageSize != 256)
+                    continue;
+                int withLongerPointers = 0;
+                int withShorterPointers = 0;
+                int step = bytes == 3 ? 46 : bytes == 2 ? 3 : 1;
+                for (int gap = boundary + 2; gap >= boundary - 90; gap -= step)
+                    for (int shape = 0; shape < WRITTEN_BRANCH_SHAPES; ++shape)
+                    {
+                        if (bytes == 3 && shape % 2 != 0)
+                            continue;
+                        boolean largeRoot = (gap & 1) == 0;
+                        String message = String.format("Shape %d page size %d gap %x %s", shape, pageSize, gap, largeRoot ? "large root" : "small root");
+                        DeletionAwareTrie<String, TestRangeState> trie = writtenBranchTrie(shape, pageSize, "G".repeat(gap), largeRoot);
+                        try
+                        {
+                            DataOutputBuffer out = newOutput(pageSize, 0);
+                            long root = OnDiskDeletionAwareTrieWriter.write(trie, STRING_SERDE, RANGE_SERDE, out, OnDiskNodeWriter.Type.PAGE_AWARE);
+                            ByteBuffer data = out.buffer();
+                            TrieUtil.assertTriesEqual(trie, OnDiskDeletionAwareTrie.open(data.duplicate(), STRING_SERDE, RANGE_SERDE, VERSION, root));
+                            Result result = new OnDiskTrieVerifier(data).deletionAware().pages(pageSize, PADDING).verify(root);
+                            assertValid("Verification", result, true);
+                            assertEquals("Deletion branches: " + result, 1, result.deletionBranches);
+
+                            int branchPointerBytes = maxBranchPointerBytes(result);
+                            if (branchPointerBytes <= bytes)
+                                ++withShorterPointers;
+                            if (gap >= boundary)
+                            {
+                                assertEquals(result.toString(), bytes + 1, branchPointerBytes);
+                                ++withLongerPointers;
+                            }
+                        }
+                        catch (Throwable t)
+                        {
+                            throw new AssertionError(message + ": " + t.getMessage(), t);
+                        }
+                    }
+                String summary = String.format("%d-byte branch pointers, page size %d: %d with shorter pointers, %d with longer ones",
+                                               bytes + 1, pageSize, withShorterPointers, withLongerPointers);
+                assertTrue(summary, withLongerPointers > 0);
                 // with the larger steps the lower distances are all below the boundary only when pages are small
                 assertTrue(summary, withShorterPointers > 0 || pageSize > 64);
             }
@@ -2416,7 +2707,8 @@ public class OnDiskNodeWriterPageAwareTest
                 }
             }
             String summary = "Page size " + pageSize + ": " + branches + " deletion branches, " + relays + " relays, " + padding + " padding bytes";
-            System.out.println("DEBUG Deletion-aware tries: " + summary);
+            if (VERBOSE)
+                System.out.println("Deletion-aware tries: " + summary);
             assertTrue(summary, branches > 30);
             assertEquals(summary, pageSize > 0, relays > 0);
             assertEquals(summary, pageSize > 0, padding > 0);

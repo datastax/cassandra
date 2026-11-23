@@ -364,6 +364,19 @@ public class OnDiskWriteNodeTypeTest
             }
     }
 
+    /// Make sure the immediate version of `selectChildrenType` matches the four-argument one.
+    @Test
+    public void testSelectChildrenTypeVersionsMatch()
+    {
+        for (int count : new int[]{ 2, 25, 26, 224, 225, 256 })
+            for (long furthestDelta : DELTAS)
+            {
+                OnDiskWriteNodeType typeExpected = OnDiskWriteNodeType.selectChildrenType(furthestDelta, 0, count, false);
+                OnDiskWriteNodeType typeActual = OnDiskWriteNodeType.selectChildrenType(furthestDelta, count);
+                assertSame(typeExpected, typeActual);
+            }
+    }
+
     /// A chain with a folded transition is the chain that begins with that transition.
     @Test
     public void testFoldedChainIsLongerChain() throws IOException

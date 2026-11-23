@@ -934,9 +934,9 @@ enum OnDiskReadNodeType
         return advance(state);
     }
     /// Move to the first remaining child at or after the given transition, in the cursor's direction, and return its
-    /// position, or the cursor's exhausted position if there is none. A backtrack entry that presents the return path
-    /// of a node has that return path, at the node's transition, as its only child. What the target is beyond its
-    /// transition -- e.g. the return path of the child found here -- is for [OnDiskCursor#skipTo] to resolve.
+    /// position, or the [OnDiskCursor#NO_CHILD] if there is none. Because a caller might request a position on the
+    /// return path, the returned position may be before the position [OnDiskCursor#skipTo] is asked to advance to,
+    /// but it may be necessary to descend into the child to store its return-path content as a backtrack entry.
     public abstract long skipTo(OnDiskCursor<?> state, int transition);
     public abstract String dump(OnDiskCursor<?> state);
 

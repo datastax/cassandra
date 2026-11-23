@@ -37,7 +37,6 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 abstract class OnDiskBaseTrieWriter<T> extends TriePathReconstructor
 {
     final OnDiskNodeWriter<T> nodeWriter;
-    final DataOutputPlus out;
     final boolean swapAscentAndDescentSides;
 
     OnDiskNodeWriter.Node<T>[] nodesOnPath = new OnDiskNodeWriter.Node[32];
@@ -53,7 +52,6 @@ abstract class OnDiskBaseTrieWriter<T> extends TriePathReconstructor
     OnDiskBaseTrieWriter(OnDiskNodeWriter<T> nodeWriter, boolean swapAscentAndDescentSides)
     {
         this.nodeWriter = nodeWriter;
-        this.out = nodeWriter.out;
         this.swapAscentAndDescentSides = swapAscentAndDescentSides;
     }
 

@@ -245,13 +245,13 @@ public class OnDiskRangeTrieTest
                 for (int suffix = 0; suffix <= suffixLength + 1; ++suffix)
                 {
                     ByteComparable.Preencoded key = key(prefixLength, transition, suffix);
-                    // The walks below do not close the cursors they make, so compare against the count before the call
-                    // rather than against zero.
                     int before = factory.outstanding;
                     RangeTrie<TestRangeState> tail = actual.tailTrie(key);
                     assertEquals("tailTrie must not keep a rebufferer, at " + key.byteComparableAsString(VERSION),
                                  before, factory.outstanding);
                     TrieUtil.assertTriesEqual(expected.tailTrie(key), tail);
+                    assertEquals("The walks of the tail must close their cursors, at " + key.byteComparableAsString(VERSION),
+                                 before, factory.outstanding);
                 }
             }
         }

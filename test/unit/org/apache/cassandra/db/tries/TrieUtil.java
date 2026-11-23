@@ -641,14 +641,15 @@ public class TrieUtil
         }
 
         for (Direction dir : Direction.values())
-            try
+            try (var expectedCursor = expected.cursor(dir);
+                 var actualCursor = actual.cursor(dir))
             {
-                assertCursorWalksEqual(expected.cursor(dir), actual.cursor(dir));
+                assertCursorWalksEqual(expectedCursor, actualCursor);
             }
             catch (Throwable t)
             {
-                System.err.println("Expected\n" + expected.cursor(dir).process(new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
-                System.err.println("Actual\n" + actual.cursor(dir).process(new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+                System.err.println("Expected\n" + expected.process(dir, new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+                System.err.println("Actual\n" + actual.process(dir, new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
                 throw t;
             }
     }
@@ -663,16 +664,17 @@ public class TrieUtil
         }
 
         for (Direction dir : Direction.values())
-            try
+            try (var expectedCursor = expected.cursor(dir);
+                 var actualCursor = actual.cursor(dir))
             {
-                assertCursorWalksEqual(expected.cursor(dir), actual.cursor(dir));
+                assertCursorWalksEqual(expectedCursor, actualCursor);
             }
             catch (Throwable t)
             {
                 try
                 {
-                    System.err.println("Expected\n" + expected.cursor(dir).process(new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
-                    System.err.println("Actual\n" + actual.cursor(dir).process(new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+                    System.err.println("Expected\n" + expected.process(dir, new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+                    System.err.println("Actual\n" + actual.process(dir, new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
                 }
                 catch (Throwable t2)
                 {
@@ -694,11 +696,13 @@ public class TrieUtil
             T expectedContent = expected.content();
             T actualContent = actual.content();
             assertEquals("Content", expectedContent, actualContent);
-            RangeCursor<D> expectedDeletionBranch = expected.deletionBranchCursor(Cursor.direction(expectedPos));
-            RangeCursor<D> actualDeletionBranch = actual.deletionBranchCursor(Cursor.direction(actualPos));
-            assertEquals("Deletion branch present", expectedDeletionBranch != null, actualDeletionBranch != null);
-            if (expectedDeletionBranch != null)
-                assertCursorWalksEqual(expectedDeletionBranch, actualDeletionBranch);
+            try (RangeCursor<D> expectedDeletionBranch = expected.deletionBranchCursor(Cursor.direction(expectedPos));
+                 RangeCursor<D> actualDeletionBranch = actual.deletionBranchCursor(Cursor.direction(actualPos)))
+            {
+                assertEquals("Deletion branch present", expectedDeletionBranch != null, actualDeletionBranch != null);
+                if (expectedDeletionBranch != null)
+                    assertCursorWalksEqual(expectedDeletionBranch, actualDeletionBranch);
+            }
             expectedPos = expected.advance();
             actualPos = actual.advance();
         }
@@ -743,14 +747,15 @@ public class TrieUtil
             expected = DeletionAwareTrie.empty(VERSION);
 
         for (Direction dir : Direction.values())
-            try
+            try (var expectedCursor = expected.cursor(dir);
+                 var actualCursor = actual.cursor(dir))
             {
-                assertCursorContentEqual(expected.cursor(dir), actual.cursor(dir));
+                assertCursorContentEqual(expectedCursor, actualCursor);
             }
             catch (Throwable t)
             {
-                System.err.println("Expected\n" + expected.cursor(dir).process(new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
-                System.err.println("Actual\n" + actual.cursor(dir).process(new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+                System.err.println("Expected\n" + expected.process(dir, new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
+                System.err.println("Actual\n" + actual.process(dir, new TrieDumper.DeletionAware<>(Object::toString, Object::toString)));
                 throw t;
             }
     }
@@ -763,55 +768,68 @@ public class TrieUtil
         long actualPos = actual.encodedPosition();
         T expectedContent = expected.content();
         T actualContent = actual.content();
-        RangeCursor<D> expectedDeletionBranch = expected.deletionBranchCursor(expected.direction());
-        RangeCursor<D> actualDeletionBranch = actual.deletionBranchCursor(actual.direction());
-        while (true)
+        RangeCursor<D> expectedDeletionBranch = null;
+        RangeCursor<D> actualDeletionBranch = null;
+        try
         {
-            assertEquals("Actual pos " + Cursor.toString(actualPos) + " != " + Cursor.toString(expectedPos), 0, Cursor.compare(expectedPos, actualPos));
-            assertEquals("Path", Hex.bytesToHex(expectedPath.getTrimmedPathBytes()), Hex.bytesToHex(actualPath.getTrimmedPathBytes()));
-            assertEquals("Content", expectedContent, actualContent);
-            if (expectedDeletionBranch != null ^ actualDeletionBranch != null)
+            expectedDeletionBranch = expected.deletionBranchCursor(expected.direction());
+            actualDeletionBranch = actual.deletionBranchCursor(actual.direction());
+
+            while (true)
             {
-                if (expectedDeletionBranch == null)
-                    expectedDeletionBranch = RangeCursor.empty(expected.direction(), VERSION);
-                else if (actualDeletionBranch == null)
-                    actualDeletionBranch = RangeCursor.empty(actual.direction(), VERSION);
+                assertEquals("Actual pos " + Cursor.toString(actualPos) + " != " + Cursor.toString(expectedPos), 0, Cursor.compare(expectedPos, actualPos));
+                assertEquals("Path", Hex.bytesToHex(expectedPath.getTrimmedPathBytes()), Hex.bytesToHex(actualPath.getTrimmedPathBytes()));
+                assertEquals("Content", expectedContent, actualContent);
+                if (expectedDeletionBranch != null ^ actualDeletionBranch != null)
+                {
+                    if (expectedDeletionBranch == null)
+                        expectedDeletionBranch = RangeCursor.empty(expected.direction(), VERSION);
+                    else if (actualDeletionBranch == null)
+                        actualDeletionBranch = RangeCursor.empty(actual.direction(), VERSION);
+                }
+                if (expectedDeletionBranch != null)
+                    assertCursorContentEqual(expectedDeletionBranch, actualDeletionBranch);
+
+                if (Cursor.isExhausted(actualPos))
+                    return;
+
+                expectedContent = null;
+                expectedDeletionBranch = null;
+                do
+                {
+                    expectedPos = advanceMultipleIntoReceiver(expected, expectedPath, expectedPos);
+                    if (!Cursor.isExhausted(expectedPos))
+                    {
+                        expectedContent = expected.content();
+                        expectedDeletionBranch = expected.deletionBranchCursor(expected.direction());
+                    }
+                    else
+                        break;
+                }
+                while (expectedContent == null && expectedDeletionBranch == null);
+
+                actualContent = null;
+                actualDeletionBranch = null;
+                do
+                {
+                    actualPos = advanceMultipleIntoReceiver(actual, actualPath, actualPos);
+                    if (!Cursor.isExhausted(actualPos))
+                    {
+                        actualContent = actual.content();
+                        actualDeletionBranch = actual.deletionBranchCursor(actual.direction());
+                    }
+                    else
+                        break;
+                }
+                while (actualContent == null && actualDeletionBranch == null);
             }
+        }
+        finally
+        {
             if (expectedDeletionBranch != null)
-                assertCursorContentEqual(expectedDeletionBranch, actualDeletionBranch);
-
-            if (Cursor.isExhausted(actualPos))
-                return;
-
-            expectedContent = null;
-            expectedDeletionBranch = null;
-            do
-            {
-                expectedPos = advanceMultipleIntoReceiver(expected, expectedPath, expectedPos);
-                if (!Cursor.isExhausted(expectedPos))
-                {
-                    expectedContent = expected.content();
-                    expectedDeletionBranch = expected.deletionBranchCursor(expected.direction());
-                }
-                else
-                    break;
-            }
-            while (expectedContent == null && expectedDeletionBranch == null);
-
-            actualContent = null;
-            actualDeletionBranch = null;
-            do
-            {
-                actualPos = advanceMultipleIntoReceiver(actual, actualPath, actualPos);
-                if (!Cursor.isExhausted(actualPos))
-                {
-                    actualContent = actual.content();
-                    actualDeletionBranch = actual.deletionBranchCursor(actual.direction());
-                }
-                else
-                    break;
-            }
-            while (actualContent == null && actualDeletionBranch == null);
+                expectedDeletionBranch.close();
+            if (actualDeletionBranch != null)
+                actualDeletionBranch.close();
         }
 
     }
