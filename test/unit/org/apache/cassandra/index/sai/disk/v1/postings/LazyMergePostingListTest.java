@@ -18,6 +18,7 @@ package org.apache.cassandra.index.sai.disk.v1.postings;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 import java.util.TreeSet;
@@ -467,6 +468,21 @@ public class LazyMergePostingListTest
         }
 
         source.assertAllClosed();
+    }
+
+    @Test
+    public void testCapacityChangeLifecycle() throws IOException
+    {
+        int[][] lists = { { 10, 20 }, { 30, 40 } };
+        InstrumentedSource source = new InstrumentedSource(lists);
+        List<String> events = new ArrayList<>();
+        LazyMergePostingList.AllocationListener listener = (oldCap, newCap) -> events.add(oldCap + "->" + newCap);
+
+        try (LazyMergePostingList merged = new LazyMergePostingList(source, 2, 4, listener))
+        {
+            assertEquals(Arrays.asList("0->2"), events);
+        }
+        assertEquals(Arrays.asList("0->2", "2->0"), events);
     }
 
     private static class InstrumentedPostingList implements PostingList

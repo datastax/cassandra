@@ -24,6 +24,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -95,11 +96,10 @@ public class RangeUtil
     @VisibleForTesting
     static long estimateRowsInRange(long rows, long partitions, AbstractBounds<PartitionPosition> keyRange)
     {
-        if (rows <= 0)
-            return 0;
-        if (coversFullRing(keyRange))
-            return rows;
-        return clampToPartition(rows, avgRowsPerPartition(rows, partitions), rows * getRingFraction(keyRange));
+        IPartitioner partitioner = keyRange.left.getPartitioner();
+        Token minToken = partitioner.getMinimumToken();
+        Token maxToken = partitioner.getMaximumToken();
+        return estimateRowsInRange(rows, avgRowsPerPartition(rows, partitions), minToken, maxToken, keyRange);
     }
 
     /**
@@ -110,7 +110,16 @@ public class RangeUtil
      */
     public static long estimateRowsInRange(Memtable memtable, AbstractBounds<PartitionPosition> keyRange)
     {
-        return estimateRowsInRange(Memtable.estimateRowCount(memtable), memtable.partitionCount(), keyRange);
+        if (memtable.isClean())
+            return 0;
+
+        long rows = Memtable.estimateRowCount(memtable);
+        long partitions = memtable.partitionCount();
+        return estimateRowsInRange(rows,
+                                   avgRowsPerPartition(rows, partitions),
+                                   memtable.minPartitionKey().getToken(),
+                                   memtable.maxPartitionKey().getToken(),
+                                   keyRange);
     }
 
     /**
@@ -127,7 +136,7 @@ public class RangeUtil
     {
         long segmentRows = 1 + segment.maxSSTableRowId - segment.minSSTableRowId;
         return estimateRowsInRange(segmentRows,
-                                   avgRowsPerPartition(sstable),
+                                   avgRowsPerPartition(sstable.getTotalRows(), sstable.estimatedKeys()),
                                    segment.minKey.token(),
                                    segment.maxKey.token(),
                                    keyRange);
@@ -142,21 +151,10 @@ public class RangeUtil
     public static long estimateRowsInRange(SSTableReader sstable, AbstractBounds<PartitionPosition> keyRange)
     {
         return estimateRowsInRange(sstable.getTotalRows(),
-                                   avgRowsPerPartition(sstable),
+                                   avgRowsPerPartition(sstable.getTotalRows(), sstable.estimatedKeys()),
                                    sstable.first.getToken(),
                                    sstable.last.getToken(),
                                    keyRange);
-    }
-
-    private static double avgRowsPerPartition(SSTableReader sstable)
-    {
-        return avgRowsPerPartition(sstable.getTotalRows(), sstable.estimatedKeys());
-    }
-
-    /** Rounds the estimate, but never goes below the size of one average partition nor above the total row count. */
-    private static long clampToPartition(long rows, double avgRowsPerPartition, double estimate)
-    {
-        return Math.min(rows, Math.round(Math.max(avgRowsPerPartition, estimate)));
     }
 
     /**
@@ -213,8 +211,9 @@ public class RangeUtil
         }
     }
 
-    public static double getRingFraction(AbstractBounds<PartitionPosition> keyRange)
+    /** Rounds the estimate, but never goes below the size of one average partition nor above the total row count. */
+    private static long clampToPartition(long rows, double avgRowsPerPartition, double estimate)
     {
-        return keyRange.left.getToken().size(keyRange.right.getToken().nextValidToken());
+        return Math.min(rows, Math.round(Math.max(avgRowsPerPartition, estimate)));
     }
 }

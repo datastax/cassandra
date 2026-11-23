@@ -344,10 +344,43 @@ public class PostingsTest extends SaiRandomizedTest
                         .toArray();
     }
 
+    @Test
+    public void testDoubleCloseDoesNotUndercount() throws Exception
+    {
+        final int blockSize = 1 << between(3, 8);
+        final IntArrayPostingList expectedPostingList = new IntArrayPostingList(new int[]{ 10, 20, 30 });
+
+        long postingPointer;
+        IndexComponents.ForWrite components = indexDescriptor.newPerIndexComponentsForWrite(indexContext);
+        try (PostingsWriter writer = new PostingsWriter(components, blockSize))
+        {
+            postingPointer = writer.write(expectedPostingList);
+            writer.complete();
+        }
+
+        IndexInput input = components.get(IndexComponentType.POSTING_LISTS).openInput();
+        SAICodecUtils.validate(input);
+        input.seek(postingPointer);
+
+        CountingPostingListEventListener listener = new CountingPostingListEventListener();
+        PostingsReader reader = new PostingsReader(input, postingPointer, listener);
+        assertEquals(1, listener.opens);
+        assertEquals(0, listener.closes);
+
+        reader.close();
+        assertEquals(1, listener.closes);
+
+        // Second close should be a no-op and must not trigger another onPostingListClose
+        reader.close();
+        assertEquals(1, listener.closes);
+    }
+
     static class CountingPostingListEventListener implements QueryEventListener.PostingListEventListener
     {
         int advances;
         int decodes;
+        int opens;
+        int closes;
 
         @Override
         public void onAdvance()
@@ -359,6 +392,18 @@ public class PostingsTest extends SaiRandomizedTest
         public void postingDecoded(long postingsDecoded)
         {
             this.decodes += postingsDecoded;
+        }
+
+        @Override
+        public void onPostingListOpen()
+        {
+            this.opens++;
+        }
+
+        @Override
+        public void onPostingListClose()
+        {
+            this.closes++;
         }
     }
 }
