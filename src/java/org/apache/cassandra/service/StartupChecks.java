@@ -167,7 +167,6 @@ public class StartupChecks
                                                                       checkMaxMapCount,
                                                                       checkReadAheadKbSetting,
                                                                       checkDataDirs,
-                                                                      checkDsePeersWithoutFlag,
                                                                       loadDsePeersRecord,
                                                                       checkDse6Artefacts,
                                                                       checkSSTablesFormat,
@@ -202,6 +201,22 @@ public class StartupChecks
     List<StartupCheck> getPreFlightChecks()
     {
         return ImmutableList.copyOf(preFlightChecks);
+    }
+
+    /**
+     * Runs, before the commit log starts, the checks whose refusal must come before it writes anything:
+     * {@link #checkDsePeersWithoutFlag}, which is not in the default list. {@link CassandraDaemon#setup} (and the
+     * in-JVM test node) calls it before {@code CommitLog.start}, and so before {@link #verify}. The commit log creates
+     * its first segments when it starts, of the version the storage compatibility mode writes, above the 4.0 line with
+     * {@code storage_compatibility_mode: NONE} or {@code UPGRADING}. Left behind by a start refused after that, they
+     * would refuse in turn the start in the mode of the DSE upgrade that the refusal names as its remedy
+     * ({@link #checkDse6Artefacts} lists them as written without the mode), and a rollback to DSE would find segments
+     * of a version that no start in the mode writes. The check reads only files of the metadata directory and needs
+     * nothing that the commit log or the other checks set up.
+     */
+    public static void verifyBeforeCommitLogStart(StartupChecksOptions options) throws StartupException
+    {
+        checkDsePeersWithoutFlag.execute(options);
     }
 
     /**
@@ -894,6 +909,7 @@ public class StartupChecks
      */
     public static final StartupCheck checkDsePeersWithoutFlag = new StartupCheck()
     {
+        // not in the default list: run before the commit log starts, by verifyBeforeCommitLogStart
         @Override
         public void execute(StartupChecksOptions options) throws StartupException
         {

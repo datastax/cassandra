@@ -581,7 +581,7 @@ public enum CassandraRelevantProperties
      */
     INTERNODE_COMPATIBILITY_MODE_DSE_VERSION("cassandra.internode_compatibility_mode.dse_version", "6.8.1"),
     /**
-     * Lets a node start with {@code internode_compatibility_mode: NONE} although the DSE 6 upgrade marker file
+     * Let a node start with {@code internode_compatibility_mode: NONE} although the DSE 6 upgrade marker file
      * or the record of DSE 6 peers is still present in its metadata directory (for example a marker left behind,
      * or a DSE 6 peer that was removed while this node was down).
      */

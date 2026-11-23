@@ -188,9 +188,11 @@ public class Dse6StartupChecksTest
         List<StartupCheck> checks = new StartupChecks().withDefaultTests().getPreFlightChecks();
         assertThat(checks.indexOf(StartupChecks.checkDse6Artefacts)).isNotNegative()
                                                                      .isLessThan(checks.indexOf(StartupChecks.checkSSTablesFormat));
-        assertThat(checks).contains(StartupChecks.checkDsePeersWithoutFlag);
-        // the record of DSE peers is loaded after the NONE check and before any check that could connect or write
-        assertThat(checks.indexOf(StartupChecks.loadDsePeersRecord)).isGreaterThan(checks.indexOf(StartupChecks.checkDsePeersWithoutFlag))
+        // the check of DSE peers without the mode runs before the commit log starts, so it is not among these
+        // (StartupChecks.verifyBeforeCommitLogStart)
+        assertThat(checks).doesNotContain(StartupChecks.checkDsePeersWithoutFlag);
+        // the record of DSE peers is loaded before any check that could connect or write
+        assertThat(checks.indexOf(StartupChecks.loadDsePeersRecord)).isNotNegative()
                                                                      .isLessThan(checks.indexOf(StartupChecks.checkDse6Artefacts));
     }
 
