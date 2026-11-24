@@ -762,15 +762,10 @@ public class StorageAttachedIndex implements Index
     @Override
     public boolean supportsExpression(RowFilter.Expression expression)
     {
-        if (expression instanceof RowFilter.JsonPathExpression)
-        {
-            RowFilter.JsonPathExpression jsonExpression = (RowFilter.JsonPathExpression) expression;
-            return supportsJsonPathExpression(jsonExpression.column(), jsonExpression.path(), jsonExpression.operator());
-        }
         // A JSON-path index only serves restrictions on its own JSON path.
-        if (indexContext.isJsonPath())
+        if (indexContext.isJsonPath() && !(expression instanceof RowFilter.JsonPathExpression))
             return false;
-        return supportsExpression(expression.column(), expression.operator());
+        return Index.super.supportsExpression(expression);
     }
 
     @Override

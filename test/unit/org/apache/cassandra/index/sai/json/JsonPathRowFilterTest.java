@@ -32,6 +32,8 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.StubIndex;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -234,6 +236,21 @@ public class JsonPathRowFilterTest extends SAITester
                                                                             Int32Type.instance, EQ,
                                                                             Int32Type.instance.decompose(1))));
         assertTrue(idx.supportsExpression(RowFilter.builder(false).add(column("other"), EQ, Int32Type.instance.decompose(1))));
+    }
+
+    /**
+     * Tests that a non-path-aware custom index implementation (such as StubIndex) does not claim JsonPathExpression.
+     */
+    @Test
+    public void nonPathAwareIndexDoesNotClaimJsonPathExpression()
+    {
+        // StubIndex supports EQ on any column through supportsExpression(ColumnMetadata, Operator)
+        Index stub = new StubIndex(getCurrentColumnFamilyStore(), null);
+        assertTrue(stub.supportsExpression(column("doc"), EQ));
+        assertTrue(stub.supportsExpression(RowFilter.builder(false).add(column("doc"), EQ, Int32Type.instance.decompose(1))));
+        assertFalse(stub.supportsJsonPathExpression(column("doc"), JsonPath.parse("$.s"), EQ));
+        assertFalse(stub.supportsExpression(expr("$.s", EQ, 1)));
+        assertFalse(stub.supportsExpression(expr("$.t", NEQ, "admin")));
     }
 
     /**

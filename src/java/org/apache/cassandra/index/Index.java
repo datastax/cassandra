@@ -480,6 +480,12 @@ public interface Index
      */
     default boolean supportsExpression(RowFilter.Expression expression)
     {
+        // A JSON path restriction is not a restriction on the column value, so only path-aware indexes can serve it.
+        if (expression instanceof RowFilter.JsonPathExpression)
+        {
+            RowFilter.JsonPathExpression jsonExpression = (RowFilter.JsonPathExpression) expression;
+            return supportsJsonPathExpression(jsonExpression.column(), jsonExpression.path(), jsonExpression.operator());
+        }
         return supportsExpression(expression.column(), expression.operator());
     }
 
