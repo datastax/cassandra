@@ -87,7 +87,6 @@ public class TrieMemoryIndex extends MemoryIndex
 {
     private static final Logger logger = LoggerFactory.getLogger(TrieMemoryIndex.class);
     private static final int MINIMUM_QUEUE_SIZE = 128;
-    private static final int MAX_RECURSIVE_KEY_LENGTH = 128;
 
     private final InMemoryTrie<PrimaryKeys> data;
     private final LongAdder primaryKeysHeapAllocations;
@@ -280,7 +279,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
                 try
                 {
-                    data.putSingleton(encodedTerm, primaryKey, transformer, term.remaining() <= MAX_RECURSIVE_KEY_LENGTH);
+                    data.putSingleton(encodedTerm, primaryKey, transformer);
                 }
                 catch (TrieSpaceExhaustedException e)
                 {

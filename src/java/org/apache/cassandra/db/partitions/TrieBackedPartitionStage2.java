@@ -21,7 +21,6 @@ package org.apache.cassandra.db.partitions;
 import java.util.Iterator;
 import java.util.NavigableSet;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.db.Clustering;
@@ -39,7 +38,6 @@ import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.Slice;
 import org.apache.cassandra.db.Slices;
 import org.apache.cassandra.db.filter.ColumnFilter;
-import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.rows.AbstractUnfilteredRowIterator;
 import org.apache.cassandra.db.rows.BTreeRow;
@@ -81,13 +79,6 @@ import org.apache.cassandra.utils.memory.EnsureOnHeap;
  */
 public class TrieBackedPartitionStage2 implements Partition
 {
-    /**
-     * If keys are below this length, we will use a recursive procedure for inserting data when building the backing
-     * trie.
-     */
-    @VisibleForTesting
-    public static final int MAX_RECURSIVE_KEY_LENGTH = 128;
-
     public static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS50;
 
     /** Pre-made path for STATIC_CLUSTERING, to avoid creating path object when querying static path. */
@@ -278,29 +269,12 @@ public class TrieBackedPartitionStage2 implements Partition
     /**
      * Put the given unfiltered in the trie.
      * @param comparator for converting key to byte-comparable
-     * @param useRecursive whether the key length is guaranteed short and recursive put can be used
      * @param trie destination
      * @param row content to put
      */
-    protected static void putInTrie(ClusteringComparator comparator, boolean useRecursive, InMemoryTrie<Object> trie, Row row) throws TrieSpaceExhaustedException
+    protected static void putInTrie(ClusteringComparator comparator, InMemoryTrie<Object> trie, Row row) throws TrieSpaceExhaustedException
     {
-        trie.putSingleton(comparator.asByteComparable(row.clustering()), rowToData(row), NO_CONFLICT_RESOLVER, useRecursive);
-    }
-
-    /**
-     * Check if we can use recursive operations when putting a value in tries.
-     * True if all types in the clustering keys are fixed length, and total size is small enough.
-     */
-    protected static boolean useRecursive(ClusteringComparator comparator)
-    {
-        int length = 1; // terminator
-        for (AbstractType type : comparator.subtypes())
-            if (!type.isValueLengthFixed())
-                return false;
-            else
-                length += 1 + type.valueLengthIfFixed();    // separator + value
-
-        return length <= MAX_RECURSIVE_KEY_LENGTH;
+        trie.putSingleton(comparator.asByteComparable(row.clustering()), rowToData(row), NO_CONFLICT_RESOLVER);
     }
 
     public TableMetadata metadata()
@@ -630,7 +604,6 @@ public class TrieBackedPartitionStage2 implements Partition
         private final MutableDeletionInfo.Builder deletionBuilder;
         private final InMemoryTrie<Object> trie;
 
-        private final boolean useRecursive;
         private final boolean collectDataSize;
 
         private int rowCountIncludingStatic;
@@ -646,7 +619,6 @@ public class TrieBackedPartitionStage2 implements Partition
                                                                isReverseOrder);
             this.trie = InMemoryTrie.shortLived(BYTE_COMPARABLE_VERSION);
 
-            this.useRecursive = useRecursive(comparator);
             this.collectDataSize = collectDataSize;
 
             rowCountIncludingStatic = 0;
@@ -663,7 +635,7 @@ public class TrieBackedPartitionStage2 implements Partition
 
         public ContentBuilder addRow(Row row) throws TrieSpaceExhaustedException
         {
-            putInTrie(comparator, useRecursive, trie, row);
+            putInTrie(comparator, trie, row);
             ++rowCountIncludingStatic;
             if (collectDataSize)
                 dataSize += row.dataSize();

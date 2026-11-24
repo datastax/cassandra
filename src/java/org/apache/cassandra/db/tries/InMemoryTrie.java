@@ -20,8 +20,6 @@ package org.apache.cassandra.db.tries;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
-import com.google.common.base.Predicates;
-
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -50,9 +48,6 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 ///   -  [#putRecursive(ByteComparable,Object,UpsertTransformer)] inserts a single value using a recursive walk with an
 ///     on-heap stack. It cannot provide consistency (single-path writes are always atomic). The recursion state is not
 ///     kept in the CPU stack, so it can process keys of any length.
-///   -  [#putSingleton(ByteComparable,Object,UpsertTransformer)] does the same using the `apply` machinery.
-///   -  [#putSingleton(ByteComparable,Object,UpsertTransformer,boolean)] uses the fourth argument to choose
-///     between the two methods above.
 ///
 ///     Because it uses 32-bit pointers in byte buffers, this trie has a fixed size limit of 2GB.
 public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
@@ -218,18 +213,6 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
                 abortMutation();
                 throw t;
             }
-        }
-
-        /// Map-like put method, using the apply machinery above which cannot run into stack overflow. When the correct
-        /// position in the trie has been reached, the value will be resolved with the given function before being placed in
-        /// the trie (even if there's no pre-existing content in this trie).
-        /// @param key the trie path/key for the given value.
-        /// @param value the value being put in the memtable trie. Note that it can be of type different than the element
-        /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
-        /// the memtable trie.
-        public void putSingleton(ByteComparable key, U value) throws TrieSpaceExhaustedException
-        {
-            apply(Trie.singleton(key, byteComparableVersion, value));
         }
     }
 
@@ -494,9 +477,7 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
         putRecursive(applyState, key, value, null, transformer);
     }
 
-    /// Map-like put method, using the apply machinery above which cannot run into stack overflow. When the correct
-    /// position in the trie has been reached, the value will be resolved with the given function before being placed in
-    /// the trie (even if there's no pre-existing content in this trie).
+    /// Map-like put method, the same as [#putRecursive(ByteComparable,Object,UpsertTransformer)].
     /// @param key the trie path/key for the given value.
     /// @param value the value being put in the memtable trie. Note that it can be of type different than the element
     /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
@@ -508,18 +489,6 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
                                  R value,
                                  UpsertTransformer<T, ? super R> transformer) throws TrieSpaceExhaustedException
     {
-        mutator(transformer, Predicates.alwaysFalse()).apply(Trie.singleton(key, byteComparableVersion, value));
-    }
-
-    /// A version of putSingleton which uses recursive put if the last argument is true.
-    public <R> void putSingleton(ByteComparable key,
-                                 R value,
-                                 UpsertTransformer<T, ? super R> transformer,
-                                 boolean useRecursive) throws TrieSpaceExhaustedException
-    {
-        if (useRecursive)
-            putRecursive(key, value, transformer);
-        else
-            putSingleton(key, value, transformer);
+        putRecursive(key, value, transformer);
     }
 }

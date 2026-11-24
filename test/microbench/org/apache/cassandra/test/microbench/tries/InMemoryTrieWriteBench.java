@@ -21,7 +21,10 @@ import java.nio.ByteBuffer;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.base.Predicates;
+
 import org.apache.cassandra.db.tries.InMemoryTrie;
+import org.apache.cassandra.db.tries.Trie;
 import org.apache.cassandra.db.tries.TrieSpaceExhaustedException;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.FBUtilities;
@@ -119,7 +122,7 @@ public class InMemoryTrieWriteBench
         {
             long l = current;
             buf.putLong(keyLength - 8, l);
-            trie.putSingleton(v -> ByteSource.preencoded(buf), Byte.valueOf((byte) (l >> 56)), resolver);
+            trie.apply(Trie.singleton(v -> ByteSource.preencoded(buf), byteComparableVersion, Byte.valueOf((byte) (l >> 56))), resolver, Predicates.alwaysFalse());
         }
         if (PRINT_SIZES)
         {
@@ -140,7 +143,7 @@ public class InMemoryTrieWriteBench
         for (long current = 0; current < count; ++current)
         {
             rand.nextBytes(buf);
-            trie.putSingleton(v -> ByteSource.preencoded(buf), Byte.valueOf(buf[0]), resolver);
+            trie.apply(Trie.singleton(v -> ByteSource.preencoded(buf), byteComparableVersion, Byte.valueOf(buf[0])), resolver, Predicates.alwaysFalse());
         }
         if (PRINT_SIZES)
         {

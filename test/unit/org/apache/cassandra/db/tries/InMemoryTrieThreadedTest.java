@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.db.tries;
 
+import com.google.common.base.Predicates;
+
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
@@ -41,6 +43,12 @@ public class InMemoryTrieThreadedTest extends ThreadedTestBase<String, InMemoryT
     @Override
     void add(InMemoryTrie<String> trie, ByteComparable b, String v, int iteration) throws TrieSpaceExhaustedException
     {
-        trie.putSingleton(b, v, (x, y) -> y, iteration % 2 != 0);
+        if (iteration % 2 != 0)
+            trie.putSingleton(b, v, (x, y) -> y);
+        else
+        {
+            trie.mutator((String x, String y) -> y, Predicates.alwaysFalse())
+                .apply(Trie.singleton(b, trie.byteComparableVersion, v));
+        }
     }
 }

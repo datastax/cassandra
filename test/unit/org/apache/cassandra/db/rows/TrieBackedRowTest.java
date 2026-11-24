@@ -214,6 +214,39 @@ public class TrieBackedRowTest
         assertToBTreeRow(counterTable, List.of(builder.build()));
     }
 
+    /// Cells of complex columns are put in the row's trie the same way whatever the length of their path: a cell is
+    /// dropped if a complex column deletion covers it, and reconciled with an existing cell for the same path.
+    @Test
+    public void testLongCellPaths()
+    {
+        TableMetadata table = TableMetadata.builder("ks", "tbl")
+                                           .addPartitionKeyColumn("pk", Int32Type.instance)
+                                           .addClusteringColumn("ck", Int32Type.instance)
+                                           .addRegularColumn("m", MapType.getInstance(UTF8Type.instance, Int32Type.instance, true))
+                                           .build();
+        ColumnMetadata m = table.getColumn(ByteBufferUtil.bytes("m"));
+        long now = FBUtilities.nowInSeconds();
+        for (int length : new int[]{ 10, 200, 100_000 })
+        {
+            CellPath deleted = CellPath.create(ByteBufferUtil.bytes("a".repeat(length)));
+            CellPath live = CellPath.create(ByteBufferUtil.bytes("b".repeat(length)));
+            Row.Builder builder = TrieBackedRow.builder(table.regularColumns());
+            builder.newRow(Util.clustering(table.comparator, 1));
+            builder.addComplexDeletion(m, DeletionTime.build(200, now));
+            builder.addCell(BufferCell.live(m, 100, ByteBufferUtil.bytes(1), deleted)); // older than the deletion
+            builder.addCell(BufferCell.live(m, 300, ByteBufferUtil.bytes(2), live));
+            builder.addCell(BufferCell.live(m, 400, ByteBufferUtil.bytes(3), live));    // same path, newer
+            builder.addCell(BufferCell.live(m, 350, ByteBufferUtil.bytes(4), live));    // same path, older
+            Row row = builder.build();
+
+            List<String> cells = new ArrayList<>();
+            for (Cell<?> cell : row.cells())
+                cells.add(cell.path().get(0).remaining() + " " + cell.timestamp() + " " + Int32Type.instance.compose(cell.buffer()));
+            assertEquals("path length " + length, List.of(length + " 400 3"), cells);
+            assertEquals("path length " + length, DeletionTime.build(200, now), row.getComplexColumnData(m).complexDeletion());
+        }
+    }
+
     private static void assertToBTreeRow(TableMetadata table, List<Row> rows)
     {
         for (Row row : rows)

@@ -183,7 +183,7 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
 
         try
         {
-            putInTrie(metadata.comparator, useRecursive(metadata.comparator), trie, row);
+            putInTrie(metadata.comparator, trie, row);
         }
         catch (TrieSpaceExhaustedException e)
         {
@@ -455,7 +455,6 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
         private final RegularAndStaticColumns columns;
         private final InMemoryTrie<Object> trie = InMemoryTrie.shortLived(BYTE_COMPARABLE_VERSION);
         private final EncodingStats.Collector statsCollector = new EncodingStats.Collector();
-        private final boolean useRecursive;
         private int rowCountIncludingStatic;
         private long dataSize;
 
@@ -478,7 +477,6 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
             this.columns = columns;
             this.canHaveShadowedData = canHaveShadowedData;
             this.deletionInfo = deletionInfo.mutableCopy();
-            useRecursive = useRecursive(metadata.comparator);
             rowCountIncludingStatic = 0;
             dataSize = 0;
             add(staticRow);
@@ -518,8 +516,7 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
             {
                 trie.putSingleton(metadata.comparator.asByteComparable(row.clustering()),
                                   row,
-                                  this::merge,
-                                  useRecursive);
+                                  this::merge);
             }
             catch (TrieSpaceExhaustedException e)
             {

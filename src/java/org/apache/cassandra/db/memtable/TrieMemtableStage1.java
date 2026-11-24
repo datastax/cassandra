@@ -103,9 +103,6 @@ public class TrieMemtableStage1 extends AbstractTrieMemtable
 
     static final ByteComparable.Version BYTE_COMPARABLE_VERSION = ByteComparable.Version.OSS41;
 
-    /** If keys is below this length, we will use a recursive procedure for inserting data in the memtable trie. */
-    public static final int MAX_RECURSIVE_KEY_LENGTH = 128;
-
     /**
      * Core-specific memtable regions. All writes must go through the specific core. The data structures used
      * are concurrent-read safe, thus reads can be carried out from any thread.
@@ -300,10 +297,7 @@ public class TrieMemtableStage1 extends AbstractTrieMemtable
             DecoratedKey key = update.partitionKey();
             data.putSingleton(key,
                               BTreePartitionUpdate.asBTreeUpdate(update),
-                              updater::mergePartitions,
-                              key.getKeyLength() < MAX_RECURSIVE_KEY_LENGTH);
-            // Note: the key length above returns the length before byte-comparable encoding; the recursion depth may be
-            // higher (up to 50%), but will still be well beyond stack limits.
+                              updater::mergePartitions);
         }
 
         @Override
