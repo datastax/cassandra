@@ -18,6 +18,7 @@ package org.apache.cassandra.tools.nodetool;
 
 import java.io.PrintStream;
 import java.lang.reflect.UndeclaredThrowableException;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Supplier;
@@ -25,6 +26,7 @@ import javax.management.AttributeNotFoundException;
 
 import com.google.common.annotations.VisibleForTesting;
 import io.airlift.airline.Command;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.tools.NodeProbe;
@@ -32,12 +34,13 @@ import org.apache.cassandra.tools.NodeTool;
 
 /**
  * Shows the compatibility modes the node runs with, the sstable format it writes, what it knows about its peers'
- * messaging versions and the requests it refused because of the upgrade: the operator's view during an in-place upgrade
- * from DataStax Enterprise 6.
+ * messaging versions, the DSE 6 peers it has on record and the requests it refused because of the upgrade: the
+ * operator's view during an in-place upgrade from DataStax Enterprise 6.
  */
-@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer and the requests refused during the upgrade")
+@Command(name = "compatstatus", description = "Print the internode and storage compatibility modes, the sstable format written, the messaging version of every known peer, the DSE 6 peers on record and the requests refused during the upgrade")
 public class CompatStatus extends NodeTool.NodeToolCmd
 {
+    private static final String DSE_6 = InternodeCompatibilityMode.DSE_6.name();
     /** What is printed for an attribute the node does not have: a server older than this nodetool. */
     private static final String NOT_REPORTED = "unknown (this node does not report them)";
 
@@ -77,6 +80,17 @@ public class CompatStatus extends NodeTool.NodeToolCmd
                                                                 : isDseGossipValue(version) ? "  (DSE 6 node known from gossip only)" : "";
             out.printf("  %-45s %d%s%n", e.getKey(), version, note);
         }
+
+        // the record of DSE 6 peers exists in DSE_6 mode only; its entries that are not addresses with port are counted and listed too
+        boolean dse6 = DSE_6.equals(mode);
+        String notInTheMode = " (internode_compatibility_mode " + mode + ')';
+        List<String> onRecord = dse6 ? ifReported(probe::getDsePeersOnRecord) : null;
+        if (!dse6)
+            out.printf("DSE 6 peers on record        : not maintained%s%n", notInTheMode);
+        else if (onRecord == null)
+            out.printf("DSE 6 peers on record        : %s%n", NOT_REPORTED);
+        else
+            out.printf("DSE 6 peers on record        : %d%s%n", onRecord.size(), onRecord.isEmpty() ? "" : " " + onRecord);
 
         printDseCompatRefusals(probe, out);
     }

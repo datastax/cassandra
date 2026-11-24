@@ -21,6 +21,7 @@ package org.apache.cassandra.net;
 
 import java.io.IOException;
 import java.net.UnknownHostException;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -164,6 +165,13 @@ public interface MessagingServiceMBean
 
     /** The requests refused because of the DSE 6 compatibility mode, by reason (see {@code DseCompatRefusals}). */
     public Map<String, Long> getDseCompatRefusals();
+
+    /**
+     * The peers on record as speaking the pre-4.0 dialect (DSE 6), address with port, as this node also persists them,
+     * then the lines of the persisted record that are not addresses with port, trimmed and sorted; empty outside
+     * {@code DSE_6}.
+     */
+    public List<String> getDsePeersOnRecord();
 
     void reloadSslCertificates() throws IOException;
 }
