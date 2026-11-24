@@ -263,6 +263,14 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         if (index != null)
             return index.getIndexContext();
 
+        // a JSON path expression without a usable index (e.g. excluded by hints) is post-filtered on the values at
+        // its path, not on the whole document
+        if (expression instanceof RowFilter.JsonPathExpression)
+        {
+            RowFilter.JsonPathExpression json = (RowFilter.JsonPathExpression) expression;
+            return IndexContext.forJsonPathFiltering(cfs, expression.column(), json.path(), json.valueType());
+        }
+
         return new IndexContext(cfs.metadata().keyspace,
                                 cfs.metadata().name,
                                 cfs.metadata().id,

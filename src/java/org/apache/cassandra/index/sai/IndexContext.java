@@ -186,6 +186,45 @@ public class IndexContext
                         IndexMetadata config,
                         @Nonnull ColumnFamilyStore cfs)
     {
+        this(keyspace, table, tableId, partitionKeyType, clusteringComparator, column, indexType, config, null, cfs);
+    }
+
+    /**
+     * Creates a non-indexed ("fake") context for post-filtering a JSON path expression whose index is not used
+     * (e.g. excluded by query hints): the values are the terms of {@code valueType} found at {@code path}.
+     */
+    public static IndexContext forJsonPathFiltering(@Nonnull ColumnFamilyStore cfs,
+                                                    @Nonnull ColumnMetadata column,
+                                                    @Nonnull JsonPath path,
+                                                    @Nonnull AbstractType<?> valueType)
+    {
+        return new IndexContext(cfs.metadata().keyspace,
+                                cfs.metadata().name,
+                                cfs.metadata().id,
+                                cfs.metadata().partitionKeyType,
+                                cfs.metadata().comparator,
+                                column,
+                                IndexTarget.Type.SIMPLE,
+                                null,
+                                new JsonPathExtractor(path, valueType),
+                                cfs);
+    }
+
+    /**
+     * Core internal constructor supporting both indexed and filtering-only JSON path extractors.
+     */
+    private IndexContext(@Nonnull String keyspace,
+                         @Nonnull String table,
+                         @Nonnull TableId tableId,
+                         @Nonnull AbstractType<?> partitionKeyType,
+                         @Nonnull ClusteringComparator clusteringComparator,
+                         @Nonnull ColumnMetadata column,
+                         @Nonnull IndexTarget.Type indexType,
+                         IndexMetadata config,
+                         @Nullable JsonPathExtractor filteringJsonPathExtractor,
+                         @Nonnull ColumnFamilyStore cfs)
+    {
+        assert filteringJsonPathExtractor == null || config == null : "JSON path filtering contexts have no index";
         this.keyspace = keyspace;
         this.table = table;
         this.tableId = tableId;
@@ -200,6 +239,11 @@ public class IndexContext
             // the indexed terms are the values found at the path, of the declared type
             this.validator = JsonPathIndexes.type(config.options);
             this.jsonPathExtractor = new JsonPathExtractor(JsonPathIndexes.path(config.options), validator);
+        }
+        else if (filteringJsonPathExtractor != null)
+        {
+            this.validator = filteringJsonPathExtractor.type();
+            this.jsonPathExtractor = filteringJsonPathExtractor;
         }
         else
         {

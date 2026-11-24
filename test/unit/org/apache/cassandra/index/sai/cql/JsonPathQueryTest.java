@@ -111,6 +111,31 @@ public class JsonPathQueryTest extends SAITester
     }
 
     /**
+     * Tests that excluding a JSON path index via query hints falls back to in-memory row filtering using the path extractor.
+     */
+    @Test
+    public void excludedJsonIndexFallsBackToFiltering() throws Throwable
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v int, doc text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        String jsonIndex = createIndex(PREFIX + "{'json_path': '$.a', 'json_type': 'int'}");
+        execute("INSERT INTO %s (pk, v, doc) VALUES (1, 1, '{\"a\":5}')");
+        execute("INSERT INTO %s (pk, v, doc) VALUES (2, 1, '{\"a\":6}')");
+        execute("INSERT INTO %s (pk, v, doc) VALUES (3, 1, '{\"a\":[4,7]}')");
+        execute("INSERT INTO %s (pk, v, doc) VALUES (4, 1, '{\"b\":5}')");
+
+        beforeAndAfterFlush(() -> {
+            String hint = " ALLOW FILTERING WITH excluded_indexes = {" + jsonIndex + "}";
+            assertRows(execute("SELECT pk FROM %s WHERE v = 1 AND doc['$.a'] = 5" + hint), row(1));
+            assertRows(execute("SELECT pk FROM %s WHERE v = 1 AND doc['$.a'] > 6" + hint), row(3));
+            assertRows(execute("SELECT pk FROM %s WHERE v = 1 AND doc['$.a'] > 6 AND doc['$.a'] < 5" + hint), row(3));
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v = 1 AND doc['$.a'] != 5" + hint), row(2), row(3), row(4));
+            // without the hint the JSON index is used
+            assertRows(execute("SELECT pk FROM %s WHERE v = 1 AND doc['$.a'] = 5"), row(1));
+        });
+    }
+
+    /**
      * Tests that invalid CQL queries on JSON paths (missing indexes, wrong types, invalid syntax) are rejected.
      */
     @Test
