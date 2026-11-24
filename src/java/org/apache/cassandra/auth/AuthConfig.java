@@ -18,8 +18,10 @@
 
 package org.apache.cassandra.auth;
 
+import java.util.ArrayList;
 import java.util.List;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,6 +29,8 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.ParameterizedClass;
 import org.apache.cassandra.exceptions.ConfigurationException;
+import org.apache.cassandra.schema.DseSystemKeyspaces;
+import org.apache.cassandra.schema.SchemaConstants;
 
 /**
  * Only purpose is to Initialize authentication/authorization via {@link #applyAuth()}.
@@ -117,6 +121,8 @@ public final class AuthConfig
 
         DatabaseDescriptor.setCIDRAuthorizer(cidrAuthorizer);
 
+        checkDse6CompatibilityMode(authenticator, networkAuthorizer, cidrAuthorizer);
+
         // Validate at last to have authenticator, authorizer, role-manager and internode-auth setup
         // in case these rely on each other.
 
@@ -126,6 +132,63 @@ public final class AuthConfig
         networkAuthorizer.validateConfiguration();
         cidrAuthorizer.validateConfiguration();
         DatabaseDescriptor.getInternodeAuthenticator().validateConfiguration();
+    }
+
+    /**
+     * In the DSE 6 compatibility mode, refuses the implementations that read tables of {@code system_auth} that DSE 6
+     * does not have (see {@link #refuseWhatNeedsTablesDseLacks}); a no-op without the mode.
+     */
+    @VisibleForTesting
+    static void checkDse6CompatibilityMode(IAuthenticator authenticator, INetworkAuthorizer networkAuthorizer, ICIDRAuthorizer cidrAuthorizer)
+    {
+        if (DatabaseDescriptor.isDse6CompatibilityMode())
+            refuseWhatNeedsTablesDseLacks(authenticator, networkAuthorizer, cidrAuthorizer);
+    }
+
+    /**
+     * Refuses the implementations that read tables of {@code system_auth} that DSE 6 does not have: in the DSE 6
+     * compatibility mode {@code system_auth} keeps DSE's definition until the mode is dropped ({@code DseSystemKeyspaces}),
+     * and silently not enforcing a network or CIDR restriction would open access. The CIDR and identity tables are
+     * not even created then while {@code storage_compatibility_mode} stays before 5.0, as the mode requires. Every
+     * offending setting is named in the one exception.
+     *
+     * @throws ConfigurationException naming each setting, the tables it reads and the implementation to use meanwhile
+     */
+    @VisibleForTesting
+    static void refuseWhatNeedsTablesDseLacks(IAuthenticator authenticator, INetworkAuthorizer networkAuthorizer, ICIDRAuthorizer cidrAuthorizer)
+    {
+        List<String> refusals = new ArrayList<>();
+        if (networkAuthorizer instanceof CassandraNetworkAuthorizer)
+            refusals.add(dse6Refusal("network_authorizer " + networkAuthorizer.getClass().getName(),
+                                     authTable(AuthKeyspace.NETWORK_PERMISSIONS) + ", which DSE 6 does not have: " + DseSystemKeyspaces.DEFERRED,
+                                     AllowAllNetworkAuthorizer.class.getSimpleName()));
+        if (cidrAuthorizer instanceof CassandraCIDRAuthorizer)
+            refusals.add(dse6Refusal("cidr_authorizer " + cidrAuthorizer.getClass().getName(),
+                                     authTable(AuthKeyspace.CIDR_PERMISSIONS) + " and " + authTable(AuthKeyspace.CIDR_GROUPS) + storage50Tables("them"),
+                                     AllowAllCIDRAuthorizer.class.getSimpleName()));
+        if (authenticator instanceof MutualTlsAuthenticator || authenticator instanceof MutualTlsWithPasswordFallbackAuthenticator)
+            refusals.add(dse6Refusal("authenticator " + authenticator.getClass().getName(),
+                                     authTable(AuthKeyspace.IDENTITY_TO_ROLES) + storage50Tables("it"),
+                                     PasswordAuthenticator.class.getSimpleName()));
+        if (!refusals.isEmpty())
+            throw new ConfigurationException("internode_compatibility_mode DSE_6 refused: " + String.join(". ", refusals), false);
+    }
+
+    /** Why the tables of {@code system_auth} that need storage_compatibility_mode 5.0 are missing in the DSE 6 compatibility mode. */
+    private static String storage50Tables(String pronoun)
+    {
+        return ", which DSE 6 does not have: this software creates " + pronoun + " only with storage_compatibility_mode UPGRADING or NONE, " +
+               "after the upgrade (internode_compatibility_mode DSE_6 requires HCD_1)";
+    }
+
+    private static String authTable(String table)
+    {
+        return SchemaConstants.AUTH_KEYSPACE_NAME + '.' + table;
+    }
+
+    private static String dse6Refusal(String setting, String reads, String meanwhile)
+    {
+        return setting + " reads " + reads + "; use " + meanwhile + " until then";
     }
 
     private static <T> T authInstantiate(ParameterizedClass authCls, Class<T> defaultCls) {

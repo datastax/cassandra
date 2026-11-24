@@ -1605,6 +1605,11 @@ public class NodeProbe implements AutoCloseable
         return msProxy.getEndpointMessagingVersions();
     }
 
+    public Map<String, String> getDsePeers()
+    {
+        return msProxy.getDsePeers();
+    }
+
     public Map<String, Long> getDseCompatRefusals()
     {
         return msProxy.getDseCompatRefusals();
@@ -1613,6 +1618,31 @@ public class NodeProbe implements AutoCloseable
     public List<String> getDsePeersOnRecord()
     {
         return msProxy.getDsePeersOnRecord();
+    }
+
+    public Map<String, List<String>> getDseAccessControlCheck()
+    {
+        return msProxy.getDseAccessControlCheck();
+    }
+
+    public String getDseSaiVersionPin()
+    {
+        return msProxy.getDseSaiVersionPin();
+    }
+
+    public String getDseNonCoreTraces()
+    {
+        return msProxy.getDseNonCoreTraces();
+    }
+
+    public List<String> getDseLoneWriteGrants()
+    {
+        return msProxy.getDseLoneWriteGrants();
+    }
+
+    public String getDseLoneWriteGrantsSource()
+    {
+        return msProxy.getDseLoneWriteGrantsSource();
     }
 
     /** @deprecated See CASSANDRA-6719 */

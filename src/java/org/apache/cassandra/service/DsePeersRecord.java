@@ -26,11 +26,14 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -58,16 +61,23 @@ import org.apache.cassandra.utils.SyncUtil;
  * {@code internode_compatibility_mode: NONE} be refused while a DSE 6 peer was still in the cluster the last
  * time this node ran (the second source of {@code StartupChecks.checkDsePeersWithoutFlag}, next to the upgrade
  * marker). No release-version heuristics are involved. A peer enters the record when the node's own messaging
- * version map ({@code MessagingService.versions}) puts it at a pre-4.0 version; a raw DSE messaging version (256 or
- * more) is read as the dialect, through {@link DseCompat#messagingVersionFromGossip}. The copies of that map handed to
- * outbound connections do not feed the record. A peer leaves the record only when it is seen at 4.0 or later (it was
- * upgraded) or its version is forgotten (it left the ring). At a {@code DSE_6} start the persisted record is loaded first
+ * version map ({@code MessagingService.versions}) puts it at a pre-4.0 version: an inbound handshake, or a gossip
+ * {@code NET_VERSION}, which the storage service stores in DSE 6 compatibility mode as the dialect when DSE gossips
+ * its own relative version (256 or more; the record also reads such a raw value as the dialect, through
+ * {@link DseCompat#messagingVersionFromGossip}), or an answer in the dialect to this node's 4.0-style first handshake
+ * message, which the node's map records too ({@code DseDialectVersions.answeredInTheDialect}). Otherwise an outbound
+ * handshake records the version in the copy of the map its connection works from, not in the node's map: a DSE peer
+ * this node has only connected to with the pre-4.0 first message is recorded when it connects back or its gossip state
+ * arrives, as in any cluster where both sides gossip. The dialect the node's map assumes for a peer stored with a DSE 6
+ * release before any connection ({@code DseDialectVersions.seed}, {@code EndpointMessagingVersions.assume}) is not a
+ * sighting and is not recorded. A peer leaves the record only when it is seen at 4.0 or later (it was upgraded) or its
+ * version is forgotten (it left the ring). At a {@code DSE_6} start the persisted record is loaded first
  * ({@code StartupChecks.loadDsePeersRecord}), so a DSE peer that stays down during a whole run of this node is not
  * forgotten, and a peer upgraded while this node was down leaves the record when it is seen.
  * <p>
  * The file is rewritten off the calling thread (the version is recorded on event loops and the gossip stage),
- * atomically and synced. Only maintained while the DSE 6 compatibility mode is on; with {@code NONE} nothing
- * is recorded and nothing is written.
+ * atomically and synced, and once more, synchronously, when the node drains ({@link #persistAtDrain}). Only maintained
+ * while the DSE 6 compatibility mode is on; with {@code NONE} nothing is recorded and nothing is written.
  */
 public final class DsePeersRecord
 {
@@ -81,7 +91,11 @@ public final class DsePeersRecord
     /** Lines of the persisted file that did not parse as an address: kept as they are, never silently dropped. */
     private static final Set<String> UNPARSED_LINES = ConcurrentHashMap.newKeySet();
     private static final AtomicBoolean LOADED = new AtomicBoolean();
+    /** Whether a peer entered or left the record in this process. */
+    private static final AtomicBoolean CHANGED = new AtomicBoolean();
     private static volatile Future<?> lastPersist;
+    /** How long the final write of a drain waits for a pending asynchronous write. */
+    private static final long DRAIN_WAIT_SECONDS = 10;
 
     private DsePeersRecord()
     {
@@ -207,18 +221,53 @@ public final class DsePeersRecord
     }
 
     /**
-     * Writes the record off the calling thread, on the non-periodic tasks executor. {@code StorageService.drain} (a
-     * {@code nodetool drain} or the shutdown of the node) stops messaging and gossip, which record the versions, then
-     * flushes the tables and only at its end shuts that executor down, dropping the writes still queued and
-     * interrupting a running one: a change recorded in the last moments before messaging stopped may then not reach
-     * the file, and the peer enters the record again when it is next seen. Once the executor is shut down, or when it
-     * rejects the write, the write is made in place, on the calling thread, which may hold the lock of the node's
-     * version map ({@code EndpointMessagingVersions}); messaging and gossip have stopped by then, so no other update
-     * waits on that lock.
+     * Writes the record off the calling thread, on the non-periodic tasks executor; the final write of a drain
+     * ({@link #persistAtDrain}) covers the writes that executor drops when the drain shuts it down. Once the executor is
+     * shut down, or when it rejects the write, the write is made in place, on the calling thread, which may hold the lock
+     * of the node's version map ({@code EndpointMessagingVersions}); messaging and gossip have stopped by then, so no
+     * other update waits on that lock.
      */
     private static void persistLater()
     {
+        CHANGED.set(true);
         lastPersist = persistOn(ScheduledExecutors.nonPeriodicTasks);
+    }
+
+    /**
+     * The final write of the record, on the calling thread: called by {@code StorageService.drain} (a
+     * {@code nodetool drain} or the shutdown of the node) once it has stopped gossip and messaging, which record the
+     * versions. The drain shuts the non-periodic tasks executor down only at its end, dropping the writes still queued
+     * and interrupting a running one; this write makes sure that a change recorded in the last moments before messaging
+     * stopped reaches the file. It first waits, for up to {@link #DRAIN_WAIT_SECONDS} seconds, for an asynchronous write
+     * still pending, so that the end of the drain does not interrupt it halfway (an interrupted write would log a
+     * failure and leave its temporary file). A no-op unless the DSE 6 compatibility mode is on, and when no peer entered
+     * or left the record in this process: the file, if any, then already holds the record.
+     */
+    public static void persistAtDrain()
+    {
+        if (!DseCompat.enabled() || !CHANGED.get())
+            return;
+        Future<?> pending = lastPersist;
+        boolean interrupted = false;
+        if (pending != null)
+        {
+            try
+            {
+                pending.get(DRAIN_WAIT_SECONDS, TimeUnit.SECONDS);
+            }
+            catch (InterruptedException e)
+            {
+                interrupted = true;
+            }
+            catch (ExecutionException | TimeoutException | CancellationException e)
+            {
+                // the write below replaces it
+            }
+        }
+        // the interrupt is restored only after the write, which an interrupted thread could not make
+        persist();
+        if (interrupted)
+            Thread.currentThread().interrupt();
     }
 
     /** Writes the record on {@code executor}, or in place when it is shut down or rejects the write; returns the pending write, if any. */
@@ -308,6 +357,7 @@ public final class DsePeersRecord
             PRE40_PEERS.clear();
             UNPARSED_LINES.clear();
             LOADED.set(false);
+            CHANGED.set(false);
             Files.deleteIfExists(path());
             Files.deleteIfExists(path().resolveSibling(TEMPORARY_FILE_NAME));
         }

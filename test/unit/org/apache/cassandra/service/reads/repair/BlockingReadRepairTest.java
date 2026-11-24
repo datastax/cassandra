@@ -30,16 +30,23 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.Util;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.AbstractReplicationStrategy;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.EndpointsForRange;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.transport.Dispatcher;
 
@@ -167,6 +174,129 @@ public class BlockingReadRepairTest extends AbstractReadRepairTest
         handler.ack(target3);
         Assert.assertTrue(getCurrentRepairStatus(handler));
 
+    }
+
+    /**
+     * DSE 6 compatibility mode: the speculative repair write to a replica at the pre-4.0 version 11 of a DSE 6 node,
+     * below {@code MessagingService.minimum_version}, is sent like the one to a replica at the current version, and
+     * the mutation sent can be sized, serialized and read back at the replica's version.
+     */
+    @Test
+    public void additionalMutationToDse6Replica() throws Exception
+    {
+        additionalMutationToReplicaAtVersion(MessagingService.VERSION_3014);
+    }
+
+    /**
+     * As {@link #additionalMutationToDse6Replica()}, at the oldest pre-4.0 version a peer may request: the first slot
+     * of the per-version mutations (no DSE 6 node is at 10).
+     */
+    @Test
+    public void additionalMutationToOldestPre40Replica() throws Exception
+    {
+        additionalMutationToReplicaAtVersion(MessagingService.VERSION_30);
+    }
+
+    /** As {@link #additionalMutationToDse6Replica()}, to a replica of this software in a cluster in DSE 6 compatibility mode. */
+    @Test
+    public void additionalMutationToCurrentReplicaInDse6Mode() throws Exception
+    {
+        additionalMutationToReplicaAtVersion(MessagingService.current_version);
+    }
+
+    /**
+     * Without DSE 6 compatibility mode the per-version mutations still start at {@code MessagingService.minimum_version}
+     * as before the mode existed: a replica stored below it (only possible through a gossiped version, the handshake
+     * refuses such a peer) still fails the speculation as it did.
+     */
+    @Test
+    public void pre40ReplicaWithoutDse6ModeKeepsTheIndexing()
+    {
+        Assert.assertFalse(DatabaseDescriptor.isDse6CompatibilityMode());
+        EndpointMessagingVersions versions = MessagingService.instance().versions;
+        int minClusterVersionBefore = versions.minClusterVersion;
+        Integer target3VersionBefore = versions.knows(target3) ? versions.getRaw(target3) : null;
+        try
+        {
+            versions.set(target3, MessagingService.VERSION_3014);
+
+            Map<Replica, Mutation> repairs = new HashMap<>();
+            repairs.put(replica1, mutation(cell2));
+            repairs.put(replica2, mutation(cell1));
+            InstrumentedReadRepairHandler handler = createRepairHandler(repairs, repairPlan(replicas, EndpointsForRange.copyOf(Lists.newArrayList(repairs.keySet()))));
+            handler.sendInitialRepairs();
+            handler.mutationsSent.clear();
+
+            // deliberate NONE-invariance pin: without the mode the indexing stays as it was before the mode existed
+            Assert.assertThrows("NONE mode keeps the minimum_version indexing", ArrayIndexOutOfBoundsException.class,
+                                () -> handler.maybeSendAdditionalWrites(0, TimeUnit.NANOSECONDS));
+            Assert.assertTrue(handler.mutationsSent.isEmpty());
+        }
+        finally
+        {
+            restoreVersion(versions, target3VersionBefore, minClusterVersionBefore);
+        }
+    }
+
+    private static void restoreVersion(EndpointMessagingVersions versions, Integer target3VersionBefore, int minClusterVersionBefore)
+    {
+        if (target3VersionBefore == null)
+            versions.reset(target3);
+        else
+            versions.set(target3, target3VersionBefore);
+        versions.minClusterVersion = minClusterVersionBefore;
+    }
+
+    private void additionalMutationToReplicaAtVersion(int target3Version) throws Exception
+    {
+        InternodeCompatibilityMode modeBefore = DatabaseDescriptor.getInternodeCompatibilityMode();
+        EndpointMessagingVersions versions = MessagingService.instance().versions;
+        int minClusterVersionBefore = versions.minClusterVersion;
+        Integer target3VersionBefore = versions.knows(target3) ? versions.getRaw(target3) : null;
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+            versions.set(target3, target3Version);
+
+            Map<Replica, Mutation> repairs = new HashMap<>();
+            repairs.put(replica1, mutation(cell2));
+            repairs.put(replica2, mutation(cell1));
+
+            ReplicaPlan.ForWrite writePlan = repairPlan(replicas, EndpointsForRange.copyOf(Lists.newArrayList(repairs.keySet())));
+            InstrumentedReadRepairHandler handler = createRepairHandler(repairs, writePlan);
+            handler.sendInitialRepairs();
+
+            handler.mutationsSent.clear();
+            handler.maybeSendAdditionalWrites(0, TimeUnit.NANOSECONDS);
+            Assert.assertEquals(1, handler.mutationsSent.size());
+            Mutation speculative = handler.mutationsSent.get(target3);
+            Assert.assertNotNull("no speculative repair sent to " + target3, speculative);
+            assertMutationEqual(resolved, speculative);
+
+            Message<Mutation> message = Message.out(Verb.READ_REPAIR_REQ, speculative);
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                Message.serializer.serialize(message, out, target3Version);
+                Assert.assertEquals(message.serializedSize(target3Version), out.getLength());
+            }
+            // a round trip through this software's own serializer: the pre-4.0 layout itself is checked byte by byte
+            // by V11SerializationAuditTest, and against HCD 1.2 by the mixed-mode in-JVM tests
+            // (MixedModeSpeculativeReadRepairTest for this write)
+            try (DataOutputBuffer out = new DataOutputBuffer())
+            {
+                Mutation.serializer.serialize(speculative, out, target3Version);
+                Assert.assertEquals(speculative.serializedSize(target3Version), out.getLength());
+                try (DataInputBuffer in = new DataInputBuffer(out.getData(), 0, out.getLength()))
+                {
+                    assertMutationEqual(resolved, Mutation.serializer.deserialize(in, target3Version));
+                }
+            }
+        }
+        finally
+        {
+            restoreVersion(versions, target3VersionBefore, minClusterVersionBefore);
+            DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
+        }
     }
 
     /**

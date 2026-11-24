@@ -489,12 +489,53 @@ public class OutboundConnection
      */
     private void onFailedSerialize(Message<?> message, int messagingVersion, int bytesWrittenToNetwork, Throwable t)
     {
+        boolean pre40 = DseCompat.isPre40Layout(messagingVersion);
+        if (pre40 && !message.verb().existsInPre40Dialect())
+        {
+            onRefusedForPre40Peer(message);
+            return;
+        }
         logger.warn("{} dropping message of type {} due to error", id(), message.verb(), t);
         JVMStabilityInspector.inspectThrowable(t);
         releaseCapacity(1, canonicalSize(message));
         errorCount += 1;
-        errorBytes += message.serializedSize(messagingVersion);
+        errorBytes += pre40 ? pre40SizeOrCanonical(message, messagingVersion) : message.serializedSize(messagingVersion);
         callbacks.onFailedSerialize(message, template.to, messagingVersion, bytesWrittenToNetwork, t);
+    }
+
+    /**
+     * DSE 6 compatibility mode: a request whose verb does not exist in the pre-4.0 dialect, queued before the peer's
+     * version was known (MessagingService refuses it before queuing otherwise), fails to serialize on a connection
+     * that turned out to speak that dialect. It is dropped once, counted as a refusal, and its callback fails at once;
+     * the message cannot be sized at the connection's version, so its canonical size is accounted. Like any message
+     * that fails to serialize, it also counts in the connection's error count and bytes.
+     */
+    private void onRefusedForPre40Peer(Message<?> message)
+    {
+        noSpamLogger.warn("{} not sending {}: the verb does not exist in the pre-4.0 dialect this peer speaks (DSE 6 compatibility mode)",
+                          id(), message.verb());
+        releaseCapacity(1, canonicalSize(message));
+        errorCount += 1;
+        errorBytes += canonicalSize(message);
+        DseCompatRefusals.refused(DseCompat.refusedVerb(message.verb()));
+        callbacks.onRefused(message, template.to);
+    }
+
+    /**
+     * The size at a pre-4.0 version of a message that failed to serialize, or its canonical size when it cannot even be
+     * sized at that version: this must not throw, or the message would never leave the queue.
+     */
+    private int pre40SizeOrCanonical(Message<?> message, int messagingVersion)
+    {
+        try
+        {
+            return message.serializedSize(messagingVersion);
+        }
+        catch (Throwable t)
+        {
+            JVMStabilityInspector.inspectThrowable(t);
+            return canonicalSize(message);
+        }
     }
 
     /**
@@ -1084,6 +1125,8 @@ public class OutboundConnection
             // our connection settings, possibly updated on retry
             int messagingVersion = template.endpointToVersion().get(template.to);
             OutboundConnectionSettings settings;
+            /** DSE 6 compatibility mode: a connection made in a superseded dialect was made again at once already. */
+            boolean remadeAfterSupersededDialect;
 
             /**
              * If we failed for any reason, try again
@@ -1111,6 +1154,25 @@ public class OutboundConnection
                 }
             }
 
+            /**
+             * DSE 6 compatibility mode: schedules the next attempt after the current delay, as {@link #onFailure} does
+             * (the delay doubles up to a second), or none without messages, for a connection that is not a failure.
+             */
+            private void retryLater()
+            {
+                if (hasPending())
+                {
+                    Promise<Result<MessagingSuccess>> result = AsyncPromise.withExecutor(eventLoop);
+                    state = new Connecting(state.disconnected(), result, eventLoop.schedule(() -> attempt(result, false), max(100, retryRateMillis), MILLISECONDS));
+                    retryRateMillis = min(1000, retryRateMillis * 2);
+                }
+                else
+                {
+                    // this Initiate will be discarded
+                    state = Disconnected.dormant(state.disconnected().maintenance);
+                }
+            }
+
             void onCompletedHandshake(Result<MessagingSuccess> result)
             {
                 switch (result.outcome)
@@ -1120,6 +1182,25 @@ public class OutboundConnection
                         assert !state.isClosed();
 
                         MessagingSuccess success = result.success();
+                        // DSE 6 compatibility mode: the peer's version rose to 4.0 or later while this connection was made
+                        // in the dialect; it is made again, with the 4.0-style handshake: at once the first time, then
+                        // with the delays of a failed attempt, so that a version going back and forth cannot spin
+                        if (DseCompat.enabled() && DseDialectVersions.supersededDialect(settings.to, success.messagingVersion, MessagingService.instance().versions))
+                        {
+                            success.channel.close();
+                            if (remadeAfterSupersededDialect)
+                            {
+                                noSpamLogger.info("{} made in the pre-4.0 dialect again, although {} is at messaging version 4.0 or later; retrying later",
+                                                  id(), settings.to);
+                                retryLater();
+                            }
+                            else
+                            {
+                                remadeAfterSupersededDialect = true;
+                                initiate();
+                            }
+                            break;
+                        }
                         messagingVersion = success.messagingVersion;
                         settings.endpointToVersion.set(settings.to, messagingVersion);
                         debug.onConnect(success.messagingVersion, settings);
@@ -1166,6 +1247,9 @@ public class OutboundConnection
                         // the messaging version we connected with was incorrect; try again with the one supplied by the remote host
                         messagingVersion = result.retry().withMessagingVersion;
                         settings.endpointToVersion.set(settings.to, messagingVersion);
+                        // DSE 6 compatibility mode: a peer answering in the dialect is recorded at it by the node too
+                        if (DseCompat.enabled() && messagingVersion < MessagingService.VERSION_40)
+                            DseDialectVersions.answeredInTheDialect(settings.to, messagingVersion);
 
                         initiate();
                         break;
@@ -1204,6 +1288,10 @@ public class OutboundConnection
                  * port being selected if configured with legacy_ssl_storage_port_enabled=true.
                  */
                 int knownMessagingVersion = messagingVersion();
+                // DSE 6 compatibility mode: a peer taken for a pre-4.0 node that the node now knows at 4.0 or later
+                if (DseCompat.enabled())
+                    knownMessagingVersion = DseDialectVersions.connectionVersion(template.to, knownMessagingVersion, template.endpointToVersion(),
+                                                                                 MessagingService.instance().versions);
                 if (knownMessagingVersion != messagingVersion)
                 {
                     logger.trace("Endpoint version changed from {} to {} since connection initialized, updating.",
@@ -1228,7 +1316,7 @@ public class OutboundConnection
                 {
                     logger.info("ConnectionId {} is falling back to {} reconnect strategy for retry", id(), fallBackSslFallbackConnectionTypes[index]);
                 }
-                initiateMessaging(eventLoop, type, fallBackSslFallbackConnectionTypes[index], settings, result)
+                initiateMessaging(eventLoop, type, fallBackSslFallbackConnectionTypes[index], settings, messagingVersion, result)
                 .addListener(future -> {
                     if (future.isCancelled())
                         return;

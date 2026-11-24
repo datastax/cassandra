@@ -21,7 +21,9 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -42,6 +44,8 @@ import org.apache.cassandra.config.StartupChecksOptions;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.exceptions.StartupException;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.ULIDBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
@@ -52,17 +56,22 @@ import org.apache.cassandra.locator.Ec2Snitches;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.SimpleSnitch;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_VERSION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS;
+import static org.apache.cassandra.config.CassandraRelevantProperties.RING_DELAY;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The startup checks of the DSE 6 compatibility mode: what {@code DSE_6} refuses to find on disk, the upgrade marker
- * it writes once every check has passed, and the refusal of {@code NONE} while the marker or the record of DSE 6 peers
- * exists.
+ * it writes once every check has passed, the refusal of {@code NONE} while the marker or the record of DSE 6 peers
+ * exists, the DSE version {@code DSE_6} gossips to DSE nodes (with the state it starts gossiping with), and the silence
+ * after which a node that is down counts as lost during the upgrade.
  * <p>
  * The JVM of this class (unit tests fork per class) initialises the trie format at version {@code bb}, as
  * {@code DSE_6} does on a real node, so that {@link StartupChecks#checkSSTablesFormat} rejects newer trie files the
@@ -742,6 +751,79 @@ public class Dse6StartupChecksTest
         }
     }
 
+    /** The DSE version gossiped to DSE nodes in DSE_6 mode: 6.8.0 or 6.8.1, or none with a warning. */
+    @Test
+    public void dse6RefusesADseVersionItMayNotGossip() throws Exception
+    {
+        dse6();
+        assertThat(new StartupChecks().withDefaultTests().getPreFlightChecks()).contains(StartupChecks.checkDse6GossipedDseVersion);
+        assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDse6GossipedDseVersion.execute(OPTIONS))).isEmpty();
+        assertThat(DseCompat.gossipedDseVersion()).isEqualTo("6.8.1");
+        for (String accepted : new String[]{ "6.8.0", "6.8.1" })
+        {
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION, accepted))
+            {
+                StartupChecks.checkDse6GossipedDseVersion.execute(OPTIONS);
+                assertThat(DseCompat.gossipedDseVersion()).isEqualTo(accepted);
+            }
+        }
+        for (String refused : new String[]{ "6.8.2", "6.8.2-SNAPSHOT", "6.9.0", "7.0.0", "6.0.18", "6.8", "06.8.1", "6.8.1 ", "6.8.1+x",
+                                            "6.8.1-SNAPSHOT", "6.8.1.5", "6.8.1.99999999999", "", "dse", "NONE" })
+        {
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION, refused))
+            {
+                assertThatThrownBy(() -> StartupChecks.checkDse6GossipedDseVersion.execute(OPTIONS))
+                .as("'%s'", refused)
+                .isInstanceOf(StartupException.class)
+                .hasMessage(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey() + " is '" + refused + "': it must be 'none' (no DSE version) or " +
+                            "the DSE version 6.8.0 or 6.8.1, which this node gossips to DSE nodes so that they do not send " +
+                            "it the range reads of a storage-attached index query with a verb only DSE nodes understand");
+            }
+        }
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION, DseCompat.NO_DSE_VERSION))
+        {
+            List<String> warnings = logsOf(Level.WARN, () -> StartupChecks.checkDse6GossipedDseVersion.execute(OPTIONS));
+            assertThat(warnings).containsExactly("This node gossips no DSE version to DSE nodes (" + INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey() +
+                                                 "=none): DSE nodes that stored one for it when it ran DSE send it the range reads of " +
+                                                 "storage-attached index queries with a verb it cannot receive, unless they run with " +
+                                                 "-Ddse.disable_endpoint_group_range_reads=true");
+            assertThat(DseCompat.gossipedDseVersion()).isNull();
+        }
+    }
+
+    @Test
+    public void noneDoesNotReadTheGossipedDseVersion() throws Exception
+    {
+        none();
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION, "6.9.0"))
+        {
+            assertThat(logsOf(Level.WARN, () -> StartupChecks.checkDse6GossipedDseVersion.execute(OPTIONS))).isEmpty();
+            Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+            StorageService.addDseState(states, new VersionedValue.VersionedValueFactory(DatabaseDescriptor.getPartitioner()));
+            assertThat(states).isEmpty();
+        }
+    }
+
+    /** The state a node starts gossiping with in DSE_6 mode: DSE's DSE_GOSSIP_STATE at the ordinal of X_11_PADDING, unless none. */
+    @Test
+    public void dse6StartsGossipingADseStateUnlessNone()
+    {
+        dse6();
+        VersionedValue.VersionedValueFactory factory = new VersionedValue.VersionedValueFactory(DatabaseDescriptor.getPartitioner());
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        StorageService.addDseState(states, factory);
+        assertThat(states).containsOnlyKeys(ApplicationState.X_11_PADDING);
+        assertThat(states.get(ApplicationState.X_11_PADDING).value).isEqualTo(factory.dseState("6.8.1").value)
+                                                                    .contains("\"dse_version\":\"6.8.1\"");
+
+        states.clear();
+        try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_DSE_VERSION, DseCompat.NO_DSE_VERSION))
+        {
+            StorageService.addDseState(states, factory);
+            assertThat(states).isEmpty();
+        }
+    }
+
     /**
      * EC2 names: in DSE_6 mode an Ec2Snitch or Ec2MultiRegionSnitch with the standard names (dc_suffix included) gets a
      * warning before the data center and rack checks, also behind the dynamic snitch; the legacy names, another snitch
@@ -791,6 +873,45 @@ public class Dse6StartupChecksTest
             DatabaseDescriptor.setBroadcastAddress(broadcastBefore);
             DatabaseDescriptor.setBroadcastRpcAddress(broadcastRpcBefore);
             FBUtilities.reset();
+        }
+    }
+
+    /**
+     * The lost-node silence property is checked at every start, in both modes: a value below the larger of one minute
+     * and twice the ring delay, or one that is not a whole number of seconds, refuses the start as a configuration error;
+     * a value at or above the floor is logged; without the property the check says nothing.
+     */
+    @Test
+    public void theLostNodeSilenceIsCheckedInBothModes() throws Exception
+    {
+        assertThat(new StartupChecks().withDefaultTests().getPreFlightChecks()).contains(StartupChecks.checkLostNodeSilence);
+        for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+            try (WithProperties properties = new WithProperties().clear(INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS)
+                                                                 .set(RING_DELAY, 30000))
+            {
+                assertThat(eventsOf(() -> StartupChecks.checkLostNodeSilence.execute(OPTIONS))).as(mode.name()).isEmpty();
+
+                properties.set(INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS, 59);
+                assertThatThrownBy(() -> StartupChecks.checkLostNodeSilence.execute(OPTIONS)).as(mode.name())
+                .isInstanceOf(StartupException.class)
+                .hasMessage("-Dcassandra.internode_compatibility_mode.lost_node_silence_seconds=59 is refused: the silence after which a node " +
+                            "that is down counts as lost during the DSE 6 upgrade must be at least 60 seconds, the larger of one minute and " +
+                            "twice the ring delay; unset it for the default (the largest of 30 minutes, max_hint_window and twice the ring " +
+                            "delay)")
+                .satisfies(e -> assertThat(((StartupException) e).returnCode).isEqualTo(StartupException.ERR_WRONG_CONFIG));
+                properties.set(INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS, "ten");
+                assertThatThrownBy(() -> StartupChecks.checkLostNodeSilence.execute(OPTIONS)).as(mode.name())
+                .isInstanceOf(StartupException.class)
+                .hasMessageEndingWith("=ten is refused: not a whole number of seconds");
+
+                // the previous value is not a number: set as a string
+                properties.set(INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS, "600");
+                assertThat(logsOf(Level.INFO, () -> StartupChecks.checkLostNodeSilence.execute(OPTIONS))).as(mode.name())
+                .containsExactly("A node that is down counts as lost during the DSE 6 upgrade once nothing has been heard of it for 600 seconds " +
+                                 "(cassandra.internode_compatibility_mode.lost_node_silence_seconds=600)");
+            }
         }
     }
 }
