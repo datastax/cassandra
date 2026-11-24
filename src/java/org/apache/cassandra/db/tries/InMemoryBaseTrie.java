@@ -769,7 +769,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
 
     protected int createContentNode(int contentId, int child, boolean isSafeChain) throws TrieSpaceExhaustedException
     {
-        return createPrefixNode(contentId, NONE, child, isSafeChain);
+        if (!shouldPresentAfterBranch(contentId))
+            return createPrefixNode(contentId, NONE, child, isSafeChain);
+        else
+            return createPrefixNode(NONE, contentId, child, isSafeChain);
     }
 
     protected int createPrefixNode(int contentId, int alternateBranch, int child, boolean isSafeChain) throws TrieSpaceExhaustedException
@@ -804,7 +807,10 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     private int updatePrefixNodeChild(int node, int child, boolean forcedCopy) throws TrieSpaceExhaustedException
     {
         assert offset(node) == PREFIX_OFFSET : "updatePrefix called on non-prefix node";
-        assert !isNullOrLeaf(child) : "Prefix node cannot reference a childless node.";
+        assert !isLeaf(child) : "Prefix node cannot reference a leaf node.";
+        // The child may be removed when the node has an alternate branch (deletion-aware tries) or content after its
+        // branch (range tries), which keep the prefix node.
+        assert !isNull(child) || getIntVolatile(node + PREFIX_ALTERNATE_OFFSET) != NONE : "Prefix node cannot reference a childless node.";
 
         // We can only update in-place if we have a full prefix node
         if (!isEmbeddedPrefixNode(node))
@@ -871,15 +877,25 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
 
         assert offset(existingPreContentNode) == PREFIX_OFFSET : "Unexpected content in non-prefix and non-leaf node.";
-        if (updatedPostContentNode != NONE || getIntVolatile(existingPreContentNode + PREFIX_ALTERNATE_OFFSET) != NONE)
+        if (updatedPostContentNode != NONE)
             return updatePrefixNodeChild(existingPreContentNode, updatedPostContentNode, forcedCopy);
-        else
+
+        // The node has no children left.
+        int contentId = getIntVolatile(existingPreContentNode + PREFIX_CONTENT_OFFSET);
+        int alternate = getIntVolatile(existingPreContentNode + PREFIX_ALTERNATE_OFFSET);
+        if (isNull(alternate) || isNull(contentId) && allowsContentAfterBranch())
         {
+            // At most one content is left (in range tries the alternate slot holds the content after the branch),
+            // which a leaf can hold.
+            assert isNullOrLeaf(alternate) : "Range trie prefix node with an alternate branch.";
             if (!isEmbeddedPrefixNode(existingPreContentNode))
                 recycleCell(existingPreContentNode);
             // otherwise cell is recycled with the post-prefix node
-            return getIntVolatile(existingPreContentNode + PREFIX_CONTENT_OFFSET);
+            return isNull(alternate) ? contentId : alternate;
         }
+        // Content on both sides of the branch (range tries) or an alternate branch (deletion-aware tries) needs the
+        // prefix node.
+        return updatePrefixNodeChild(existingPreContentNode, NONE, forcedCopy);
     }
 
     /// Represents the state for an [InMemoryTrie#apply] operation. Contains a stack of all nodes we descended through
@@ -1448,7 +1464,7 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
                 applyContent((position & Cursor.MAY_HAVE_CONTENT_BIT) != 0 ? mutationCursor.content() : null);
 
                 position = mutationCursor.advance();
-                assert !Cursor.isOnReturnPath(position) : "Return path in forward direction can only be used in range tries.";
+                rejectReturnPath(position);
                 depth = Cursor.depth(position);
                 if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth))
                     break;
@@ -1543,41 +1559,61 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
     }
 
+    /// Whether this trie can hold content presented after a node's branch in forward walks, i.e. on the return path
+    /// in forward direction. This is only true for range tries (including the deletion branches of a deletion-aware one).
+    protected boolean allowsContentAfterBranch()
+    {
+        return false;
+    }
+
+    /// Rejects a position on the return path of the forward walk of a trie that is being applied to a trie that cannot
+    /// hold content after a branch (see [#allowsContentAfterBranch]).
+    static void rejectReturnPath(long position)
+    {
+        if (Cursor.isOnReturnPath(position))
+            throw new IllegalArgumentException("Return path position " + Cursor.toString(position) + " in non-range trie.");
+    }
+
     /// Map-like put method, using a fast recursive implementation through the key bytes. May run into stack overflow if
     /// the trie becomes too deep. When the correct position in the trie has been reached, the value will be resolved
     /// with the given function before being placed in the trie (even if there's no pre-existing content in this trie).
     /// @param key The trie path/key for the given value.
     /// @param value The value being put in the memtable trie. Note that it can be of type different than the element
     /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
-    /// the memtable trie.
+    /// the memtable trie. If it is `null`, the trie is not changed and the transformer is not called.
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
     public <R> void putRecursive(ByteComparable key, R value, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
     {
-        putRecursive(key, value, false, transformer);
+        putRecursiveInternal(key, value, null, transformer);
     }
 
 
-    /// Map-like put method, using a fast recursive implementation through the key bytes. May run into stack overflow if
-    /// the trie becomes too deep. When the correct position in the trie has been reached, the value will be resolved
-    /// with the given function before being placed in the trie (even if there's no pre-existing content in this trie).
+    /// Map-like put method for both content slots of a node, using a fast recursive implementation through the key
+    /// bytes. May run into stack overflow if the trie becomes too deep. When the correct position in the trie has been
+    /// reached, each value will be resolved with the given function, together with the content of its slot, before
+    /// being placed in the trie (even if there's no pre-existing content in this trie). The slot before the branch is
+    /// processed first.
     /// @param key The trie path/key for the given value.
-    /// @param value The value being put in the memtable trie. Note that it can be of type different than the element
-    /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
-    /// the memtable trie.
-    /// @param contentAfterBranch Whether the content should be placed after descendants in forward iteration order.
-    /// Setting this to true only makes sense with ordered or range tries (i.e. where [#presentContentOnDescentPath] is
-    /// false).
+    /// @param contentBeforeBranch The value being put in the memtable trie in the slot for content presented before the
+    /// node's branch. Note that it can be of type different than the element type for this memtable trie. It's up to
+    /// the `transformer` to return the final value that will stay in the memtable trie. If it is `null`, the slot is
+    /// not changed and the transformer is not called for it.
+    /// @param contentAfterBranch The value being put in the memtable trie in the slot for content presented after the
+    /// node's branch. Only usable with range tries (others throw [IllegalArgumentException], without changing
+    /// anything, if this is not `null`). Processed by `transformer` as above.
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putRecursive(ByteComparable key, R value, boolean contentAfterBranch, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    <R> void putRecursiveInternal(ByteComparable key, R contentBeforeBranch, R contentAfterBranch, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
     {
-        assert !(contentAfterBranch && presentContentOnDescentPath) : "After branch placement only makes sense with range or ordered tries";
+        if (contentAfterBranch != null && !allowsContentAfterBranch())
+            throw new IllegalArgumentException("Content after branch can only be used with range tries.");
+
         try
         {
-            int newRoot = putRecursive(root, key.asComparableBytes(byteComparableVersion), value, contentAfterBranch, transformer);
+            int newRoot = putRecursive(root, key.asComparableBytes(byteComparableVersion), contentBeforeBranch, contentAfterBranch, transformer);
             if (newRoot != root)
                 root = newRoot;
             completeMutation();
@@ -1589,15 +1625,15 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
     }
 
-    private <R> int putRecursive(int node, ByteSource key, R value, boolean contentAfterBranch, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    private <R> int putRecursive(int node, ByteSource key, R contentBeforeBranch, R contentAfterBranch, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
     {
         int transition = key.next();
         if (transition == ByteSource.END_OF_STREAM)
-            return applyContent(node, value, contentAfterBranch, transformer);
+            return applyContent(node, contentBeforeBranch, contentAfterBranch, transformer);
 
         int child = getChild(node, transition);
 
-        int newChild = putRecursive(child, key, value, contentAfterBranch, transformer);
+        int newChild = putRecursive(child, key, contentBeforeBranch, contentAfterBranch, transformer);
         if (newChild == child)
             return node;
 
@@ -1609,105 +1645,110 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         return preservePrefix(node, skippedContent, attachedChild, false);
     }
 
-    private <R> int applyContent(int node, R value, boolean contentAfterBranch, UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    /// Applies the given content to the node at the end of the key, and returns the node to attach in its place.
+    ///
+    /// The same code serves all kinds of tries: plain ones never have content after a branch (which
+    /// [#putRecursiveInternal] checks), and in deletion-aware tries the alternate slot of a prefix node holds a
+    /// deletion branch, which is left alone when there is no content for that slot.
+    private <R> int applyContent(int node, R contentBeforeBranch, R contentAfterBranch, UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
     {
         if (isNull(node))
-            return addContent(transformer.apply(null, value), contentAfterBranch);
+        {
+            int before = modifyContent(NONE, contentBeforeBranch, transformer, false);
+            int after = modifyContent(NONE, contentAfterBranch, transformer, true);
+            return leafOrPrefix(before, after);
+        }
         else if (isLeaf(node))
-            return applyContentToLeaf(node, value, contentAfterBranch, transformer);
+        {
+            boolean presentAfter = shouldPresentAfterBranch(node);
+            int before = modifyContent(presentAfter ? NONE : node, contentBeforeBranch, transformer, false);
+            int after = modifyContent(presentAfter ? node : NONE, contentAfterBranch, transformer, true);
+            return leafOrPrefix(before, after);
+        }
         else if (offset(node) == PREFIX_OFFSET)
-            return applyContentToPrefix(node, value, contentAfterBranch, transformer);
+            return applyContentToPrefix(node, contentBeforeBranch, contentAfterBranch, transformer);
         else
         {
-            T newContent = transformer.apply(null, value);
-            if (newContent == null)
+            int before = modifyContent(NONE, contentBeforeBranch, transformer, false);
+            int after = modifyContent(NONE, contentAfterBranch, transformer, true);
+            if (before == NONE && after == NONE)
                 return node;
             else
-                return createContentNode(addContent(newContent, contentAfterBranch), node, false);
+                return createPrefixNode(before, after, node, false);
         }
     }
 
-    private <R> int applyContentToLeaf(int node, R value, boolean contentAfterBranch, UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    /// Applies the given value to the content with the given id (`NONE` if there is none) and returns the id of the
+    /// resulting content (`NONE` if the transformer removed it). A `null` value leaves the content as it is.
+    private <R> int modifyContent(int existingId, R value, UpsertTransformer<T, R> transformer, boolean afterBranch)
+    throws TrieSpaceExhaustedException
     {
-        int contentId = node;
+        if (value == null)
+            return existingId;
+        if (existingId == NONE)
+            return addContent(transformer.apply(null, value), afterBranch);
 
-        if (contentAfterBranch == shouldPresentAfterBranch(node))
+        T existing = getContent(existingId);
+        T merged = transformer.apply(existing, value);
+        if (merged == existing)
+            return existingId;
+        if (merged == null)
         {
-            T existingContent = getContent(contentId);
-            T newContent = transformer.apply(existingContent, value);
-
-            if (newContent == existingContent)
-                return contentId;
-            if (newContent != null)
-            {
-                return setContent(contentId, newContent);
-            }
-            else
-            {
-                releaseContent(contentId);
-                return NONE;
-            }
+            releaseContent(existingId);
+            return NONE;
         }
-        else
-        {
-            T newContent = transformer.apply(null, value);
-
-            // We already have content, but we also need to add content on the other side of the branch.
-            if (newContent == null)
-                return contentId;
-
-            // Convert this to prefix node to be able to store both.
-            return createPrefixNode(contentId, addContent(newContent, contentAfterBranch), NONE, false);
-        }
+        return setContent(existingId, merged); // the content manager may need to change the id
     }
 
-    private <R> int applyContentToPrefix(int node, R value, boolean contentAfterBranch, UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    /// The node for content on either or both sides of a branch that has no children.
+    private int leafOrPrefix(int before, int after) throws TrieSpaceExhaustedException
     {
-        int contentOffset = contentAfterBranch ? PREFIX_ALTERNATE_OFFSET : PREFIX_CONTENT_OFFSET;
-        int contentId = getIntVolatile(node + contentOffset);
+        if (before == NONE)
+            return after; // may be none
+        else if (after == NONE)
+            return before;
+        else
+            return createPrefixNode(before, after, NONE, true);
+    }
 
-        assert isNullOrLeaf(contentId) : "Content after branch cannot be used toghether with alternate branch";
-        T existingContent = isNull(contentId) ? null : getContent(contentId);
-        T newContent = transformer.apply(existingContent, value);
-        if (newContent == existingContent)
-            return node;
+    private <R> int applyContentToPrefix(int node, R contentBeforeBranch, R contentAfterBranch, UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    {
+        int existingIdBefore = getIntVolatile(node + PREFIX_CONTENT_OFFSET);
+        int existingIdAfter = getIntVolatile(node + PREFIX_ALTERNATE_OFFSET);
 
-        if (newContent != null)
+        int before = modifyContent(existingIdBefore, contentBeforeBranch, transformer, false);
+        int after = modifyContent(existingIdAfter, contentAfterBranch, transformer, true);
+        if (before == existingIdBefore && after == existingIdAfter)
+            return node; // unchanged, or content changed in place
+        if (before == NONE && after == NONE)
+            return releasePrefixAndReturnChild(node);
+        if ((before == NONE || after == NONE) && isNull(followPrefixTransition(node)) && allowsContentAfterBranch())
         {
-            if (!isNull(contentId))
-            {
-                int newId = setContent(contentId, newContent);
-                if (newId != contentId)
-                    putIntVolatile(node + contentOffset, newId);
-            }
-            else
-                putIntVolatile(node + contentOffset, addContent(newContent, contentAfterBranch));
-            return node;
+            // A range trie node without children that has content on one side only: a leaf holds that. (Without a
+            // child, the prefix node cannot be embedded.)
+            recycleCell(node);
+            return before == NONE ? after : before;
+        }
+        if (before != existingIdBefore)
+            putIntVolatile(node + PREFIX_CONTENT_OFFSET, before);
+        if (after != existingIdAfter)
+            putIntVolatile(node + PREFIX_ALTERNATE_OFFSET, after);
+        return node;
+    }
+
+    private int releasePrefixAndReturnChild(int node)
+    {
+        int b = getUnsignedByte(node + PREFIX_FLAGS_OFFSET);
+        if (b < CELL_SIZE)
+        {
+            // embedded prefix node
+            return node - PREFIX_OFFSET + b;
         }
         else
         {
-            releaseContent(contentId);
-            int otherContentOffset = contentAfterBranch ? PREFIX_CONTENT_OFFSET : PREFIX_ALTERNATE_OFFSET;
-
-            if (!isNull(getIntVolatile(node + otherContentOffset)))
-            {
-                // keep the prefix node for the other content / alternate path
-                putIntVolatile(node + contentOffset, NONE);
-                return node;
-            }
-
-            int b = getUnsignedByte(node + PREFIX_FLAGS_OFFSET);
-            if (b < CELL_SIZE)
-            {
-                // embedded prefix node
-                return node - PREFIX_OFFSET + b;
-            }
-            else
-            {
-                // separate prefix node. recycle it as it's no longer needed
-                recycleCell(node);
-                return getIntVolatile(node + PREFIX_POINTER_OFFSET);
-            }
+            // separate prefix node. recycle it as it's no longer needed
+            recycleCell(node);
+            return getIntVolatile(node + PREFIX_POINTER_OFFSET);
         }
     }
 

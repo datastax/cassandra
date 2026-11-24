@@ -60,6 +60,29 @@ public class CellReuseTest
     private static final int COUNT = 10000;
     Random rand = new Random(2);
 
+    /// A content manager may give a different id to content when it changes; [ContentManagerBytes] does when a value
+    /// turns from special into serialized or back. `putRecursive` must store the id it is given, for content in a
+    /// leaf as well as in a prefix node (i.e. at a key that has descendants).
+    @Test
+    public void testPutRecursiveContentIdChange() throws TrieSpaceExhaustedException
+    {
+        ByteComparable prefix = TrieUtil.comparable("a");
+        ByteComparable leaf = TrieUtil.comparable("ab");
+        InMemoryTrie<Object> trie = InMemoryTrie.longLived(VERSION, BufferType.ON_HEAP, null, new TestContentSerializer());
+        InMemoryTrie.UpsertTransformer<Object, Object> replace = (existing, update) -> update;
+        for (ByteComparable key : new ByteComparable[]{ leaf, prefix })
+        {
+            for (Object value : new Object[]{ Boolean.TRUE, ByteBufferUtil.bytes("serialized"), Boolean.TRUE, ByteBufferUtil.bytes("again") })
+            {
+                trie.putRecursive(key, value, replace);
+                String what = key.byteComparableAsString(VERSION) + " = " + value + '\n' + trie.dump();
+                Assert.assertEquals(what, value, trie.get(key));
+            }
+        }
+        Assert.assertEquals(ByteBufferUtil.bytes("again"), trie.get(leaf));
+        Assert.assertEquals(2, trie.valuesCount());
+    }
+
     @Test
     public void testCellReuseBytesPartitionCopying() throws Exception
     {
