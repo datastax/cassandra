@@ -118,7 +118,7 @@ public class SSTableIndexWriter implements PerIndexWriter
             return;
 
         boolean addedRow = false;
-        if (indexContext.isNonFrozenCollection())
+        if (indexContext.isMultiValued())
         {
             Iterator<ByteBuffer> valueIterator = indexContext.getValuesOf(row, nowInSec);
             if (valueIterator != null)

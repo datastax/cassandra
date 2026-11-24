@@ -52,8 +52,11 @@ import org.apache.cassandra.db.marshal.AsciiType;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.DecimalType;
+import org.apache.cassandra.db.marshal.DoubleType;
 import org.apache.cassandra.db.marshal.InetAddressType;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.IntegerType;
+import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.db.marshal.VectorType;
@@ -72,6 +75,9 @@ import org.apache.cassandra.index.sai.disk.vector.VectorValidation;
 import org.apache.cassandra.index.sai.iterators.KeyRangeAntiJoinIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeIterator;
 import org.apache.cassandra.index.sai.iterators.KeyRangeUnionIterator;
+import org.apache.cassandra.index.sai.json.JsonPath;
+import org.apache.cassandra.index.sai.json.JsonPathExtractor;
+import org.apache.cassandra.index.sai.json.JsonPathIndexes;
 import org.apache.cassandra.index.sai.memory.MemtableIndex;
 import org.apache.cassandra.index.sai.memory.MemtableKeyRangeIterator;
 import org.apache.cassandra.index.sai.metrics.AbstractMetrics;
@@ -144,6 +150,10 @@ public class IndexContext
     private final AbstractType<?> validator;
     private final ColumnFamilyStore cfs;
 
+    // Non-null only for indexes over a JSON path of a text/ascii column (json_path/json_type options).
+    @Nullable
+    private final JsonPathExtractor jsonPathExtractor;
+
     // Config can be null if the column context is "fake" (i.e. created for a filtering expression).
     private final IndexMetadata config;
     private final VectorSimilarityFunction vectorSimilarityFunction;
@@ -185,7 +195,17 @@ public class IndexContext
         this.indexType = indexType;
         this.config = config;
         this.viewManager = new IndexViewManager(this);
-        this.validator = TypeUtil.cellValueType(column, indexType);
+        if (config != null && JsonPathIndexes.isJsonPathIndex(config.options))
+        {
+            // the indexed terms are the values found at the path, of the declared type
+            this.validator = JsonPathIndexes.type(config.options);
+            this.jsonPathExtractor = new JsonPathExtractor(JsonPathIndexes.path(config.options), validator);
+        }
+        else
+        {
+            this.validator = TypeUtil.cellValueType(column, indexType);
+            this.jsonPathExtractor = null;
+        }
         this.cfs = cfs;
         this.version = Version.current(keyspace);
         this.primaryKeyFactory = version.onDiskFormat().newPrimaryKeyFactory(clusteringComparator);
@@ -299,7 +319,7 @@ public class IndexContext
 
         long start = nanoTime();
 
-        if (isNonFrozenCollection())
+        if (isMultiValued())
         {
             Iterator<ByteBuffer> bufferIterator = getValuesOf(row, FBUtilities.nowInSeconds());
             if (bufferIterator != null)
@@ -326,7 +346,7 @@ public class IndexContext
     public void validateMaxTermSizeForRow(DecoratedKey key, Row row)
     {
         AbstractAnalyzer analyzer = getAnalyzerFactory().create();
-        if (isNonFrozenCollection())
+        if (isMultiValued())
         {
             Iterator<ByteBuffer> bufferIterator = getValuesOf(row, FBUtilities.nowInSeconds());
             while (bufferIterator != null && bufferIterator.hasNext())
@@ -440,7 +460,7 @@ public class IndexContext
         // C* has already determined this is the current represntation of the oldRow in the memtable, and that means
         // we need to add the newValue to the index and remove the oldValue from it, even if it has already expired via
         // TTL.
-        if (isNonFrozenCollection())
+        if (isMultiValued())
         {
             Iterator<ByteBuffer> oldValues = getValuesOf(oldRow, 0);
             Iterator<ByteBuffer> newValues = getValuesOf(newRow, FBUtilities.nowInSeconds());
@@ -596,6 +616,37 @@ public class IndexContext
     public boolean isNonFrozenCollection()
     {
         return TypeUtil.isNonFrozenCollection(column.type);
+    }
+
+    /**
+     * Determines whether this index is configured over a JSON path of a text/ascii column.
+     *
+     * @return true if this index targets a JSON path, false otherwise
+     */
+    public boolean isJsonPath()
+    {
+        return jsonPathExtractor != null;
+    }
+
+    /**
+     * Returns the target JSON path of this index, or null if it is not a JSON path index.
+     *
+     * @return the JSON path or null
+     */
+    @Nullable
+    public JsonPath getJsonPath()
+    {
+        return jsonPathExtractor == null ? null : jsonPathExtractor.path();
+    }
+
+    /**
+     * Determines whether indexing a row yields an iterator of values rather than a single scalar value.
+     *
+     * @return true for non-frozen collections and JSON path indexes, false otherwise
+     */
+    public boolean isMultiValued()
+    {
+        return isNonFrozenCollection() || isJsonPath();
     }
 
     public boolean isCollection()
@@ -773,6 +824,8 @@ public class IndexContext
 
     public boolean supports(Operator op)
     {
+        if (isJsonPath())
+            return supportsJsonPath(op);
         if (op.isLike())
             return supportsLikeQueries();
         // Analyzed columns store the indexed result, so we are unable to compute raw equality.
@@ -826,6 +879,19 @@ public class IndexContext
         return (operator != null) && !(TypeUtil.isLiteral(validator) && operator == Expression.Op.RANGE);
     }
 
+    /**
+     * Evaluates operator support for JSON path indexes: supports EQ and NEQ for all types,
+     * and inequality/slice ranges for numeric types only.
+     */
+    private boolean supportsJsonPath(Operator op)
+    {
+        if (op == Operator.EQ || op == Operator.NEQ)
+            return true;
+        if (op == Operator.LT || op == Operator.LTE || op == Operator.GT || op == Operator.GTE)
+            return validator instanceof Int32Type || validator instanceof LongType || validator instanceof DoubleType;
+        return false;
+    }
+
     public ByteBuffer getValueOf(DecoratedKey key, Row row, long nowInSecs)
     {
         if (row == null)
@@ -870,6 +936,11 @@ public class IndexContext
                 if (!row.isStatic())
                     return null;
             case REGULAR:
+                if (jsonPathExtractor != null)
+                {
+                    Cell<?> cell = row.getCell(column);
+                    return cell == null || !cell.isLive(nowInSecs) ? null : jsonPathExtractor.extract(cell.buffer());
+                }
                 return TypeUtil.collectionIterator(validator, row.getComplexColumnData(column), column, indexType, nowInSecs);
 
             default:

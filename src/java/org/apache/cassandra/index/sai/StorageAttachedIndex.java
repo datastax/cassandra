@@ -751,6 +751,10 @@ public class StorageAttachedIndex implements Index
     @Override
     public boolean supportsExpression(ColumnMetadata column, Operator operator)
     {
+        // A JSON-path index indexes values found inside the column, not the column value itself, so it can't serve
+        // plain restrictions on the column.
+        if (indexContext.isJsonPath())
+            return false;
         return dependsOn(column) && indexContext.supports(operator);
     }
 
