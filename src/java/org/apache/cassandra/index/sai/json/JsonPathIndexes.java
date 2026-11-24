@@ -114,6 +114,9 @@ public final class JsonPathIndexes
             || !(target.left.type instanceof UTF8Type || target.left.type instanceof AsciiType))
             throw new InvalidRequestException("Options '" + JSON_PATH + "' and '" + JSON_TYPE +
                                               "' require a plain column target of type text or ascii");
+        // getValuesOf only reads cells of regular/static columns; key columns would silently index nothing
+        if (target.left.kind != ColumnMetadata.Kind.REGULAR && target.left.kind != ColumnMetadata.Kind.STATIC)
+            throw new InvalidRequestException("JSON path indexes are only supported on regular or static columns");
         if (AbstractAnalyzer.isAnalyzed(options)
             || options.containsKey(NonTokenizingOptions.CASE_SENSITIVE)
             || options.containsKey(NonTokenizingOptions.NORMALIZE)

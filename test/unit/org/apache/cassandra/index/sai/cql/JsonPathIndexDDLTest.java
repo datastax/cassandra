@@ -74,4 +74,29 @@ public class JsonPathIndexDDLTest extends SAITester
         assertInvalidMessage("text or ascii", "CREATE CUSTOM INDEX ON %s(values(m)) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_path': '$.a', 'json_type': 'text'}");
         assertInvalidMessage("cannot be combined", PREFIX + "{'json_path': '$.a', 'json_type': 'text', 'case_sensitive': 'false'}");
     }
+
+    /**
+     * Tests that JSON path indexes cannot be created on partition or clustering key columns.
+     */
+    @Test
+    public void rejectsPrimaryKeyColumns()
+    {
+        createTable("CREATE TABLE %s (pk text, pk2 int, ck text, doc text, PRIMARY KEY ((pk, pk2), ck))");
+        assertInvalidMessage("only supported on regular or static columns",
+                             "CREATE CUSTOM INDEX ON %s(pk) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_path': '$.a', 'json_type': 'int'}");
+        assertInvalidMessage("only supported on regular or static columns",
+                             "CREATE CUSTOM INDEX ON %s(ck) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_path': '$.a', 'json_type': 'int'}");
+    }
+
+    /**
+     * Tests that JSON path indexes can be created on static columns.
+     */
+    @Test
+    public void acceptsStaticColumn()
+    {
+        createTable("CREATE TABLE %s (pk int, ck int, sdoc text static, PRIMARY KEY (pk, ck))");
+        createIndex("CREATE CUSTOM INDEX ON %s(sdoc) USING 'StorageAttachedIndex' WITH OPTIONS = {'json_path': '$.a', 'json_type': 'int'}");
+        assertEquals(Optional.of(Int32Type.instance),
+                     JsonPathIndexes.findIndexedType(currentTableMetadata(), getColumn("sdoc"), JsonPath.parse("$.a")));
+    }
 }
