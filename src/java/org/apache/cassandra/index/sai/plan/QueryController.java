@@ -698,7 +698,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 if (hints.excludes(expression.context.getIndexName()))
                     continue;
 
-                if (expression.getOp() == Expression.Op.NOT_EQ)
+                // A JSON path NEQ also matches rows without a value at the path, which a union of half ranges
+                // would miss, so it is served like NOT CONTAINS: all keys minus the keys matching the EQ.
+                if (expression.getOp() == Expression.Op.NOT_EQ && !expression.context.isJsonPath())
                     builder.add(buildInequalityPlan(expression));
                 else
                 {

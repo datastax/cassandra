@@ -39,13 +39,16 @@ import org.apache.cassandra.cql3.Term;
 import org.apache.cassandra.cql3.Terms;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.cql3.statements.Bound;
+import org.apache.cassandra.cql3.statements.RequestValidations;
 import org.apache.cassandra.db.MultiClusteringBuilder;
 import org.apache.cassandra.db.filter.ANNOptions;
 import org.apache.cassandra.db.filter.IndexHints;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.json.JsonPath;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.serializers.ListSerializer;
 import org.apache.cassandra.service.ClientWarn;
@@ -118,6 +121,10 @@ public abstract class SingleColumnRestriction implements SingleRestriction
     @Override
     public final SingleRestriction mergeWith(SingleRestriction otherRestriction)
     {
+        // JSON path restrictions can only be combined with other JSON path restrictions on the same column
+        checkFalse(otherRestriction instanceof JsonPathRestriction && !(this instanceof JsonPathRestriction),
+                   JsonPathRestriction.CANNOT_BE_MERGED_ERROR, columnDef.name, this);
+
         // We want to allow query like: b > ? AND (b,c) < (?, ?)
         if (otherRestriction.isMultiColumn() && canBeConvertedToMultiColumnRestriction())
         {
@@ -581,6 +588,224 @@ public abstract class SingleColumnRestriction implements SingleRestriction
         public String toString()
         {
             return String.format("MAP_SLICE %s", slices);
+        }
+    }
+
+    /**
+     * One or more restrictions on JSON paths of a text column holding JSON documents, written with the map-element
+     * syntax, e.g. {@code doc['$.a'] = 1 AND doc['$.b'] > 2}.
+     * <p>
+     * Every entry is matched independently (array semantics: different array elements may satisfy different restrictions),
+     * so entries are never combined into ranges: each becomes its own {@link RowFilter.JsonPathExpression}.
+     */
+    public static class JsonPathRestriction extends SingleColumnRestriction
+    {
+        public static final String CANNOT_BE_MERGED_ERROR = "Column \"%s\" cannot be restricted by both a JSON path relation and %s";
+
+        private static final class Entry
+        {
+            private final JsonPath path;
+            private final AbstractType<?> valueType;
+            private final Operator operator;
+            private final Term value;
+
+            /**
+             * Constructs a single JSON path restriction entry with path, value type, operator, and value term.
+             */
+            private Entry(JsonPath path, AbstractType<?> valueType, Operator operator, Term value)
+            {
+                this.path = path;
+                this.valueType = valueType;
+                this.operator = operator;
+                this.value = value;
+            }
+
+            @Override
+            public String toString()
+            {
+                return String.format("['%s'] %s %s", path, operator, value);
+            }
+        }
+
+        private final List<Entry> entries;
+
+        /**
+         * Constructs a JSON path restriction with a single initial entry.
+         */
+        public JsonPathRestriction(ColumnMetadata columnDef, JsonPath path, AbstractType<?> valueType, Operator operator, Term value)
+        {
+            super(columnDef);
+            assert operator == Operator.EQ || operator == Operator.NEQ || operator.isSlice() : operator;
+            this.entries = Collections.singletonList(new Entry(path, valueType, operator, value));
+        }
+
+        /**
+         * Constructs a JSON path restriction with a list of merged entries.
+         */
+        private JsonPathRestriction(ColumnMetadata columnDef, List<Entry> entries)
+        {
+            super(columnDef);
+            this.entries = entries;
+        }
+
+        /**
+         * Collects any CQL functions referenced by the value terms of each entry.
+         */
+        @Override
+        public void addFunctionsTo(List<Function> functions)
+        {
+            entries.forEach(entry -> entry.value.addFunctionsTo(functions));
+        }
+
+        /**
+         * JSON path restrictions cannot be converted to multi-column restrictions.
+         */
+        @Override
+        MultiColumnRestriction toMultiColumnRestriction()
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        /**
+         * Indicates whether this restriction can be converted to multi-column (always false for JSON path).
+         */
+        @Override
+        boolean canBeConvertedToMultiColumnRestriction()
+        {
+            return false;
+        }
+
+        /**
+         * JSON path restrictions are not supported on primary key columns and cannot build clusterings.
+         */
+        @Override
+        public MultiClusteringBuilder appendTo(MultiClusteringBuilder builder, QueryOptions options)
+        {
+            // JSON path restrictions are not supported on primary key columns.
+            throw new UnsupportedOperationException();
+        }
+
+        /**
+         * Checks whether this restriction has a bound (unsupported because multiple entries are independent).
+         */
+        @Override
+        public boolean hasBound(Bound b)
+        {
+            // A JSON path restriction can hold several independent entries, so its bounds are not well defined.
+            throw new UnsupportedOperationException("Bounds not well defined for JSON path restrictions");
+        }
+
+        /**
+         * Checks whether the bound is inclusive (unsupported for JSON path restrictions).
+         */
+        @Override
+        public boolean isInclusive(Bound b)
+        {
+            throw new UnsupportedOperationException();
+        }
+
+        /**
+         * Merges this JSON path restriction with another by concatenating independent path entries.
+         */
+        @Override
+        public SingleRestriction doMergeWith(SingleRestriction otherRestriction)
+        {
+            checkTrue(otherRestriction instanceof JsonPathRestriction, CANNOT_BE_MERGED_ERROR, columnDef.name, otherRestriction);
+
+            // entries are matched independently, so they are concatenated rather than combined
+            List<Entry> newEntries = new ArrayList<>(entries);
+            newEntries.addAll(((JsonPathRestriction) otherRestriction).entries);
+            return new JsonPathRestriction(columnDef, newEntries);
+        }
+
+        /**
+         * Appends a JsonPathExpression to the row filter for each entry in this restriction.
+         */
+        @Override
+        public void addToRowFilter(RowFilter.Builder filter,
+                                   IndexRegistry indexRegistry,
+                                   QueryOptions options,
+                                   ANNOptions annOptions,
+                                   IndexHints indexHints)
+        {
+            for (Entry entry : entries)
+            {
+                ByteBuffer value = entry.value.bindAndGet(options);
+                RequestValidations.checkNotNull(value, "Invalid null value for JSON path restriction on column %s", columnDef.name);
+                checkBindValueSet(value, "Invalid unset value for JSON path restriction on column %s", columnDef.name);
+                filter.add(new RowFilter.JsonPathExpression(columnDef, entry.path, entry.valueType, entry.operator, value));
+            }
+        }
+
+        /**
+         * Returns true if all entries in this restriction are supported by the given index.
+         */
+        @Override
+        protected boolean isSupportedBy(Index index)
+        {
+            for (Entry entry : entries)
+                if (!isSupportedBy(index, entry))
+                    return false;
+            return true;
+        }
+
+        /**
+         * Checks if the given index supports a specific JSON path entry.
+         */
+        private boolean isSupportedBy(Index index, Entry entry)
+        {
+            return index.supportsJsonPathExpression(columnDef, entry.path, entry.operator);
+        }
+
+        /**
+         * Entries on different paths are served by different indexes (one per path), so the restriction is supported
+         * when every entry is supported by some index, not necessarily the same one.
+         *
+         * @return the best index for the first entry if every entry has a supporting index, {@code null} otherwise
+         */
+        @Nullable
+        @Override
+        public Index findSupportingIndex(IndexRegistry indexRegistry, IndexHints indexHints)
+        {
+            Index first = null;
+            for (Entry entry : entries)
+            {
+                Index index = indexHints.getBestIndexFor(indexRegistry.listIndexes(), i -> isSupportedBy(i, entry), false).orElse(null);
+                if (index == null)
+                    return null;
+                if (first == null)
+                    first = index;
+            }
+            return first;
+        }
+
+        /**
+         * Determines if post-filtering is required for any entry not covered by the index group.
+         */
+        @Override
+        public boolean needsFiltering(Index.Group indexGroup, IndexHints indexHints)
+        {
+            for (Entry entry : entries)
+            {
+                boolean supported = false;
+                for (Index index : indexGroup.getIndexes())
+                {
+                    if (!indexHints.excludes(index) && isSupportedBy(index, entry))
+                    {
+                        supported = true;
+                        break;
+                    }
+                }
+                if (!supported)
+                    return true;
+            }
+            return false;
+        }
+
+        @Override
+        public String toString()
+        {
+            return String.format("JSON_PATH %s", entries);
         }
     }
 

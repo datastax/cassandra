@@ -129,6 +129,10 @@ public class Operation
                         isMultiExpression = isMultiExpression || perColumn.isEmpty();
                         break;
                 }
+                // Restrictions on JSON paths are matched independently (array semantics), so EQ and NEQ are always
+                // their own expressions; slices open a new expression below.
+                if (e instanceof RowFilter.JsonPathExpression)
+                    isMultiExpression = e.operator() == Operator.EQ || e.operator() == Operator.NEQ;
                 columnIsMultiExpression.put(e.column(), isMultiExpression);
 
                 if (isMultiExpression && e.operator() == Operator.LIKE_MATCHES)
@@ -168,7 +172,8 @@ public class Operation
                 // not-equals is combined with the range iff operator is AND.
                 {
                     Expression range;
-                    if (perColumn.size() == 0 || op != OperationType.AND || e instanceof RowFilter.MapComparisonExpression)
+                    if (perColumn.size() == 0 || op != OperationType.AND || e instanceof RowFilter.MapComparisonExpression
+                        || e instanceof RowFilter.JsonPathExpression)
                     {
                         range = new Expression(indexContext);
                         perColumn.add(range);

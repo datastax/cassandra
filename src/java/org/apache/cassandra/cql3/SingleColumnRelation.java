@@ -21,12 +21,22 @@ import java.util.Collections;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 
 import org.apache.cassandra.db.filter.IndexHints;
+import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.AsciiType;
+import org.apache.cassandra.db.marshal.DoubleType;
+import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.marshal.VectorType;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.sai.analyzer.AnalyzerEqOperatorSupport;
+import org.apache.cassandra.index.sai.json.JsonPath;
+import org.apache.cassandra.index.sai.json.JsonPathIndexes;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.cql3.Term.Raw;
@@ -50,6 +60,9 @@ import static org.apache.cassandra.cql3.statements.RequestValidations.invalidReq
  */
 public final class SingleColumnRelation extends Relation
 {
+    /** The JSON path value types that support slice restrictions. */
+    private static final Set<AbstractType<?>> SLICEABLE_JSON_TYPES = Set.of(Int32Type.instance, LongType.instance, DoubleType.instance);
+
     private final ColumnIdentifier entity;
     private final Term.Raw mapKey;
     private final Term.Raw value;
@@ -246,6 +259,10 @@ public final class SingleColumnRelation extends Relation
                                  Index.joinNames(ebi.eqIndexes),
                                  ebi.matchIndexes.iterator().next().getIndexMetadata().name);
         }
+        Restriction jsonPathRestriction = newJsonPathRestriction(table, columnDef, boundNames);
+        if (jsonPathRestriction != null)
+            return jsonPathRestriction;
+
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
         Term entryValue = toTerm(Collections.singletonList(receivers.get(1)), value, table.keyspace, boundNames);
@@ -262,6 +279,10 @@ public final class SingleColumnRelation extends Relation
             MarkerOrTerms skippedValues = new MarkerOrTerms.Terms(Collections.singletonList(term));
             return SingleColumnRestriction.SliceRestriction.fromSkippedValues(columnDef, skippedValues);
         }
+
+        Restriction jsonPathRestriction = newJsonPathRestriction(table, columnDef, boundNames);
+        if (jsonPathRestriction != null)
+            return jsonPathRestriction;
 
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
@@ -328,6 +349,10 @@ public final class SingleColumnRelation extends Relation
             Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
             return SingleColumnRestriction.SliceRestriction.fromBound(columnDef, bound, inclusive, term);
         }
+        Restriction jsonPathRestriction = newJsonPathRestriction(table, columnDef, boundNames);
+        if (jsonPathRestriction != null)
+            return jsonPathRestriction;
+
         List<? extends ColumnSpecification> receivers = toReceivers(columnDef);
         Term entryKey = toTerm(Collections.singletonList(receivers.get(0)), mapKey, table.keyspace, boundNames);
         Term entryValue = toTerm(Collections.singletonList(receivers.get(1)), value, table.keyspace, boundNames);
@@ -408,6 +433,51 @@ public final class SingleColumnRelation extends Relation
         Term term = toTerm(toReceivers(columnDef), value, table.keyspace, boundNames);
 
         return new SingleColumnRestriction.AnalyzerMatchesRestriction(columnDef, term);
+    }
+
+    /**
+     * Creates the restriction for a {@code doc['<path>'] op value} relation on a text column holding JSON documents,
+     * served by a JSON path index on that column and path.
+     *
+     * @return the JSON path restriction, or {@code null} if the column is not a text column, in which case the relation
+     * is handled as a map-element relation
+     */
+    private Restriction newJsonPathRestriction(TableMetadata table, ColumnMetadata columnDef, VariableSpecifications boundNames)
+    {
+        assert mapKey != null;
+        AbstractType<?> columnType = columnDef.type.unwrap();
+        if (columnType != UTF8Type.instance && columnType != AsciiType.instance)
+            return null;
+
+        checkTrue(mapKey instanceof Constants.Literal && ((Constants.Literal) mapKey).type == Constants.Type.STRING,
+                  "JSON path on column %s must be a string literal", columnDef.name);
+
+        JsonPath path;
+        try
+        {
+            path = JsonPath.parse(((Constants.Literal) mapKey).getRawText());
+        }
+        catch (IllegalArgumentException e)
+        {
+            throw invalidRequest("Invalid JSON path on column %s: %s", columnDef.name, e.getMessage());
+        }
+
+        Optional<AbstractType<?>> indexedType = JsonPathIndexes.findIndexedType(table, columnDef, path);
+        checkTrue(indexedType.isPresent(), "No JSON path index on column %s for path %s", columnDef.name, path);
+        AbstractType<?> valueType = indexedType.get();
+
+        checkTrue(relationType == Operator.EQ || relationType == Operator.NEQ || relationType.isSlice(),
+                  "Only EQ, NEQ, and SLICE relations are supported on JSON paths");
+        checkFalse(relationType.isSlice() && !SLICEABLE_JSON_TYPES.contains(valueType),
+                   "Slice restrictions on JSON path %s of column %s are only supported for int, bigint and double paths",
+                   path, columnDef.name);
+
+        ColumnSpecification receiver = new ColumnSpecification(table.keyspace,
+                                                               table.name,
+                                                               new ColumnIdentifier(String.format("%s['%s']", columnDef.name, path), true),
+                                                               valueType);
+        Term term = toTerm(Collections.singletonList(receiver), value, table.keyspace, boundNames);
+        return new SingleColumnRestriction.JsonPathRestriction(columnDef, path, valueType, relationType, term);
     }
 
     /**
