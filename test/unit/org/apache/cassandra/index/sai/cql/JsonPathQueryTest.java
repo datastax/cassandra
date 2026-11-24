@@ -87,6 +87,36 @@ public class JsonPathQueryTest extends SAITester
     }
 
     /**
+     * Tests NOT EQUALS combined with OR branches or paired with EQUALS on the same JSON path.
+     */
+    @Test
+    public void notEqualsUnderOrAndCombinedWithEquals() throws Throwable
+    {
+        createJsonTable();
+
+        beforeAndAfterFlush(() -> {
+            // pk 1 has 'dev' and age 25; pk 2 has only 'admin'; pk 3 has no tags
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE doc['$.tags'] != 'dev' OR doc['$.profile.age'] = 35"), row(2), row(3));
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE doc['$.tags'] != 'dev' OR doc['$.profile.age'] = 25"), row(1), row(2), row(3));
+            assertRows(execute("SELECT pk FROM %s WHERE doc['$.tags'] = 'admin' AND doc['$.tags'] != 'dev'"), row(2));
+            assertRows(execute("SELECT pk FROM %s WHERE doc['$.tags'] != 'dev' AND doc['$.tags'] = 'admin'"), row(2));
+        });
+    }
+
+    /**
+     * Tests that unset bind values in JSON path restrictions are properly rejected.
+     */
+    @Test
+    public void unsetBindValueRejected() throws Throwable
+    {
+        createJsonTable();
+
+        assertInvalidMessage("unset", "SELECT pk FROM %s WHERE doc['$.s'] = ?", unset());
+        assertInvalidMessage("unset", "SELECT pk FROM %s WHERE doc['$.tags'] != ?", unset());
+        assertInvalidMessage("unset", "SELECT pk FROM %s WHERE doc['$.s'] > ?", unset());
+    }
+
+    /**
      * Tests that NOT EQUALS on a JSON path index correctly returns rows missing the path across SSTables.
      */
     @Test
