@@ -27,6 +27,7 @@ import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import java.util.zip.CRC32;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
@@ -57,14 +58,23 @@ import org.apache.cassandra.db.commitlog.CommitLogReplayer;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog;
+import org.apache.cassandra.db.view.DseViewHiddenColumnCatalog.HiddenColumn;
+import org.apache.cassandra.db.view.DseViewWireFormat;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.io.sstable.ISSTableScanner;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.SchemaTransformations;
+import org.apache.cassandra.schema.SystemDistributedKeyspace;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.security.EncryptionContext;
+import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -83,7 +93,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * such a segment, and replays it again at the next start (shown here with {@code NONE}), unless {@code DSE_6} mode
  * moves it aside. What a real start adds (the startup checks letting version 680 through, a restart after the move)
  * is not exercised here, where the test drives the replay directly: the in-JVM {@code Dse6RollbackArtefactsTest}
- * covers it.
+ * covers it. No DSE-written segment holds the update of a materialized view: the tests of such updates replay a segment
+ * of version 680 built here ({@code dseSegment}), holding an update built in DSE's layout.
  */
 public class DseCommitLogReplayTest extends CQLTester
 {
@@ -115,6 +126,8 @@ public class DseCommitLogReplayTest extends CQLTester
      * fixture segment, which the test output (DEBUG on the console) would hold in memory for every replay of the class.
      */
     private static final Logger REPLAYER_LOGGER = (Logger) LoggerFactory.getLogger(CommitLogReplayer.class);
+    /** The logger of the WARN saying why a view update DSE stored is not translated. */
+    private static final Logger TRANSLATION_LOGGER = (Logger) LoggerFactory.getLogger(DseViewWireFormat.class);
     private static Level replayerLevel;
 
     @Rule
@@ -415,6 +428,143 @@ public class DseCommitLogReplayTest extends CQLTester
             assertRows(execute("SELECT count(*) FROM " + t), row((long) DseFixtures.COLLECTION_TABLE_COUNT_STAR));
             assertRows(execute("SELECT id, ck, v FROM " + t + " WHERE id = 25"), row(25, "ck1", "val49"), row(25, "ck2", "val50"));
         });
+    }
+
+    /**
+     * In {@code DSE_6}, the update of a materialized view in a DSE segment, which names DSE's hidden column of the view, is
+     * replayed when the catalog of DSE's hidden columns lists that column for the view, as a batch or a hint DSE stored:
+     * the rows get the liveness of their hidden cells, so the entry DSE wrote dead (a hidden tombstone) stays dead.
+     */
+    @Test
+    public void aViewUpdateOfADseSegmentIsTranslatedInDse6Mode() throws Throwable
+    {
+        TableMetadata view = createFixtureView();
+        Path segment = dseSegment(folder.newFolder().toPath(), DseFixtures.dse68Mutation(DseFixtures.dseViewUpdate(view, "x")));
+        DseViewHiddenColumnCatalog before = DseViewHiddenColumnCatalog.setInstance(new DseViewHiddenColumnCatalog(
+            Map.of(Pair.create(FIXTURE_KEYSPACE, view.name), List.of(new HiddenColumn(".v", "regular", true, "text")))));
+        try
+        {
+            withModes(InternodeCompatibilityMode.DSE_6, DatabaseDescriptor.getStorageCompatibilityMode(), () -> {
+                Map<Keyspace, Integer> replayed = CommitLog.instance.recoverSegmentsOnDiskNoArchive(ColumnFamilyStore.FlushReason.STARTUP,
+                                                                                                    new File[]{ new File(segment) });
+                assertThat(replayed.get(Keyspace.open(FIXTURE_KEYSPACE))).isEqualTo(1);
+            });
+        }
+        finally
+        {
+            DseViewHiddenColumnCatalog.setInstance(before);
+        }
+        assertRows(execute("SELECT v, id, ck FROM " + view + " WHERE v = 'x'"), row("x", 1, "a"));
+    }
+
+    /**
+     * The update of a materialized view in a DSE segment fails its replay as before, as a mutation naming a column unknown
+     * here, when the translation of the hidden column is not certain (in {@code DSE_6}, the catalog of DSE's hidden columns
+     * lists no hidden column for the view; a WARN says why) or not made (without the mode). The replay errors are ignored
+     * here, as with {@code -Dcassandra.commitlog.ignorereplayerrors=true}, rather than stop the replay; the copy of the
+     * mutation the replay saves is deleted.
+     */
+    @Test
+    public void aViewUpdateOfADseSegmentFailsItsReplayWhenItsTranslationIsUncertain() throws Throwable
+    {
+        TableMetadata view = createFixtureView();
+        ByteBuffer update = DseFixtures.dse68Mutation(DseFixtures.dseViewUpdate(view, "x"));
+        DseViewHiddenColumnCatalog before = DseViewHiddenColumnCatalog.setInstance(new DseViewHiddenColumnCatalog(Map.of()));
+        try (WithProperties ignoreErrors = new WithProperties().set(CassandraRelevantProperties.COMMITLOG_IGNORE_REPLAY_ERRORS, true))
+        {
+            for (InternodeCompatibilityMode mode : InternodeCompatibilityMode.values())
+            {
+                Path segment = dseSegment(folder.newFolder().toPath(), update);
+                ListAppender<ILoggingEvent> appender = new ListAppender<>();
+                appender.start();
+                REPLAYER_LOGGER.addAppender(appender);
+                ListAppender<ILoggingEvent> translation = new ListAppender<>();
+                translation.start();
+                TRANSLATION_LOGGER.addAppender(translation);
+                try
+                {
+                    withModes(mode, DatabaseDescriptor.getStorageCompatibilityMode(), () -> {
+                        Map<Keyspace, Integer> replayed = CommitLog.instance.recoverSegmentsOnDiskNoArchive(ColumnFamilyStore.FlushReason.STARTUP,
+                                                                                                            new File[]{ new File(segment) });
+                        assertThat(replayed.get(Keyspace.open(FIXTURE_KEYSPACE))).as("mutations replayed in %s", mode).isNull();
+                    });
+                }
+                finally
+                {
+                    REPLAYER_LOGGER.detachAppender(appender);
+                    appender.stop();
+                    TRANSLATION_LOGGER.detachAppender(translation);
+                    translation.stop();
+                }
+                List<String> errors = appender.list.stream()
+                                                   .filter(event -> event.getLevel() == Level.ERROR && event.getFormattedMessage().equals("Ignoring commit log replay error"))
+                                                   .map(event -> event.getThrowableProxy().getMessage())
+                                                   .collect(Collectors.toList());
+                assertThat(errors).as("replay errors in %s", mode).singleElement().asString()
+                                  .startsWith("Unexpected error deserializing mutation; saved to ")
+                                  .endsWith("Exception follows: java.lang.RuntimeException: Unknown column .v during deserialization of " + view);
+                String saved = errors.get(0).substring("Unexpected error deserializing mutation; saved to ".length());
+                Files.delete(Path.of(saved.substring(0, saved.indexOf(".  "))));
+                if (mode == InternodeCompatibilityMode.DSE_6)
+                    assertThat(translation.list).singleElement().satisfies(event -> {
+                        assertThat(event.getLevel()).isEqualTo(Level.WARN);
+                        assertThat(event.getFormattedMessage()).contains("names the column .v of materialized view " + view + ", which is not translated: " +
+                                                                         "DSE's system_schema.hidden_columns on this node lists no hidden column for that view.");
+                    });
+                else
+                    assertThat(translation.list).isEmpty();
+            }
+        }
+        finally
+        {
+            DseViewHiddenColumnCatalog.setInstance(before);
+        }
+        assertRows(execute("SELECT * FROM " + view));
+    }
+
+    /**
+     * The view {@code t_by_v} of the 6.8.65 fixture table, keyed by {@code (v, id, ck)}. The keyspace system_distributed,
+     * where the build of a view is recorded, is created here: the tests run without the network, which creates it otherwise.
+     */
+    private TableMetadata createFixtureView() throws Throwable
+    {
+        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(SystemDistributedKeyspace.metadata(), SystemDistributedKeyspace.GENERATION));
+        createFixtureSchema(DseVersion.DSE_6_8_65);
+        execute("CREATE MATERIALIZED VIEW " + FIXTURE_KEYSPACE + ".t_by_v AS SELECT id, ck, v FROM " + FIXTURE_KEYSPACE + ".t " +
+                "WHERE v IS NOT NULL AND id IS NOT NULL AND ck IS NOT NULL PRIMARY KEY (v, id, ck)");
+        return Schema.instance.getTableMetadata(FIXTURE_KEYSPACE, "t_by_v");
+    }
+
+    /**
+     * A DSE segment (version 680) holding one mutation, framed as a commit log segment frames it: the header, a sync marker
+     * (the position of the next one and the CRC32 of the segment id and its own position), the mutation (its size, the
+     * CRC32 of the size, the mutation, the CRC32 of the size and the mutation), then an empty sync marker, the end of the
+     * log. A fresh segment id, above those of the segments of this test server.
+     */
+    private static Path dseSegment(Path directory, ByteBuffer mutation) throws IOException
+    {
+        CommitLogDescriptor descriptor = new CommitLogDescriptor(CommitLogDescriptor.VERSION_DSE_68, CommitLog.instance.getCurrentPosition().segmentId + 1000,
+                                                                 null, new EncryptionContext());
+        ByteBuffer buffer = ByteBuffer.allocate(4096 + mutation.remaining());
+        CommitLogDescriptor.writeHeader(buffer, descriptor);
+        int markerPosition = buffer.position();
+        int end = markerPosition + 8 + 4 + 4 + mutation.remaining() + 4;
+        CRC32 crc = new CRC32();
+        FBUtilities.updateChecksumInt(crc, (int) (descriptor.id & 0xFFFFFFFFL));
+        FBUtilities.updateChecksumInt(crc, (int) (descriptor.id >>> 32));
+        FBUtilities.updateChecksumInt(crc, markerPosition);
+        buffer.putInt(end).putInt((int) crc.getValue());
+        crc.reset();
+        FBUtilities.updateChecksumInt(crc, mutation.remaining());
+        buffer.putInt(mutation.remaining()).putInt((int) crc.getValue());
+        crc.update(mutation.duplicate());
+        buffer.put(mutation.duplicate()).putInt((int) crc.getValue());
+        assertThat(buffer.position()).isEqualTo(end);
+        buffer.putInt(0).putInt(0);
+        buffer.flip();
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(bytes);
+        return Files.write(directory.resolve(descriptor.fileName()), bytes);
     }
 
     /**

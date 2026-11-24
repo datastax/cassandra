@@ -15,17 +15,26 @@
  */
 package org.apache.cassandra.batchlog;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.stream.Collectors;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
@@ -40,10 +49,13 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.dht.Murmur3Partitioner;
+import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.metrics.StorageMetrics;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
@@ -415,5 +427,89 @@ public class BatchlogManagerInterceptorTest
         assertEquals(0, BatchlogManager.instance.countBatchesAwaitingInterceptor());
         assertEquals(1, StorageMetrics.hintedBatchlogReplays.getCount() - initialHintedReplays);
         assertEquals(0, StorageMetrics.batchlogReplays.getCount() - initialPlainReplays);
+    }
+
+    /**
+     * A batch awaiting its interceptor whose row no longer decodes with a RuntimeException (a corrupt length) is kept and
+     * its read retried, as an error that cannot be classified always was; one that no longer decodes with an IOException
+     * (cut short) has its callbacks dropped and is deleted, as before, also when the row carries a DSE version; one whose
+     * row carries a version of DSE's range that is none of DSE 6, or an empty version, is kept and retried.
+     */
+    @Test
+    public void testBatchAwaitingInterceptorThatNoLongerDecodes() throws Exception
+    {
+        TableMetadata cfm = Keyspace.open(KEYSPACE1).getColumnFamilyStore(CF_STANDARD1).metadata();
+        TimeUUID corrupt = storeReplayableBatch(cfm, 5678);
+        TimeUUID cut = storeReplayableBatch(cfm, 6789);
+        TimeUUID cutDse = storeReplayableBatch(cfm, 7890);
+        TimeUUID unknownDse = storeReplayableBatch(cfm, 8901);
+        TimeUUID emptyVersion = storeReplayableBatch(cfm, 9012);
+
+        TestInterceptor.failCallbacks = true;
+        BatchlogManager.instance.startBatchlogReplay().get();
+        assertEquals(5, BatchlogManager.instance.countBatchesAwaitingInterceptor());
+
+        // one partition update of the table, then its partition key length, a vint out of range of an int
+        ByteBuffer corruptBytes = ByteBuffer.allocate(1 + 16 + 12);
+        corruptBytes.put((byte) 1).putLong(cfm.id.asUUID().getMostSignificantBits()).putLong(cfm.id.asUUID().getLeastSignificantBits());
+        while (corruptBytes.hasRemaining())
+            corruptBytes.put((byte) 0xF7);
+        corruptBytes.flip();
+        // one partition update of the table, and nothing after its id
+        ByteBuffer cutBytes = ByteBuffer.wrap(Arrays.copyOf(corruptBytes.array(), 1 + 16));
+        String rewrite = "INSERT INTO system.batches (id, mutations, version) VALUES (?, ?, ?) USING TIMESTAMP ?";
+        int version = MessagingService.current_version;
+        executeInternal(rewrite, corrupt, Collections.singletonList(corruptBytes), version, FBUtilities.timestampMicros());
+        executeInternal(rewrite, cut, Collections.singletonList(cutBytes), version, FBUtilities.timestampMicros());
+        // DSE 6.8.1's messaging version, whose layout has an 8-byte timestamp after the table id: cut short too
+        executeInternal(rewrite, cutDse, Collections.singletonList(cutBytes), DseCompat.DSE_681_VERSION, FBUtilities.timestampMicros());
+        // in DSE's range but none of DSE 6's versions
+        executeInternal(rewrite, unknownDse, Collections.singletonList(cutBytes), DseFixtures.UNKNOWN_DSE_VERSION, FBUtilities.timestampMicros());
+        // an empty version value, which CQL accepts for an int column
+        executeInternal("UPDATE system.batches USING TIMESTAMP ? SET version = blobAsInt(0x) WHERE id = ?", FBUtilities.timestampMicros(), emptyVersion);
+
+        TestInterceptor.failCallbacks = false;
+        Logger logger = (Logger) LoggerFactory.getLogger(BatchlogManager.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try
+        {
+            BatchlogManager.instance.startBatchlogReplay().get();
+        }
+        finally
+        {
+            logger.detachAppender(appender);
+            appender.stop();
+        }
+        // the callbacks of the two cut batches are dropped with an ERROR each; the kept ones log none (their retry WARN is
+        // rate limited across batches, so it is not asserted)
+        List<String> errors = appender.list.stream()
+                                           .filter(e -> e.getLevel() == Level.ERROR)
+                                           .map(ILoggingEvent::getFormattedMessage)
+                                           .sorted()
+                                           .collect(Collectors.toList());
+        String dropped = " was replayed but can no longer be deserialized; its remaining interceptor callbacks are dropped";
+        List<String> expected = Arrays.asList("Batch " + cut + dropped, "Batch " + cutDse + dropped);
+        Collections.sort(expected);
+        assertEquals(expected, errors);
+        String select = String.format("SELECT id FROM %s.%s WHERE id = ?", SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.BATCHES);
+        assertEquals(3, BatchlogManager.instance.countBatchesAwaitingInterceptor());
+        assertEquals(3, BatchlogManager.instance.countAllBatches());
+        assertEquals(1, executeInternal(select, corrupt).size());
+        assertEquals(1, executeInternal(select, unknownDse).size());
+        assertEquals(1, executeInternal(select, emptyVersion).size());
+
+        // still kept at the next cycle
+        BatchlogManager.instance.startBatchlogReplay().get();
+        assertEquals(3, BatchlogManager.instance.countBatchesAwaitingInterceptor());
+        assertEquals(3, BatchlogManager.instance.countAllBatches());
+
+        // the operator's removal of the rows lets the retry forget them
+        BatchlogManager.remove(corrupt);
+        BatchlogManager.remove(unknownDse);
+        BatchlogManager.remove(emptyVersion);
+        BatchlogManager.instance.startBatchlogReplay().get();
+        assertEquals(0, BatchlogManager.instance.countBatchesAwaitingInterceptor());
     }
 }
