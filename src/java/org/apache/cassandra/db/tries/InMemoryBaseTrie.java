@@ -1354,6 +1354,8 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         {
             if (data == null)
                 return "uninitialized";
+            if (currentDepth < 0)
+                return "empty";
             StringBuilder sb = new StringBuilder();
             sb.append('@');
             for (int i = 0; i < currentDepth; ++i)
@@ -1574,9 +1576,9 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
             throw new IllegalArgumentException("Return path position " + Cursor.toString(position) + " in non-range trie.");
     }
 
-    /// Map-like put method, using a fast recursive implementation through the key bytes. May run into stack overflow if
-    /// the trie becomes too deep. When the correct position in the trie has been reached, the value will be resolved
-    /// with the given function before being placed in the trie (even if there's no pre-existing content in this trie).
+    /// Map-like put method. It walks the key bytes with an on-heap stack, so keys of any length can be used. When the
+    /// correct position in the trie has been reached, the value will be resolved with the given function before being
+    /// placed in the trie (even if there's no pre-existing content in this trie).
     /// @param key The trie path/key for the given value.
     /// @param value The value being put in the memtable trie. Note that it can be of type different than the element
     /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
@@ -1584,17 +1586,14 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putRecursive(ByteComparable key, R value, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
-    {
-        putRecursiveInternal(key, value, null, transformer);
-    }
+    public abstract <R> void putRecursive(ByteComparable key, R value, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException;
 
 
-    /// Map-like put method for both content slots of a node, using a fast recursive implementation through the key
-    /// bytes. May run into stack overflow if the trie becomes too deep. When the correct position in the trie has been
-    /// reached, each value will be resolved with the given function, together with the content of its slot, before
-    /// being placed in the trie (even if there's no pre-existing content in this trie). The slot before the branch is
-    /// processed first.
+    /// Map-like put method for both content slots of a node. It walks the key bytes using the given `state` as a stack
+    /// so keys of any length can be used. When the correct position in the trie has been reached,
+    /// each value will be resolved with the given function, together with the content of its slot, before being placed
+    /// in the trie (even if there's no pre-existing content in this trie). The slot before the branch is processed
+    /// first.
     /// @param key The trie path/key for the given value.
     /// @param contentBeforeBranch The value being put in the memtable trie in the slot for content presented before the
     /// node's branch. Note that it can be of type different than the element type for this memtable trie. It's up to
@@ -1606,16 +1605,14 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    <R> void putRecursiveInternal(ByteComparable key, R contentBeforeBranch, R contentAfterBranch, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    <R> void putRecursive(ApplyState<T> state, ByteComparable key, R contentBeforeBranch, R contentAfterBranch, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
     {
         if (contentAfterBranch != null && !allowsContentAfterBranch())
             throw new IllegalArgumentException("Content after branch can only be used with range tries.");
 
         try
         {
-            int newRoot = putRecursive(root, key.asComparableBytes(byteComparableVersion), contentBeforeBranch, contentAfterBranch, transformer);
-            if (newRoot != root)
-                root = newRoot;
+            putRecursive(state, key.asComparableBytes(byteComparableVersion), contentBeforeBranch, contentAfterBranch, transformer);
             completeMutation();
         }
         catch (Throwable t)
@@ -1625,31 +1622,52 @@ public abstract class InMemoryBaseTrie<T> extends InMemoryReadTrie<T>
         }
     }
 
-    private <R> int putRecursive(int node, ByteSource key, R contentBeforeBranch, R contentAfterBranch, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
+    private <R> void putRecursive(ApplyState<T> state, ByteSource key, R contentBeforeBranch, R contentAfterBranch, final UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
     {
+        int node = root;
+        // descend along the key
         int transition = key.next();
-        if (transition == ByteSource.END_OF_STREAM)
-            return applyContent(node, contentBeforeBranch, contentAfterBranch, transformer);
+        int statePos = 0;
+        while (transition != ByteSource.END_OF_STREAM)
+        {
+            if (statePos >= state.data.length)
+                state.data = Arrays.copyOf(state.data, state.data.length * 2);
+            state.data[statePos + 0] = node;
+            state.data[statePos + 1] = transition;
+            statePos += 2;
+            node = getChild(node, transition);
+            transition = key.next();
+        }
 
-        int child = getChild(node, transition);
+        // apply new content
+        int newNode = applyContent(node, contentBeforeBranch, contentAfterBranch, transformer);
 
-        int newChild = putRecursive(child, key, contentBeforeBranch, contentAfterBranch, transformer);
-        if (newChild == child)
-            return node;
+        // ascend and attach new nodes, until a node is changed in place
+        while (newNode != node)
+        {
+            if (statePos == 0)
+            {
+                root = newNode;
+                return;
+            }
+            statePos -= 2;
+            node = state.data[statePos + 0];
+            transition = state.data[statePos + 1];
 
-        int skippedContent = followPrefixTransition(node);
-        int attachedChild = !isNull(skippedContent)
-                            ? attachChild(skippedContent, transition, newChild)  // Single path, no copying required
-                            : expandOrCreateChainNode(transition, newChild);
+            int skippedContent = followPrefixTransition(node);
+            int attachedChild = !isNull(skippedContent)
+                                ? attachChild(skippedContent, transition, newNode)  // Single path, no copying required
+                                : expandOrCreateChainNode(transition, newNode);
 
-        return preservePrefix(node, skippedContent, attachedChild, false);
+            newNode = preservePrefix(node, skippedContent, attachedChild, false);
+        }
     }
 
     /// Applies the given content to the node at the end of the key, and returns the node to attach in its place.
     ///
-    /// The same code serves all kinds of tries: plain ones never have content after a branch (which
-    /// [#putRecursiveInternal] checks), and in deletion-aware tries the alternate slot of a prefix node holds a
-    /// deletion branch, which is left alone when there is no content for that slot.
+    /// The same code serves all kinds of tries: plain ones never have content after a branch (which [#putRecursive]
+    /// checks), and in deletion-aware tries the alternate slot of a prefix node holds a deletion branch, which is left
+    /// alone when there is no content for that slot.
     private <R> int applyContent(int node, R contentBeforeBranch, R contentAfterBranch, UpsertTransformer<T, R> transformer) throws TrieSpaceExhaustedException
     {
         if (isNull(node))

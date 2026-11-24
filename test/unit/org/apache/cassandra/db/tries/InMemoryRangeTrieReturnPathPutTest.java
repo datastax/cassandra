@@ -52,7 +52,7 @@ import static org.junit.Assert.assertTrue;
 /// it arrives, and the same nodes getting those after the marker has been put, at the root and below it.
 ///
 /// Each of these is also checked putting both markers of a key with one call of the two-payload `putRecursive`, and
-/// further tests cover what that call gives the transformer for each slot, and removals.
+/// further tests cover what that call gives the transformer for each slot, removals and long keys.
 public class InMemoryRangeTrieReturnPathPutTest
 {
     @BeforeClass
@@ -528,6 +528,24 @@ public class InMemoryRangeTrieReturnPathPutTest
                          sides(actual.applicableRange(comparable(probe))));
         assertEquals(what, skips(expected), skips(actual));
         assertEquals(what, expected.valuesCount(), actual.valuesCount());
+    }
+
+    /// The two-payload put walks keys of any length without recursion.
+    @Test
+    public void testBothSlotsLongKey() throws TrieSpaceExhaustedException
+    {
+        String key = "a".repeat(100_000);
+        InMemoryRangeTrie<TestRangeState> trie = InMemoryRangeTrie.shortLived(VERSION);
+        trie.putRecursive(comparable(key), before(key, -1, 1).state(), after(key, 1, -1).state(), (e, u) -> u);
+        trie.putRecursive(comparable(key + "b"), before(key + "b", 1, 2).state(), after(key + "b", 2, 1).state(), (e, u) -> u);
+        assertEquals(4, trie.valuesCount());
+        assertEquals("2/2", sides(trie.applicableRange(comparable(key + "bc"))));
+        assertEquals("1/1", sides(trie.applicableRange(comparable(key + "c"))));
+
+        trie.putRecursive(comparable(key + "b"), before(key + "b", 1, 2).state(), after(key + "b", 2, 1).state(), (e, u) -> null);
+        trie.putRecursive(comparable(key), before(key, -1, 1).state(), after(key, 1, -1).state(), (e, u) -> null);
+        assertTrue(trie.isEmpty());
+        assertEquals(0, trie.valuesCount());
     }
 
     static InMemoryRangeTrie<TestRangeState> build(List<Marker> markers)

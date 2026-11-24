@@ -150,7 +150,6 @@ public class TrieColumnFilter
                     // include only the subselection
                     for (ColumnSubselection ss : subselection)
                     {
-                        // FIXME: This should be protected against stack overflow.
                         CellPath start = ss.startInclusive();
                         CellPath end = ss.endInclusive();
                         if (start != end)
