@@ -94,7 +94,7 @@ public class JsonPathQueryTest extends SAITester
     {
         createJsonTable();
 
-        beforeAndAfterFlush(() -> {
+        runThenFlushThenCompact(() -> {
             // pk 1 has 'dev' and age 25; pk 2 has only 'admin'; pk 3 has no tags
             assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE doc['$.tags'] != 'dev' OR doc['$.profile.age'] = 35"), row(2), row(3));
             assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE doc['$.tags'] != 'dev' OR doc['$.profile.age'] = 25"), row(1), row(2), row(3));
