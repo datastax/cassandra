@@ -85,6 +85,13 @@ public class CassandraDiskAnn
 
     private final ExplicitThreadLocal<GraphSearcherAccessManager> searchers;
 
+    // The values reported to columnQueryMetrics when the graph was loaded. close() subtracts exactly these, since
+    // the live values can grow while the graph is open (e.g. the compressed vectors' ramBytesUsed() counts PQ
+    // scoring tables once a search creates them).
+    private final long metricsQuantizationBytes;
+    private final long metricsOrdinalsMapBytes;
+    private final long metricsVectorsLoaded;
+
     public CassandraDiskAnn(SSTableContext sstableContext, SegmentMetadata segmentMetadata, PerIndexFiles indexFiles, IndexContext context, OrdinalsMapFactory omFactory) throws IOException
     {
         this.source = sstableContext.sstable().getId();
@@ -162,9 +169,10 @@ public class CassandraDiskAnn
         searchers = ExplicitThreadLocal.withInitial(() -> new GraphSearcherAccessManager(new GraphSearcher(graph)));
 
         // Record metrics for this graph
-        columnQueryMetrics.onGraphLoaded(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
-                                         ordinalsMap.cachedBytesUsed(),
-                                         graph.size(0));
+        metricsQuantizationBytes = compressedVectors == null ? 0 : compressedVectors.ramBytesUsed();
+        metricsOrdinalsMapBytes = ordinalsMap.cachedBytesUsed();
+        metricsVectorsLoaded = graph.size(0);
+        columnQueryMetrics.onGraphLoaded(metricsQuantizationBytes, metricsOrdinalsMapBytes, metricsVectorsLoaded);
     }
 
     public Structure getPostingsStructure()
@@ -307,9 +315,7 @@ public class CassandraDiskAnn
     public void close() throws IOException
     {
         FileUtils.close(ordinalsMap, searchers, graph, graphHandle);
-        columnQueryMetrics.onGraphClosed(compressedVectors == null ? 0 : compressedVectors.ramBytesUsed(),
-                                         ordinalsMap.cachedBytesUsed(),
-                                         graph.size(0));
+        columnQueryMetrics.onGraphClosed(metricsQuantizationBytes, metricsOrdinalsMapBytes, metricsVectorsLoaded);
     }
 
     public OrdinalsView getOrdinalsView()
