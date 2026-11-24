@@ -60,6 +60,7 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.internal.CollatedViewIndexBuilder;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.json.JsonPath;
 import org.apache.cassandra.index.transactions.IndexTransaction;
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.Descriptor;
@@ -492,6 +493,20 @@ public interface Index
      * @return true if this index is capable of supporting such expressions, false otherwise
      */
     boolean supportsExpression(ColumnMetadata column, Operator operator);
+
+    /**
+     * Called to determine whether this index can serve a restriction on the values found at a JSON path of the
+     * specified column (see {@link RowFilter.JsonPathExpression}) using the specified operator.
+     *
+     * @param column the column holding the JSON documents
+     * @param path the normalized JSON path of the restriction
+     * @param operator the operator of the restriction
+     * @return true if this index is capable of supporting such restrictions, false otherwise
+     */
+    default boolean supportsJsonPathExpression(ColumnMetadata column, JsonPath path, Operator operator)
+    {
+        return false;
+    }
 
     /**
      * Returns whether this index does any kind of filtering when the query has multiple contains expressions, assuming

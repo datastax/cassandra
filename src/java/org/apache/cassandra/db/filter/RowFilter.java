@@ -23,8 +23,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -80,10 +82,15 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.exceptions.IncompatibleSchemaException;
 import org.apache.cassandra.exceptions.InvalidPatternException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexRegistry;
+import org.apache.cassandra.index.sai.json.JsonPath;
+import org.apache.cassandra.index.sai.json.JsonPathExtractor;
+import org.apache.cassandra.index.sai.json.JsonPathIndexes;
 import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -1358,7 +1365,7 @@ public class RowFilter
         // VECTOR
         protected enum Kind
         {
-            SIMPLE(0), MAP_COMPARISON(1), UNUSED1(2), CUSTOM(3), USER(4), VECTOR_RADIUS(100);
+            SIMPLE(0), MAP_COMPARISON(1), UNUSED1(2), CUSTOM(3), USER(4), JSON_PATH(5), VECTOR_RADIUS(100);
             private final int val;
             Kind(int v) { val = v; }
             public int getVal() { return val; }
@@ -1371,6 +1378,7 @@ public class RowFilter
                     case 2: return UNUSED1;
                     case 3: return CUSTOM;
                     case 4: return USER;
+                    case 5: return JSON_PATH;
                     case 100: return VECTOR_RADIUS;
                     default: throw new IllegalArgumentException("Unknown index expression kind: " + val);
                 }
@@ -1662,6 +1670,11 @@ public class RowFilter
                         ByteBufferUtil.writeWithShortLength(mexpr.key, out);
                         ByteBufferUtil.writeWithShortLength(mexpr.value, out);
                         break;
+                    case JSON_PATH:
+                        JsonPathExpression jexpr = (JsonPathExpression) expression;
+                        out.writeUTF(jexpr.path.toString());
+                        ByteBufferUtil.writeWithShortLength(jexpr.value, out);
+                        break;
                     case VECTOR_RADIUS:
                         GeoDistanceExpression gexpr = (GeoDistanceExpression) expression;
                         gexpr.distanceOperator.writeTo(out);
@@ -1707,6 +1720,26 @@ public class RowFilter
                         ByteBuffer key = ByteBufferUtil.readWithShortLength(in);
                         ByteBuffer val = ByteBufferUtil.readWithShortLength(in);
                         return new MapComparisonExpression(column, key, operator, val);
+                    case JSON_PATH:
+                        String pathString = in.readUTF();
+                        ByteBuffer jsonValue = ByteBufferUtil.readWithShortLength(in);
+                        JsonPath path;
+                        try
+                        {
+                            path = JsonPath.parse(pathString);
+                        }
+                        catch (IllegalArgumentException e)
+                        {
+                            throw new IncompatibleSchemaException(RequestFailureReason.INCOMPATIBLE_SCHEMA,
+                                                                  "Invalid JSON path " + pathString + " for column " + column.name +
+                                                                  " during deserialization: " + e.getMessage());
+                        }
+                        Optional<AbstractType<?>> valueType = JsonPathIndexes.findIndexedType(metadata, column, path);
+                        if (valueType.isEmpty())
+                            throw new IncompatibleSchemaException(RequestFailureReason.INCOMPATIBLE_SCHEMA,
+                                                                  "No JSON path index on column " + column.name + " for path " +
+                                                                  path + " during deserialization");
+                        return new JsonPathExpression(column, path, valueType.get(), operator, jsonValue);
                     case VECTOR_RADIUS:
                         Operator boundaryOperator = Operator.readFrom(in);
                         ByteBuffer distance = ByteBufferUtil.readWithShortLength(in);
@@ -1737,6 +1770,11 @@ public class RowFilter
                         MapComparisonExpression mexpr = (MapComparisonExpression)expression;
                         size += ByteBufferUtil.serializedSizeWithShortLength(mexpr.key)
                               + ByteBufferUtil.serializedSizeWithShortLength(mexpr.value);
+                        break;
+                    case JSON_PATH:
+                        JsonPathExpression jexpr = (JsonPathExpression) expression;
+                        size += TypeSizes.sizeof(jexpr.path.toString())
+                              + ByteBufferUtil.serializedSizeWithShortLength(jexpr.value);
                         break;
                     case CUSTOM:
                         size += IndexMetadata.serializer.serializedSize(((CustomExpression)expression).targetIndex, version)
@@ -2179,6 +2217,172 @@ public class RowFilter
                 default:
                     throw new AssertionError("Unsupported operator: " + operator);
             }
+        }
+    }
+
+    /**
+     * An expression of the form {@code column['<json path>'] OPERATOR value}, restricting the values found at a JSON
+     * path of a text/ascii column holding JSON documents. The operator can be {@link Operator#EQ},
+     * {@link Operator#NEQ}, {@link Operator#LT}, {@link Operator#LTE}, {@link Operator#GT} or {@link Operator#GTE}.
+     * <p>
+     * The values at the path are extracted as terms of {@link #valueType()} (arrays yield one term per element) and
+     * each restriction is matched independently against them: {@code EQ} and slices are satisfied if any term
+     * satisfies them, {@code NEQ} is satisfied if no term equals the value, including when the path is missing, the
+     * document is malformed or the cell is absent.
+     */
+    public static class JsonPathExpression extends Expression
+    {
+        private final JsonPath path;
+        private final AbstractType<?> valueType;
+        private final JsonPathExtractor extractor;
+
+        /**
+         * Constructs a JsonPathExpression for filtering rows based on a specific JSON path predicate.
+         */
+        public JsonPathExpression(ColumnMetadata column,
+                                  JsonPath path,
+                                  AbstractType<?> valueType,
+                                  Operator operator,
+                                  ByteBuffer value)
+        {
+            super(column, operator, value);
+            assert operator == Operator.EQ || operator == Operator.NEQ || operator.isSlice() : operator;
+            this.path = path;
+            this.valueType = valueType;
+            this.extractor = new JsonPathExtractor(path, valueType);
+        }
+
+        /**
+         * Returns the target JSON path for this expression.
+         */
+        public JsonPath path()
+        {
+            return path;
+        }
+
+        /**
+         * Returns the data type used to interpret and compare extracted JSON terms.
+         */
+        public AbstractType<?> valueType()
+        {
+            return valueType;
+        }
+
+        /**
+         * Validates that the restriction value is non-null and set.
+         */
+        @Override
+        public void validate() throws InvalidRequestException
+        {
+            checkNotNull(value, "Unsupported null value for JSON path restriction on column %s", column.name);
+            checkBindValueSet(value, "Unsupported unset value for JSON path restriction on column %s", column.name);
+        }
+
+        /**
+         * Checks whether the given row satisfies this JSON path restriction.
+         */
+        @Override
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            assert value != null;
+
+            if (row.isStatic() != column.isStatic())
+                return true;
+
+            // NEQ is the negation of EQ: it also matches when there is no document or nothing at the path.
+            boolean anyMatch = anyTermSatisfies(getValue(metadata, partitionKey, row, nowInSec));
+            return anyMatch ^ (operator == Operator.NEQ);
+        }
+
+        /**
+         * Evaluates whether any term extracted from the raw document satisfies the comparison operator against the target value.
+         */
+        private boolean anyTermSatisfies(@Nullable ByteBuffer document)
+        {
+            if (document == null)
+                return false;
+
+            Iterator<ByteBuffer> terms = extractor.extract(document);
+            while (terms.hasNext())
+            {
+                int comp = valueType.compare(terms.next(), value);
+                boolean satisfied;
+                switch (operator)
+                {
+                    case EQ:
+                    case NEQ: // NEQ is inverted in the calling method
+                        satisfied = comp == 0;
+                        break;
+                    case LT:
+                        satisfied = comp < 0;
+                        break;
+                    case LTE:
+                        satisfied = comp <= 0;
+                        break;
+                    case GT:
+                        satisfied = comp > 0;
+                        break;
+                    case GTE:
+                        satisfied = comp >= 0;
+                        break;
+                    default:
+                        throw new AssertionError("Unsupported operator: " + operator);
+                }
+                if (satisfied)
+                    return true;
+            }
+            return false;
+        }
+
+        /**
+         * Formats this expression as a CQL predicate string.
+         */
+        @Override
+        public String toCQLString(Redaction redaction)
+        {
+            return String.format("%s['%s'] %s %s",
+                                 column.name.toCQLString(),
+                                 path.toString().replace("'", "''"),
+                                 operator,
+                                 valueType.toCQLString(value, redaction));
+        }
+
+        /**
+         * Tests equality based on target column, JSON path, operator, and comparison value.
+         */
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o)
+                return true;
+
+            if (!(o instanceof JsonPathExpression))
+                return false;
+
+            JsonPathExpression that = (JsonPathExpression) o;
+
+            return Objects.equal(this.column.name, that.column.name)
+                && Objects.equal(this.path, that.path)
+                && this.operator == that.operator
+                && Objects.equal(this.value, that.value);
+        }
+
+        /**
+         * Computes hash code from column, path, operator, and comparison value.
+         */
+        @Override
+        public int hashCode()
+        {
+            return Objects.hashCode(column.name, path, operator, value);
+        }
+
+        /**
+         * Returns Kind.JSON_PATH for expression serialization and identification.
+         */
+        @Override
+        protected Kind kind()
+        {
+            return Kind.JSON_PATH;
         }
     }
 

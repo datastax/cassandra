@@ -89,6 +89,7 @@ import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
+import org.apache.cassandra.index.sai.json.JsonPath;
 import org.apache.cassandra.index.sai.json.JsonPathIndexes;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
@@ -756,6 +757,29 @@ public class StorageAttachedIndex implements Index
         if (indexContext.isJsonPath())
             return false;
         return dependsOn(column) && indexContext.supports(operator);
+    }
+
+    @Override
+    public boolean supportsExpression(RowFilter.Expression expression)
+    {
+        if (expression instanceof RowFilter.JsonPathExpression)
+        {
+            RowFilter.JsonPathExpression jsonExpression = (RowFilter.JsonPathExpression) expression;
+            return supportsJsonPathExpression(jsonExpression.column(), jsonExpression.path(), jsonExpression.operator());
+        }
+        // A JSON-path index only serves restrictions on its own JSON path.
+        if (indexContext.isJsonPath())
+            return false;
+        return supportsExpression(expression.column(), expression.operator());
+    }
+
+    @Override
+    public boolean supportsJsonPathExpression(ColumnMetadata column, JsonPath path, Operator operator)
+    {
+        return indexContext.isJsonPath()
+               && dependsOn(column)
+               && indexContext.getJsonPath().equals(path)
+               && indexContext.supports(operator);
     }
 
     @Override
