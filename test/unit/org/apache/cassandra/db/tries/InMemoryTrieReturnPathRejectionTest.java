@@ -64,11 +64,11 @@ public class InMemoryTrieReturnPathRejectionTest
     static Trie<String> mergedViewWithDeletionAfterBranch() throws TrieSpaceExhaustedException
     {
         InMemoryTrie<String> live = InMemoryTrie.shortLived(VERSION);
-        live.putRecursive(key("m"), "m", (existing, update) -> update);
-        live.putRecursive(key("mx"), "mx", (existing, update) -> update);
+        live.putSingleton(key("m"), "m", (existing, update) -> update);
+        live.putSingleton(key("mx"), "mx", (existing, update) -> update);
 
         InMemoryRangeTrie<TestRangeState> deletion = InMemoryRangeTrie.shortLived(VERSION);
-        deletion.putRecursive(ByteComparable.EMPTY, new TestRangeState(ByteComparable.EMPTY, false, -1, 1), new TestRangeState(ByteComparable.EMPTY, true, 1, -1), (existing, update) -> update);
+        deletion.putSingleton(ByteComparable.EMPTY, new TestRangeState(ByteComparable.EMPTY, false, -1, 1), new TestRangeState(ByteComparable.EMPTY, true, 1, -1), (existing, update) -> update);
 
         InMemoryDeletionAwareTrie<String, TestRangeState> trie = InMemoryDeletionAwareTrie.shortLived(VERSION);
         InMemoryDeletionAwareTrie<String, TestRangeState>.Mutator<String, TestRangeState> mutator = mutator(trie);
@@ -96,7 +96,7 @@ public class InMemoryTrieReturnPathRejectionTest
         for (boolean ordered : new boolean[]{ false, true })
         {
             InMemoryTrie<String> trie = ordered ? InMemoryTrie.shortLivedOrdered(VERSION) : InMemoryTrie.shortLived(VERSION);
-            trie.putRecursive(key("a"), "a", (existing, update) -> update);
+            trie.putSingleton(key("a"), "a", (existing, update) -> update);
 
             IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
                                                       () -> trie.apply(merged, (existing, update) -> update, features -> false));

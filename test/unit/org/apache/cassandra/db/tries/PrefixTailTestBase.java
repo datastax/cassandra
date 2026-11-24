@@ -321,7 +321,7 @@ public abstract class PrefixTailTestBase<T extends InMemoryBaseTrie<Object>, Q e
 
                 Tail t = new Tail(prefixes[i].asByteComparableArray(VERSION), content);
                 allContent.putAll(content);
-                tail.putRecursive(ByteComparable.EMPTY, t, THROWING_UPSERT);
+                tail.putSingleton(ByteComparable.EMPTY, t, THROWING_UPSERT);
 //            System.out.println(tail.dump(CONTENT_TO_STRING));
 
                 applyPrefixed(tries[k], prefixes[i], tail, THROWING_UPSERT);
@@ -349,7 +349,7 @@ public abstract class PrefixTailTestBase<T extends InMemoryBaseTrie<Object>, Q e
             addToInMemoryTrie(src, content, tail);
 
             Tail t = new Tail(prefixes[i].asByteComparableArray(VERSION), content);
-            tail.putRecursive(ByteComparable.EMPTY, t, THROWING_UPSERT);
+            tail.putSingleton(ByteComparable.EMPTY, t, THROWING_UPSERT);
 //            System.out.println(tail.dump(CONTENT_TO_STRING));
             applyPrefixed(tries[trieIndex], prefixes[i], tail, THROWING_UPSERT);
 
@@ -375,7 +375,7 @@ public abstract class PrefixTailTestBase<T extends InMemoryBaseTrie<Object>, Q e
             T tail = makeInMemoryTrie();
             addToInMemoryTrie(src, content, tail);
 //                        System.out.println(tail.dump(CONTENT_TO_STRING));
-            tail.putRecursive(ByteComparable.EMPTY, 1, THROWING_UPSERT);
+            tail.putSingleton(ByteComparable.EMPTY, 1, THROWING_UPSERT);
             applyPrefixed(trie, prefix, tail,
                        (x, y) -> x instanceof Integer ? (Integer) x + (Integer) y : y);
         }

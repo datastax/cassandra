@@ -109,7 +109,7 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
         InMemoryTrie<Object> trie = InMemoryTrie.shortLived(BYTE_COMPARABLE_VERSION);
         try
         {
-            trie.putRecursive(ByteComparable.EMPTY, deletion, NO_CONFLICT_RESOLVER);
+            trie.putSingleton(ByteComparable.EMPTY, deletion, NO_CONFLICT_RESOLVER);
         }
         catch (TrieSpaceExhaustedException e)
         {
@@ -549,7 +549,7 @@ public class TriePartitionUpdateStage2 extends TrieBackedPartitionStage2 impleme
         {
             try
             {
-                trie.putRecursive(ByteComparable.EMPTY, deletionInfo, NO_CONFLICT_RESOLVER);
+                trie.putSingleton(ByteComparable.EMPTY, deletionInfo, NO_CONFLICT_RESOLVER);
             }
             catch (TrieSpaceExhaustedException e)
             {

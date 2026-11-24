@@ -113,7 +113,7 @@ public class TriePartitionUpdateStage3 extends TrieBackedPartitionStage3 impleme
         InMemoryDeletionAwareTrie<Object, TrieTombstoneMarker> trie = InMemoryDeletionAwareTrie.shortLived(BYTE_COMPARABLE_VERSION);
         try
         {
-            trie.putRecursive(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());
+            trie.putSingleton(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());
         }
         catch (TrieSpaceExhaustedException e)
         {
@@ -618,7 +618,7 @@ public class TriePartitionUpdateStage3 extends TrieBackedPartitionStage3 impleme
         {
             try
             {
-                trie.putRecursive(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());
+                trie.putSingleton(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());
             }
             catch (TrieSpaceExhaustedException e)
             {

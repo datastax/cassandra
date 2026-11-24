@@ -374,12 +374,12 @@ public class DeletionAwareTailTrieTest
 
             // Add live data at partition/key1, partition/key2, partition/key3
 
-            trie.putRecursive(key1, value1, (e, u) -> u);
-            trie.putRecursive(key3, value3, (e, u) -> u);
-            trie.putRecursive(key4, value4, (e, u) -> u);
-            trie.putRecursive(key5, value5, (e, u) -> u);
-            trie.putRecursive(key6, value6, (e, u) -> u);
-            trie.putRecursive(key7, value7, (e, u) -> u);
+            trie.putSingleton(key1, value1, (e, u) -> u);
+            trie.putSingleton(key3, value3, (e, u) -> u);
+            trie.putSingleton(key4, value4, (e, u) -> u);
+            trie.putSingleton(key5, value5, (e, u) -> u);
+            trie.putSingleton(key6, value6, (e, u) -> u);
+            trie.putSingleton(key7, value7, (e, u) -> u);
 
             // Deletion at key2
             trie.apply(DeletionAwareTrie.deletedRange(key2,

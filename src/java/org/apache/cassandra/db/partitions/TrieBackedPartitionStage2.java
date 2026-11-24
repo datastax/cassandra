@@ -659,7 +659,7 @@ public class TrieBackedPartitionStage2 implements Partition
         public ContentBuilder complete() throws TrieSpaceExhaustedException
         {
             MutableDeletionInfo deletionInfo = deletionBuilder.build();
-            trie.putRecursive(ByteComparable.EMPTY, deletionInfo, NO_CONFLICT_RESOLVER);    // will throw if called more than once
+            trie.putSingleton(ByteComparable.EMPTY, deletionInfo, NO_CONFLICT_RESOLVER);    // will throw if called more than once
             // dataSize does not include the deletion info bytes
             return this;
         }

@@ -339,7 +339,7 @@ public class TrieBackedPartitionMemtableAccountingTest
                InMemoryDeletionAwareTrie.longLived(TrieBackedPartition.BYTE_COMPARABLE_VERSION, bufferTypeFor(allocationType), opOrder,
                                                    new TrieMemtable.TrieSerializer(cellDataBufferManager, null));
             TriePartitionUpdater updater = new TriePartitionUpdater(null, trie);
-            trie.putRecursive(ByteComparable.EMPTY, new TrieMemtable.PartitionData(null), (x, y) -> y);
+            trie.putSingleton(ByteComparable.EMPTY, new TrieMemtable.PartitionData(null), (x, y) -> y);
 
             // For each update, apply it and verify the allocator is positive
             long unreleasable = updates.stream().mapToLong(updateUntyped -> {
@@ -394,7 +394,7 @@ public class TrieBackedPartitionMemtableAccountingTest
             InMemoryDeletionAwareTrie.longLived(TrieBackedPartition.BYTE_COMPARABLE_VERSION, bufferTypeFor(allocationType), opOrder,
                                                 new TrieMemtable.TrieSerializer(cellDataBufferManager, null));
             TriePartitionUpdater recreatedUpdater = new TriePartitionUpdater(null, recreatedTrie);
-            recreatedTrie.putRecursive(ByteComparable.EMPTY, new TrieMemtable.PartitionData(null), (x, y) -> y);
+            recreatedTrie.putSingleton(ByteComparable.EMPTY, new TrieMemtable.PartitionData(null), (x, y) -> y);
             try (UnfilteredRowIterator iter = partition.unfilteredIterator())
             {
                 TriePartitionUpdate update = TriePartitionUpdate.fromIterator(iter);

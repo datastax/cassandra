@@ -347,10 +347,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putRecursive(ByteComparable key, R value, final UpsertTransformer<S, R> transformer)
+    public <R> void putSingleton(ByteComparable key, R value, final UpsertTransformer<S, R> transformer)
     throws TrieSpaceExhaustedException
     {
-        putRecursive(applyState, key, value, null, transformer);
+        putSingleton(applyState, key, value, null, transformer);
     }
 
     /// Map-like put method. It walks the key bytes with an on-heap stack, so keys of any length can be used. When the
@@ -369,10 +369,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putRecursive(ByteComparable key, R value, boolean contentAfterBranch, final UpsertTransformer<S, R> transformer)
+    public <R> void putSingleton(ByteComparable key, R value, boolean contentAfterBranch, final UpsertTransformer<S, R> transformer)
     throws TrieSpaceExhaustedException
     {
-        putRecursive(applyState, key, contentAfterBranch ? null : value, contentAfterBranch ? value : null, transformer);
+        putSingleton(applyState, key, contentAfterBranch ? null : value, contentAfterBranch ? value : null, transformer);
     }
 
     /// Map-like put method for both content slots of a node, e.g. the start and the end of a range that covers the
@@ -395,10 +395,10 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putRecursive(ByteComparable key, R contentBeforeBranch, R contentAfterBranch, final UpsertTransformer<S, R> transformer)
+    public <R> void putSingleton(ByteComparable key, R contentBeforeBranch, R contentAfterBranch, final UpsertTransformer<S, R> transformer)
     throws TrieSpaceExhaustedException
     {
-        putRecursive(applyState, key, contentBeforeBranch, contentAfterBranch, transformer);
+        putSingleton(applyState, key, contentBeforeBranch, contentAfterBranch, transformer);
     }
 
     /// Reused storage for the state of application of mutations. This stores the backtracking path, including changes

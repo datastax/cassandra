@@ -281,7 +281,7 @@ class TestRangeState implements RangeState<TestRangeState>
                 ByteComparable pos = i.position;
                 if (pos == null)
                     pos = ByteComparable.EMPTY;
-                trie.putRecursive(pos, i, i.appliesAfter, (ex, n) -> n);
+                trie.putSingleton(pos, i, i.appliesAfter, (ex, n) -> n);
             }
             catch (TrieSpaceExhaustedException e)
             {

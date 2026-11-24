@@ -754,10 +754,10 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putRecursive(ByteComparable key, R value, final UpsertTransformer<T, R> transformer)
+    public <R> void putSingleton(ByteComparable key, R value, final UpsertTransformer<T, R> transformer)
     throws TrieSpaceExhaustedException
     {
-        putRecursive(applyState, key, value, null, transformer);
+        putSingleton(applyState, key, value, null, transformer);
     }
 
     private class DumpCursor extends InMemoryReadTrie<T>.DumpCursor<DeletionAwareInMemoryCursor<T, D>> implements DeletionAwareCursor<String, D>

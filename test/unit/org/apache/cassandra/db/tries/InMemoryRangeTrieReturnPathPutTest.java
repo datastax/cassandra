@@ -51,7 +51,7 @@ import static org.junit.Assert.assertTrue;
 /// The puts cover a node that has a child, more than one child, or content before its branch when the marker after
 /// it arrives, and the same nodes getting those after the marker has been put, at the root and below it.
 ///
-/// Each of these is also checked putting both markers of a key with one call of the two-payload `putRecursive`, and
+/// Each of these is also checked putting both markers of a key with one call of the two-payload `putSingleton`, and
 /// further tests cover what that call gives the transformer for each slot, removals and long keys.
 public class InMemoryRangeTrieReturnPathPutTest
 {
@@ -224,7 +224,7 @@ public class InMemoryRangeTrieReturnPathPutTest
     /// applicable ranges of the [#PROBES] against `expectedApplicable`, and the states after skips against the trie
     /// built in walk order.
     ///
-    /// Then does the same putting the markers of each key with a single call of the two-payload `putRecursive`, which
+    /// Then does the same putting the markers of each key with a single call of the two-payload `putSingleton`, which
     /// is given `null` for a slot the key has no marker for.
     static void check(String[] expectedApplicable, Marker... markersInWalkOrder)
     {
@@ -304,7 +304,7 @@ public class InMemoryRangeTrieReturnPathPutTest
             for (Marker[] pair : pairs)
             {
                 String key = pair[0] != null ? pair[0].key : pair[1].key;
-                trie.putRecursive(comparable(key), state(pair[0]), state(pair[1]), (existing, update) -> update);
+                trie.putSingleton(comparable(key), state(pair[0]), state(pair[1]), (existing, update) -> update);
             }
         }
         catch (TrieSpaceExhaustedException e)
@@ -350,7 +350,7 @@ public class InMemoryRangeTrieReturnPathPutTest
                     continue;
 
                 List<String> calls = new ArrayList<>();
-                trie.putRecursive(comparable("a"), putBefore, putAfter, (e, u) -> {
+                trie.putSingleton(comparable("a"), putBefore, putAfter, (e, u) -> {
                     calls.add(e + " -> " + u);
                     assertTrue("Update " + u + " given for the wrong slot", u == putBefore || u == putAfter);
                     return u;
@@ -389,12 +389,12 @@ public class InMemoryRangeTrieReturnPathPutTest
         {
             InMemoryRangeTrie<TestRangeState> trie = build(Arrays.asList(branch));
             // a sibling with content, so that the path to "a" exists before the put for an empty branch
-            trie.putRecursive(comparable("b"), before("b", -1, 6).state(), after("b", 6, -1).state(), (e, u) -> u);
+            trie.putSingleton(comparable("b"), before("b", -1, 6).state(), after("b", 6, -1).state(), (e, u) -> u);
 
             List<String> calls = new ArrayList<>();
             Marker start = before("a", -1, 3);
             Marker end = after("a", 3, -1);
-            trie.putRecursive(comparable("a"), start.state(), end.state(), (e, u) -> {
+            trie.putSingleton(comparable("a"), start.state(), end.state(), (e, u) -> {
                 calls.add(e + " -> " + u);
                 return u;
             });
@@ -425,23 +425,23 @@ public class InMemoryRangeTrieReturnPathPutTest
     {
         // Both slots of "a" with a child: the prefix node goes, the child stays.
         InMemoryRangeTrie<TestRangeState> trie = build(Arrays.asList(before("a", -1, 1), before("ab", 1, 2), after("ab", 2, 1), after("a", 1, -1)));
-        trie.putRecursive(comparable("a"), before("a", -1, 1).state(), after("a", 1, -1).state(), (e, u) -> {
+        trie.putSingleton(comparable("a"), before("a", -1, 1).state(), after("a", 1, -1).state(), (e, u) -> {
             assertNotNull(e);
             return null;
         });
         // "ab" now has to start and end the range itself.
-        trie.putRecursive(comparable("ab"), before("ab", -1, 2).state(), after("ab", 2, -1).state(), (e, u) -> u);
+        trie.putSingleton(comparable("ab"), before("ab", -1, 2).state(), after("ab", 2, -1).state(), (e, u) -> u);
         assertEquals(trie.dump(), Arrays.asList("\"ab\" " + before("ab", -1, 2).state(), "\"ab\" " + after("ab", 2, -1).state()), entries(trie, Direction.FORWARD));
         assertEquals(2, trie.valuesCount());
 
         // Removing those, which sit in a prefix node with no child, at the end of a chain, empties the trie.
-        trie.putRecursive(comparable("ab"), before("ab", -1, 2).state(), after("ab", 2, -1).state(), (e, u) -> null);
+        trie.putSingleton(comparable("ab"), before("ab", -1, 2).state(), after("ab", 2, -1).state(), (e, u) -> null);
         assertTrue(trie.dump(), trie.isEmpty());
         assertEquals(0, trie.valuesCount());
 
         // Removing the range at "a" leaves its sibling, in a node that has only one child left.
         trie = build(Arrays.asList(before("a", -1, 1), after("a", 1, -1), before("b", -1, 2), after("b", 2, -1)));
-        trie.putRecursive(comparable("a"), before("a", -1, 1).state(), after("a", 1, -1).state(), (e, u) -> null);
+        trie.putSingleton(comparable("a"), before("a", -1, 1).state(), after("a", 1, -1).state(), (e, u) -> null);
         assertEquals(trie.dump(), Arrays.asList("\"b\" " + before("b", -1, 2).state(), "\"b\" " + after("b", 2, -1).state()), entries(trie, Direction.FORWARD));
         assertEquals("2/2", sides(trie.applicableRange(comparable("ba"))));
         assertEquals("-", sides(trie.applicableRange(comparable("ab"))));
@@ -454,21 +454,21 @@ public class InMemoryRangeTrieReturnPathPutTest
         {
             trie = build(Arrays.asList(shape));
             Marker child = shape[shape.length - 2];
-            trie.putRecursive(comparable(child.key), child.state(), null, (e, u) -> null);
+            trie.putSingleton(comparable(child.key), child.state(), null, (e, u) -> null);
             String what = Arrays.toString(shape) + '\n' + trie.dump();
             assertEquals(what, shape.length - 1, trie.valuesCount());
             // Make the range valid again with a start at the root if needed, and check the walks.
             List<String> expected = new ArrayList<>();
             if (shape.length == 2)
             {
-                trie.putRecursive(comparable(""), before("", -1, 1).state(), null, (e, u) -> u);
+                trie.putSingleton(comparable(""), before("", -1, 1).state(), null, (e, u) -> u);
                 expected.add("\"\" " + before("", -1, 1).state());
             }
             else
                 expected.add("\"a\" " + before("a", -1, 1).state());
             Marker end = shape[shape.length - 1];
             if (shape.length == 3) // the end of the range moves to the left side of the start
-                trie.putRecursive(comparable("a"), null, after("a", 1, -1).state(), (e, u) -> u);
+                trie.putSingleton(comparable("a"), null, after("a", 1, -1).state(), (e, u) -> u);
             expected.add("\"a\" " + (shape.length == 3 ? after("a", 1, -1) : end).state());
             what = Arrays.toString(shape) + '\n' + trie.dump();
             assertEquals(what, expected, entries(trie, Direction.FORWARD));
@@ -478,8 +478,8 @@ public class InMemoryRangeTrieReturnPathPutTest
             assertEquals(what, "-", sides(trie.applicableRange(comparable("b"))));
 
             // and the content can still be removed, emptying the trie
-            trie.putRecursive(comparable("a"), before("a", -1, 1).state(), after("a", 1, -1).state(), (e, u) -> null);
-            trie.putRecursive(comparable(""), before("", -1, 1).state(), null, (e, u) -> null);
+            trie.putSingleton(comparable("a"), before("a", -1, 1).state(), after("a", 1, -1).state(), (e, u) -> null);
+            trie.putSingleton(comparable(""), before("", -1, 1).state(), null, (e, u) -> null);
             assertTrue(trie.dump(), trie.isEmpty());
         }
     }
@@ -497,18 +497,18 @@ public class InMemoryRangeTrieReturnPathPutTest
                 List<Marker> expected;
                 if (removeAfter)
                 {
-                    trie.putRecursive(comparable(key), null, after(key, 1, -1).state(), (e, u) -> null);
+                    trie.putSingleton(comparable(key), null, after(key, 1, -1).state(), (e, u) -> null);
                     // end the range somewhere after the key's branch instead
-                    trie.putRecursive(comparable("b"), null, after("b", 1, -1).state(), (e, u) -> u);
+                    trie.putSingleton(comparable("b"), null, after("b", 1, -1).state(), (e, u) -> u);
                     expected = Arrays.asList(before(key, -1, 1), after("b", 1, -1));
                 }
                 else
                 {
-                    trie.putRecursive(comparable(key), before(key, -1, 1).state(), null, (e, u) -> null);
+                    trie.putSingleton(comparable(key), before(key, -1, 1).state(), null, (e, u) -> null);
                     // start the range at the root instead
                     if (key.isEmpty())
                         continue; // nothing left to start the range before
-                    trie.putRecursive(comparable(""), before("", -1, 1).state(), null, (e, u) -> u);
+                    trie.putSingleton(comparable(""), before("", -1, 1).state(), null, (e, u) -> u);
                     expected = Arrays.asList(before("", -1, 1), after(key, 1, -1));
                 }
                 assertSameAs(build(expected), trie, (removeAfter ? "after" : "before") + " removed at \"" + key + '"');
@@ -536,14 +536,14 @@ public class InMemoryRangeTrieReturnPathPutTest
     {
         String key = "a".repeat(100_000);
         InMemoryRangeTrie<TestRangeState> trie = InMemoryRangeTrie.shortLived(VERSION);
-        trie.putRecursive(comparable(key), before(key, -1, 1).state(), after(key, 1, -1).state(), (e, u) -> u);
-        trie.putRecursive(comparable(key + "b"), before(key + "b", 1, 2).state(), after(key + "b", 2, 1).state(), (e, u) -> u);
+        trie.putSingleton(comparable(key), before(key, -1, 1).state(), after(key, 1, -1).state(), (e, u) -> u);
+        trie.putSingleton(comparable(key + "b"), before(key + "b", 1, 2).state(), after(key + "b", 2, 1).state(), (e, u) -> u);
         assertEquals(4, trie.valuesCount());
         assertEquals("2/2", sides(trie.applicableRange(comparable(key + "bc"))));
         assertEquals("1/1", sides(trie.applicableRange(comparable(key + "c"))));
 
-        trie.putRecursive(comparable(key + "b"), before(key + "b", 1, 2).state(), after(key + "b", 2, 1).state(), (e, u) -> null);
-        trie.putRecursive(comparable(key), before(key, -1, 1).state(), after(key, 1, -1).state(), (e, u) -> null);
+        trie.putSingleton(comparable(key + "b"), before(key + "b", 1, 2).state(), after(key + "b", 2, 1).state(), (e, u) -> null);
+        trie.putSingleton(comparable(key), before(key, -1, 1).state(), after(key, 1, -1).state(), (e, u) -> null);
         assertTrue(trie.isEmpty());
         assertEquals(0, trie.valuesCount());
     }
@@ -554,7 +554,7 @@ public class InMemoryRangeTrieReturnPathPutTest
         try
         {
             for (Marker marker : markers)
-                trie.putRecursive(comparable(marker.key), marker.state(), marker.afterBranch, (existing, update) -> update);
+                trie.putSingleton(comparable(marker.key), marker.state(), marker.afterBranch, (existing, update) -> update);
         }
         catch (TrieSpaceExhaustedException e)
         {

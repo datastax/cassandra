@@ -1391,7 +1391,7 @@ public class TrieBackedRow extends AbstractRow
 
             try
             {
-                data.putRecursive(ByteComparable.EMPTY, (info), (x, y) -> y);
+                data.putSingleton(ByteComparable.EMPTY, (info), (x, y) -> y);
             }
             catch (TrieSpaceExhaustedException e)
             {
@@ -1434,12 +1434,12 @@ public class TrieBackedRow extends AbstractRow
                 if (cellDeletion != null && cellDeletion.deletes(cell))
                     return;
 
-                data.putRecursive(key, cell, (x, y) -> Cells.reconcile((Cell<?>) x, y));
+                data.putSingleton(key, cell, (x, y) -> Cells.reconcile((Cell<?>) x, y));
 
                 if (path != null)
-                    data.putRecursive(columnKey(columnIds, cell.column), COMPLEX_COLUMN_MARKER, Builder::addIfNotPresent);
+                    data.putSingleton(columnKey(columnIds, cell.column), COMPLEX_COLUMN_MARKER, Builder::addIfNotPresent);
 
-                data.putRecursive(ByteComparable.EMPTY, LivenessInfo.EMPTY, Builder::addIfNotPresent);
+                data.putSingleton(ByteComparable.EMPTY, LivenessInfo.EMPTY, Builder::addIfNotPresent);
             }
             catch (TrieSpaceExhaustedException e)
             {

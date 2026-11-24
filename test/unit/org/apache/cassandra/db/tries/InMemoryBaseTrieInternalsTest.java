@@ -427,7 +427,7 @@ public class InMemoryBaseTrieInternalsTest
             trie = InMemoryTrie.shortLived(ByteComparable.Version.OSS50);
             int first = transitions.length - count;
             for (int i = first; i < transitions.length; ++i)
-                trie.putRecursive(ByteComparable.preencoded(ByteComparable.Version.OSS50, new byte[]{ (byte) transitions[i] }),
+                trie.putSingleton(ByteComparable.preencoded(ByteComparable.Version.OSS50, new byte[]{ (byte) transitions[i] }),
                                   "v" + i,
                                   (x, y) -> y);
 

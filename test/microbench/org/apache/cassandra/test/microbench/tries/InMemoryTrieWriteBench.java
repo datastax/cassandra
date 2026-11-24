@@ -80,7 +80,7 @@ public class InMemoryTrieWriteBench
         {
             long l = current;
             buf.putLong(keyLength - 8, l);
-            trie.putRecursive(v -> ByteSource.preencoded(buf), Byte.valueOf((byte) (l >> 56)), resolver);
+            trie.putSingleton(v -> ByteSource.preencoded(buf), Byte.valueOf((byte) (l >> 56)), resolver);
         }
         if (PRINT_SIZES)
         {
@@ -101,7 +101,7 @@ public class InMemoryTrieWriteBench
         for (long current = 0; current < count; ++current)
         {
             rand.nextBytes(buf);
-            trie.putRecursive(v -> ByteSource.preencoded(buf), Byte.valueOf(buf[0]), resolver);
+            trie.putSingleton(v -> ByteSource.preencoded(buf), Byte.valueOf(buf[0]), resolver);
         }
         if (PRINT_SIZES)
         {

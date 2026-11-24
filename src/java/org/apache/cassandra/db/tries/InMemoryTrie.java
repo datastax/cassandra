@@ -45,7 +45,7 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 ///
 ///
 ///     Additionally, the class provides several simpler write methods for efficiency and convenience:
-///   -  [#putRecursive(ByteComparable,Object,UpsertTransformer)] inserts a single value using a recursive walk with an
+///   -  [#putSingleton(ByteComparable,Object,UpsertTransformer)] inserts a single value using a recursive walk with an
 ///     on-heap stack. It cannot provide consistency (single-path writes are always atomic). The recursion state is not
 ///     kept in the CPU stack, so it can process keys of any length.
 ///
@@ -471,24 +471,9 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
     /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putRecursive(ByteComparable key, R value, final UpsertTransformer<T, R> transformer)
+    public <R> void putSingleton(ByteComparable key, R value, final UpsertTransformer<T, R> transformer)
     throws TrieSpaceExhaustedException
     {
-        putRecursive(applyState, key, value, null, transformer);
-    }
-
-    /// Map-like put method, the same as [#putRecursive(ByteComparable,Object,UpsertTransformer)].
-    /// @param key the trie path/key for the given value.
-    /// @param value the value being put in the memtable trie. Note that it can be of type different than the element
-    /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
-    /// the memtable trie.
-    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
-    /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
-    /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putSingleton(ByteComparable key,
-                                 R value,
-                                 UpsertTransformer<T, ? super R> transformer) throws TrieSpaceExhaustedException
-    {
-        putRecursive(key, value, transformer);
+        putSingleton(applyState, key, value, null, transformer);
     }
 }

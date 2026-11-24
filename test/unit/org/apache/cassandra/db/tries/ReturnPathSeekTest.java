@@ -79,7 +79,7 @@ public class ReturnPathSeekTest
         if (inMemorySingleton)
         {
             InMemoryTrie<String> tt = InMemoryTrie.shortLivedOrdered(VERSION);
-            tt.putRecursive(e, v, (x, y) -> y);
+            tt.putSingleton(e, v, (x, y) -> y);
             return tt;
         }
         else
@@ -135,7 +135,7 @@ public class ReturnPathSeekTest
             ByteComparable.Preencoded e = TrieUtil.directComparable(test);
             System.out.println("Adding " + asString(e) + ": " + test);
             if (inMemorySingleton)
-                trie.putRecursive(e, test, (x, y) -> y);
+                trie.putSingleton(e, test, (x, y) -> y);
             else
                 trie.mutator((String x, String y) -> y, Predicates.alwaysFalse()).apply(makeSingleton(e, test));
         }

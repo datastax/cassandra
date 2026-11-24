@@ -293,7 +293,7 @@ extends PrefixTailTestBase<InMemoryDeletionAwareTrie<Object, TestRangeState>,
                                                      true,
                                                      VERSION,
                                                      deletion));
-        source.putRecursive(directComparable(dataKey), data, (a, b) -> b);
+        source.putSingleton(directComparable(dataKey), data, (a, b) -> b);
         return source;
     }
 }

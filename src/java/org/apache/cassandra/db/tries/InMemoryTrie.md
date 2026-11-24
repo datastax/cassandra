@@ -529,10 +529,10 @@ trie is built to support this by making sure that any modification of a node is 
 concurrently.
 
 The main method for mutating a `InMemoryTrie` is `apply`, which merges the structure of another `Trie` in. 
-`InMemoryTrie` also provides simpler recursive method of modification, `putRecursive`, which creates a single 
-`key -> value` mapping in the trie. We will describe the mutation process starting with a `putRecursive` example.
+`InMemoryTrie` also provides simpler recursive method of modification, `putSingleton`, which creates a single 
+`key -> value` mapping in the trie. We will describe the mutation process starting with a `putSingleton` example.
 
-### Adding a new key -> value mapping using `putRecursive`
+### Adding a new key -> value mapping using `putSingleton`
 
 Suppose we want to insert the value `traverse` into the trie described in the previous paragraph. The recursive
 insertion process walks the trie to find corresponding existing nodes for the ones in the path to be inserted.
@@ -785,7 +785,7 @@ Atomicity of writes is usually a desirable property. Atomicity means that reader
 of a mutation, or all of them, i.e. that they can never see some part of an update and miss another.
 
 We can achieve this by making sure that the application of a mutation has only one attachment point. This is always the
-case for single-path updates (`putRecursive` or `apply` where no mutation node has more than one child). We can achieve
+case for single-path updates (`putSingleton` or `apply` where no mutation node has more than one child). We can achieve
 the same for branching updates if we "force-copy" all memtable trie nodes at or below the topmost branching node of
 the mutation trie.
 

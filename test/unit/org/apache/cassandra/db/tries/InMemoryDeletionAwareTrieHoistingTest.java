@@ -93,10 +93,10 @@ public class InMemoryDeletionAwareTrieHoistingTest
         DeletionAwareTestBase.assertDeletionAwareEqual("hoisted", expected, trie);
     }
 
-    /// `putRecursive` at the node where a deletion branch is rooted adds, changes and removes the node's live content
+    /// `putSingleton` at the node where a deletion branch is rooted adds, changes and removes the node's live content
     /// and leaves the deletion branch in place.
     @Test
-    public void testPutRecursiveAtDeletionBranchRoot() throws TrieSpaceExhaustedException
+    public void testPutSingletonAtDeletionBranchRoot() throws TrieSpaceExhaustedException
     {
         for (String at : new String[]{ "", "40", "4050" })
         {
@@ -115,23 +115,23 @@ public class InMemoryDeletionAwareTrieHoistingTest
                                            new LivePoint(hex(at + "30"), 1));
             assertPoints("before put at " + at, rest, trie);
 
-            trie.putRecursive(hex(at), new LivePoint(hex(at), 2), (e, u) -> u);
+            trie.putSingleton(hex(at), new LivePoint(hex(at), 2), (e, u) -> u);
             List<DataPoint> withContent = new ArrayList<>();
             withContent.add(new LivePoint(hex(at), 2));
             withContent.addAll(rest);
             assertPoints("put at " + at, withContent, trie);
 
-            trie.putRecursive(hex(at), new LivePoint(hex(at), 3), (e, u) -> u);
+            trie.putSingleton(hex(at), new LivePoint(hex(at), 3), (e, u) -> u);
             withContent.set(0, new LivePoint(hex(at), 3));
             assertPoints("update at " + at, withContent, trie);
 
-            trie.putRecursive(hex(at), new LivePoint(hex(at), 4), (e, u) -> null);
+            trie.putSingleton(hex(at), new LivePoint(hex(at), 4), (e, u) -> null);
             assertPoints("removal at " + at, rest, trie);
 
             // Remove the child too; the node keeps the deletion branch.
-            trie.putRecursive(hex(at + "30"), new LivePoint(hex(at + "30"), 1), (e, u) -> null);
+            trie.putSingleton(hex(at + "30"), new LivePoint(hex(at + "30"), 1), (e, u) -> null);
             assertPoints("removal of child of " + at, rest.subList(0, 2), trie);
-            trie.putRecursive(hex(at), new LivePoint(hex(at), 5), (e, u) -> u);
+            trie.putSingleton(hex(at), new LivePoint(hex(at), 5), (e, u) -> u);
             withContent = new ArrayList<>();
             withContent.add(new LivePoint(hex(at), 5));
             withContent.addAll(rest.subList(0, 2));

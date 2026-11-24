@@ -321,7 +321,7 @@ public class TrieBackedPartition implements Partition
     {
         try
         {
-            trie.putRecursive(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());
+            trie.putSingleton(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());
         }
         catch (TrieSpaceExhaustedException e)
         {
