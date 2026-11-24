@@ -29,6 +29,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.SortedMap;
@@ -88,6 +89,7 @@ import org.apache.cassandra.index.sai.disk.StorageAttachedIndexWriter;
 import org.apache.cassandra.index.sai.disk.format.IndexDescriptor;
 import org.apache.cassandra.index.sai.disk.format.Version;
 import org.apache.cassandra.index.sai.disk.v1.IndexWriterConfig;
+import org.apache.cassandra.index.sai.json.JsonPathIndexes;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
 import org.apache.cassandra.index.sai.view.View;
 import org.apache.cassandra.index.transactions.IndexTransaction;
@@ -216,7 +218,9 @@ public class StorageAttachedIndex implements Index
                                                                      IndexWriterConfig.OPTIMIZE_FOR,
                                                                      LuceneAnalyzer.INDEX_ANALYZER,
                                                                      LuceneAnalyzer.QUERY_ANALYZER,
-                                                                     AnalyzerEqOperatorSupport.OPTION);
+                                                                     AnalyzerEqOperatorSupport.OPTION,
+                                                                     JsonPathIndexes.JSON_PATH,
+                                                                     JsonPathIndexes.JSON_TYPE);
 
     // this does not include vectors because each Vector declaration is a separate type instance
     public static final Set<CQL3Type> SUPPORTED_TYPES = ImmutableSet.of(CQL3Type.Native.ASCII, CQL3Type.Native.BIGINT, CQL3Type.Native.DATE,
@@ -305,6 +309,11 @@ public class StorageAttachedIndex implements Index
             throw new InvalidRequestException("Failed to retrieve target column for: " + targetColumn);
         }
 
+        boolean isJsonPath = JsonPathIndexes.isJsonPathIndex(options);
+        if (isJsonPath)
+            JsonPathIndexes.validate(options, target);
+        String jsonPath = JsonPathIndexes.normalizedPathOrNull(options);
+
         // Check for duplicate indexes considering both target and analyzer configuration
         boolean isAnalyzed = AbstractAnalyzer.isAnalyzed(options);
         long duplicateCount = metadata.indexes.stream()
@@ -316,6 +325,8 @@ public class StorageAttachedIndex implements Index
                                                   if (existingTarget == null || !existingTarget.equals(target))
                                                       return false;
                                                   // Also allow different indexes if one is analyzed and the other isn't
+                                                  if (!Objects.equals(jsonPath, JsonPathIndexes.normalizedPathOrNull(index.options)))
+                                                      return false;
                                                   return isAnalyzed == AbstractAnalyzer.isAnalyzed(index.options);
                                               })
                                               .count();
@@ -332,6 +343,9 @@ public class StorageAttachedIndex implements Index
                     logger.warn("Schema contains an invalid index analyzer on primary key column, allowed for backwards compatibility: " + target.left);
             }
         }
+
+        if (isJsonPath)
+            return Collections.emptyMap();
 
         AbstractType<?> type = TypeUtil.cellValueType(target.left, target.right);
 
