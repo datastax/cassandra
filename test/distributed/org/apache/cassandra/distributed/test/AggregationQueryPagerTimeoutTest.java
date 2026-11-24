@@ -17,7 +17,9 @@
 package org.apache.cassandra.distributed.test;
 
 import java.util.Collections;
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -29,10 +31,21 @@ import com.datastax.driver.core.SocketOptions;
 import com.datastax.driver.core.exceptions.ReadFailureException;
 import com.datastax.driver.core.exceptions.ReadTimeoutException;
 import com.datastax.driver.core.policies.FallthroughRetryPolicy;
+import net.bytebuddy.ByteBuddy;
+import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
+import net.bytebuddy.implementation.MethodDelegation;
+import net.bytebuddy.implementation.bind.annotation.SuperCall;
+import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.distributed.Cluster;
 import org.apache.cassandra.distributed.api.ConsistencyLevel;
 import org.apache.cassandra.distributed.shared.WithProperties;
+import org.apache.cassandra.service.QueryState;
+import org.apache.cassandra.transport.Dispatcher;
+import org.apache.cassandra.transport.messages.ResultMessage;
 
+import static net.bytebuddy.matcher.ElementMatchers.named;
+import static net.bytebuddy.matcher.ElementMatchers.takesArguments;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TEST_READ_ITERATION_DELAY_MS;
 import static org.apache.cassandra.distributed.api.Feature.GOSSIP;
 import static org.apache.cassandra.distributed.api.Feature.NATIVE_PROTOCOL;
@@ -46,7 +59,6 @@ public class AggregationQueryPagerTimeoutTest extends TestBaseImpl
 {
     private static final int AGGREGATION_NATIVE_TRANSPORT_TIMEOUT_MILLIS = 2000;
     private static final int AGGREGATION_READ_TIMEOUT_MILLIS = 1000;
-    private static final int AGGREGATION_ROWS = 100;
     /**
      * Delay injected by {@code TEST_READ_ITERATION_DELAY_MS} for every partition and every row a replica reads.
      */
@@ -69,7 +81,7 @@ public class AggregationQueryPagerTimeoutTest extends TestBaseImpl
     public void aggregationOutlivesNativeTransportAndReadTimeouts() throws Throwable
     {
         AggregationResult result = runAggregation("60000ms", AGGREGATION_NATIVE_TRANSPORT_TIMEOUT_MILLIS, AGGREGATION_READ_TIMEOUT_MILLIS,
-                                                  AggregationQueryPagerTimeoutTest::loadUniformRows);
+                                                  cluster -> loadUniformRows(cluster, 100));
         Assert.assertTrue("Aggregation was expected to succeed, but timed out", result.succeeded);
         Assert.assertTrue("Aggregation should have taken longer than native transport timeout, but took " + result.elapsedMillis + "ms",
                           result.elapsedMillis > AGGREGATION_NATIVE_TRANSPORT_TIMEOUT_MILLIS);
@@ -90,7 +102,7 @@ public class AggregationQueryPagerTimeoutTest extends TestBaseImpl
         Assert.assertTrue(aggregationTimeoutMillis > AGGREGATION_NATIVE_TRANSPORT_TIMEOUT_MILLIS);
 
         AggregationResult result = runAggregation(aggregationTimeoutMillis + "ms", AGGREGATION_NATIVE_TRANSPORT_TIMEOUT_MILLIS,
-                                                  AGGREGATION_READ_TIMEOUT_MILLIS, AggregationQueryPagerTimeoutTest::loadUniformRows);
+                                                  AGGREGATION_READ_TIMEOUT_MILLIS, cluster -> loadUniformRows(cluster, 100));
 
         Assert.assertFalse("Aggregation was expected to time out", result.succeeded);
         Assert.assertTrue("Timeout was not triggered by the aggregation timeout", result.aggregationTimeoutLogged);
@@ -124,6 +136,26 @@ public class AggregationQueryPagerTimeoutTest extends TestBaseImpl
         Assert.assertTrue("Aggregation was expected to succeed with a larger read timeout", control.succeeded);
     }
 
+    /**
+     * The aggregation timeout is measured from the start of the request.
+     * <p>
+     * Setup: 30 rows of about 500 bytes in 1KiB sub-pages of two rows each, which the
+     * aggregation reads in at least {@code 30 * 50ms = 1.5s} and in well under 3.5s. The aggregation timeout is 3.5s and
+     * the native transport and read timeouts are 60s, so they cannot interfere.
+     * <ul>
+     *   <li>With a 3s delay injected before the select statement is executed,
+     *       the aggregation still needs at least 1.5s, which together makes at least 4.5s since the start of
+     *       the request, more than the aggregation timeout, so it is guaranteed to time out.</li>
+     * </ul>
+     */
+    @Test
+    public void aggregationTimeoutIsMeasuredFromRequestStart() throws Throwable
+    {
+        AggregationResult result = runAggregation("3500ms", 60000, 60000, 3000, cluster -> loadUniformRows(cluster, 30));
+        Assert.assertFalse("Aggregation was expected to time out", result.succeeded);
+        Assert.assertTrue("Timeout was not triggered by the aggregation timeout", result.aggregationTimeoutLogged);
+    }
+
     private static class AggregationResult
     {
         final boolean succeeded;
@@ -145,13 +177,13 @@ public class AggregationQueryPagerTimeoutTest extends TestBaseImpl
     }
 
     /**
-     * 500 bytes each
+     * {@code numOfRows} rows of 500 bytes each
      */
-    private static int loadUniformRows(Cluster cluster)
+    private static int loadUniformRows(Cluster cluster, int numOfRows)
     {
-        for (int i = 0; i < AGGREGATION_ROWS; i++)
+        for (int i = 0; i < numOfRows; i++)
             insertRow(cluster, i, String.join("", Collections.nCopies(500, "x")));
-        return AGGREGATION_ROWS;
+        return numOfRows;
     }
 
     /**
@@ -178,9 +210,19 @@ public class AggregationQueryPagerTimeoutTest extends TestBaseImpl
                                              int readTimeoutMillis,
                                              AggregationData data) throws Throwable
     {
+        return runAggregation(aggregationTimeout, nativeTransportTimeoutMillis, readTimeoutMillis, 0, data);
+    }
+
+    private AggregationResult runAggregation(String aggregationTimeout,
+                                             int nativeTransportTimeoutMillis,
+                                             int readTimeoutMillis,
+                                             long preExecutionDelayMillis,
+                                             AggregationData data) throws Throwable
+    {
         // Each row read on a replica takes at least AGGREGATION_ROW_DELAY_MILLIS.
         try (WithProperties ignored = new WithProperties().set(TEST_READ_ITERATION_DELAY_MS, AGGREGATION_ROW_DELAY_MILLIS);
              Cluster control = init(Cluster.build().withNodes(1)
+                                           .withInstanceInitializer(PreExecutionDelay::install)
                                            .withConfig(config -> config.with(GOSSIP, NETWORK, NATIVE_PROTOCOL)
                                                                        .set("read_request_timeout", readTimeoutMillis + "ms")
                                                                        .set("range_request_timeout", readTimeoutMillis + "ms")
@@ -191,6 +233,7 @@ public class AggregationQueryPagerTimeoutTest extends TestBaseImpl
         {
             control.schemaChange(withKeyspace("CREATE TABLE %s.tbl (pk int, ck int, v text, PRIMARY KEY (pk, ck))"));
             int rows = data.load(control);
+            control.get(1).runOnInstance(() -> PreExecutionDelay.delayMillis.set(preExecutionDelayMillis));
 
             // No retries, so that the elapsed time is the time it took for the first attempt to fail
             try (com.datastax.driver.core.Cluster cluster = com.datastax.driver.core.Cluster.builder()
@@ -218,6 +261,32 @@ public class AggregationQueryPagerTimeoutTest extends TestBaseImpl
                 boolean aggregationTimeoutLogged = !control.get(1).logs().grep("Aggregation query timeout triggered").getResult().isEmpty();
                 return new AggregationResult(succeeded, elapsedMillis, aggregationTimeoutLogged);
             }
+        }
+    }
+
+    /**
+     * Delays the execution of client select statements by {@link #delayMillis}. The delay happens after the request has
+     * started and before the pager is created.
+     */
+    public static class PreExecutionDelay
+    {
+        static final AtomicLong delayMillis = new AtomicLong(0);
+
+        static void install(ClassLoader cl, int nodeNumber)
+        {
+            new ByteBuddy().rebase(SelectStatement.class)
+                           .method(named("execute").and(takesArguments(QueryState.class, QueryOptions.class, Dispatcher.RequestTime.class)))
+                           .intercept(MethodDelegation.to(PreExecutionDelay.class))
+                           .make()
+                           .load(cl, ClassLoadingStrategy.Default.INJECTION);
+        }
+
+        public static ResultMessage.Rows execute(QueryState state, QueryOptions options, Dispatcher.RequestTime requestTime, @SuperCall Callable<ResultMessage.Rows> r) throws Exception
+        {
+            long delay = delayMillis.get();
+            if (delay > 0 && !state.getClientState().isInternal)
+                Thread.sleep(delay);
+            return r.call();
         }
     }
 }
