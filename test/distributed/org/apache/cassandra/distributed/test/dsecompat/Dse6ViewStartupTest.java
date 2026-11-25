@@ -19,7 +19,6 @@ package org.apache.cassandra.distributed.test.dsecompat;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.Test;
@@ -34,6 +33,7 @@ import org.apache.cassandra.distributed.test.TestBaseImpl;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
 
+import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SAI_CURRENT_VERSION;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -157,30 +157,33 @@ public class Dse6ViewStartupTest extends TestBaseImpl
     {
         try (Cluster cluster = Cluster.build(1)
                                       .withDynamicPortAllocation(true)
-                                      .withConfig(c -> c.set("storage_compatibility_mode", "HCD_1")
-                                                        .set("uuid_sstable_identifiers_enabled", false)
-                                                        .set("materialized_views_enabled", true)
-                                                        .set("sstable", Map.of("selected_format", "big"))
-                                                        .with(Feature.NETWORK, Feature.GOSSIP))
+                                      .withInstanceInitializer(Dse51NewNodes::install)
+                                      .withConfig(c -> {
+                                          Dse51NewNodes.configure(c);
+                                          c.set("materialized_views_enabled", true)
+                                           .with(Feature.NETWORK, Feature.GOSSIP);
+                                      })
                                       .start())
         {
             IInvokableInstance node = cluster.get(1);
-            init(cluster);
-            cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (pk int, ck int, v text, PRIMARY KEY (pk, ck))"));
-            cluster.schemaChange("CREATE MATERIALIZED VIEW " + KEYSPACE + ".t_by_v AS SELECT pk, ck, v FROM " +
-                                 KEYSPACE + ".t WHERE v IS NOT NULL AND pk IS NOT NULL AND ck IS NOT NULL " +
-                                 "PRIMARY KEY (v, pk, ck)");
+            try (WithProperties properties = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
+            {
+                init(cluster);
+                cluster.schemaChange(withKeyspace("CREATE TABLE %s.t (pk int, ck int, v text, PRIMARY KEY (pk, ck))"));
+                cluster.schemaChange("CREATE MATERIALIZED VIEW " + KEYSPACE + ".t_by_v AS SELECT pk, ck, v FROM " +
+                                     KEYSPACE + ".t WHERE v IS NOT NULL AND pk IS NOT NULL AND ck IS NOT NULL " +
+                                     "PRIMARY KEY (v, pk, ck)");
+            }
             cluster.coordinator(1).execute(withKeyspace("INSERT INTO %s.t (pk, ck, v) VALUES (1, 1, 'a')"),
                                            ConsistencyLevel.ONE);
             String built = "SELECT view_name FROM system.built_views WHERE keyspace_name = ?";
             await().atMost(1, TimeUnit.MINUTES).until(() -> node.executeInternal(built, KEYSPACE).length == 1);
             node.flush(KEYSPACE);
             node.shutdown().get();
-            node.config().set("internode_compatibility_mode", "DSE_5_1");
             node.startup();
             assertThat(node.logs().grep("system_schema.hidden_columns").getResult()).isEmpty();
-            // the start in the mode: its startup check of the DSE features this software does not support ran
-            assertThat(node.logs().grep("DSE 5.1 compatibility mode: no trace of DSE Search").getResult()).hasSize(1);
+            // both starts in the mode: their startup check of the DSE features this software does not support ran
+            assertThat(node.logs().grep("DSE 5.1 compatibility mode: no trace of DSE Search").getResult()).hasSize(2);
             String read = withKeyspace("SELECT pk, ck FROM %s.t_by_v WHERE v = 'a'");
             assertThat(cluster.coordinator(1).execute(read, ConsistencyLevel.ONE).length).isEqualTo(1);
         }

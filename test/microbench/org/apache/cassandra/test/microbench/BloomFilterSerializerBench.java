@@ -32,7 +32,6 @@ import org.apache.cassandra.utils.BloomFilter;
 import org.apache.cassandra.utils.BloomFilterSerializer;
 import org.apache.cassandra.utils.FilterFactory;
 import org.apache.cassandra.utils.IFilter;
-import org.apache.cassandra.utils.SerializationsTest;
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Fork;
@@ -65,8 +64,6 @@ public class BloomFilterSerializerBench
 
     private ByteBuffer testVal = ByteBuffer.wrap(new byte[] { 0, 1});
 
-    private static final BloomFilterSerializer serializer = BloomFilterSerializer.forVersion(false);
-
     @Benchmark
     public void serializationTest() throws IOException
     {
@@ -76,10 +73,7 @@ public class BloomFilterSerializerBench
             BloomFilter filter = (BloomFilter) FilterFactory.getFilter(numElemsInK * 1024, 0.01d);
             filter.add(wrap(testVal));
             FileOutputStreamPlus out = new FileOutputStreamPlus(file);
-            if (oldBfFormat)
-                SerializationsTest.serializeOldBfFormat(filter, out);
-            else
-                serializer.serialize(filter, out);
+            BloomFilterSerializer.forVersion(oldBfFormat).serialize(filter, out);
             out.close();
             filter.close();
 

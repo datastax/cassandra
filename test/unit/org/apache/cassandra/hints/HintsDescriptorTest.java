@@ -224,6 +224,7 @@ public class HintsDescriptorTest
             {
                 case CASSANDRA_4:
                 case HCD_1:
+                case DSE_5_1:
                     // These modes should use VERSION_40 for storage
                     assertEquals("Mode " + mode + " should use VERSION_40 for hints storage",
                                  MessagingService.VERSION_40, expectedVersion);

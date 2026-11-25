@@ -602,20 +602,39 @@ public class CompressionMetadata extends WrappedSharedCloseable
         private SafeMemory offsets;
         private int count = 0;
 
+        /** Whether the header stores the maximum compressed length, see {@code open}. */
+        private final boolean hasMaxCompressedLength;
+
         // provided by user when setDescriptor
         private long dataLength, chunkCount;
 
-        private Writer(CompressionParams parameters, File file)
+        private Writer(CompressionParams parameters, File file, boolean hasMaxCompressedLength)
         {
             this.parameters = parameters;
             this.file = file;
+            this.hasMaxCompressedLength = hasMaxCompressedLength;
             offsets = new SafeMemory(maxCount * 8L);
             NATIVE_MEMORY_USAGE.addAndGet(offsets.size());
         }
 
         public static Writer open(CompressionParams parameters, File file)
         {
-            return new Writer(parameters, file);
+            return open(parameters, file, true);
+        }
+
+        /**
+         * @param hasMaxCompressedLength whether the header stores the maximum compressed length: false for the big
+         *                               {@code m*} versions (written as Cassandra 3.x writes them,
+         *                               {@code Version.hasPre40Encoding()}), whose chunks are all compressed, so
+         *                               {@code parameters} must then have no maximum
+         *                               ({@link CompressionParams#withEveryChunkCompressed})
+         */
+        public static Writer open(CompressionParams parameters, File file, boolean hasMaxCompressedLength)
+        {
+            Preconditions.checkArgument(hasMaxCompressedLength || parameters.maxCompressedLength() == Integer.MAX_VALUE,
+                                        "a compression info without a maximum compressed length requires every " +
+                                        "chunk compressed, found a maximum of %s", parameters.maxCompressedLength());
+            return new Writer(parameters, file, hasMaxCompressedLength);
         }
 
         public void addOffset(long offset)
@@ -644,7 +663,8 @@ public class CompressionMetadata extends WrappedSharedCloseable
 
                 // store the length of the chunk
                 out.writeInt(parameters.chunkLength());
-                out.writeInt(parameters.maxCompressedLength());
+                if (hasMaxCompressedLength)
+                    out.writeInt(parameters.maxCompressedLength());
                 // store position and reserve a place for uncompressed data length and chunks count
                 out.writeLong(dataLength);
                 out.writeInt(chunks);

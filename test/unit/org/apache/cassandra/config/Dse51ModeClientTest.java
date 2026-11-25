@@ -23,11 +23,13 @@ import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
+import org.apache.cassandra.db.rows.CellData;
 import org.apache.cassandra.distributed.shared.WithProperties;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE;
+import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_CHECKSUM_TYPE;
 import static org.apache.cassandra.config.CassandraRelevantProperties.SSTABLE_COMPRESSION_SELECTOR_CLASS;
 import static org.apache.cassandra.config.CassandraRelevantProperties.TRIE_INDEX_FORMAT_VERSION;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -36,8 +38,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * Clients that write sstables without reading cassandra.yaml ({@code CQLSSTableWriter}, the bulk loader) and set
  * {@code -Dcassandra.internode_compatibility_mode=DSE_5_1} cannot select the sstable format themselves: they get the
- * big format and numeric generations forced, each with an INFO line, and the internode mode stays {@code NONE}. In a
- * class of its own: {@code clientInitialization} happens once per JVM.
+ * big format and numeric generations forced, each with an INFO line, write the big version of the mode, {@code me}, and
+ * the internode mode stays {@code NONE}. In a class of its own: {@code clientInitialization} happens once per JVM.
  */
 public class Dse51ModeClientTest
 {
@@ -82,6 +84,12 @@ public class Dse51ModeClientTest
             assertThat(new Config().sstable.selected_format).isNotEqualTo(BigFormat.NAME);
             assertThat(new Config().uuid_sstable_identifiers_enabled).isTrue();
             assertThat(DatabaseDescriptor.getSelectedSSTableFormat().name()).isEqualTo(BigFormat.NAME);
+            // a client in the mode writes the big version DSE 5.1 reads (CQLSSTableWriter, for sstableloader)
+            assertThat(DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion().version)
+            .isEqualTo(InternodeCompatibilityMode.DSE_51_BIG_VERSION);
+            // and its deletion times, 32-bit in me, capped in 2038 without the storage mode too
+            assertThat(CellData.getVersionedMaxDeletiontionTime())
+            .isEqualTo((long) CellData.MAX_DELETION_TIME_2038_LEGACY_CAP);
             assertThat(DatabaseDescriptor.isUUIDSSTableIdentifiersEnabled()).isFalse();
 
             // a client configuration that already selects big: nothing to select, nothing logged about the format
@@ -108,6 +116,17 @@ public class Dse51ModeClientTest
                 assertThatThrownBy(() -> DatabaseDescriptor.applyInternodeCompatibilityMode(new Config()))
                 .isInstanceOf(ConfigurationException.class)
                 .hasMessage(Dse51ModeConfigTest.compressionSelectorRefusal(custom));
+            }
+            // a refused checksum type leaves the configuration of the client as it was, its format included
+            try (WithProperties checksum = new WithProperties().set(SSTABLE_CHECKSUM_TYPE, "CRC32C"))
+            {
+                Config refused = new Config();
+                String formatBefore = refused.sstable.selected_format;
+                assertThatThrownBy(() -> DatabaseDescriptor.applyInternodeCompatibilityMode(refused))
+                .isInstanceOf(ConfigurationException.class)
+                .hasMessage(Dse51ModeConfigTest.checksumTypeRefusal("CRC32C"));
+                assertThat(refused.sstable.selected_format).isEqualTo(formatBefore).isNotEqualTo(BigFormat.NAME);
+                assertThat(refused.uuid_sstable_identifiers_enabled).isTrue();
             }
         }
     }

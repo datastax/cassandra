@@ -61,11 +61,13 @@ import org.apache.cassandra.io.sstable.metadata.MetadataType;
 import org.apache.cassandra.io.sstable.metadata.StatsMetadata;
 import org.apache.cassandra.io.util.MmappedRegionsCache;
 import org.apache.cassandra.schema.CompressionParams;
+import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.TimeUUID;
 import org.apache.cassandra.utils.concurrent.Transactional;
 
 import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
 
 /**
  * A root class for a writer implementation. A writer must be created by passing an implementation-specific
@@ -109,6 +111,11 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         this.isTransient = builder.isTransientSSTable();
         this.metadataCollector = builder.getMetadataCollector();
         this.header = builder.getSerializationHeader();
+        // the 3.x versions (big me, for DSE 5.1) have neither a pending repair nor a transient flag, which only an
+        // sstable pending repair has (validateRepairedMetadata), and would lose them: incremental repair,
+        // anticompaction and transient replication are refused in that mode before they get here
+        checkState(!descriptor.version.hasPre40Encoding() || pendingRepair == ActiveRepairService.NO_PENDING_REPAIR,
+                   "sstable version %s cannot hold the pending repair session %s", descriptor.version, pendingRepair);
         this.mmappedRegionsCache = builder.getMmappedRegionsCache();
         this.lifecycleNewTracker = lifecycleNewTracker;
 
@@ -557,7 +564,12 @@ public abstract class SSTableWriter extends SSTable implements Transactional, SS
         {
             // A header read from a DSE view sstable (scrub, cleanup and streaming reuse the header of their input)
             // names a hidden column whose cells never reach the rows written here: the new sstable must not name it.
-            this.serializationHeader = serializationHeader == null ? null : serializationHeader.withoutDseViewLivenessColumn();
+            // The version decides how a LIVE deletion time is written: for big me (DSE 5.1), as Cassandra 3.x writes
+            // it; the writer, its partition writer and its row index all take this header.
+            this.serializationHeader = serializationHeader == null
+                                       ? null
+                                       : serializationHeader.withoutDseViewLivenessColumn()
+                                                            .forSSTableVersion(descriptor.version);
             return (B) this;
         }
 

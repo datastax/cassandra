@@ -37,6 +37,7 @@ import org.apache.cassandra.db.compaction.TableOperation;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
+import org.apache.cassandra.schema.TableParams;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
@@ -211,6 +212,17 @@ public abstract class CassandraIndex implements Index
 
     public Callable<?> getMetadataReloadTask(IndexMetadata indexDef)
     {
+        // DSE 5.1 compatibility: the sstables of the table of the index are written at once with the new compression
+        // of its base table, which the table of the index takes at the next start, so that the sstable rewrite the
+        // compressor refusals of the mode advise (nodetool upgradesstables -a) writes those of the index with it too:
+        // a node-local override of the compression alone, as the compression set by JMX is, which the writers read;
+        // set before the reload of the index table, so that the reload and the writers after it see it
+        if (DatabaseDescriptor.isDse51CompatibilityMode())
+        {
+            TableMetadata current = indexCfs.metadata.get();
+            TableParams params = current.params.unbuild().compression(baseCfs.metadata().params.compression).build();
+            indexCfs.metadata.setLocalOverrides(current.unbuild().params(params).build());
+        }
         return () -> {
             indexCfs.reload();
             return null;

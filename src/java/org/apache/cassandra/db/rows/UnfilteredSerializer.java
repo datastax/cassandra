@@ -31,6 +31,7 @@ import org.apache.cassandra.db.SerializationHeader;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.marshal.ByteArrayAccessor;
 import org.apache.cassandra.db.view.DseViewHiddenColumns;
+import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.db.rows.Row.Deletion;
@@ -339,48 +340,113 @@ public class UnfilteredSerializer
     /**
      * DSE 6 and DSE 5.1 compatibility modes: the pre-4.0 dialect has 32-bit local deletion times, the last one early in
      * 2038, and a DSE peer would read a later one as a negative, invalid, time. The text names the DSE release of the
-     * mode ({@link DseCompat#source()}). The mode requires the {@code HCD_1} storage compatibility mode, under which no
-     * deletion time goes past that cap, so this never fires; it fails fast, before anything is written, if one ever
-     * does. {@link Cell#NO_DELETION_TIME} (live) is never written as a deletion time. It covers what is serialized at
-     * the peer's version: mutations, hints, batches, Paxos commits, and the data of a read response, which the replica
-     * builds at the current version and serializes again at the peer's.
+     * mode ({@link DseCompat#source()}). The mode requires a storage compatibility mode before 5.0 ({@code HCD_1} for
+     * DSE 6, {@code DSE_5_1} for DSE 5.1), under which no deletion time goes past that cap (in {@code DSE_5_1} for the
+     * tools and clients too, see {@code CellData.getVersionedMaxDeletiontionTime}), so this never fires; it fails fast,
+     * before anything is written, if one ever does. {@link Cell#NO_DELETION_TIME} (live) is never written as a deletion
+     * time. It covers what is serialized at the peer's version: mutations, hints, batches, Paxos commits, and the data
+     * of a read response, which the replica builds at the current version and serializes again at the peer's.
      */
     public static void checkPre40DeletionTime(long localDeletionTime, int version)
     {
+        checkPre40DeletionTime(localDeletionTime, version, null);
+    }
+
+    /**
+     * The DSE 5.1 compatibility mode: big {@code me} ({@code version}, a version with
+     * {@link Version#hasPre40Encoding()}, which this software writes in that mode only, by the node or by a tool) holds
+     * 32-bit local deletion times, as DSE 5.1 reads them, and a deletion or expiration time past 2038 written there is
+     * one DSE 5.1 reads wrong (a cell's or a row's as a delta that wraps in its 32-bit arithmetic, a partition deletion
+     * capped). An {@code oa} sstable written outside the storage mode can hold one (up to 2106), which
+     * {@code sstableupgrade}, run with the node's configuration, would rewrite at {@code me}: {@code Upgrader} calls
+     * this for the static row and each row and marker of such a rewrite, and {@link #checkPre40SSTableDeletionTime} for
+     * its partition deletions, before they are written, so that the rewrite fails ({@code sstableupgrade} prints "Error
+     * upgrading" for the sstable and keeps it). Not called for anything else written at {@code me}: what the node
+     * computes in the mode never goes past the cap ({@code CellData.getVersionedMaxDeletiontionTime}), while the 3.x
+     * sstables DSE 5.1 wrote can hold the overflowed expiration times of CASSANDRA-14092, which this software reads as
+     * times past the cap and the writer of {@code me} writes back as it reads them.
+     */
+    public static void checkPre40SSTableDeletionTimes(Unfiltered unfiltered, Version version)
+    {
+        // the messaging version is not in the text of an sstable's refusal, which names the sstable version
+        checkPre40DeletionTimes(unfiltered, version.correspondingMessagingVersion(), version);
+    }
+
+    /** The partition deletion of {@link #checkPre40SSTableDeletionTimes}. */
+    public static void checkPre40SSTableDeletionTime(DeletionTime partitionDeletion, Version version)
+    {
+        // the messaging version is not in the text of an sstable's refusal, which names the sstable version
+        checkPre40DeletionTime(partitionDeletion.localDeletionTime(), version.correspondingMessagingVersion(),
+                               version);
+    }
+
+    private static void checkPre40DeletionTimes(Unfiltered unfiltered, int version, Version sstableVersion)
+    {
+        if (unfiltered.isRow())
+        {
+            checkPre40DeletionTimes((Row) unfiltered, version, sstableVersion);
+        }
+        else if (((RangeTombstoneMarker) unfiltered).isBoundary())
+        {
+            RangeTombstoneBoundaryMarker marker = (RangeTombstoneBoundaryMarker) unfiltered;
+            checkPre40DeletionTime(marker.endDeletionTime().localDeletionTime(), version, sstableVersion);
+            checkPre40DeletionTime(marker.startDeletionTime().localDeletionTime(), version, sstableVersion);
+        }
+        else
+        {
+            RangeTombstoneBoundMarker marker = (RangeTombstoneBoundMarker) unfiltered;
+            checkPre40DeletionTime(marker.deletionTime().localDeletionTime(), version, sstableVersion);
+        }
+    }
+
+    /**
+     * {@code sstableVersion} null: a message at messaging version {@code version}; otherwise the sstable of that
+     * version that is written.
+     */
+    private static void checkPre40DeletionTime(long localDeletionTime, int version, Version sstableVersion)
+    {
         if (localDeletionTime > CellData.MAX_DELETION_TIME_2038_LEGACY_CAP && localDeletionTime != Cell.NO_DELETION_TIME)
             throw new IllegalStateException(DseCompat.source() + " compatibility mode: local deletion time " +
-                                            localDeletionTime + " is past 2038 and cannot be sent at messaging " +
-                                            "version " + version + ", whose deletion times are 32-bit");
+                                            localDeletionTime + " is past 2038 and cannot be " +
+                                            (sstableVersion == null
+                                             ? "sent at messaging version " + version
+                                             : "written to an sstable of version " + sstableVersion) +
+                                            ", whose deletion times are 32-bit");
     }
 
     private static void checkPre40DeletionTimes(Row row, int version)
     {
+        checkPre40DeletionTimes(row, version, null);
+    }
+
+    private static void checkPre40DeletionTimes(Row row, int version, Version sstableVersion)
+    {
         LivenessInfo pkLiveness = row.primaryKeyLivenessInfo();
         if (pkLiveness.isExpiring())
-            checkPre40DeletionTime(pkLiveness.localExpirationTime(), version);
+            checkPre40DeletionTime(pkLiveness.localExpirationTime(), version, sstableVersion);
         if (!row.deletion().isLive())
-            checkPre40DeletionTime(row.deletion().time().localDeletionTime(), version);
+            checkPre40DeletionTime(row.deletion().time().localDeletionTime(), version, sstableVersion);
         for (ColumnData data : row)
         {
             if (data.column().isSimple())
             {
-                checkPre40DeletionTime((Cell<?>) data, version);
+                checkPre40DeletionTime((Cell<?>) data, version, sstableVersion);
             }
             else
             {
                 ComplexColumnData complex = (ComplexColumnData) data;
                 if (!complex.complexDeletion().isLive())
-                    checkPre40DeletionTime(complex.complexDeletion().localDeletionTime(), version);
+                    checkPre40DeletionTime(complex.complexDeletion().localDeletionTime(), version, sstableVersion);
                 for (Cell<?> cell : complex)
-                    checkPre40DeletionTime(cell, version);
+                    checkPre40DeletionTime(cell, version, sstableVersion);
             }
         }
     }
 
-    private static void checkPre40DeletionTime(Cell<?> cell, int version)
+    private static void checkPre40DeletionTime(Cell<?> cell, int version, Version sstableVersion)
     {
         if (cell.isExpiring() || cell.isTombstone())
-            checkPre40DeletionTime(cell.localDeletionTime(), version);
+            checkPre40DeletionTime(cell.localDeletionTime(), version, sstableVersion);
     }
 
     public long serializedSize(Unfiltered unfiltered, SerializationHelper helper, int version)
