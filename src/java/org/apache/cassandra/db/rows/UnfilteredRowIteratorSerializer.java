@@ -201,6 +201,16 @@ public class UnfilteredRowIteratorSerializer
 
     public Header deserializeHeader(TableMetadata metadata, ColumnFilter selection, DataInputPlus in, int version, DeserializationHelper.Flag flag) throws IOException
     {
+        return deserializeHeader(metadata, selection, in, version, flag, false);
+    }
+
+    /**
+     * @param keepDseViewHiddenCells for the data of a materialized view sent by a DSE 6 peer, whether the rows keep DSE's
+     * hidden cells as they are (see {@link SerializationHeader.Serializer#deserializeForMessaging})
+     */
+    public Header deserializeHeader(TableMetadata metadata, ColumnFilter selection, DataInputPlus in, int version, DeserializationHelper.Flag flag,
+                                    boolean keepDseViewHiddenCells) throws IOException
+    {
         DecoratedKey key = metadata.partitioner.decorateKey(ByteBufferUtil.readWithVIntLength(in));
         int flags = in.readUnsignedByte();
         boolean isReversed = (flags & IS_REVERSED) != 0;
@@ -214,7 +224,7 @@ public class UnfilteredRowIteratorSerializer
         boolean hasStatic = (flags & HAS_STATIC_ROW) != 0;
         boolean hasRowEstimate = (flags & HAS_ROW_ESTIMATE) != 0;
 
-        SerializationHeader header = SerializationHeader.serializer.deserializeForMessaging(in, metadata, selection, hasStatic);
+        SerializationHeader header = SerializationHeader.serializer.deserializeForMessaging(in, metadata, selection, hasStatic, version, keepDseViewHiddenCells);
 
         DeletionTime partitionDeletion = hasPartitionDeletion ? header.readDeletionTime(in) : DeletionTime.LIVE;
 
@@ -233,7 +243,9 @@ public class UnfilteredRowIteratorSerializer
 
         final DeserializationHelper helper = new DeserializationHelper(metadata, version, flag);
         final SerializationHeader sHeader = header.sHeader;
-        return new AbstractUnfilteredRowIterator(metadata, header.key, header.partitionDeletion, sHeader.columns(), header.staticRow, header.isReversed, sHeader.stats())
+        // the rows of a DSE view carry no cell of the hidden column that gave them their liveness (DseViewWireFormat)
+        RegularAndStaticColumns columns = sHeader.withoutDseViewLivenessColumn().columns();
+        return new AbstractUnfilteredRowIterator(metadata, header.key, header.partitionDeletion, columns, header.staticRow, header.isReversed, sHeader.stats())
         {
             private final Row.Builder builder = BTreeRow.sortedBuilder();
 
@@ -254,7 +266,17 @@ public class UnfilteredRowIteratorSerializer
 
     public UnfilteredRowIterator deserialize(DataInputPlus in, int version, TableMetadata metadata, ColumnFilter selection, DeserializationHelper.Flag flag) throws IOException
     {
-        return deserialize(in, version, metadata, flag, deserializeHeader(metadata, selection, in, version, flag));
+        return deserialize(in, version, metadata, selection, flag, false);
+    }
+
+    /**
+     * @param keepDseViewHiddenCells for the data of a materialized view sent by a DSE 6 peer, whether the rows keep DSE's
+     * hidden cells as they are (see {@link SerializationHeader.Serializer#deserializeForMessaging})
+     */
+    public UnfilteredRowIterator deserialize(DataInputPlus in, int version, TableMetadata metadata, ColumnFilter selection, DeserializationHelper.Flag flag,
+                                             boolean keepDseViewHiddenCells) throws IOException
+    {
+        return deserialize(in, version, metadata, flag, deserializeHeader(metadata, selection, in, version, flag, keepDseViewHiddenCells));
     }
 
     public static class Header
