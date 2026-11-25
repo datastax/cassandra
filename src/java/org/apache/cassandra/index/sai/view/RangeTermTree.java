@@ -68,8 +68,9 @@ public class RangeTermTree implements TermTree
         Function<Version, Term> lower = version -> e.lower == null ? null : new Term(e.getPartiallyEncodedLowerBound(version), comparator, version);
         Function<Version, Term> upper = version -> e.upper == null ? null : new Term(e.getPartiallyEncodedUpperBound(version), comparator, version);
         // the bounds of a literal range are raw terms, which the comparator of a reversed (DESC clustering) column
-        // orders in reverse
-        return e.isLiteralTermRange() && comparator.isReversed() ? searchRange(upper, lower) : searchRange(lower, upper);
+        // orders in reverse, except for the frozen types, compared as unsigned bytes (see TypeUtil#compare)
+        boolean reversed = e.isLiteralTermRange() && comparator.isReversed() && !TypeUtil.isFrozen(comparator);
+        return reversed ? searchRange(upper, lower) : searchRange(lower, upper);
     }
 
     /**
