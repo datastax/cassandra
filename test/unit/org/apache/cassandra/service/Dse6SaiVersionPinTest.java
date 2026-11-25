@@ -431,6 +431,20 @@ public class Dse6SaiVersionPinTest
         }
     }
 
+    /** DSE 5.1 has no SAI, so a DSE_5_1 node has no version to pin: the check neither reads nor logs, as with NONE. */
+    @Test
+    public void dse51ModeChecksNothing() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        corruptNodesLocal();
+        try (WithProperties pin = new WithProperties().clear(SAI_CURRENT_VERSION)
+                                                      .clear(INTERNODE_COMPATIBILITY_MODE_IGNORE_SAI_VERSION_PIN))
+        {
+            assertThat(logsOf(Level.TRACE, () -> StartupChecks.checkDse6SaiVersionPin.execute(OPTIONS))).isEmpty();
+            assertThat(Dse6SaiVersionPin.status()).isNull();
+        }
+    }
+
     @Test
     public void unreadableNodesLocalIsRefused() throws Exception
     {

@@ -2373,17 +2373,22 @@ storage_compatibility_mode: HCD_1
 # (CQLSSTableWriter, sstableloader) inherit it only through the system property below. Remove the
 # setting (or set NONE) with a rolling restart once every node runs this software.
 # Set to DSE_5_1 on every node of a cluster that is being upgraded in place from DataStax
-# Enterprise 5.1.51. So far this mode only checks the settings: it requires
-# storage_compatibility_mode HCD_1, sstable format big (selected_format: big in the sstable
-# section), paxos_variant v1 (also at runtime), the default compression selector and
-# flush_compression fast or table, refuses to start while a table is compressed with another
-# compressor than LZ4Compressor, SnappyCompressor or DeflateCompressor (the ones DSE 5.1 reads),
-# and forces uuid_sstable_identifiers_enabled off. The node still writes big sstables of version
-# nb, which DSE 5.1 does not read, and does not connect to DSE 5.1 nodes. Offline tools that read
-# this file inherit the checks of the sstable format, the compression selector and
-# flush_compression, and the numeric generations (they write big oa sstables, without the storage
-# mode); clients that set the system property below get the big format selected instead of
-# refused.
+# Enterprise 5.1.51. It requires storage_compatibility_mode HCD_1, sstable format big
+# (selected_format: big in the sstable section), paxos_variant v1 (also at runtime), the default
+# compression selector and flush_compression fast or table, refuses to start while a table is
+# compressed with another compressor than LZ4Compressor, SnappyCompressor or DeflateCompressor (the
+# ones DSE 5.1 reads), and forces uuid_sstable_identifiers_enabled off. At its first start in the
+# mode the node writes the upgrade marker metadata_directory/dse51-upgrade-in-progress, which
+# refuses a later start with NONE while it exists; a start in the mode refuses the files a node in
+# the mode never writes (sstables of the bti format or another format than big, big sstables newer
+# than oa, non-numeric generations, commit log segments above version 7); DSE 5.1's replayed commit
+# log segments are renamed with the suffix .replayed, and transaction logs and sstable statistics
+# are written as DSE 5.1 reads them. The node still writes big sstables of version nb, which
+# DSE 5.1 does not read, and does not connect to DSE 5.1 nodes. Offline tools that read this file
+# inherit the checks of the sstable format, the compression selector and flush_compression, the
+# numeric generations and the transaction logs and statistics of the mode (they write big oa
+# sstables, without the storage mode); clients that set the system property below get the big
+# format selected instead of refused.
 # The system property cassandra.internode_compatibility_mode overrides this setting.
 # Possible values: NONE (default), DSE_6, DSE_5_1.
 #

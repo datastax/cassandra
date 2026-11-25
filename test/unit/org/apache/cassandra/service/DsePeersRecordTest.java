@@ -433,4 +433,57 @@ public class DsePeersRecordTest
         assertThat(DsePeersRecord.parseEntry("127.0.0.99:not-a-port")).isNull();
         assertThat(DsePeersRecord.parseEntry("")).isNull();
     }
+
+    /** The bytes the record is written with in DSE_6 mode: its file, its header and one line per peer. */
+    @Test
+    public void theRecordWrittenInDse6ModeHasTheseBytes() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        set(otherDsePeer, MessagingService.VERSION_3014);
+        set(dsePeer, MessagingService.VERSION_30);
+
+        assertThat(DsePeersRecord.path()).isEqualTo(metadata.resolve("dse-peers-seen"));
+        assertThat(DsePeersRecord.path(InternodeCompatibilityMode.DSE_6)).isEqualTo(DsePeersRecord.path());
+        assertThat(Files.readAllBytes(DsePeersRecord.path()))
+        .isEqualTo(("# peers known to speak the pre-4.0 dialect (DSE 6); " +
+                    "maintained by the node, one address with port per " +
+                    "line\n127.0.0.44:7000\n127.0.0.45:7000\n").getBytes(StandardCharsets.UTF_8));
+        assertThat(DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1)).doesNotExist();
+    }
+
+    /**
+     * The record of the upgrade from DSE 5.1: a file of its own, whose header names DSE 5.1, read apart from the DSE 6
+     * one; nothing records a peer in DSE_5_1 mode, so the node does not write it.
+     */
+    @Test
+    public void theRecordOfTheUpgradeFromDse51IsAFileOfItsOwn() throws Exception
+    {
+        Path record = DsePeersRecord.path(InternodeCompatibilityMode.DSE_5_1);
+        assertThat(record).isEqualTo(metadata.resolve("dse51-peers-seen"));
+        assertThat(DsePeersRecord.content(InternodeCompatibilityMode.DSE_5_1,
+                                          List.of("127.0.0.44:7000", "127.0.0.45:7000")))
+        .isEqualTo("# peers known to speak the pre-4.0 dialect (DSE 5.1); maintained by the node, one address with " +
+                   "port per line\n127.0.0.44:7000\n127.0.0.45:7000\n");
+        assertThat(DsePeersRecord.content(InternodeCompatibilityMode.DSE_6, List.of("127.0.0.44:7000")))
+        .isEqualTo("# peers known to speak the pre-4.0 dialect (DSE 6); maintained by the node, one address with " +
+                   "port per line\n127.0.0.44:7000\n");
+
+        Files.write(record, DsePeersRecord.content(InternodeCompatibilityMode.DSE_5_1, List.of("127.0.0.44:7000"))
+                                          .getBytes(StandardCharsets.UTF_8));
+        assertThat(DsePeersRecord.persistedPeers(InternodeCompatibilityMode.DSE_5_1))
+        .containsExactly("127.0.0.44:7000");
+        assertThat(DsePeersRecord.persistedPeers()).isEmpty();
+
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        set(dsePeer, MessagingService.VERSION_3014);
+        assertThat(DsePeersRecord.peers()).isEmpty();
+        DsePeersRecord.persistAtDrain();
+        assertThat(DsePeersRecord.path()).doesNotExist();
+        assertThat(DsePeersRecord.persistedPeers(InternodeCompatibilityMode.DSE_5_1))
+        .containsExactly("127.0.0.44:7000");
+
+        // clear() deletes the files of both records
+        DsePeersRecord.clear();
+        assertThat(record).doesNotExist();
+    }
 }

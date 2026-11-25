@@ -17,9 +17,12 @@
 package org.apache.cassandra.io.sstable.metadata;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.junit.After;
 import org.junit.Before;
@@ -28,12 +31,14 @@ import org.junit.Test;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.CQLTester;
+import org.apache.cassandra.dsecompat.Dse51Fixtures;
 import org.apache.cassandra.dsecompat.DseFixtures;
 import org.apache.cassandra.dsecompat.DseFixtures.DseVersion;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SequenceBasedSSTableId;
 import org.apache.cassandra.io.sstable.format.SSTableFormat.Components;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.big.BigFormat;
 import org.apache.cassandra.io.sstable.format.bti.BtiFormat;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.EstimatedHistogram;
@@ -47,10 +52,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * DSE's 114; with {@code NONE} it keeps this software's 118 (CASSANDRA-15164). The partition size histogram has 150
  * buckets in both modes, as DSE's. The mode is switched at runtime, which changes the histogram but not the sstable
  * version this test's node writes: only the histograms are under test here (InternodeCompatibilityModeToolTest and
- * Dse6ModeSmokeTest cover the {@code bb} side).
+ * Dse6ModeSmokeTest cover the {@code bb} side). {@code DSE_5_1} writes DSE's 114 buckets too.
  */
 public class MetadataCollectorDse6Test extends CQLTester
 {
+    /** The sstables DSE 5.1.51 wrote, among the fixtures. */
+    private static final int DSE_51_WRITTEN_SSTABLES = 34;
+
     private InternodeCompatibilityMode modeBefore;
 
     @Before
@@ -110,6 +118,44 @@ public class MetadataCollectorDse6Test extends CQLTester
         StatsMetadata none = flushAndReadStats(noneTable);
         assertThat(none.estimatedCellPerPartitionCount.getBuckets(false)).hasSize(119);
         assertThat(none.estimatedPartitionSize.getBuckets(false)).hasSize(151);
+    }
+
+    /**
+     * DSE 5.1.51 asks for the same 114 buckets as DSE 6, as every sstable it wrote among the fixtures has (the
+     * {@code system.local} and {@code system.peers} ones of both captures, flushed and compacted, the user ones, those
+     * of {@code system_schema}, {@code system_auth}, {@code system.batches} and {@code system.paxos}), with the 150
+     * buckets of the partition size histogram of this software: DSE_5_1 writes them too, at a flush as in a new
+     * histogram.
+     */
+    @Test
+    public void theCellCountHistogramHasDsesBucketsInDse51Mode() throws Throwable
+    {
+        String table = createTable("CREATE TABLE %s (pk int, ck int, v text, PRIMARY KEY (pk, ck))");
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        EstimatedHistogram dse51 = MetadataCollector.defaultCellPerPartitionCountHistogram();
+        assertThat(dse51.getBucketOffsets()).hasSize(MetadataCollector.DSE_6_CELL_COUNT_BUCKETS);
+        assertThat(dse51.getLargestBucketOffset()).isEqualTo(1996099046L);
+        List<Path> written = dse51WrittenStatistics();
+        assertThat(written).hasSize(DSE_51_WRITTEN_SSTABLES);
+        long[] partitionSizeOffsets = MetadataCollector.defaultPartitionSizeHistogram().getBucketOffsets();
+        for (Path statistics : written)
+        {
+            // the fixtures' directories do not all name the keyspace and the table, which the stats do not need
+            int generation = Integer.parseInt(statistics.getFileName().toString().split("-")[1]);
+            Descriptor descriptor = new Descriptor(Dse51Fixtures.SSTABLE_VERSION, new File(statistics.getParent()),
+                                                   "ks", "t", new SequenceBasedSSTableId(generation),
+                                                   BigFormat.getInstance());
+            StatsMetadata dse = (StatsMetadata) descriptor.getMetadataSerializer().deserialize(descriptor,
+                                                                                               MetadataType.STATS);
+            assertThat(dse.estimatedCellPerPartitionCount.getBucketOffsets()).as("%s", statistics)
+                                                                             .isEqualTo(dse51.getBucketOffsets());
+            assertThat(dse.estimatedPartitionSize.getBucketOffsets()).as("%s", statistics)
+                                                                     .isEqualTo(partitionSizeOffsets);
+        }
+
+        StatsMetadata flushed = flushAndReadStats(table);
+        assertThat(flushed.estimatedCellPerPartitionCount.getBuckets(false)).hasSize(115);
+        assertThat(flushed.estimatedPartitionSize.getBuckets(false)).hasSize(151);
     }
 
     @Test
@@ -181,6 +227,19 @@ public class MetadataCollectorDse6Test extends CQLTester
         stats.add(stats(DseFixtures.dse6926PaxosSSTableDirectory(), 4));
         stats.add(stats(DseFixtures.schemaDataDirectory().resolve("system_auth").resolve("role_permissions-3afbe79f219431a7add7f5ab90d8ec9c"), 1));
         return stats;
+    }
+
+    /** The stats components of every sstable DSE 5.1.51 wrote, among the fixtures (big {@code me}). */
+    private static List<Path> dse51WrittenStatistics() throws IOException
+    {
+        try (Stream<Path> files = Files.walk(DseFixtures.ROOT))
+        {
+            return files.filter(Dse51Fixtures::isDse51Fixture)
+                        .filter(p -> p.getFileName().toString()
+                                      .matches(Dse51Fixtures.SSTABLE_VERSION + "-\\d+-big-Statistics\\.db"))
+                        .sorted()
+                        .collect(Collectors.toList());
+        }
     }
 
     private static StatsMetadata stats(Path directory, int generation) throws IOException
