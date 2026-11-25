@@ -280,7 +280,8 @@ public class BlockingReadRepairTest extends AbstractReadRepairTest
                 Assert.assertEquals(message.serializedSize(target3Version), out.getLength());
             }
             // a round trip through this software's own serializer: the pre-4.0 layout itself is checked byte by byte
-            // by V11SerializationAuditTest
+            // by V11SerializationAuditTest, and against HCD 1.2 by the mixed-mode in-JVM tests
+            // (MixedModeSpeculativeReadRepairTest for this write)
             try (DataOutputBuffer out = new DataOutputBuffer())
             {
                 Mutation.serializer.serialize(speculative, out, target3Version);
