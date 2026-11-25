@@ -44,6 +44,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.transactions.IndexTransaction;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.notifications.INotification;
 import org.apache.cassandra.notifications.INotificationConsumer;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -54,8 +55,9 @@ import org.apache.cassandra.utils.Pair;
 
 /**
  * Dummy index used when an unknown index is found in system_schema.index and INDEX_UNKNOWN_IGNORE=true, or while
- * the DSE 6 compatibility mode is on (an index type this software does not have, left by an in-place upgrade; the
- * DataStax Enterprise Search indexes are refused in that mode instead, see Dse6NonCoreTraces)
+ * the DSE 6 or DSE 5.1 compatibility mode is on (an index type this software does not have, left by an in-place
+ * upgrade, such as a SASI index of DSE 5.1; the DataStax Enterprise Search indexes are refused in those modes instead,
+ * see Dse6NonCoreTraces)
  *
  * This is just a mock implementation to prevent problems with old schemas containing unknown indexes.
  * It ignores writes, declares that it supports no expressions, and throws an exception when asked to search.
@@ -66,11 +68,12 @@ public final class NoopIndex implements Index, INotificationConsumer
                                                       + CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE.getKey()
                                                       + " is enabled so using an noop index that will ignore writes and won't be queryable. "
                                                       + "Please drop this index and/or use a Storage Attached Index (SAI) instead.";
-    private static final String DSE6_UNSUPPORTED_MESSAGE = "Custom index %s.%s of type '%s' %s is not supported by this software. "
-                                                           + "The DSE 6 compatibility mode (internode_compatibility_mode: DSE_6) is enabled "
-                                                           + "so using a noop index that will ignore writes and won't be queryable. "
-                                                           + "Please drop this index on DSE before the upgrade (a node in internode_compatibility_mode NONE refuses to load it) "
-                                                           + "and/or use a Storage Attached Index (SAI) instead.";
+    private static final String DSE_UNSUPPORTED_MESSAGE =
+        "Custom index %s.%s of type '%s' %s is not supported by this software. " +
+        "The %s compatibility mode (internode_compatibility_mode: %s) is enabled " +
+        "so using a noop index that will ignore writes and won't be queryable. " +
+        "Please drop this index on DSE before the upgrade (a node in internode_compatibility_mode NONE refuses to " +
+        "load it) and/or use a Storage Attached Index (SAI) instead.";
     @VisibleForTesting
     static final Callable<?> NO_OP_TASK = () -> null;
 
@@ -78,23 +81,30 @@ public final class NoopIndex implements Index, INotificationConsumer
 
     private final IndexMetadata config;
     private final String keyspace;
-    /** The indexed column, or null, in the DSE 6 compatibility mode only, for an index whose target is not a column here. */
+    /**
+     * The indexed column, or null, in the DSE 6 and DSE 5.1 compatibility modes only, for an index whose target is not
+     * a column here.
+     */
     @Nullable
     private final ColumnMetadata column;
     /**
-     * In the DSE 6 compatibility mode, when the target is not one column, the columns of the table among its
-     * comma-separated parts, which the index depends on so that none of them is dropped while it is in the schema.
+     * In the DSE 6 and DSE 5.1 compatibility modes, when the target is not one column, the columns of the table among
+     * its comma-separated parts, which the index depends on so that none of them is dropped while it is in the schema.
      */
     private final Set<ColumnIdentifier> listedColumns;
-    /** Loaded because of the DSE 6 compatibility mode rather than {@link CassandraRelevantProperties#INDEX_UNKNOWN_IGNORE}. */
-    private final boolean dse6Compatibility;
+    /**
+     * Loaded because of a DSE compatibility mode rather than
+     * {@link CassandraRelevantProperties#INDEX_UNKNOWN_IGNORE}.
+     */
+    private final boolean dseCompatibility;
 
     public NoopIndex(ColumnFamilyStore baseCfs, IndexMetadata config)
     {
         this.config = config;
-        // same precedence as SecondaryIndexManager#createInstance: the property first, then the DSE 6 mode
-        dse6Compatibility = !CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE.getBoolean() && DatabaseDescriptor.isDse6CompatibilityMode();
-        if (DatabaseDescriptor.isDse6CompatibilityMode())
+        // same precedence as SecondaryIndexManager#createInstance: the property first, then the DSE modes
+        dseCompatibility = !CassandraRelevantProperties.INDEX_UNKNOWN_IGNORE.getBoolean() &&
+                            DatabaseDescriptor.isDseCompatibilityMode();
+        if (DatabaseDescriptor.isDseCompatibilityMode())
         {
             // the target may not be a column here, as for the solr_query pseudo-column of a DataStax Enterprise search index
             // (keyed on the mode alone, so that setting the ignore property as well does not make the load fail)
@@ -127,10 +137,13 @@ public final class NoopIndex implements Index, INotificationConsumer
 
     public String getUnsupportedMessage()
     {
-        return String.format(dse6Compatibility ? DSE6_UNSUPPORTED_MESSAGE : UNSUPPORTED_MESSAGE, keyspace, config.name, config.getIndexClassName(), describedTarget());
+        if (dseCompatibility)
+            return String.format(DSE_UNSUPPORTED_MESSAGE, keyspace, config.name, config.getIndexClassName(),
+                                 describedTarget(), DseCompat.source(), DseCompat.textMode());
+        return String.format(UNSUPPORTED_MESSAGE, keyspace, config.name, config.getIndexClassName(), describedTarget());
     }
 
-    // "on column c"; in the DSE 6 compatibility mode also "on target solr_query", for a target that is not one column
+    // "on column c"; in the DSE compatibility modes also "on target solr_query", for a target that is not one column
     // here, or "with no target"
     private String describedTarget()
     {
@@ -150,8 +163,8 @@ public final class NoopIndex implements Index, INotificationConsumer
     public void register(IndexRegistry registry)
     {
         registry.registerIndex(this);
-        // in the DSE 6 compatibility mode SecondaryIndexManager#createInstance has already logged a warning for it
-        if (!dse6Compatibility)
+        // in the DSE compatibility modes SecondaryIndexManager#createInstance has already logged a warning for it
+        if (!dseCompatibility)
             logger.error(getUnsupportedMessage());
     }
 
