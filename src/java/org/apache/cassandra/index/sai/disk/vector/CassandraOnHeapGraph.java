@@ -63,10 +63,10 @@ import io.github.jbellis.jvector.util.Accountable;
 import io.github.jbellis.jvector.util.Bits;
 import io.github.jbellis.jvector.util.DenseIntMap;
 import io.github.jbellis.jvector.util.RamUsageEstimator;
-import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorUtil;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.FloatArray;
 import io.github.jbellis.jvector.vector.types.VectorFloat;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.agrona.collections.IntHashSet;
@@ -160,7 +160,7 @@ public class CassandraOnHeapGraph<T> implements Accountable
         // based Map (which only needs to look at vector elements until a difference is found)
         // is thus a better option than hash-based (which has to look at all elements to compute the hash).
         postingsMap = new ConcurrentSkipListMap<>((a, b) -> {
-            return Arrays.compare(((ArrayVectorFloat) a).get(), ((ArrayVectorFloat) b).get());
+            return Arrays.compare(((FloatArray) a).array(), ((FloatArray) b).array());
         });
         postingsByOrdinal = new DenseIntMap<>(1024);
         deletedOrdinals = new IntHashSet();

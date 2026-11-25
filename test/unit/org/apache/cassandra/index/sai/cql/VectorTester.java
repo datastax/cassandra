@@ -39,9 +39,9 @@ import org.junit.runners.Parameterized;
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
 import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.util.Bits;
-import io.github.jbellis.jvector.vector.ArrayVectorFloat;
 import io.github.jbellis.jvector.vector.VectorSimilarityFunction;
 import io.github.jbellis.jvector.vector.VectorizationProvider;
+import io.github.jbellis.jvector.vector.types.FloatArray;
 import io.github.jbellis.jvector.vector.types.VectorTypeSupport;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
@@ -117,7 +117,7 @@ public class VectorTester extends SAITester
 
         var nearestNeighbors = new ArrayList<float[]>();
         for (var ns : results.getNodes())
-            nearestNeighbors.add(((ArrayVectorFloat) vectorValues.getVector(ns.node)).get());
+            nearestNeighbors.add(((FloatArray) vectorValues.getVector(ns.node)).array());
 
         return recallMatch(nearestNeighbors, result, topK);
     }
