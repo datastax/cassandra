@@ -200,7 +200,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
         this.nextClusterings = new InsertionOrderedNavigableSet<>(cfs.metadata().comparator);
         queryContext.setEstimatedRowsInQueryRange(estimateTotalRows(ranges));
-        var tableMetrics = new Plan.TableMetrics(estimateTotalRows(),
+        var tableMetrics = new Plan.TableMetrics(estimateTotalAvailableRows(ranges),
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
                                                  cfs.getLiveSSTables().size());
@@ -1069,15 +1069,21 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     }
 
     /**
-     * Estimates the number of rows in all memtables and sstables, regardless of the query key range.
+     * Returns the total count of rows in the sstables which overlap with any of the given ranges
+     * and the rows in the memtables restricted to the queried token ranges. Token ranges are
+     * approximated to full shards, according to the way how TrieMemtableIndex shards the indexes.
      */
-    private long estimateTotalRows()
+    private long estimateTotalAvailableRows(List<DataRange> ranges)
     {
         long rows = 0;
         for (Memtable memtable : cfs.getAllMemtables())
             rows += Memtable.estimateRowCount(memtable);
+
         for (SSTableReader sstable : cfs.getLiveSSTables())
-            rows += sstable.getTotalRows();
+            for (DataRange range : ranges)
+                if (RangeUtil.intersects(sstable, range.keyRange()))
+                    rows += sstable.getTotalRows();
+
         return rows;
     }
 
