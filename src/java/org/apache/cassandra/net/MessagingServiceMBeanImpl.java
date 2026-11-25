@@ -40,6 +40,7 @@ import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.service.Dse6AccessControlCheck;
+import org.apache.cassandra.service.Dse6NonCoreTraces;
 import org.apache.cassandra.service.Dse6SaiVersionPin;
 import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.utils.FBUtilities;
@@ -407,6 +408,12 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     public String getDseSaiVersionPin()
     {
         return DatabaseDescriptor.isDse6CompatibilityMode() ? Dse6SaiVersionPin.status() : null;
+    }
+
+    @Override
+    public String getDseNonCoreTraces()
+    {
+        return DatabaseDescriptor.isDse6CompatibilityMode() ? Dse6NonCoreTraces.status() : null;
     }
 
     @Override

@@ -196,6 +196,15 @@ public interface MessagingServiceMBean
     public String getDseSaiVersionPin();
 
     /**
+     * In {@code DSE_6} mode, what the startup check of the DSE features this software does not support found
+     * ({@code Dse6NonCoreTraces}): no trace ({@code none}), with the override of the entries of DSE's {@code nodes/peers}
+     * named when it is set, or no trace but what of {@code nodes/peers} the override ignored (its entries with a DSE
+     * workload other than Cassandra, or the file itself when it cannot be read); null outside {@code DSE_6} and before
+     * the check.
+     */
+    public String getDseNonCoreTraces();
+
+    /**
      * The grants of DataStax Enterprise's {@code UPDATE} or {@code TRUNCATE} alone on data resources in
      * {@code system_auth.role_permissions}, which {@code CassandraAuthorizer} drops (the two together are read as
      * {@code MODIFY}), in every mode, as last read on this node: {@code role '<role>' on <resource>: <name>}, sorted.
