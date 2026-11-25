@@ -385,16 +385,17 @@ public class Dse51ColumnTypesTest extends CQLTester
         .isInstanceOf(StartupException.class)
         .hasMessage("internode_compatibility_mode DSE_5_1 refused: " + column + " is of a type this software does " +
                     "not write for DSE 5.1, so this node cannot write the sstables DSE 5.1 reads for it. Such a " +
-                    "column comes with the schema of DSE 5.1 (a type of a class both load, such as a custom type), " +
-                    "or from a run of this node outside the mode. From DSE 5.1's schema: do not end the mode on this " +
-                    "node, which it needs to reach the DSE 5.1 nodes; roll it back to DSE 5.1, then, before the " +
-                    "first node is upgraded, drop it there and upgrade the node again, or, in the mixed phase (a " +
-                    "schema change made on DSE 5.1 since the upgrade began), upgrade no further node and report to " +
-                    "the upgrade owner. From a run of this node outside the mode (its flag drop undone): once no " +
-                    "node runs DSE 5.1, end the mode on this node again by the flag drop (stop the node, delete the " +
-                    "files of the DSE 5.1 upgrade of its metadata directory and start it set to " +
-                    "internode_compatibility_mode NONE with storage_compatibility_mode HCD_1); while DSE 5.1 nodes " +
-                    "remain, upgrade no further node and report to the upgrade owner");
+                    "column comes with the schema of DSE 5.1 (a type of a class both load, such as a custom type, " +
+                    "which the preflight inspection of a DSE 5.1 node blocks on as COLUMN_TYPE), or from a run of " +
+                    "this node outside the mode. From DSE 5.1's schema: do not end the mode on this node, which it " +
+                    "needs to reach the DSE 5.1 nodes; roll it back to DSE 5.1, then, before the first node is " +
+                    "upgraded, drop it there and upgrade the node again, or, in the mixed phase (a schema change " +
+                    "made on DSE 5.1 since the upgrade began), upgrade no further node and report to the upgrade " +
+                    "owner. From a run of this node outside the mode (its flag drop undone): once no node runs DSE " +
+                    "5.1, end the mode on this node again by the flag drop (stop the node, delete the files of the " +
+                    "DSE 5.1 upgrade of its metadata directory and start it set to internode_compatibility_mode NONE " +
+                    "with storage_compatibility_mode HCD_1); while DSE 5.1 nodes remain, upgrade no further node and " +
+                    "report to the upgrade owner");
         assertThat(Dse51ColumnTypes.startRefusal(List.of("ks.t.a (x)", "ks.t.b (y)")))
         .startsWith("internode_compatibility_mode DSE_5_1 refused: ks.t.a (x), ks.t.b (y) are of a type this " +
                     "software does not write for DSE 5.1, so this node cannot write the sstables DSE 5.1 reads for " +

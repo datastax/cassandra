@@ -579,7 +579,8 @@ public final class DsePreflight
 
     static void printAggregate(ClusterAggregate.AggregateReport aggregate, PrintStream out)
     {
-        out.println("DSE 6 preflight inspection, cluster aggregate (" + NodeReport.TOOL + ' ' + aggregate.softwareVersion + ')');
+        out.println(aggregate.source + " preflight inspection, cluster aggregate (" + NodeReport.TOOL + ' ' +
+                    aggregate.softwareVersion + ')');
         out.println("Reports read: " + aggregate.reportsRead + dataCenterCounts(aggregate));
         // the node lines grouped by data center, in the order of the report within each
         for (String dataCenter : aggregate.dataCenters.keySet())

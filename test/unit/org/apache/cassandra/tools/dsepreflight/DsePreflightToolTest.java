@@ -102,7 +102,7 @@ public class DsePreflightToolTest extends OfflineToolUtils
 
     /**
      * A DSE 5.1.51 node through {@code main}, in a JVM without the DSE 5.1 compatibility mode: its big me sstables are
-     * read from scratch copies, its files stay unchanged, and nothing of the server is loaded.
+     * read from scratch copies, its schema checked, its files stay unchanged, and nothing of the server is loaded.
      */
     @Test
     public void aDse51NodeIsInspectedAsAnOfflineClientThroughMain() throws IOException
@@ -111,7 +111,7 @@ public class DsePreflightToolTest extends OfflineToolUtils
         Map<String, String> before = node.fingerprint();
         Path json = temporaryFolder.getRoot().toPath().resolve("report-dse51.json");
         ToolResult tool = ToolRunner.invokeClass(DsePreflight.class, node.args("--json", json.toString()));
-        // the node ran with Thrift on, as DSE installs it
+        // the node ran with Thrift on, as DSE installs it, and its schema holds what the schema checks block
         assertThat(tool.getExitCode()).as("%s%s", tool.getStdout(), tool.getStderr())
                                       .isEqualTo(DsePreflight.EXIT_BLOCKED);
         assertThat(tool.getStdout()).startsWith("DSE 5.1 preflight inspection").contains("[THRIFT]");
@@ -120,7 +120,8 @@ public class DsePreflightToolTest extends OfflineToolUtils
         NodeReport report = ClusterAggregate.READER.readValue(Files.readAllBytes(json));
         assertThat(report.findings).filteredOn(f -> f.severity == Finding.Severity.BLOCKING)
                                    .extracting(f -> f.code)
-                                   .containsExactly("THRIFT");
+                                   .containsExactlyInAnyOrder("THRIFT", "COMPACT_STORAGE", "SASI_INDEX",
+                                                              "ROW_LEVEL_ACCESS", "RESTRICTED_VIEW", "VIEW_TABLE_ROW");
         assertThat(report.node.hostId).isEqualTo("c8896567-fb1e-4ce9-bb92-c8a31586e679");
 
         assertSchemaNotLoaded();
