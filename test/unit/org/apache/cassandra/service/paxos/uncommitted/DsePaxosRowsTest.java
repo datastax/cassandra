@@ -288,7 +288,7 @@ public class DsePaxosRowsTest extends CQLTester
      */
     private void loadsDse6926PaxosSSTable(InternodeCompatibilityMode mode) throws Throwable
     {
-        // the schema and the import first, then the mode, as on a node upgraded in place
+        // the schema and the import first, then the mode, as on a node upgraded in place: DSE_6 refuses DDL and import
         schemaChange("CREATE KEYSPACE IF NOT EXISTS " + DSE_6_9_26_KEYSPACE + " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}");
         schemaChange("CREATE TABLE IF NOT EXISTS " + DSE_6_9_26_KEYSPACE + ".lwt (id int PRIMARY KEY, v int) WITH ID = " +
                      DseFixtures.PAXOS_DSE_6_9_26_LWT_TABLE_ID + " AND gc_grace_seconds = " + DSE_6_9_26_GC_GRACE_SECONDS);
