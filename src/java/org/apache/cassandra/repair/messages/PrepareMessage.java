@@ -34,8 +34,11 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseCompatRefusals;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.service.DseUpgradeGuards;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.TimeUUID;
 
@@ -98,10 +101,27 @@ public class PrepareMessage extends RepairMessage
                                                    "4.x nodes. " +
                                                    "To allow repair during rolling upgrades, set -Dcassandra.allow_mixed_repair=true";
 
+    /**
+     * A pre-4.0 messaging version is only ever negotiated with a DSE 6 peer, in the DSE 6 compatibility mode: repair
+     * cannot involve such a peer, and the coordinator says so instead of the mixed-major-version text above. Defence
+     * in depth: {@code StorageService.repair} already refuses in that mode, and the pre-4.0 verb mapping refuses the
+     * repair verbs before any serialization; this is the last line for a message that reaches the serializer anyway.
+     * A refused message fails at the first of the three methods it reaches (the size of an outgoing message is computed
+     * before it is written), so each refusal is counted once.
+     */
+    private static void refuseDsePeer(int version)
+    {
+        if (version >= MessagingService.VERSION_40 || !DseCompat.enabled())
+            return;
+        DseCompatRefusals.refused("repair");
+        throw new UnsupportedOperationException(DseUpgradeGuards.REPAIR_WITH_DSE_PEER);
+    }
+
     public static final IVersionedSerializer<PrepareMessage> serializer = new IVersionedSerializer<PrepareMessage>()
     {
         public void serialize(PrepareMessage message, DataOutputPlus out, int version) throws IOException
         {
+            refuseDsePeer(version);
             if (!ALLOW_MIXED_REPAIR)
                 Preconditions.checkArgument(version == MessagingService.current_version, MIXED_MODE_ERROR);
 
@@ -123,6 +143,7 @@ public class PrepareMessage extends RepairMessage
 
         public PrepareMessage deserialize(DataInputPlus in, int version) throws IOException
         {
+            refuseDsePeer(version);
             if (!ALLOW_MIXED_REPAIR)
                 Preconditions.checkArgument(version == MessagingService.current_version, MIXED_MODE_ERROR);
 
@@ -144,6 +165,7 @@ public class PrepareMessage extends RepairMessage
 
         public long serializedSize(PrepareMessage message, int version)
         {
+            refuseDsePeer(version);
             long size;
             size = TypeSizes.sizeof(message.tableIds.size());
             for (TableId tableId : message.tableIds)

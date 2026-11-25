@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import org.junit.AfterClass;
 import org.junit.Assert;
@@ -37,6 +38,8 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -47,6 +50,10 @@ import org.apache.cassandra.utils.memory.BufferPools;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.Math.min;
+import static org.apache.cassandra.net.MessagingService.VERSION_30;
+import static org.apache.cassandra.net.MessagingService.VERSION_3014;
+import static org.apache.cassandra.net.MessagingService.current_version;
+import static org.apache.cassandra.net.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 import static org.apache.cassandra.net.ShareableBytes.wrap;
 
 // TODO: test corruption
@@ -56,37 +63,60 @@ public class FramingTest
 {
     private static final Logger logger = LoggerFactory.getLogger(FramingTest.class);
 
+    /**
+     * The verb of the messages of the pre-4.0 stream tests: the pre-4.0 dialect (DSE 6 compatibility mode) carries only
+     * the request verbs of Cassandra 3.0, so one of them gets a byte-array payload for the duration of the class.
+     */
+    private static final Verb LEGACY_VERB = Verb.ECHO_REQ;
+    private static Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> legacyVerbSerializer;
+
+    private static final IVersionedSerializer<byte[]> BYTES_SERIALIZER = new IVersionedSerializer<byte[]>()
+    {
+        public void serialize(byte[] t, DataOutputPlus out, int version) throws IOException
+        {
+            out.writeUnsignedVInt32(t.length);
+            out.write(t);
+        }
+
+        public byte[] deserialize(DataInputPlus in, int version) throws IOException
+        {
+            byte[] r = new byte[in.readUnsignedVInt32()];
+            in.readFully(r);
+            return r;
+        }
+
+        public long serializedSize(byte[] t, int version)
+        {
+            return VIntCoding.computeUnsignedVIntSize(t.length) + t.length;
+        }
+    };
+
     @BeforeClass
     public static void begin() throws NoSuchFieldException, IllegalAccessException
     {
         DatabaseDescriptor.daemonInitialization();
-        Verb._TEST_1.unsafeSetSerializer(() -> new IVersionedSerializer<byte[]>()
-        {
-
-            public void serialize(byte[] t, DataOutputPlus out, int version) throws IOException
-            {
-                out.writeUnsignedVInt32(t.length);
-                out.write(t);
-            }
-
-            public byte[] deserialize(DataInputPlus in, int version) throws IOException
-            {
-                byte[] r = new byte[in.readUnsignedVInt32()];
-                in.readFully(r);
-                return r;
-            }
-
-            public long serializedSize(byte[] t, int version)
-            {
-                return VIntCoding.computeUnsignedVIntSize(t.length) + t.length;
-            }
-        });
+        legacyVerbSerializer = LEGACY_VERB.unsafeSetSerializer(() -> BYTES_SERIALIZER);
     }
 
     @AfterClass
     public static void after() throws NoSuchFieldException, IllegalAccessException
     {
-        Verb._TEST_1.unsafeSetSerializer(() -> null);
+        LEGACY_VERB.unsafeSetSerializer(legacyVerbSerializer);
+    }
+
+    /** Runs the task in DSE 6 compatibility mode, the only mode in which the pre-4.0 layouts are spoken. */
+    private static void inDse6Mode(Runnable task)
+    {
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            task.run();
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
     }
 
     private static class SequenceOfFrames
@@ -233,6 +263,272 @@ public class FramingTest
         subTest.accept(-1L);
         subTest.accept(1L << 7 - 1);
         subTest.accept(1L << 14 - 1);
+    }
+
+    /*
+     * The unframed pre-4.0 stream (DSE 6 compatibility mode, messaging version 11): a sequence of messages whose
+     * boundaries the decoder finds by inferring each message's size from its header. Ported from the 4.0-line tests.
+     */
+
+    @Test
+    public void burnRandomLegacy()
+    {
+        inDse6Mode(() -> burnRandomLegacy(200));
+    }
+
+    private void burnRandomLegacy(int count)
+    {
+        int[] versions = new int[] { VERSION_30, VERSION_3014, current_version };
+        SecureRandom seed = new SecureRandom();
+        Random random = new Random();
+        for (int i = 0 ; i < count ; ++i)
+        {
+            long innerSeed = seed.nextLong();
+            float ratio = seed.nextFloat();
+            int version = versions[random.nextInt(versions.length)];
+            logger.debug("seed: {}, ratio: {}, version: {}", innerSeed, ratio, version);
+            random.setSeed(innerSeed);
+            testRandomSequenceOfMessages(random, ratio, version, new FrameDecoderLegacy(GlobalBufferPoolAllocator.instance, version));
+        }
+    }
+
+    @Test
+    public void testRandomLegacy()
+    {
+        inDse6Mode(() -> testRandomLegacy(100));
+    }
+
+    private void testRandomLegacy(int count)
+    {
+        SecureRandom seeds = new SecureRandom();
+        for (int messagingVersion : new int[] { VERSION_30, VERSION_3014, current_version })
+        {
+            FrameDecoder decoder = new FrameDecoderLegacy(GlobalBufferPoolAllocator.instance, messagingVersion);
+            testSomeMessages(seeds.nextLong(), count, 0.0f, messagingVersion, decoder);
+            testSomeMessages(seeds.nextLong(), count, 0.1f, messagingVersion, decoder);
+            testSomeMessages(seeds.nextLong(), count, 0.95f, messagingVersion, decoder);
+            testSomeMessages(seeds.nextLong(), count, 1.0f, messagingVersion, decoder);
+        }
+    }
+
+    private void testSomeMessages(long seed, int count, float largeRatio, int messagingVersion, FrameDecoder decoder)
+    {
+        logger.info("seed: {}, iterations: {}, largeRatio: {}, messagingVersion: {}, decoder: {}", seed, count, largeRatio, messagingVersion, decoder.getClass().getSimpleName());
+        Random random = new Random(seed);
+        for (int i = 0 ; i < count ; ++i)
+        {
+            long innerSeed = random.nextLong();
+            logger.debug("inner seed: {}, iteration: {}", innerSeed, i);
+            random.setSeed(innerSeed);
+            testRandomSequenceOfMessages(random, largeRatio, messagingVersion, decoder);
+        }
+    }
+
+    private void testRandomSequenceOfMessages(Random random, float largeRatio, int messagingVersion, FrameDecoder decoder)
+    {
+        SequenceOfFrames sequenceOfMessages = sequenceOfMessages(random, largeRatio, messagingVersion);
+
+        List<byte[]> messages = sequenceOfMessages.original;
+        ShareableBytes stream = sequenceOfMessages.frames;
+
+        int end = stream.get().limit();
+        List<FrameDecoder.Frame> out = new ArrayList<>();
+
+        int messageStart = 0;
+        int messageIndex = 0;
+        for (int i = 0 ; i < end ; )
+        {
+            int limit = i + random.nextInt(1 + end - i);
+            decoder.decode(out, stream.slice(i, limit));
+
+            int outIndex = 0;
+            byte[] message = messages.get(messageIndex);
+            if (i > messageStart)
+            {
+                int start;
+                if (message.length <= LARGE_MESSAGE_THRESHOLD)
+                {
+                    start = 0;
+                }
+                else  if (!lengthIsReadable(message, i - messageStart, messagingVersion))
+                {
+                    // we should have an initial frame containing only some prefix of the message (probably 64 bytes)
+                    // that was stashed only to decide how big the message was
+                    FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
+                    Assert.assertFalse(frame.isSelfContained);
+                    start = frame.contents.remaining();
+                    verify(message, 0, frame.contents.remaining(), frame.contents);
+                }
+                else
+                {
+                    start = i - messageStart;
+                }
+
+                if (limit >= message.length + messageStart)
+                {
+                    FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
+                    Assert.assertEquals(start == 0, frame.isSelfContained);
+                    // verify remainder of a large message, or a single fully stashed small message
+                    verify(message, start, message.length, frame.contents);
+
+                    messageStart += message.length;
+                    if (++messageIndex < messages.size())
+                        message = messages.get(messageIndex);
+                }
+                else if (message.length > LARGE_MESSAGE_THRESHOLD)
+                {
+                    FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
+                    Assert.assertFalse(frame.isSelfContained);
+                    // verify next portion of a large message
+                    verify(message, start, limit - messageStart, frame.contents);
+
+                    Assert.assertEquals(outIndex, out.size());
+                    for (FrameDecoder.Frame f : out)
+                        f.release();
+                    out.clear();
+                    i = limit;
+                    continue;
+                }
+            }
+
+            // message is fresh
+            int beginFrameIndex = messageIndex;
+            while (messageStart + message.length <= limit)
+            {
+                messageStart += message.length;
+                if (++messageIndex < messages.size())
+                    message = messages.get(messageIndex);
+            }
+
+            if (beginFrameIndex < messageIndex)
+            {
+                FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
+                Assert.assertTrue(frame.isSelfContained);
+                while (beginFrameIndex < messageIndex)
+                {
+                    byte[] m = messages.get(beginFrameIndex);
+                    ShareableBytes bytesToVerify = frame.contents.sliceAndConsume(m.length);
+                    verify(m, bytesToVerify);
+                    bytesToVerify.release();
+                    ++beginFrameIndex;
+                }
+                Assert.assertFalse(frame.contents.hasRemaining());
+            }
+
+            if (limit > messageStart
+                && message.length > LARGE_MESSAGE_THRESHOLD
+                && lengthIsReadable(message, limit - messageStart, messagingVersion))
+            {
+                FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
+                Assert.assertFalse(frame.isSelfContained);
+                verify(message, 0, limit - messageStart, frame.contents);
+            }
+
+            Assert.assertEquals(outIndex, out.size());
+            for (FrameDecoder.Frame frame : out)
+                frame.release();
+            out.clear();
+
+            i = limit;
+        }
+        stream.release();
+        Assert.assertTrue(stream.isReleased());
+        Assert.assertNull(decoder.stash);
+        Assert.assertTrue(decoder.frames.isEmpty());
+    }
+
+    private static boolean lengthIsReadable(byte[] message, int limit, int messagingVersion)
+    {
+        try
+        {
+            return Message.serializer.inferMessageSize(ByteBuffer.wrap(message), 0, limit, messagingVersion) >= 0;
+        }
+        catch (Message.InvalidLegacyProtocolMagic e)
+        {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static SequenceOfFrames sequenceOfMessages(Random random, float largeRatio, int messagingVersion)
+    {
+        int messageCount = 1 + random.nextInt(63);
+        List<byte[]> messages = new ArrayList<>();
+        int[] cumulativeLength = new int[messageCount];
+        for (int i = 0 ; i < messageCount ; ++i)
+        {
+            byte[] payload;
+            if (random.nextFloat() < largeRatio) payload = randomishBytes(random, 1 << 16, 1 << 17);
+            else payload = randomishBytes(random, 1, 1 << 16);
+            Message<byte[]> messageObj = Message.out(LEGACY_VERB, payload);
+
+            byte[] message;
+            try (DataOutputBuffer out = new DataOutputBuffer(messageObj.serializedSize(messagingVersion)))
+            {
+                Message.serializer.serialize(messageObj, out, messagingVersion);
+                message = out.toByteArray();
+            }
+            catch (IOException e)
+            {
+                throw new IllegalStateException(e);
+            }
+            messages.add(message);
+
+            cumulativeLength[i] = (i == 0 ? 0 : cumulativeLength[i - 1]) + message.length;
+        }
+
+        ByteBuffer frames = BufferPools.forNetworking().getAtLeast(cumulativeLength[messageCount - 1], BufferType.OFF_HEAP);
+        for (byte[] buffer : messages)
+            frames.put(buffer);
+        frames.flip();
+        return new SequenceOfFrames(messages, cumulativeLength, frames);
+    }
+
+    /**
+     * A pre-4.0 stream with a malformed header: an address that is neither IPv4 nor IPv6, a negative param count, a
+     * payload longer than the maximum message size. The decoder refuses each as soon as it reads the length, before
+     * buffering the rest; the exception ends the connection through the handler's exception path, and discarding the
+     * decoder, as closing the channel does, releases the part of the message it had stashed.
+     */
+    @Test
+    public void malformedLegacyStreamsAreRefused()
+    {
+        inDse6Mode(() -> {
+            // magic, id, creation time; the address size and address; the verb; the param count; the payload size
+            assertRefused(Message.InvalidPre40MessageException.class, legacyHeader(7, 0, 0));
+            assertRefused(Message.InvalidPre40MessageException.class, legacyHeader(4, -1, 0));
+            assertRefused(Message.InvalidPre40MessageException.class, legacyHeader(4, 0, -1));
+            assertRefused(Message.OversizedMessageException.class, legacyHeader(4, 0, Integer.MAX_VALUE));
+        });
+    }
+
+    private static byte[] legacyHeader(int addressSize, int paramCount, int payloadSize)
+    {
+        ByteBuffer header = ByteBuffer.allocate(12 + 1 + addressSize + 12);
+        header.putInt(Message.PROTOCOL_MAGIC).putInt(1).putInt(0);
+        header.put((byte) addressSize).put(new byte[addressSize]);
+        header.putInt(LEGACY_VERB.toPre40Verb().id).putInt(paramCount).putInt(payloadSize);
+        return header.array();
+    }
+
+    private static void assertRefused(Class<? extends RuntimeException> refusal, byte[] header)
+    {
+        FrameDecoderLegacy decoder = new FrameDecoderLegacy(GlobalBufferPoolAllocator.instance, VERSION_3014);
+        List<FrameDecoder.Frame> out = new ArrayList<>();
+        // the first bytes alone are stashed, as a read that ends early in the header leaves them
+        decoder.decode(out, legacyBytes(header, 0, 6));
+        Assert.assertNotNull(decoder.stash);
+        Assert.assertThrows(refusal, () -> decoder.decode(out, legacyBytes(header, 6, header.length)));
+        Assert.assertTrue(out.isEmpty());
+        decoder.discard();
+        Assert.assertNull(decoder.stash);
+    }
+
+    private static ShareableBytes legacyBytes(byte[] bytes, int from, int to)
+    {
+        ByteBuffer buffer = BufferPools.forNetworking().getAtLeast(to - from, BufferType.OFF_HEAP);
+        buffer.put(bytes, from, to - from);
+        buffer.flip();
+        return wrap(buffer);
     }
 
     public static byte[] randomishBytes(Random random, int minLength, int maxLength)

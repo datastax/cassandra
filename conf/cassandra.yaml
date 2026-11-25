@@ -1657,7 +1657,10 @@ server_encryption_options:
   # optional defaults to true if internode_encryption is none
   # optional: true
   # If enabled, will open up an encrypted listening socket on ssl_storage_port. Should only be used
-  # during upgrade to 4.0; otherwise, set to false.
+  # during upgrade to 4.0; otherwise, set to false. In internode_compatibility_mode DSE_6 the node also
+  # listens there for DSE 6 nodes whenever internode_encryption is not none (and ssl_storage_port
+  # differs from storage_port), and dials each DSE node on the port its release listens on: leave this
+  # false.
   legacy_ssl_storage_port_enabled: false
   # Set to a valid keystore if internode_encryption is dc, rack or all
   keystore: conf/.keystore
@@ -2361,7 +2364,10 @@ storage_compatibility_mode: HCD_1
 # the linearizability of LWTs against DSE); a runtime change of the Paxos variant to another one is
 # refused. What the node flushes and compacts must use compressors DSE reads: it requires the
 # default compression selector (no -Dcassandra.sstable.compression.selector.class) and
-# flush_compression fast or table. Offline tools that read this file (sstablescrub, sstableupgrade,
+# flush_compression fast or table. It also requires the SAI on-disk version to be pinned to the one
+# the cluster's DSE release writes, with -Dcassandra.sai.latest.version=aa (DSE 6.8) or =ca (DSE
+# 6.9) in jvm-server.options. With DSE 6 peers the node speaks the pre-4.0 internode dialect DSE
+# uses with non-DSE peers. Offline tools that read this file (sstablescrub, sstableupgrade,
 # sstablesplit, ...) inherit the on-disk half of the mode: they write trie bb sstables with numeric
 # generations too, without the storage mode and paxos checks. Clients that do not read this file
 # (CQLSSTableWriter, sstableloader) inherit it only through the system property below. Remove the

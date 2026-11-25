@@ -46,6 +46,7 @@ import org.apache.cassandra.db.transform.StoppingTransformation;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -142,9 +143,11 @@ public abstract class DataLimits
         }
 
         /**
-         * Used with DSE compatibility protocol {@link org.apache.cassandra.net.MessagingService.Version#VERSION_30}.
-         * DSE doesn't know {@link #THRIFT_LIMIT} and {@link #SUPER_COLUMN_COUNTING_LIMIT}, so the compatibility
-         * ordinals are shifted by 2.
+         * The ordinal DSE uses for this kind, written and read at
+         * {@link org.apache.cassandra.net.MessagingService.Version#VERSION_30} (the older DSE &lt;-&gt; CC migration dialect)
+         * and, in DSE 6 compatibility mode, at {@link org.apache.cassandra.net.MessagingService.Version#VERSION_3014}
+         * (DSE writes its own ordinals there too). DSE doesn't know {@link #THRIFT_LIMIT} and
+         * {@link #SUPER_COLUMN_COUNTING_LIMIT}, so the compatibility ordinals of the GROUP BY kinds are shifted by 2.
          */
         private final int dseCompatibilityOrdinal;
 
@@ -206,6 +209,12 @@ public abstract class DataLimits
     public boolean isGroupByLimit()
     {
         return false;
+    }
+
+    /** The aggregation of a GROUP BY limit, or null for any other limit. */
+    public AggregationSpecification groupBySpecification()
+    {
+        return null;
     }
 
     /**
@@ -903,6 +912,12 @@ public abstract class DataLimits
             return true;
         }
 
+        @Override
+        public AggregationSpecification groupBySpecification()
+        {
+            return groupBySpec;
+        }
+
         public boolean isUnlimited()
         {
             return groupLimit == NO_LIMIT && groupPerPartitionLimit == NO_LIMIT && super.isUnlimited();
@@ -1442,11 +1457,26 @@ public abstract class DataLimits
 
     public static class Serializer
     {
+        /**
+         * The DSE ordinal of a kind in the pre-4.0 layout of DSE 6 compatibility mode; the kinds DSE does not know (never
+         * built by this software) cannot be sent to DSE.
+         */
+        private static int pre40DseCompatibilityOrdinal(Kind kind, int version)
+        {
+            if (kind.dseCompatibilityOrdinal == Kind.UNDEFINED)
+                throw new IllegalStateException("DataLimits.Kind " + kind + " cannot be serialized at messaging version " + version);
+            return kind.dseCompatibilityOrdinal;
+        }
+
         public void serialize(DataLimits limits, DataOutputPlus out, int version, ClusteringComparator comparator) throws IOException
         {
-            // VERSION_30 is used for migration only (DSE <-> CC compatibility is required).
-            // DSE doesn't know THRIFT_LIMIT(2) and SUPER_COLUMN_COUNTING_LIMIT(3), so DSE ordinals must be used here.
-            if (version == MessagingService.VERSION_30)
+            // VERSION_30 is used for migration only (DSE <-> CC compatibility is required), and the DSE 6 compatibility
+            // mode speaks VERSION_3014 with DSE. DSE doesn't know THRIFT_LIMIT(2) and SUPER_COLUMN_COUNTING_LIMIT(3), so
+            // DSE ordinals must be used here (DSE writes its own ordinals at OSS_3014 too). With the mode off,
+            // VERSION_3014 keeps the ordinals of the enum and VERSION_30 its checks, as before the mode existed.
+            if (DseCompat.isPre40Layout(version))
+                out.writeByte(pre40DseCompatibilityOrdinal(limits.kind(), version));
+            else if (version == MessagingService.VERSION_30)
                 out.writeByte(limits.kind().dseCompatibilityOrdinal());
             else
                 out.writeByte(limits.kind().ordinal());
@@ -1495,11 +1525,22 @@ public abstract class DataLimits
         public DataLimits deserialize(DataInputPlus in, int version, TableMetadata metadata) throws IOException
         {
             int ordinal = in.readUnsignedByte();
-            Kind kind = version == MessagingService.VERSION_30 ?
-                        Kind.DSE_COMPATIBILITY_VALUES[ordinal] :
-                        Kind.values()[ordinal];
+            Kind kind;
+            if (DseCompat.isPre40Layout(version))
+            {
+                // an ordinal a DSE 6 peer sends for no kind is refused with an explicit error
+                kind = ordinal < Kind.DSE_COMPATIBILITY_VALUES.length ? Kind.DSE_COMPATIBILITY_VALUES[ordinal] : null;
+                if (kind == null)
+                    throw new IOException("Unknown DataLimits.Kind ordinal " + ordinal + " at messaging version " + version);
+            }
+            else
+            {
+                kind = version == MessagingService.VERSION_30 ?
+                       Kind.DSE_COMPATIBILITY_VALUES[ordinal] :
+                       Kind.values()[ordinal];
 
-            assert kind != null : "Unknown DataLimits.Kind with ordinal " + ordinal + " and version " + version;
+                assert kind != null : "Unknown DataLimits.Kind with ordinal " + ordinal + " and version " + version;
+            }
 
             switch (kind)
             {

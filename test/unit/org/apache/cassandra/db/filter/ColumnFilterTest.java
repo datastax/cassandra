@@ -29,11 +29,14 @@ import org.junit.Test;
 
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.cql3.ColumnIdentifier;
+import org.apache.cassandra.db.Columns;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.SetType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.CellPath;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.gms.Gossiper;
@@ -46,6 +49,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.CassandraVersion;
+import org.apache.cassandra.utils.Hex;
 import org.apache.cassandra.utils.Throwables;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -543,6 +547,206 @@ public class ColumnFilterTest
 
         setMinVersion("5.0");
         assertEquals("<all regulars>+[s1]/[s1]", ColumnFilter.selection(metadata, RegularAndStaticColumns.builder().add(s1).build(), false).toString());
+    }
+
+    /**
+     * The pre-4.0 layouts of the DSE 6 compatibility mode. The header has no FETCH_ALL_STATICS bit (0x08), which 4.0
+     * added: in those dialects fetching all regular columns fetches all static columns too, so such a filter is read back
+     * as ALL_COLUMNS. At version 10 (Cassandra 3.0.0 to 3.0.13) the fetched columns are not sent either: the receiver
+     * fetches all of the table's.
+     */
+    @Test
+    public void pre40Layouts() throws IOException
+    {
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            checkPre40Layouts();
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    /**
+     * CNDB-19930 with DSE 6 peers: every DSE 6 node gossips a 4.0.0 release (DSE 6.8.65 gossips 4.0.0.6865), so while one
+     * is in the cluster a coordinator that selects some of the static columns fetches all the columns, the filter
+     * Cassandra 3.0 sends for that selection. Its bytes at version 11, the dialect of DSE 6 peers, are those of the
+     * Cassandra 3.0.14 layout: the header, the fetched columns (every column of the table), the queried columns. Each
+     * group of columns is the statics, then the regulars, each a count (an unsigned vint; with no synthetic column the
+     * packed count of this software is the 3.0.14 count) followed by the names (each its length as an unsigned vint,
+     * then its UTF-8 bytes), simple columns before complex ones, then by name. Read back at version 11 the bytes give
+     * the same filter, as on Cassandra 3.0.14 and HCD 1.2. A DSE 6 replica fetches every static column for that header
+     * too, but also takes every static column as queried (answer A33, item 3), so its answer for such a selection
+     * carries the values of the other static columns as well. With the mode off version 11 keeps the 4.0 layout, the
+     * FETCH_ALL_STATICS bit included.
+     */
+    @Test
+    public void pre40LayoutOfAStaticSelectionWithDse6Peers() throws IOException
+    {
+        setMinVersion("4.0.0.6865");
+        RegularAndStaticColumns queried = RegularAndStaticColumns.builder().add(s1).build();
+        assertThat(DatabaseDescriptor.isDse6CompatibilityMode()).isFalse();
+        ColumnFilter modeOff = ColumnFilter.selection(metadata, queried, false);
+        assertThat(serialize(modeOff, MessagingService.VERSION_3014)).isEqualTo(serialize(modeOff, MessagingService.VERSION_40));
+        assertThat(serialize(modeOff, MessagingService.VERSION_3014)[0]).isEqualTo((byte) 0x0b);
+
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            byte[] expected = Hex.hexToBytes("03" +                                 // FETCH_ALL_REGULARS (0x01) | HAS_QUERIED (0x02), no FETCH_ALL_STATICS (0x08)
+                                             "02" + "027331" + "027332" +           // fetched statics: s1, s2
+                                             "03" + "0c45736361706564204e616d65" +  // fetched regulars: "Escaped Name",
+                                             "027631" + "027632" +                  // v1, then v2 (complex, after the simple)
+                                             "01" + "027331" +                      // queried statics: s1
+                                             "00");                                 // queried regulars: none
+            for (ColumnFilter filter : new ColumnFilter[]{ ColumnFilter.selection(metadata, queried, false),
+                                                           ColumnFilter.allRegularColumnsBuilder(metadata, false).add(s1).build() })
+            {
+                assertEquals("*/[s1]", filter.toString());
+                assertThat(serialize(filter, MessagingService.VERSION_3014)).isEqualTo(expected);
+                ColumnFilter received = deserialize(expected, MessagingService.VERSION_3014);
+                assertThat(received).isEqualTo(filter);
+                assertThat(received.fetchesAllColumns(true)).isTrue();
+                assertThat(received.queriedColumns()).isEqualTo(queried);
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    /**
+     * With the mode off versions 10 (the DSE to CC migration path) and 11 keep the layout they had before the mode
+     * existed: the 4.0 one, FETCH_ALL_STATICS bit and fetched columns included.
+     */
+    @Test
+    public void pre40LayoutsAreUnchangedWithTheModeOff() throws IOException
+    {
+        assertThat(DatabaseDescriptor.isDse6CompatibilityMode()).isFalse();
+        ColumnFilter wildcard = ColumnFilter.all(metadata);
+        ColumnFilter allStatics = ColumnFilter.allRegularColumnsBuilder(metadata, true).add(v1).build();
+        ColumnFilter queriedStatics = ColumnFilter.allRegularColumnsBuilder(metadata, false).add(v1).build();
+        for (int version : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_3014 })
+        {
+            for (ColumnFilter filter : new ColumnFilter[]{ wildcard, allStatics, queriedStatics })
+            {
+                assertThat(serialize(filter, version)).isEqualTo(serialize(filter, MessagingService.VERSION_40));
+                assertThat(deserialize(serialize(filter, version), version)).isEqualTo(filter);
+            }
+        }
+        // the FETCH_ALL_STATICS bit (0x08) stays on the wire at 11
+        assertThat(serialize(wildcard, MessagingService.VERSION_3014)[0]).isEqualTo((byte) 0x09);
+    }
+
+    /**
+     * DSE 6 compatibility mode: the filter a DSE 6 coordinator sends for a materialized view names DSE's hidden column
+     * ({@code withDseViewHiddenColumn}); the filter the read runs with leaves it out and remembers the one sent
+     * ({@code dseColumnFilter}), which is part of neither its equality, its hash, its text nor its serialized form: it
+     * compares and serializes as the filter built without the column. A filter without the column is returned as it is.
+     */
+    @Test
+    public void dseViewHiddenColumnFilters() throws IOException
+    {
+        ColumnMetadata hidden = ColumnMetadata.regularColumn(metadata, ByteBufferUtil.bytes(".v"), UTF8Type.instance);
+        for (ColumnFilter filter : new ColumnFilter[]{ ColumnFilter.all(metadata),
+                                                       ColumnFilter.allRegularColumnsBuilder(metadata, false).add(v1).build(),
+                                                       ColumnFilter.selection(RegularAndStaticColumns.of(v1)) })
+        {
+            assertThat(filter.dseColumnFilter()).isNull();
+            assertThat(filter.withoutDseViewHiddenColumn(hidden)).isSameAs(filter);
+
+            ColumnFilter sent = filter.withDseViewHiddenColumn(hidden);
+            assertThat(sent.fetchedColumns().regulars.contains(hidden)).isTrue();
+            assertThat(sent.queriedColumns().regulars.contains(hidden)).isTrue();
+            assertThat(sent.dseColumnFilter()).isNull();
+
+            ColumnFilter run = sent.withoutDseViewHiddenColumn(hidden);
+            assertThat(run.dseColumnFilter()).isSameAs(sent);
+            assertThat(run).isEqualTo(filter);
+            assertThat(run.hashCode()).isEqualTo(filter.hashCode());
+            assertThat(run.toString()).isEqualTo(filter.toString());
+            for (int version : new int[]{ MessagingService.VERSION_40, MessagingService.current_version })
+                assertThat(serialize(run, version)).isEqualTo(serialize(filter, version));
+        }
+    }
+
+    private void checkPre40Layouts() throws IOException
+    {
+        ColumnFilter wildcard = ColumnFilter.all(metadata);
+        ColumnFilter allStatics = ColumnFilter.allRegularColumnsBuilder(metadata, true).add(v1).build();
+        ColumnFilter queriedStatics = ColumnFilter.allRegularColumnsBuilder(metadata, false).add(v1).build();
+        RegularAndStaticColumns queried = RegularAndStaticColumns.of(v1);
+
+        // wildcard: header only at 10, header and fetched columns from 11, FETCH_ALL_STATICS from 4.0
+        assertThat(serialize(wildcard, MessagingService.VERSION_30)).isEqualTo(new byte[]{ 0x01 });
+        assertThat(serialize(wildcard, MessagingService.VERSION_3014)).isEqualTo(bytes(0x01, metadata.regularAndStaticColumns()));
+        assertThat(serialize(wildcard, MessagingService.VERSION_40)).isEqualTo(bytes(0x09, metadata.regularAndStaticColumns()));
+
+        // a selection that fetches every column: FETCH_ALL_REGULARS and HAS_QUERIED, never FETCH_ALL_STATICS below 4.0
+        assertThat(serialize(allStatics, MessagingService.VERSION_30)).isEqualTo(bytes(0x03, queried));
+        assertThat(serialize(allStatics, MessagingService.VERSION_3014)).isEqualTo(bytes(0x03, allStatics.fetchedColumns(), queried));
+        assertThat(serialize(allStatics, MessagingService.VERSION_40)).isEqualTo(bytes(0x0B, allStatics.fetchedColumns(), queried));
+        assertThat(serialize(queriedStatics, MessagingService.VERSION_3014)).isEqualTo(bytes(0x03, queriedStatics.fetchedColumns(), queried));
+
+        for (int version : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_3014 })
+        {
+            // whichever statics the sender fetched, a pre-4.0 filter that fetches all regulars fetches all statics too
+            for (ColumnFilter filter : new ColumnFilter[]{ allStatics, queriedStatics })
+            {
+                ColumnFilter received = deserialize(serialize(filter, version), version);
+                assertThat(received.fetchesAllColumns(true)).isTrue();
+                assertThat(received.fetchesAllColumns(false)).isTrue();
+                assertThat(received.queriedColumns()).isEqualTo(queried);
+                assertFetchedQueried(true, false, received, s1, s2, v2, escaped);
+                assertFetchedQueried(true, true, received, v1);
+                // at 10 the receiver fetches every column of the table, at 11 the sender lists the columns it fetches
+                assertThat(received.fetchedColumns()).isEqualTo(version == MessagingService.VERSION_30 ? metadata.regularAndStaticColumns()
+                                                                                                       : filter.fetchedColumns());
+            }
+            assertThat(deserialize(serialize(wildcard, version), version)).isEqualTo(wildcard);
+        }
+        // from 4.0 the sender's choice is kept
+        assertThat(deserialize(serialize(queriedStatics, MessagingService.VERSION_40), MessagingService.VERSION_40).fetchesAllColumns(true)).isFalse();
+    }
+
+    private static byte[] bytes(int header, RegularAndStaticColumns... columns) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            out.writeByte(header);
+            for (RegularAndStaticColumns c : columns)
+            {
+                Columns.serializer.serialize(c.statics, out);
+                Columns.serializer.serialize(c.regulars, out);
+            }
+            return out.toByteArray();
+        }
+    }
+
+    private static byte[] serialize(ColumnFilter filter, int version) throws IOException
+    {
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            serializer.serialize(filter, out, version);
+            byte[] bytes = out.toByteArray();
+            assertEquals(serializer.serializedSize(filter, version), bytes.length);
+            return bytes;
+        }
+    }
+
+    private ColumnFilter deserialize(byte[] bytes, int version) throws IOException
+    {
+        try (DataInputBuffer in = new DataInputBuffer(bytes))
+        {
+            ColumnFilter filter = serializer.deserialize(in, version, metadata);
+            assertEquals(0, in.available());
+            return filter;
+        }
     }
 
     private void testRoundTrips(ColumnFilter cf)

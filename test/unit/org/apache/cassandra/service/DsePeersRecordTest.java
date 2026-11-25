@@ -20,7 +20,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
@@ -39,17 +41,23 @@ import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.gms.ApplicationState;
+import org.apache.cassandra.gms.EndpointState;
+import org.apache.cassandra.gms.HeartBeatState;
+import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.net.MessagingService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The record of DSE 6 peers: maintained from the messaging versions the node records (the pre-4.0 dialect, DSE's
- * own gossip values), loaded from the previous run at startup, persisted for the startup checks,
- * and untouched with {@code internode_compatibility_mode: NONE}.
+ * The record of DSE 6 peers: maintained from the messaging versions the node records (the dialect from a
+ * handshake, DSE's own gossip values), loaded from the previous run at startup, persisted for the startup checks
+ * (once more at a drain), and untouched with {@code internode_compatibility_mode: NONE}.
  */
 public class DsePeersRecordTest
 {
@@ -122,10 +130,55 @@ public class DsePeersRecordTest
     }
 
     @Test
+    public void gossipedDseVersionsReachTheRecordAtTheDialect() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        try
+        {
+            // DSE's own NET_VERSION (6.8: 1024): the gossip code stores the dialect, which puts the peer on record
+            gossipNetVersion(dsePeer, "1024");
+            assertThat(MessagingService.instance().versions.getRaw(dsePeer)).isEqualTo(MessagingService.VERSION_3014);
+            assertThat(DsePeers.isDse(dsePeer)).isTrue();
+            assertThat(DsePeersRecord.peers()).containsExactly(dsePeer);
+            assertThat(DsePeersRecord.persistedPeers()).containsExactly("127.0.0.44:7000");
+
+            // a node of this software in DSE_6 mode gossips 12 for DSE's sake: the version negotiated with it stays, and it
+            // does not enter the record
+            set(upgradedPeer, MessagingService.current_version);
+            gossipNetVersion(upgradedPeer, String.valueOf(DseCompat.NET_VERSION_PUBLISHED));
+            assertThat(MessagingService.instance().versions.getRaw(upgradedPeer)).isEqualTo(MessagingService.current_version);
+            assertThat(DsePeersRecord.peers()).containsExactly(dsePeer);
+
+            // the DSE node is upgraded and gossips 12: it is no longer a DSE node and leaves the record
+            gossipNetVersion(dsePeer, String.valueOf(DseCompat.NET_VERSION_PUBLISHED));
+            assertThat(MessagingService.instance().versions.getRaw(dsePeer)).isEqualTo(DseCompat.NET_VERSION_PUBLISHED);
+            assertThat(DsePeers.isDse(dsePeer)).isFalse();
+            assertThat(DsePeersRecord.peers()).isEmpty();
+            assertThat(DsePeersRecord.persistedPeers()).isEmpty();
+        }
+        finally
+        {
+            DsePeers.reset();
+        }
+    }
+
+    /** A {@code NET_VERSION} as the gossip code applies it to the storage service (a node restarted, or a state change). */
+    private static void gossipNetVersion(InetAddressAndPort peer, String netVersion) throws Exception
+    {
+        Map<ApplicationState, VersionedValue> states = new EnumMap<>(ApplicationState.class);
+        states.put(ApplicationState.NET_VERSION, VersionedValue.unsafeMakeVersionedValue(netVersion, 1));
+        EndpointState state = new EndpointState(new HeartBeatState(1, 1), states);
+        state.markDead(); // onRestart would otherwise first treat the peer as one that went down
+        StorageService.instance.onRestart(peer, state);
+        DsePeersRecord.awaitPersisted();
+    }
+
+    @Test
     public void rawDseGossipValuesAreRecordedAsDsePeers() throws Exception
     {
         DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
-        // NET_VERSION as DSE 6.8 and 6.9.7+ gossip it (relative version << 8): the record reads a raw value as the dialect
+        // NET_VERSION as DSE 6.8 and 6.9.7+ gossip it (relative version << 8): the gossip code stores the dialect in
+        // DSE_6 mode (see above), the record still reads a raw value as the dialect
         set(dsePeer, 1024);
         set(otherDsePeer, 1536);
         assertThat(DsePeersRecord.peers()).containsExactly(dsePeer, otherDsePeer);
@@ -308,6 +361,46 @@ public class DsePeersRecordTest
         Mockito.when(rejecting.submit(Mockito.any(Runnable.class))).thenThrow(new RejectedExecutionException("shut down"));
         assertThat(DsePeersRecord.persistOn(rejecting)).isNull();
         assertThat(DsePeersRecord.persistedPeers()).containsExactly("127.0.0.44:7000");
+    }
+
+    @Test
+    public void theDrainWritesTheRecordOnceMoreWhenItChanged() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        // a record loaded from the previous run and not changed since: the file already holds it and is left as it is
+        Files.createDirectories(DsePeersRecord.path().getParent());
+        Files.write(DsePeersRecord.path(), "127.0.0.45:7000\n".getBytes(StandardCharsets.UTF_8));
+        DsePeersRecord.loadAtStartup();
+        Files.write(DsePeersRecord.path(), "# edited by hand\n127.0.0.45:7000\n".getBytes(StandardCharsets.UTF_8));
+        DsePeersRecord.persistAtDrain();
+        assertThat(Files.readString(DsePeersRecord.path(), StandardCharsets.UTF_8)).isEqualTo("# edited by hand\n127.0.0.45:7000\n");
+
+        // a change whose write did not reach the file (dropped by the drain): the final write, on the calling thread,
+        // puts the last state there
+        set(dsePeer, MessagingService.VERSION_3014);
+        Files.delete(DsePeersRecord.path());
+        DsePeersRecord.persistAtDrain();
+        assertThat(DsePeersRecord.persistedPeers()).containsExactly("127.0.0.44:7000", "127.0.0.45:7000");
+    }
+
+    @Test
+    public void theDrainWritesNothingInNoneMode() throws Exception
+    {
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        Files.createDirectories(DsePeersRecord.path().getParent());
+        Files.write(DsePeersRecord.path(), "127.0.0.45:7000\n".getBytes(StandardCharsets.UTF_8));
+        set(dsePeer, MessagingService.VERSION_3014);
+        DsePeersRecord.persistAtDrain();
+        assertThat(Files.readString(DsePeersRecord.path(), StandardCharsets.UTF_8)).isEqualTo("127.0.0.45:7000\n");
+
+        // nor for a record changed in DSE_6 mode once the mode is off
+        Files.delete(DsePeersRecord.path());
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+        set(dsePeer, MessagingService.VERSION_3014);
+        Files.delete(DsePeersRecord.path());
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+        DsePeersRecord.persistAtDrain();
+        assertThat(DsePeersRecord.path()).doesNotExist();
     }
 
     @Test

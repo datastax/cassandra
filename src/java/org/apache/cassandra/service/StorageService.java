@@ -178,6 +178,9 @@ import org.apache.cassandra.metrics.Sampler;
 import org.apache.cassandra.metrics.SamplingManager;
 import org.apache.cassandra.metrics.StorageMetrics;
 import org.apache.cassandra.net.AsyncOneResponse;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseDialectVersions;
+import org.apache.cassandra.net.DsePeers;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.RepairCoordinator;
@@ -185,6 +188,7 @@ import org.apache.cassandra.repair.SharedContext;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.repair.messages.RepairOption;
 import org.apache.cassandra.schema.CompactionParams.TombstoneOption;
+import org.apache.cassandra.schema.DseSystemKeyspaces;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.ReplicationParams;
@@ -289,7 +293,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 {
     private static final Logger logger = LoggerFactory.getLogger(StorageService.class);
 
+    /** The replicated system keyspaces whose deferred additions were logged in the DSE 6 compatibility mode. */
+    private static final Set<String> DSE6_DEFERRED_ADDITIONS_LOGGED = ConcurrentHashMap.newKeySet();
+
     public static final int INDEFINITE = -1;
+    /** The ring delay without {@code cassandra.ring_delay_ms}; a constant, so that reading it does not initialise this class. */
+    public static final int DEFAULT_RING_DELAY_MILLIS = 30 * 1000;
     public static final int RING_DELAY_MILLIS = getRingDelay(); // delay after which we assume ring has stablized
     public static final int SCHEMA_DELAY_MILLIS = getSchemaDelay();
 
@@ -308,7 +317,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private static int getRingDelay()
     {
-        int defaultDelay = 30 * 1000;
+        int defaultDelay = DEFAULT_RING_DELAY_MILLIS;
         int newDelay = CassandraRelevantProperties.RING_DELAY.getInt(defaultDelay);
         Preconditions.checkArgument(newDelay >= 0, "%s must be >= 0", CassandraRelevantProperties.RING_DELAY.getKey());
         if (newDelay != defaultDelay)
@@ -762,6 +771,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         InetAddressAndPort replaceAddress = DatabaseDescriptor.getReplaceAddress();
         logger.info("Gathering node replacement information for {}", replaceAddress);
         Map<InetAddressAndPort, EndpointState> epStates = Gossiper.instance.doShadowRound();
+        DseUpgradeGuards.refuseJoinWithDsePeersInGossip(epStates, replaceAddress, "replacing a node");
         // as we've completed the shadow round of gossip, we should be able to find the node we're replacing
         EndpointState state = epStates.get(replaceAddress);
         if (state == null)
@@ -868,6 +878,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return bootstrapTokens;
     }
 
+    /**
+     * Also refuses a new node whose shadow round shows DSE 6 nodes (see {@code DseUpgradeGuards}); like the collision
+     * check itself, that check is skipped with {@code -Dcassandra.allow_unsafe_join=true}, which skips the shadow round.
+     */
     public synchronized void checkForEndpointCollision(UUID localHostId, Set<InetAddressAndPort> peers) throws ConfigurationException
     {
         if (ALLOW_UNSAFE_JOIN.getBoolean())
@@ -878,6 +892,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         logger.debug("Starting shadow gossip round to check for endpoint collision");
         Map<InetAddressAndPort, EndpointState> epStates = Gossiper.instance.doShadowRound(peers);
+        if (!SystemKeyspace.bootstrapComplete())
+            DseUpgradeGuards.refuseJoinWithDsePeersInGossip(epStates, null, "bootstrapping a new node");
 
         if (epStates.isEmpty() && DatabaseDescriptor.getSeeds().contains(FBUtilities.getBroadcastAddressAndPort()))
             logger.info("Unable to gossip with any peers but continuing anyway since node is in its own seed list. Broadcast address: {}, seeds: {}", FBUtilities.getBroadcastAddressAndPort(), DatabaseDescriptor.getSeeds());
@@ -1211,6 +1227,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (DatabaseDescriptor.getReplaceTokens().size() > 0 || DatabaseDescriptor.getReplaceNode() != null)
                 throw new RuntimeException("Replace method removed; use " + REPLACE_ADDRESS.getKey() + " system property instead.");
 
+            // a former DSE 6 node restarts on its own data (its bootstrap state is COMPLETED, imported from the DSE node
+            // files); a new node, whether it would stream (auto_bootstrap) or not (a seed, auto_bootstrap: false), and a
+            // replacement node cannot join a cluster that still has DSE 6 peers. The shadow rounds below check the gossip
+            // states too, for a node that does not run the mode.
+            if (DseUpgradeGuards.upgradeInProgress())
+            {
+                if (replacing)
+                    DseUpgradeGuards.refuseReplacementWhileUpgrading();
+                else if (!SystemKeyspace.bootstrapComplete())
+                    DseUpgradeGuards.refuseAtStartupWhileUpgrading("bootstrapping a new node (bootstrap state " + SystemKeyspace.getBootstrapState() + ')');
+            }
+
             DatabaseDescriptor.getInternodeAuthenticator().setupInternode();
             MessagingService.instance().listen();
 
@@ -1263,6 +1291,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             appStates.put(ApplicationState.RPC_ADDRESS, valueFactory.rpcaddress(FBUtilities.getJustBroadcastNativeAddress()));
             appStates.put(ApplicationState.RELEASE_VERSION, valueFactory.releaseVersion());
             appStates.put(ApplicationState.SSTABLE_VERSIONS, valueFactory.sstableVersions(sstablesTracker.versionsInUse()));
+            addDseState(appStates, valueFactory);
 
             logger.debug("Starting up server gossip");
             Gossiper.instance.register(this);
@@ -1288,7 +1317,24 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             HintsService.instance.startDispatch();
             BatchlogManager.instance.start();
             startSnapshotManager();
+            DseUpgradeGuards.startStatusLog();
         }
+    }
+
+    /**
+     * DSE 6 compatibility mode: adds to the states this node starts gossiping with DSE's {@code DSE_GOSSIP_STATE}, at the
+     * ordinal of {@code X_11_PADDING}, which this software never uses, unless the gossiped DSE version is
+     * {@link DseCompat#NO_DSE_VERSION} (see {@link DseCompat#gossipedDseVersion}). Outside the mode nothing is added and
+     * the property is not read.
+     */
+    @VisibleForTesting
+    static void addDseState(Map<ApplicationState, VersionedValue> appStates, VersionedValue.VersionedValueFactory valueFactory)
+    {
+        if (!DseCompat.enabled())
+            return;
+        String dseVersion = DseCompat.gossipedDseVersion();
+        if (dseVersion != null)
+            appStates.put(ApplicationState.X_11_PADDING, valueFactory.dseState(dseVersion));
     }
 
     @VisibleForTesting
@@ -1425,6 +1471,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     {
         if (!joined)
         {
+            // a node started without gossip has not been through the startup refusal of the DSE 6 upgrade, and one
+            // without the mode may have seen no DSE 6 peer at its start: a node that has not completed a bootstrap
+            // cannot join the ring while the upgrade is in progress either
+            if (!SystemKeyspace.bootstrapComplete())
+                DseUpgradeGuards.refuseWhileUpgrading("join");
             logger.info("Joining ring by operator request");
             try
             {
@@ -1486,7 +1537,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         {
             if (setUpSchema)
             {
-                Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION));
+                setUpSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION);
             }
 
             DatabaseDescriptor.getRoleManager().setup();
@@ -1516,9 +1567,42 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     @VisibleForTesting
     public void setUpDistributedSystemKeyspaces()
     {
-        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(TraceKeyspace.metadata(), TraceKeyspace.GENERATION));
-        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(SystemDistributedKeyspace.metadata(), SystemDistributedKeyspace.GENERATION));
-        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION));
+        setUpSystemKeyspace(TraceKeyspace.metadata(), TraceKeyspace.GENERATION);
+        setUpSystemKeyspace(SystemDistributedKeyspace.metadata(), SystemDistributedKeyspace.GENERATION);
+        setUpSystemKeyspace(AuthKeyspace.metadata(), AuthKeyspace.GENERATION);
+    }
+
+    /**
+     * Brings a replicated system keyspace to this software's definition, at the fixed timestamp of its generation.
+     * <p>
+     * In the DSE 6 compatibility mode a keyspace that exists keeps the definition it was loaded with, DSE's on an
+     * upgraded node: this software's additions would reach the DSE nodes, which pull and merge the schema of a peer
+     * whose schema version differs from theirs, and would break the schema freeze of the upgrade (see
+     * {@link DseSystemKeyspaces}). They are made at the first start with {@code NONE}, where this method runs as it
+     * always did. A keyspace that does not exist at all (a node that never ran DSE) is created as without the mode:
+     * there is no DSE definition to keep, and this node never sends its schema to a DSE peer, though the upgraded peers
+     * that pull it then hold this software's definition too. What is deferred is logged once per keyspace (the auth
+     * keyspace step runs again when a node started with {@code join_ring: false} joins).
+     */
+    @VisibleForTesting
+    static void setUpSystemKeyspace(KeyspaceMetadata keyspace, long generation)
+    {
+        if (DseCompat.enabled())
+        {
+            KeyspaceMetadata loaded = Schema.instance.getKeyspaceMetadata(keyspace.name);
+            if (loaded != null)
+            {
+                if (DSE6_DEFERRED_ADDITIONS_LOGGED.add(keyspace.name))
+                {
+                    List<String> deferred = DseSystemKeyspaces.deferredAdditions(keyspace, loaded);
+                    logger.info("internode_compatibility_mode DSE_6: {} keeps the definition it was loaded with (DSE's on an upgraded node); " +
+                                "this software's additions to it are made at the first start with internode_compatibility_mode NONE{}",
+                                keyspace.name, deferred.isEmpty() ? " (no table or column is missing, table options aside)" : ": " + deferred);
+                }
+                return;
+            }
+        }
+        Schema.instance.transform(SchemaTransformations.updateSystemKeyspace(keyspace, generation));
     }
 
     public boolean isJoined()
@@ -1538,6 +1622,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void rebuild(String sourceDc, String keyspace, String tokens, String specificSources, boolean excludeLocalDatacenterNodes)
     {
+        DseUpgradeGuards.refuseWhileUpgrading("rebuild");
+
         // fail if source DC is local and --exclude-local-dc is set
         if (sourceDc != null && sourceDc.equals(DatabaseDescriptor.getLocalDataCenter()) && excludeLocalDatacenterNodes)
         {
@@ -2362,6 +2448,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public boolean resumeBootstrap()
     {
+        DseUpgradeGuards.refuseWhileUpgrading("bootstrap resume");
+
         if (isBootstrapMode && SystemKeyspace.bootstrapInProgress())
         {
             logger.info("Resuming bootstrap...");
@@ -2956,14 +3044,58 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     private void updateNetVersion(InetAddressAndPort endpoint, VersionedValue value)
     {
+        int version;
         try
         {
-            MessagingService.instance().versions.set(endpoint, Integer.parseInt(value.value));
+            version = Integer.parseInt(value.value);
         }
         catch (NumberFormatException e)
         {
+            // DSE 6 compatibility mode: a value this software cannot parse must not break the gossip stage
+            if (DseCompat.enabled())
+            {
+                logger.warn("Ignoring the NET_VERSION {} gossiped by {}: not a number; the messaging version of the peer stays {}",
+                            value.value, endpoint, MessagingService.instance().versions.knows(endpoint) ? MessagingService.instance().versions.getRaw(endpoint) : "unknown");
+                return;
+            }
             throw new AssertionError("Got invalid value for NET_VERSION application state: " + value.value);
         }
+        if (DseCompat.enabled())
+        {
+            // whether the peer is a DSE 6 node, which decides the ordinals of the gossip states exchanged with it
+            DsePeers.fromGossipedNetVersion(endpoint, version);
+            // A DSE 6 peer gossips its own messaging version (256 or more); we speak the pre-4.0 dialect with it.
+            int dialect = DseCompat.messagingVersionFromGossip(version);
+            if (dialect != version)
+            {
+                // DsePeers logged the peer as a DSE node at INFO the first time
+                logger.debug("Peer {} gossips the DSE messaging version {}; recording the DSE 6 dialect {} for it", endpoint, version, dialect);
+                version = dialect;
+            }
+            boolean wasPre40;
+            // under the lock of the inbound handshakes' recording (DseDialectVersions.recordHandshakeVersion), which reads
+            // the gossip state this version was stored in
+            synchronized (MessagingService.instance().versions)
+            {
+                // A peer of this software in DSE_6 mode gossips 12 for DSE's sake: it must not lower the version a handshake
+                // with it negotiated, which schema pulls, read digests and hints rely on.
+                if (version == DseCompat.NET_VERSION_PUBLISHED && MessagingService.instance().versions.knows(endpoint))
+                {
+                    int negotiated = MessagingService.instance().versions.getRaw(endpoint);
+                    if (negotiated > version)
+                    {
+                        logger.debug("Peer {} gossips NET_VERSION {}; keeping the messaging version {} negotiated with it", endpoint, version, negotiated);
+                        return;
+                    }
+                }
+                wasPre40 = DseDialectVersions.isPre40(MessagingService.instance().versions, endpoint);
+                MessagingService.instance().versions.set(endpoint, version);
+            }
+            // a peer taken for a pre-4.0 node (a stale stored release, or it was upgraded meanwhile): reconnect to it
+            DseDialectVersions.versionRaised(endpoint, wasPre40, version);
+            return;
+        }
+        MessagingService.instance().versions.set(endpoint, version);
     }
 
     public void updateTopology(InetAddressAndPort endpoint)
@@ -3846,6 +3978,15 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         // Then, the node may have been upgraded and changed its messaging protocol version. If so, we
         // want to update that before we mark the node live again to avoid problems like CASSANDRA-11128.
         VersionedValue netVersion = state.getApplicationState(ApplicationState.NET_VERSION);
+        // DSE 6 compatibility mode: the state given is the one from before the restart, and a DSE node upgraded to this
+        // software (or one of its nodes rolled back to DSE) changed its NET_VERSION with it; the gossiper has stored the
+        // new state already, so its NET_VERSION is the one to record
+        if (DseCompat.enabled())
+        {
+            EndpointState current = Gossiper.instance.getEndpointStateForEndpoint(endpoint);
+            if (current != null && current != state)
+                netVersion = current.getApplicationState(ApplicationState.NET_VERSION);
+        }
         if (netVersion != null)
             updateNetVersion(endpoint, netVersion);
     }
@@ -4229,6 +4370,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                int jobs,
                                String... tableNames) throws IOException, ExecutionException, InterruptedException
     {
+        refuseSSTableRewriteWhileUpgrading("upgradesstables");
         return rewriteSSTables(keyspaceName, skipIfCurrentVersion, skipIfNewerThanTimestamp, false, jobs, tableNames);
     }
 
@@ -4236,9 +4378,30 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                                   int jobs,
                                   String... tableNames) throws IOException, ExecutionException, InterruptedException
     {
+        refuseSSTableRewriteWhileUpgrading("recompress_sstables");
         return rewriteSSTables(keyspaceName, false, Long.MAX_VALUE, true, jobs, tableNames);
     }
 
+    /**
+     * Refuses upgradesstables while the DSE 6 upgrade is in progress: it is the maintenance step of a finished upgrade,
+     * and nothing in the mixed cluster needs it; recompress_sstables is the same rewrite. The other rewrites (scrub,
+     * garbagecollect, relocatesstables, cleanup) repair or reclaim and stay allowed: like compaction they write trie
+     * {@code bb} sstables, with their storage-attached index components at the SAI on-disk version a start in
+     * {@code DSE_6} mode requires to be pinned to the DSE release ({@link Dse6SaiVersionPin}). The refusal is a checked
+     * exception: nodetool upgradesstables retries and then swallows a RuntimeException (CASSANDRA-18635), and the
+     * operator must see it.
+     */
+    private static void refuseSSTableRewriteWhileUpgrading(String operation) throws IOException
+    {
+        try
+        {
+            DseUpgradeGuards.refuseWhileUpgrading(operation);
+        }
+        catch (UnsupportedOperationException e)
+        {
+            throw new IOException(e.getMessage(), e);
+        }
+    }
 
     public int rewriteSSTables(String keyspaceName,
                                final boolean skipIfCurrentVersion,
@@ -4780,6 +4943,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public Pair<Integer, Future<?>> repair(String keyspace, RepairOption option, List<ProgressListener> listeners)
     {
+        DseUpgradeGuards.refuseWhileUpgrading("repair");
+
         // if ranges are not specified
         if (option.getRanges().isEmpty())
         {
@@ -5304,6 +5469,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void decommission(boolean force) throws InterruptedException
     {
+        DseUpgradeGuards.refuseWhileUpgrading("decommission");
+
         if (operationMode == DECOMMISSIONED)
         {
             logger.info("This node was already decommissioned. There is no point in decommissioning it again.");
@@ -5746,6 +5913,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void move(String newToken) throws IOException
     {
+        DseUpgradeGuards.refuseWhileUpgrading("move");
+
         try
         {
             getTokenFactory().validate(newToken);
@@ -5873,6 +6042,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
      */
     public void forceRemoveCompletion()
     {
+        DseUpgradeGuards.refuseForcedRemovalWhileUpgrading(getTokenMetadata().getLeavingEndpoints());
+
         if (!replicatingNodes.isEmpty()  || getTokenMetadata().getSizeOfLeavingEndpoints() > 0)
         {
             logger.warn("Removal not confirmed for for {}", StringUtils.join(this.replicatingNodes, ","));
@@ -5906,6 +6077,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         UUID localHostId = getTokenMetadata().getHostId(myAddress);
         UUID hostId = UUID.fromString(hostIdString);
         InetAddressAndPort endpoint = getTokenMetadata().getEndpointForHostId(hostId);
+        DseUpgradeGuards.refuseRemoveNodeWhileUpgrading(endpoint);
 
         if (endpoint == null)
             throw new UnsupportedOperationException("Host ID not found.");
@@ -6116,6 +6288,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 // drain process; otherwise drain and/or shutdown might throw
                 logger.error("Messaging service timed out shutting down", t);
             }
+            // gossip and messaging, which record the peers' versions, have stopped: the last state of the record of DSE 6
+            // peers reaches its file before the executor of its writes is shut down (a no-op without the DSE 6 mode)
+            DsePeersRecord.persistAtDrain();
 
             logger.info("DRAINING: flushing column families");
             if (!isFinalShutdown)
@@ -6740,6 +6915,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     @Deprecated(since = "4.0")
     public void loadNewSSTables(String ksName, String cfName)
     {
+        DseUpgradeGuards.refuseWhileUpgrading("refresh");
         if (!isInitialized())
             throw new RuntimeException("Not yet initialized, can't load new sstables");
         verifyKeyspaceIsValid(ksName);
@@ -6858,6 +7034,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void resetLocalSchema() throws IOException
     {
+        // the reset waits for schema pushed by peers, which DSE 6 peers never send to this software
+        DseUpgradeGuards.refuseWhileUpgrading("resetlocalschema");
         Schema.instance.resetLocalSchema();
     }
 

@@ -18,15 +18,18 @@
 package org.apache.cassandra.gms;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.annotation.Nullable;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DseCompat;
 
 import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
 
@@ -40,11 +43,59 @@ public class GossipDigestAck
 
     final List<GossipDigest> gDigestList;
     final Map<InetAddressAndPort, EndpointState> epStateMap;
+    /** DSE 6 compatibility mode: the peer this ack is sent to (see {@link DseGossipStates.Recipient}); null otherwise. */
+    @Nullable
+    final DseGossipStates.Recipient recipient;
+    /**
+     * DSE 6 compatibility mode: true for an ack read at a pre-4.0 version, whose states still have the sender's ordinals
+     * until {@link #getEndpointStateMap(InetAddressAndPort)} translates them.
+     */
+    final boolean readInDialect;
 
     GossipDigestAck(List<GossipDigest> gDigestList, Map<InetAddressAndPort, EndpointState> epStateMap)
     {
+        this(gDigestList, epStateMap, null, false);
+    }
+
+    /** An ack to send to {@code to}. */
+    GossipDigestAck(List<GossipDigest> gDigestList, Map<InetAddressAndPort, EndpointState> epStateMap, InetAddressAndPort to)
+    {
+        this(gDigestList, epStateMap, DseGossipStates.recipient(to), false);
+    }
+
+    /** The answer to the shadow round of {@code to}: no digest, {@code epStateMap}, whose states are never left out. */
+    static GossipDigestAck shadowRoundAnswer(Map<InetAddressAndPort, EndpointState> epStateMap, InetAddressAndPort to)
+    {
+        return new GossipDigestAck(Collections.emptyList(), epStateMap, DseGossipStates.shadowRoundRecipient(to), false);
+    }
+
+    private GossipDigestAck(List<GossipDigest> gDigestList, Map<InetAddressAndPort, EndpointState> epStateMap,
+                            @Nullable DseGossipStates.Recipient recipient, boolean readInDialect)
+    {
         this.gDigestList = gDigestList;
         this.epStateMap = epStateMap;
+        this.recipient = recipient;
+        this.readInDialect = readInDialect;
+    }
+
+    /** A received ack, read at {@code version}. */
+    static GossipDigestAck received(List<GossipDigest> gDigestList, Map<InetAddressAndPort, EndpointState> epStateMap, int version)
+    {
+        return new GossipDigestAck(gDigestList, epStateMap, null, DseCompat.isPre40Layout(version));
+    }
+
+    boolean writesDseOrdinals(int version)
+    {
+        return recipient != null && recipient.dseOrdinals(version);
+    }
+
+    /**
+     * The endpoint states written at {@code version}: none at a pre-4.0 version to a peer only presumed to be a DSE 6 node
+     * (except in the answer to a shadow round), else all.
+     */
+    Map<InetAddressAndPort, EndpointState> statesToWrite(int version)
+    {
+        return recipient != null && recipient.withholdsStates(version) ? Collections.emptyMap() : epStateMap;
     }
 
     List<GossipDigest> getGossipDigestList()
@@ -52,9 +103,10 @@ public class GossipDigestAck
         return gDigestList;
     }
 
-    Map<InetAddressAndPort, EndpointState> getEndpointStateMap()
+    /** The endpoint states of this ack received from {@code sender}, with this software's ordinals. */
+    Map<InetAddressAndPort, EndpointState> getEndpointStateMap(InetAddressAndPort sender)
     {
-        return epStateMap;
+        return readInDialect ? DseGossipStates.receivedFrom(sender, epStateMap, !gDigestList.isEmpty()) : epStateMap;
     }
 }
 
@@ -63,12 +115,13 @@ class GossipDigestAckSerializer implements IVersionedSerializer<GossipDigestAck>
     public void serialize(GossipDigestAck gDigestAckMessage, DataOutputPlus out, int version) throws IOException
     {
         GossipDigestSerializationHelper.serialize(gDigestAckMessage.gDigestList, out, version);
-        out.writeInt(gDigestAckMessage.epStateMap.size());
-        for (Map.Entry<InetAddressAndPort, EndpointState> entry : gDigestAckMessage.epStateMap.entrySet())
+        Map<InetAddressAndPort, EndpointState> states = gDigestAckMessage.statesToWrite(version);
+        out.writeInt(states.size());
+        for (Map.Entry<InetAddressAndPort, EndpointState> entry : states.entrySet())
         {
             InetAddressAndPort ep = entry.getKey();
             inetAddressAndPortSerializer.serialize(ep, out, version);
-            EndpointState.serializer.serialize(entry.getValue(), out, version);
+            EndpointStateSerializer.instance.serialize(entry.getValue(), out, version, gDigestAckMessage.writesDseOrdinals(version));
         }
     }
 
@@ -84,16 +137,17 @@ class GossipDigestAckSerializer implements IVersionedSerializer<GossipDigestAck>
             EndpointState epState = EndpointState.serializer.deserialize(in, version);
             epStateMap.put(ep, epState);
         }
-        return new GossipDigestAck(gDigestList, epStateMap);
+        return GossipDigestAck.received(gDigestList, epStateMap, version);
     }
 
     public long serializedSize(GossipDigestAck ack, int version)
     {
         int size = GossipDigestSerializationHelper.serializedSize(ack.gDigestList, version);
-        size += TypeSizes.sizeof(ack.epStateMap.size());
-        for (Map.Entry<InetAddressAndPort, EndpointState> entry : ack.epStateMap.entrySet())
+        Map<InetAddressAndPort, EndpointState> states = ack.statesToWrite(version);
+        size += TypeSizes.sizeof(states.size());
+        for (Map.Entry<InetAddressAndPort, EndpointState> entry : states.entrySet())
             size += inetAddressAndPortSerializer.serializedSize(entry.getKey(), version)
-                    + EndpointState.serializer.serializedSize(entry.getValue(), version);
+                    + EndpointStateSerializer.instance.serializedSize(entry.getValue(), version, ack.writesDseOrdinals(version));
         return size;
     }
 }

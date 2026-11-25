@@ -90,6 +90,7 @@ import org.apache.cassandra.locator.Ec2Snitch;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.SimpleSnitch;
 import org.apache.cassandra.locator.SnitchProperties;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -169,8 +170,11 @@ public class StartupChecks
                                                                       checkDataDirs,
                                                                       loadDsePeersRecord,
                                                                       checkDse6Artefacts,
+                                                                      checkDse6GossipedDseVersion,
+                                                                      checkLostNodeSilence,
                                                                       checkSSTablesFormat,
                                                                       checkSystemKeyspaceState,
+                                                                      checkDse6SaiVersionPin,
                                                                       checkDse6Ec2NamingScheme,
                                                                       checkDatacenter,
                                                                       checkRack,
@@ -899,6 +903,61 @@ public class StartupChecks
     }
 
     /**
+     * With {@code internode_compatibility_mode: DSE_6}, refuses to start when the DSE version this node is to gossip to
+     * DSE nodes ({@code cassandra.internode_compatibility_mode.dse_version}) is not one it may gossip, before the node
+     * contacts any peer, and warns when it gossips none (see {@link DseCompat#gossipedDseVersion}).
+     */
+    public static final StartupCheck checkDse6GossipedDseVersion = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            if (!DatabaseDescriptor.isDse6CompatibilityMode())
+                return;
+            String dseVersion;
+            try
+            {
+                dseVersion = DseCompat.gossipedDseVersion();
+            }
+            catch (ConfigurationException e)
+            {
+                throw new StartupException(StartupException.ERR_WRONG_CONFIG, e.getMessage());
+            }
+            if (dseVersion == null)
+                logger.warn("This node gossips no DSE version to DSE nodes ({}={}): DSE nodes that stored one for it when it ran DSE send it " +
+                            "the range reads of storage-attached index queries with a verb it cannot receive, unless they run with " +
+                            "-Ddse.disable_endpoint_group_range_reads=true",
+                            CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_DSE_VERSION.getKey(), DseCompat.NO_DSE_VERSION);
+        }
+    };
+
+    /**
+     * Refuses to start when {@code cassandra.internode_compatibility_mode.lost_node_silence_seconds} is set to a value
+     * that is not a whole number of seconds or is below the larger of one minute and twice the ring delay, and logs the
+     * silence when it is set ({@link DseUpgradeGuards#checkLostNodeSilence}). In every mode, since the removal of a node
+     * lost during the DSE 6 upgrade is allowed in both; a no-op when the property is not set.
+     */
+    public static final StartupCheck checkLostNodeSilence = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            long seconds;
+            try
+            {
+                seconds = DseUpgradeGuards.checkLostNodeSilence();
+            }
+            catch (ConfigurationException e)
+            {
+                throw new StartupException(StartupException.ERR_WRONG_CONFIG, e.getMessage());
+            }
+            if (seconds >= 0)
+                logger.info("A node that is down counts as lost during the DSE 6 upgrade once nothing has been heard of it for {} seconds ({}={})",
+                            seconds, CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_LOST_NODE_SILENCE_SECONDS.getKey(), seconds);
+        }
+    };
+
+    /**
      * With {@code internode_compatibility_mode: NONE}, refuses to start while the DSE 6 upgrade marker is present or
      * while the node's own record of DSE 6 peers ({@link DsePeersRecord}) is not empty: DSE peers may still be in the
      * cluster, and a node without the mode cannot talk to them. These two files are the only sources of truth here;
@@ -976,6 +1035,23 @@ public class StartupChecks
                                                      "or start with -D%s=true",
                                                      found, remedy,
                                                      CassandraRelevantProperties.INTERNODE_COMPATIBILITY_MODE_IGNORE_DSE_PEERS.getKey()));
+        }
+    };
+
+    /**
+     * In {@code DSE_6} mode, refuses to start unless the SAI on-disk version is pinned to the one the cluster's DSE
+     * release writes ({@link Dse6SaiVersionPin}). It reads the node metadata, so it runs after
+     * {@link #checkSystemKeyspaceState}, which initialises it: on the first start in the mode the refusal therefore comes
+     * after the import of DSE's node metadata and the scrub of the system keyspace, both of which leave DSE's files as
+     * they are and are repeated harmlessly by the next start. Not configurable from the yaml, like the other checks of
+     * the mode; its own override property is logged at WARN on every start.
+     */
+    public static final StartupCheck checkDse6SaiVersionPin = new StartupCheck()
+    {
+        @Override
+        public void execute(StartupChecksOptions options) throws StartupException
+        {
+            Dse6SaiVersionPin.verifyAtStartup();
         }
     };
 
