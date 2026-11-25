@@ -56,7 +56,9 @@ import org.apache.cassandra.utils.logging.LoggingSupportFactory;
  * tarball; it reads the node's files and never writes to them. It reports whether and how the node can be upgraded, and
  * exits with {@value #EXIT_BLOCKED} when it finds a feature that forbids the upgrade. The release of the node decides
  * which inspection runs ({@link #isDse51Node}): DSE 6's ({@link NodeInspector}) or DSE 5.1's
- * ({@link Dse51NodeInspector}). The aggregate mode checks the reports of every node of a cluster together.
+ * ({@link Dse51NodeInspector}). The aggregate mode checks the reports of every node of a cluster together. The
+ * Paxos rollback mode lists the open Paxos rounds of a node to roll back to DSE ({@link PaxosRollback}), and the
+ * rollback check tells whether a node of HCD 2.0 can go back to DSE 5.1 ({@link Dse51RollbackInspection}).
  * <p>
  * Exit codes: {@value #EXIT_READY} ready (warnings allowed), {@value #EXIT_BLOCKED} blocking findings (or, in the
  * aggregate mode, a cluster that is not ready), {@value #EXIT_ERROR} wrong usage or an error that stopped the
@@ -78,15 +80,23 @@ public final class DsePreflight
     static final String USAGE = "dsepreflight [options]                                 " +
                                 "inspect this DSE 6 or DSE 5.1 node\n" +
                                 "       dsepreflight --aggregate <directory> [--json <file>]   check the reports of a cluster\n" +
-                                "       dsepreflight --paxos-rollback [options]                list the open Paxos rounds of a node to roll back to DSE";
+                                "       dsepreflight --paxos-rollback [options]                " +
+                                "list the open Paxos rounds of a node to roll back to DSE\n" +
+                                "       dsepreflight --rollback-check [options]                " +
+                                "check a node to roll back to DSE 5.1";
     /** The options of the Paxos rollback mode only. */
     static final List<String> PAXOS_ROLLBACK_ONLY = List.of("snapshot", "paxos-dir", "not-restored", "dc", "serial-consistency", "cql");
     /** The options the Paxos rollback mode does not take. */
     static final List<String> PAXOS_ROLLBACK_EXCLUDED = List.of("aggregate", "nodetool", "nodetool-arg",
                                                                 "nodetool-timeout", "nodetool-java-home",
-                                                                "commitlog-dir", "hints-dir", "jvm-options");
+                                                                "commitlog-dir", "hints-dir", "jvm-options",
+                                                                "rollback-check", "saved-caches-dir");
     /** The options the aggregate mode takes; it refuses every other, so that none is silently ignored. */
     static final Set<String> AGGREGATE_OPTIONS = Set.of("aggregate", "json", "help");
+    /** The options the rollback check takes; it refuses every other, so that none is silently ignored. */
+    static final Set<String> ROLLBACK_CHECK_OPTIONS = Set.of("rollback-check", "dse-home", "conf-dir", "cassandra-yaml",
+                                                             "data-dir", "metadata-dir", "commitlog-dir", "hints-dir",
+                                                             "saved-caches-dir", "snapshot", "json", "help");
 
     private DsePreflight()
     {
@@ -177,13 +187,17 @@ public final class DsePreflight
                 return aggregate(cmd, out, err);
             if (cmd.hasOption("paxos-rollback"))
                 return paxosRollback(cmd, out, err);
+            if (cmd.hasOption("rollback-check"))
+                return rollbackCheck(cmd, out, err);
             return inspect(cmd, out, err);
         }
         catch (Throwable e)
         {
             // an error too, so that the exit code is never that of blocking findings
             err.println((cmd.hasOption("paxos-rollback") ? "the listing of the open Paxos rounds failed: "
-                         : cmd.hasOption("aggregate") ? "the aggregate failed: " : "the inspection failed: ") + e);
+                         : cmd.hasOption("aggregate") ? "the aggregate failed: "
+                         : cmd.hasOption("rollback-check") ? "the rollback check failed: "
+                         : "the inspection failed: ") + e);
             return EXIT_ERROR;
         }
     }
@@ -203,6 +217,7 @@ public final class DsePreflight
         layoutOptions.metadataDirectory = path(cmd, "metadata-dir");
         layoutOptions.commitLogDirectory = path(cmd, "commitlog-dir");
         layoutOptions.hintsDirectory = path(cmd, "hints-dir");
+        layoutOptions.savedCachesDirectory = path(cmd, "saved-caches-dir");
         layoutOptions.dseHomeFromEnvironment = CassandraRelevantEnv.DSE_HOME.getString();
         return new NodeLayout(layoutOptions);
     }
@@ -364,9 +379,18 @@ public final class DsePreflight
             for (Option option : options.getOptions())
                 if (!AGGREGATE_OPTIONS.contains(option.getLongOpt()) && cmd.hasOption(option.getLongOpt()))
                     return "--" + option.getLongOpt() + " does not apply to --aggregate";
+        if (cmd.hasOption("rollback-check"))
+            for (Option option : options.getOptions())
+                if (!ROLLBACK_CHECK_OPTIONS.contains(option.getLongOpt()) && cmd.hasOption(option.getLongOpt()))
+                    return "--" + option.getLongOpt() + " does not apply to --rollback-check";
+        // read by the rollback check only
+        if (cmd.hasOption("saved-caches-dir") && !cmd.hasOption("rollback-check"))
+            return "--saved-caches-dir applies only to --rollback-check";
         for (String option : PAXOS_ROLLBACK_ONLY)
-            if (cmd.hasOption(option))
-                return "--" + option + " applies only to --paxos-rollback";
+            if (cmd.hasOption(option) && !(cmd.hasOption("rollback-check") && ROLLBACK_CHECK_OPTIONS.contains(option)))
+                return "--" + option + (option.equals("snapshot") ? " applies only to --paxos-rollback and " +
+                                                                    "--rollback-check"
+                                                                  : " applies only to --paxos-rollback");
         return null;
     }
 
@@ -375,6 +399,9 @@ public final class DsePreflight
     {
         NodeLayout layout = layout(cmd);
         PaxosRollback.Options options = new PaxosRollback.Options();
+        // a node rolled back to DSE 5.1 has neither nodes files nor trie sstables; a node rolled back to DSE 6 has its
+        // nodes/local back (its rollback puts it back before this mode runs), which isDse51Node looks at first
+        options.dse51 = isDse51Node(layout);
         options.dataDirectories.addAll(layout.dataDirectories);
         options.metadataDirectory = layout.metadataDirectory;
         options.defaultsAssumed.addAll(layout.defaultsAssumed);
@@ -454,6 +481,66 @@ public final class DsePreflight
             writeAtomically(Path.of(cmd.getOptionValue("json")), JsonUtils.JSON_OBJECT_PRETTY_WRITER.writeValueAsBytes(report));
         PaxosRollback.print(report, serial, localSerial, out);
         return PaxosRollbackReport.NEEDS_ATTENTION.equals(report.result) ? EXIT_BLOCKED : EXIT_READY;
+    }
+
+    /**
+     * The rollback check: whether a drained node of HCD 2.0 in {@code DSE_5_1} mode can go back to DSE 5.1.51 with
+     * the files HCD 2.0 left ({@link Dse51RollbackInspection}).
+     */
+    private static int rollbackCheck(CommandLine cmd, PrintStream out, PrintStream err) throws IOException
+    {
+        NodeLayout layout = layout(cmd);
+        if (!isDse51Node(layout))
+        {
+            // a node of the DSE 6 upgrade is checked by the node inspection at its rollback
+            err.println("--rollback-check applies to nodes rolled back to DSE 5.1 only, and this node is " +
+                        "inspected as a DSE 6 node");
+            return EXIT_ERROR;
+        }
+        String snapshot = cmd.getOptionValue("snapshot");
+        String notATag = PaxosRollback.notASnapshotTag(snapshot);
+        if (notATag != null)
+        {
+            err.println(notATag);
+            return EXIT_ERROR;
+        }
+        Dse51RollbackInspection.Report report =
+            new Dse51RollbackInspection(layout, snapshot).inspect(hostname(), FBUtilities.getReleaseVersionString(),
+                                                                  FBUtilities.now().toString());
+        // printed first, so that a report that cannot be written as JSON still leaves the findings with the operator
+        printRollbackCheck(report, out);
+        if (cmd.hasOption("json"))
+            writeAtomically(Path.of(cmd.getOptionValue("json")),
+                            JsonUtils.JSON_OBJECT_PRETTY_WRITER.writeValueAsBytes(report));
+        return report.blocked() ? EXIT_BLOCKED : EXIT_READY;
+    }
+
+    static void printRollbackCheck(Dse51RollbackInspection.Report report, PrintStream out)
+    {
+        out.println("DSE 5.1 rollback check of this node (" + NodeReport.TOOL + ' ' + report.softwareVersion + ')');
+        out.println("Precondition, not verified by the tool: HCD 2.0 stopped after a successful drain (nodetool " +
+                    "drain exited 0, DRAINED in system.log), system and system_schema not restored yet, DSE 5.1 not " +
+                    "started.");
+        out.println("Host: " + report.hostname);
+        out.println();
+        out.println("Result: " + report.result + " (" + report.count(Finding.Severity.BLOCKING) + " blocking, " +
+                    report.count(Finding.Severity.WARNING) + " warnings, " + report.count(Finding.Severity.INFO) +
+                    " notes)");
+        printFindings(report.findings, out);
+        out.println();
+        out.println("Files the rollback removes before DSE 5.1 starts:");
+        report.toRemove.forEach(file -> out.println("  - " + file));
+        if (report.toRemove.isEmpty())
+            out.println("  none");
+        if (!report.mayRemove.isEmpty())
+        {
+            out.println("Files the rollback may remove (DSE 5.1 ignores them):");
+            report.mayRemove.forEach(file -> out.println("  - " + file));
+        }
+        out.println("Kept by the rollback:");
+        report.kept.forEach(file -> out.println("  - " + file));
+        if (report.kept.isEmpty())
+            out.println("  none");
     }
 
     private static int aggregate(CommandLine cmd, PrintStream out, PrintStream err) throws IOException
@@ -712,6 +799,9 @@ public final class DsePreflight
         options.addOption(Option.builder().longOpt("metadata-dir").hasArg().argName("dir").desc("instead of metadata_directory of cassandra.yaml").build());
         options.addOption(Option.builder().longOpt("commitlog-dir").hasArg().argName("dir").desc("instead of commitlog_directory of cassandra.yaml").build());
         options.addOption(Option.builder().longOpt("hints-dir").hasArg().argName("dir").desc("instead of hints_directory of cassandra.yaml").build());
+        options.addOption(Option.builder().longOpt("saved-caches-dir").hasArg().argName("dir")
+                                .desc("with --rollback-check: instead of saved_caches_directory of cassandra.yaml")
+                                .build());
         options.addOption(Option.builder().longOpt("nodetool").hasArg().argName("path")
                                 .desc("DSE's nodetool, to collect the live state of the running node (read-only commands)").build());
         options.addOption(Option.builder().longOpt("nodetool-arg").hasArg().argName("arg")
@@ -733,7 +823,8 @@ public final class DsePreflight
                                       "list the partitions with an open Paxos round in system.paxos of HCD 2.0 and of the pre-hcd snapshot, and write the serial " +
                                       "reads that complete them").build());
         options.addOption(Option.builder().longOpt("snapshot").hasArg().argName("tag")
-                                .desc("with --paxos-rollback: the snapshot the rollback restores; default the only pre-hcd-* snapshot of the node").build());
+                                .desc("with --paxos-rollback or --rollback-check: the snapshot the rollback " +
+                                      "restores; default the only pre-hcd-* snapshot of the node").build());
         options.addOption(Option.builder().longOpt("paxos-dir").hasArg().argName("dir")
                                 .desc("with --paxos-rollback: one more directory of system.paxos sstables to read, laid out as <...>/system/paxos-<id>; " +
                                       "required after the restore of system, with the directories HCD 2.0's sstables were moved to (repeat for each). " +
@@ -744,7 +835,9 @@ public final class DsePreflight
                                       "sstables of the data directories are all in the snapshot (HCD 2.0 wrote none on this node, and dropped none or only " +
                                       "fully expired ones); no effect when they hold an sstable the snapshot lacks; refused with --paxos-dir").build());
         options.addOption(Option.builder().longOpt("dc").hasArg().argName("name")
-                                .desc("with --paxos-rollback: this node's data center; default from nodes/local, else cassandra-rackdc.properties").build());
+                                .desc("with --paxos-rollback: this node's data center; default from nodes/local " +
+                                      "(DSE 6) or from system.local of the snapshot (DSE 5.1), else " +
+                                      "cassandra-rackdc.properties").build());
         options.addOption(Option.builder().longOpt("serial-consistency").hasArg().argName("keyspace=level")
                                 .desc("with --paxos-rollback: the serial consistency (SERIAL or LOCAL_SERIAL) the tables of a keyspace are written at, " +
                                       "needed where the two are different quorums (a keyspace with replicas outside this node's data center); keyspace * " +
@@ -752,6 +845,14 @@ public final class DsePreflight
         options.addOption(Option.builder().longOpt("cql").hasArg().argName("file")
                                 .desc("with --paxos-rollback: write the SERIAL reads to this file and the LOCAL_SERIAL reads to <file>-local-serial.cql " +
                                       "(<file> without its .cql), for cqlsh -f").build());
+        options.addOption(Option.builder().longOpt("rollback-check")
+                                .desc("instead of inspecting a DSE node: on a node to roll back to DSE 5.1, with " +
+                                      "HCD 2.0 stopped after its drain, system and system_schema not restored yet " +
+                                      "and DSE 5.1 not started, check that DSE 5.1 can start on the files HCD 2.0 " +
+                                      "left, and list those the rollback removes and keeps; the directories are " +
+                                      "taken from DSE's cassandra.yaml, so pass --commitlog-dir, --hints-dir, " +
+                                      "--metadata-dir and --saved-caches-dir where HCD 2.0's cassandra.yaml sets " +
+                                      "others").build());
         options.addOption(Option.builder("h").longOpt("help").desc("print this help").build());
         return options;
     }
@@ -763,14 +864,19 @@ public final class DsePreflight
                                       "\nInspects a DSE 6.8/6.9 or DSE 5.1.51 node, read-only, before its upgrade " +
                                       "to HCD 2.0. " +
                                       "With --aggregate, checks the JSON reports of the nodes of a cluster together. " +
-                                      "With --paxos-rollback, lists the open Paxos rounds of a node to roll back to DSE and writes their serial reads.\n\n",
+                                      "With --paxos-rollback, lists the open Paxos rounds of a node to roll back to " +
+                                      "DSE and writes their serial reads. " +
+                                      "With --rollback-check, checks a node of HCD 2.0 to roll back to DSE 5.1.\n\n",
                                       options, 2, 2,
                                       "\nExit codes: 0 ready (warnings allowed), " +
                                       "1 blocking findings or cluster not ready, " +
                                       "2 usage or inspection error, 3 incomplete (no blocking finding, " +
                                       "the live state of --nodetool not read completely). " +
                                       "With --paxos-rollback: 0 no open round, or every one covered by the reads listed (or needing none), 1 open rounds that " +
-                                      "cannot be protected or need a decision, or problems (see the report), 2 usage or inspection error.");
+                                      "cannot be protected or need a decision, or problems (see the report), 2 usage " +
+                                      "or inspection error. " +
+                                      "With --rollback-check: 0 the node can go back to DSE 5.1 (warnings allowed), " +
+                                      "1 blocking findings, 2 usage or inspection error.");
         writer.flush();
     }
 }
