@@ -398,8 +398,8 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
             DseCompatRefusals.refused(SCHEMA_PULL_WITHOUT_SCHEMA);
             NoSpamLogger.log(logger, NoSpamLogger.Level.INFO, 10, TimeUnit.MINUTES,
                              "Answering with no schema the schema pulls of peers that do not speak this node's messaging version, " +
-                             "DSE 6 nodes in the first place (for example {}): in internode_compatibility_mode DSE_6 this node's " +
-                             "schema must not reach the DSE 6 nodes", from);
+                             "DSE 6 nodes in the first place (for example {}): in internode_compatibility_mode DSE_6 the schema is " +
+                             "frozen and this node's schema must not reach the DSE 6 nodes", from);
             return Collections.emptyList();
         }
         return getSchemaMutations();
@@ -407,19 +407,19 @@ public class DefaultSchemaUpdateHandler implements SchemaUpdateHandler, IEndpoin
 
     /**
      * In the DSE 6 compatibility mode, drops a schema push from a peer this node does not exchange its schema with
-     * ({@link MigrationCoordinator#exchangesSchemaWith}): no schema crosses between this node and a DSE 6 node, in either
-     * direction, so a schema change made on a DSE 6 node does not reach this node. Counted in {@code nodetool compatstatus}
-     * and logged at most once every ten minutes. A push from a node of this software whose messaging version this node
-     * does not know at that moment is dropped too: its schema change reaches this node by the pull that follows its
-     * gossiped schema version, once the version is known.
+     * ({@link MigrationCoordinator#exchangesSchemaWith}): the schema is frozen during the upgrade, so a schema change
+     * made on a DSE 6 node does not reach this node. Counted in {@code nodetool compatstatus} and logged at most once
+     * every ten minutes. A push from a node of this software whose messaging version this node does not know at that
+     * moment is dropped too: its schema change reaches this node by the pull that follows its gossiped schema version,
+     * once the version is known.
      */
     private static void ignoreSchemaPush(InetAddressAndPort from)
     {
         DseCompatRefusals.refused(SCHEMA_PUSH_IGNORED);
         NoSpamLogger.log(logger, NoSpamLogger.Level.WARN, 10, TimeUnit.MINUTES,
                          "Ignoring the schema pushes of peers that do not speak this node's messaging version, DSE 6 nodes in the " +
-                         "first place (for example {}): in internode_compatibility_mode DSE_6 a schema change made on a DSE 6 node " +
-                         "during the upgrade does not reach this node", from);
+                         "first place (for example {}): in internode_compatibility_mode DSE_6 the schema is frozen, and a schema " +
+                         "change made on a DSE 6 node during the upgrade does not reach this node", from);
     }
 
     private synchronized Collection<Mutation> getSchemaMutations()

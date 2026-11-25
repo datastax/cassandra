@@ -132,10 +132,10 @@ public final class DseDialectVersions
     /**
      * The {@code NET_VERSION} of a gossip state showing a node of this software (or of the 4.0 line outside the dialect):
      * 12 or more but not a DSE version (256 or more); -1 for any other state, value or none. HCD 1.2 at the dialect
-     * gossips 11.
+     * gossips 11. Also how the operational guards of the upgrade tell a lost node of this software
+     * ({@code DseUpgradeGuards#isLostNode}).
      */
-    @VisibleForTesting
-    static int gossipedVersion40OrLater(EndpointState state)
+    public static int gossipedVersion40OrLater(EndpointState state)
     {
         VersionedValue netVersion = state == null ? null : state.getApplicationState(ApplicationState.NET_VERSION);
         if (netVersion == null)

@@ -110,7 +110,8 @@ import org.apache.cassandra.utils.FBUtilities;
  * out ({@code DseGossipStates.receivedFrom}), which is every live endpoint including this node, and only saved entries
  * (host id, tokens) remain. Its shadow round ends with those incomplete states; they are only used for its startup
  * checks (the endpoint collision check, which passes without a state of the node itself, and the snitch check, which
- * reads the saved information of fewer endpoints), and by a replacement, which is not part of the upgrade.
+ * reads the saved information of fewer endpoints), and by a replacement, which is not part of the upgrade (the
+ * operational guards of the upgrade refuse it).
  * <p>
  * Failure mode: a DSE peer not identified yet is treated like HCD 1.2, with this software's ordinals. That takes a DSE
  * node that reconnected with a plain first message at 11 or less, of which this node stores no {@code NET_VERSION},
@@ -282,8 +283,9 @@ public final class DsePeers
      * True when the gossip state of a node says it left the ring: decommissioned ({@code LEFT}) or removed
      * ({@code REMOVED_TOKEN}). Such a node stays in gossip for days, and a DSE node gone that way is no longer a DSE
      * peer. A node that is only down, hibernating (being replaced) or whose removal is still streaming
-     * ({@code REMOVING_TOKEN}) still is one. Used by {@code nodetool compatstatus} and {@link #knownAtStartup};
-     * a null state has not left.
+     * ({@code REMOVING_TOKEN}) still is one. The one definition used by {@code nodetool compatstatus}, by
+     * {@link #knownAtStartup} and by the operational guards of the upgrade ({@code DseUpgradeGuards}); a null state has
+     * not left.
      */
     public static boolean hasLeftTheRing(EndpointState state)
     {
@@ -294,7 +296,9 @@ public final class DsePeers
     /**
      * DSE's own messaging version (256 or more) that the gossip state of a node carries as its {@code NET_VERSION}, or -1
      * when the state is null or carries none, a smaller value or one that is not a number. The test of "gossips a DSE
-     * version" used by {@code nodetool compatstatus} and {@link #knownAtStartup}.
+     * version" used by {@code nodetool compatstatus}, by {@link #knownAtStartup} and by the DSE peers the operational
+     * guards name; the refusal of a joining node counts the dialect too
+     * ({@code DseUpgradeGuards.refuseJoinWithDsePeersInGossip}).
      */
     public static int gossipedDseVersion(EndpointState state)
     {
@@ -368,6 +372,12 @@ public final class DsePeers
     public static Map<InetAddressAndPort, String> snapshot()
     {
         return DseCompat.enabled() ? Map.copyOf(IDENTIFIED) : Map.of();
+    }
+
+    /** The peers presumed to be DSE nodes with the reason of each, in DSE 6 compatibility mode; empty otherwise. */
+    public static Map<InetAddressAndPort, String> presumedSnapshot()
+    {
+        return DseCompat.enabled() ? Map.copyOf(PRESUMED) : Map.of();
     }
 
     @VisibleForTesting

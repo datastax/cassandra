@@ -96,6 +96,7 @@ public class Dse6GossipTest extends TestBaseImpl
                                                      .withSubnet(8)
                                                      .withConfig(config -> formerDseNode(config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL)))))
         {
+            // the schema is frozen in DSE_6 mode: the property lifts the freeze for the schema changes of the test
             try (WithProperties ddl = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
             {
                 cluster.schemaChange("CREATE TABLE " + KEYSPACE + ".t (k int PRIMARY KEY, v text)");
@@ -140,9 +141,10 @@ public class Dse6GossipTest extends TestBaseImpl
     }
 
     /**
-     * As on a real upgrade, the nodes enter the mode on a restart, on data they wrote before. The nodes of {@code builder},
-     * configured with {@link #formerDseNode}, first start without the mode, with the trie sstable version DSE reads, and
-     * the test keyspace is created; then each node restarts in {@code DSE_6} mode.
+     * As on a real upgrade, the nodes enter the mode on a restart, on data they wrote before: the operational guards of the
+     * mode refuse a node that has not completed its bootstrap. The nodes of {@code builder}, configured with
+     * {@link #formerDseNode}, first start without the mode, with the trie sstable version DSE reads, and the test keyspace
+     * is created; then each node restarts in {@code DSE_6} mode.
      */
     private static Cluster formerDseNodes(Cluster.Builder builder) throws Throwable
     {
@@ -188,6 +190,7 @@ public class Dse6GossipTest extends TestBaseImpl
                                                      .withSubnet(13)
                                                      .withConfig(config -> formerDseNode(config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL)))))
         {
+            // the schema is frozen in DSE_6 mode: the property lifts the freeze for the schema changes of the test
             try (WithProperties ddl = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
             {
                 cluster.schemaChange("CREATE TABLE " + KEYSPACE + ".t (k int PRIMARY KEY, v text)");
@@ -273,6 +276,7 @@ public class Dse6GossipTest extends TestBaseImpl
                                                      .withSubnet(11)
                                                      .withConfig(config -> formerDseNode(config.with(GOSSIP).with(NETWORK).with(NATIVE_PROTOCOL)))))
         {
+            // the schema is frozen in DSE_6 mode: the property lifts the freeze for the schema changes of the test
             try (WithProperties ddl = new WithProperties().set(INTERNODE_COMPATIBILITY_MODE_ALLOW_DDL, true))
             {
                 cluster.schemaChange("CREATE TABLE " + KEYSPACE + ".t (k int PRIMARY KEY, v text)");

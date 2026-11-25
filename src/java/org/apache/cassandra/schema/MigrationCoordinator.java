@@ -782,10 +782,10 @@ public class MigrationCoordinator
      * <p>
      * A DSE 6 node pulls the schema of a peer whose schema version differs from its own, as this node's does in practice
      * (the two digest different {@code system_schema} tables), and merges what it receives (observed with DSE 6.8.65):
-     * this node's schema must not reach it, since a table DSE does not know stays in its schema after a rollback. DSE 6
-     * pushes a schema change to every live peer it considers schema-compatible, so a DDL run on a DSE node can be pushed
-     * here: it is ignored, so that no schema crosses between this node and a DSE 6 node in either direction. Without the
-     * mode the caller does not ask, and every peer is answered and applied as before.
+     * this node's schema must not reach it, since the schema is frozen during the upgrade and a table DSE does not know
+     * stays in its schema after a rollback. DSE 6 pushes a schema change to every live peer it considers
+     * schema-compatible, so a DDL run on a DSE node can be pushed here: ignoring it keeps the freeze on this side as
+     * well. Without the mode the caller does not ask, and every peer is answered and applied as before.
      */
     boolean exchangesSchemaWith(InetAddressAndPort endpoint)
     {

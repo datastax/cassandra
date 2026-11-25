@@ -125,7 +125,8 @@ public class Dse6SchemaExchangeTest extends CQLTester
             assertThat(handler().schemaMutationsForPull(dsePeer)).isEmpty();
             assertThat(messages(appender)).contains("Answering with no schema the schema pulls of peers that do not speak this node's " +
                                                     "messaging version, DSE 6 nodes in the first place (for example " + dsePeer + "): in " +
-                                                    "internode_compatibility_mode DSE_6 this node's schema must not reach the DSE 6 nodes");
+                                                    "internode_compatibility_mode DSE_6 the schema is frozen and this node's schema must not " +
+                                                    "reach the DSE 6 nodes");
         });
         assertThat(DseCompatRefusals.count(DefaultSchemaUpdateHandler.SCHEMA_PULL_WITHOUT_SCHEMA)).isEqualTo(before + 1);
         assertThat(handler().schemaMutationsForPull(upgradedPeer)).isNotEmpty();
@@ -218,7 +219,8 @@ public class Dse6SchemaExchangeTest extends CQLTester
             push(dsePeer, pushedKeyspace);
             assertThat(messages(appender)).contains("Ignoring the schema pushes of peers that do not speak this node's messaging version, DSE 6 " +
                                                     "nodes in the first place (for example " + dsePeer + "): in internode_compatibility_mode DSE_6 " +
-                                                    "a schema change made on a DSE 6 node during the upgrade does not reach this node");
+                                                    "the schema is frozen, and a schema change made on a DSE 6 node during the upgrade does not " +
+                                                    "reach this node");
         });
         assertThat(Schema.instance.getKeyspaceMetadata(pushedKeyspace)).isNull();
         assertThat(DseCompatRefusals.count(DefaultSchemaUpdateHandler.SCHEMA_PUSH_IGNORED)).isEqualTo(before + 1);
