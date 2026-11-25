@@ -137,6 +137,7 @@ public class RangeUtilTest
     private static Memtable memtable(long rows, long partitions)
     {
         Memtable memtable = mock(Memtable.class);
+        when(memtable.isClean()).thenReturn(false);
         when(memtable.getEstimatedAverageRowSize()).thenReturn(10L);
         when(memtable.getLiveDataSize()).thenReturn(rows * 10);
         when(memtable.partitionCount()).thenReturn(partitions);
@@ -153,6 +154,20 @@ public class RangeUtilTest
         assertEquals(1000, RangeUtil.estimateRowsInRange(memtable, range(min, min)));
         assertEquals(500, RangeUtil.estimateRowsInRange(memtable, range(token(0), Murmur3Partitioner.instance.getMaximumToken())));
         assertEquals(0, RangeUtil.estimateRowsInRange(memtable(0, 0), range(token(0), token(100))));
+    }
+
+    @Test
+    public void emptyMemtable()
+    {
+        Memtable memtable = mock(Memtable.class);
+        when(memtable.isClean()).thenReturn(true);
+        when(memtable.getEstimatedAverageRowSize()).thenReturn(0L);
+        when(memtable.getLiveDataSize()).thenReturn(0L);
+        when(memtable.partitionCount()).thenReturn(0L);
+        when(memtable.minPartitionKey()).thenReturn(null);
+        when(memtable.maxPartitionKey()).thenReturn(null);
+
+        assertEquals(0, RangeUtil.estimateRowsInRange(memtable, range(500, -500)));
     }
 
     @Test
