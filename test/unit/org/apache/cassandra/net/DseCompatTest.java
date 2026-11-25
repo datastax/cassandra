@@ -58,6 +58,16 @@ public class DseCompatTest
         DatabaseDescriptor.setInternodeCompatibilityMode(modeBefore);
     }
 
+    /** A DSE messaging version in a handshake is {@code relative << 8}, relative 1 to 255; nothing else is one. */
+    @Test
+    public void dseHandshakeVersionsAreTheRelativeVersionsShiftedBy8()
+    {
+        for (int version : new int[]{ 256, 1024, 1536, 65280 })
+            assertThat(DseCompat.isDseHandshakeVersion(version)).as(Integer.toString(version)).isTrue();
+        for (int version : new int[]{ 0, 11, 255, 257, 300, 1025, 65281, 65536, Integer.MAX_VALUE, -256, Integer.MIN_VALUE })
+            assertThat(DseCompat.isDseHandshakeVersion(version)).as(Integer.toString(version)).isFalse();
+    }
+
     @Test
     public void dse6ReleaseVersions()
     {

@@ -804,7 +804,25 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
 
     public void listen()
     {
+        seedDseDialectPeers();
         inboundSockets.open();
+    }
+
+    /**
+     * DSE 6 compatibility mode: the saved peers stored with a DSE 6 release are first connected to with the pre-4.0
+     * handshake, not the 4.0-style one DSE fails to parse (see {@link DseDialectVersions}); nothing happens otherwise.
+     */
+    @VisibleForTesting
+    void seedDseDialectPeers()
+    {
+        if (DseCompat.enabled())
+            DseDialectVersions.seedFromSavedPeers(versions);
+    }
+
+    @VisibleForTesting
+    InboundSockets inboundSockets()
+    {
+        return inboundSockets;
     }
 
     public void waitUntilListening() throws InterruptedException
