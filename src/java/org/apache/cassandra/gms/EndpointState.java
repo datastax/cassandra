@@ -537,10 +537,11 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
         {
             int key = in.readInt();
             VersionedValue value = VersionedValue.serializer.deserialize(in, version);
-            if ((key < 0 || key >= Gossiper.STATES.length) && DseCompat.isDse6())
+            if ((key < 0 || key >= Gossiper.STATES.length) && DseCompat.enabled())
             {
-                // DSE 6 compatibility mode: DSE 6 has one more padding state than this software (ordinal 31); an ordinal
-                // this software does not know is dropped, the rest of the endpoint state is kept.
+                // DSE compatibility modes: DSE 6 has one more padding state than this software (ordinal 31); an ordinal
+                // this software does not know is dropped, the rest of the endpoint state is kept, in either DSE mode
+                // (DSE 5.1 knows no ordinal above 24, so it sends none).
                 noSpamLogger.warn("Dropping the gossip application state with the unknown ordinal {} (value '{}') received at messaging version {}",
                                   key, value.value, version);
                 continue;
@@ -584,7 +585,10 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
      * node ({@link DseGossipStates#toDse}); with this software's ordinals to any other (HCD 1.2 at the dialect), only the
      * release version cut as {@link #filterValue} does and the index status in the legacy format, as to HCD 1.2 at 4.0
      * and later. At 4.0 and later, the states as they are, but the index status in the legacy format below
-     * {@link MessagingService#VERSION_DS_20} ({@link #withLegacyIndexStatus}).
+     * {@link MessagingService#VERSION_DS_20} ({@link #withLegacyIndexStatus}). In the DSE 5.1 compatibility mode, where
+     * every peer at a pre-4.0 version is a DSE 5.1 node, a state with an ordinal DSE 5.1 does not know (above
+     * {@link Dse51GossipStates#DSE51_MAX_ORDINAL}) is left out with a WARN: DSE 5.1 would fail on the whole message and
+     * close the connection. This software publishes none (its own states end at {@code INDEX_STATUS}, 20).
      */
     @VisibleForTesting
     static Set<Map.Entry<ApplicationState, VersionedValue>> filterOutgoingStates(Set<Map.Entry<ApplicationState, VersionedValue>> states, int version, boolean dseOrdinals)
@@ -593,9 +597,20 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
             return version < MessagingService.VERSION_DS_20 ? withLegacyIndexStatus(states) : states;
         if (dseOrdinals)
             return DseGossipStates.toDse(states).entrySet();
+        boolean dse51 = DseCompat.isDse51();
         Map<ApplicationState, VersionedValue> filtered = new EnumMap<>(ApplicationState.class);
         for (Map.Entry<ApplicationState, VersionedValue> state : states)
+        {
+            if (dse51 && state.getKey().ordinal() > Dse51GossipStates.DSE51_MAX_ORDINAL)
+            {
+                noSpamLogger.warn("DSE 5.1 compatibility mode: not sending the gossip state {} (ordinal {}, value '{}') " +
+                                  "to a DSE 5.1 node, which knows no ordinal above {}",
+                                  state.getKey(), state.getKey().ordinal(), state.getValue().value,
+                                  Dse51GossipStates.DSE51_MAX_ORDINAL);
+                continue;
+            }
             filtered.put(state.getKey(), filterValue(state.getKey(), state.getValue(), version));
+        }
         return withLegacyIndexStatus(filtered.entrySet());
     }
 
@@ -610,9 +625,10 @@ class EndpointStateSerializer implements IVersionedSerializer<EndpointState>
      * {@code -Dds.current_messaging_version}. The legacy format is
      * understood by every version that knows INDEX_STATUS, so it is the safe choice when the peer is ambiguous.
      * <p>
-     * Below 4.0 (DSE 6 compatibility mode only) it applies to a peer not identified as a DSE 6 node: HCD 1.2 at the
+     * Below 4.0, in DSE 6 compatibility mode, it applies to a peer not identified as a DSE 6 node: HCD 1.2 at the
      * dialect, started with {@code -Dds.current_messaging_version=11}, which then reads the states with its own
-     * ordinals, INDEX_STATUS at 20 on both sides.
+     * ordinals, INDEX_STATUS at 20 on both sides. In the DSE 5.1 compatibility mode it applies to every peer below 4.0,
+     * a DSE 5.1 node, which keeps INDEX_STATUS in its padding state at 20 and never reads it.
      */
     private static Set<Map.Entry<ApplicationState, VersionedValue>> withLegacyIndexStatus(Set<Map.Entry<ApplicationState, VersionedValue>> states)
     {

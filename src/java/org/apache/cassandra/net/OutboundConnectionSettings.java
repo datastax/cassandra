@@ -450,13 +450,15 @@ public class OutboundConnectionSettings
      * {@code storage_port} whatever its {@code enable_legacy_ssl_storage_port}), else when this node enables
      * {@code legacy_ssl_storage_port_enabled}. HCD 1.2 dials {@code ssl_storage_port} for every encrypted pre-4.0 peer;
      * here the setting decides only when the DSE version is not known, because DSE 6.9.7+ and HCD 1.2 nodes, which can
-     * be at the dialect too, listen with TLS on {@code storage_port}. Returns these settings unchanged in every other
+     * be at the dialect too, listen with TLS on {@code storage_port}. DSE 5.1 compatibility mode: an encrypted
+     * connection to a peer at a pre-4.0 version, a DSE 5.1 node, always goes to {@code ssl_storage_port}, the only port
+     * on which DSE 5.1 accepts TLS (the rule of Apache Cassandra 3.11). Returns these settings unchanged in every other
      * case: an unencrypted connection, a peer at 4.0 or later, and mode {@code NONE}, where upstream has no pre-4.0
      * port choice.
      */
     public OutboundConnectionSettings withLegacyPortIfNecessary(int messagingVersion)
     {
-        if (!DseCompat.isDse6() || messagingVersion >= MessagingService.VERSION_40 || encryption == null
+        if (!DseCompat.enabled() || messagingVersion >= MessagingService.VERSION_40 || encryption == null
             || !DseTlsPorts.dialsSslStoragePort(to, encryption.legacy_ssl_storage_port_enabled))
             return this;
 

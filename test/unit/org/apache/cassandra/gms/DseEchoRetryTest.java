@@ -241,7 +241,7 @@ public class DseEchoRetryTest
 
     /**
      * True when the echo request asks for a failure response: its callback handles failures and the message carries the
-     * failure-callback flag (bit 0 of the flags, {@code MessageFlag.CALL_BACK_ON_FAILURE}) and, in DSE 6 compatibility
+     * failure-callback flag (bit 0 of the flags, {@code MessageFlag.CALL_BACK_ON_FAILURE}) and, in a DSE compatibility
      * mode, serialized at messaging version 11, the failure-callback param ({@code CAL_BAC} as a flag param: the UTF-8 key,
      * an int length 1 and the byte 0); false when none of them is the case.
      */
@@ -250,7 +250,7 @@ public class DseEchoRetryTest
         boolean invokeOnFailure = echo.callback.callback.invokeOnFailure();
         assertThat((echo.message.header.flags() & 1) != 0).as("the flag of the message matches the callback")
                                                           .isEqualTo(invokeOnFailure);
-        if (!DatabaseDescriptor.isDse6CompatibilityMode())
+        if (!DatabaseDescriptor.isDseCompatibilityMode())
             return invokeOnFailure; // the pre-4.0 layout exists only in the mode
         byte[] param;
         try (DataOutputBuffer out = new DataOutputBuffer())
@@ -852,5 +852,38 @@ public class DseEchoRetryTest
 
         Gossiper.instance.clearUnsafe();
         assertThat(recordedAttempt()).isZero();
+    }
+
+    /**
+     * DSE_5_1 mode: the echo request a DSE 5.1 node leaves unanswered is sent again once its timeout has passed, as in
+     * DSE_6 mode; every request asks for a failure response, with the CAL_BAC param on the wire at 11, and the log
+     * lines name DSE 5.1.
+     */
+    @Test
+    public void testUnansweredEchoToDse51NodeIsSentAgainAndMarksItUp() throws Exception
+    {
+        mode(InternodeCompatibilityMode.DSE_5_1);
+        gossipNormal();
+        assertThat(echoes).hasSize(1);
+        assertThat(asksForAFailureResponse(echoes.get(0))).isTrue();
+        DsePeers.fromGossipedNetVersion(peer, String.valueOf(VERSION_3014));
+        assertThat(DsePeers.isDse(peer)).isTrue();
+
+        justBeforeTheRequestTimeout();
+        gossipNormal();
+        assertThat(echoes).as("not sent again before the request timeout").hasSize(1);
+        advanceMillis(2);
+        gossipNormal();
+        assertThat(echoes).as("sent again after the request timeout").hasSize(2);
+        assertThat(asksForAFailureResponse(echoes.get(1))).isTrue();
+        assertThat(lines(Level.DEBUG)).containsExactly("DSE 5.1 compatibility mode: peer " + peer + " did not answer the echo request sent " +
+                                                       (REQUEST_TIMEOUT_MILLIS + 1) + " ms ago; sending it again (attempt 2), since it " +
+                                                       "stays down until one is answered");
+
+        answer(echoes.get(1));
+        assertThat(isUp()).isTrue();
+        assertThat(recordedAttempt()).isZero();
+        assertThat(lines(Level.INFO)).containsExactly("DSE 5.1 compatibility mode: peer " + peer + " answered the echo request sent " +
+                                                      "again (attempt 2); marking it up");
     }
 }
