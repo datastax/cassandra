@@ -364,27 +364,26 @@ public class LikePrefixTest extends SAITester
         ColumnQueryMetrics.TrieIndexMetrics trieMetrics = (ColumnQueryMetrics.TrieIndexMetrics) saiIndex.getIndexContext().getColumnQueryMetrics();
 
         long initialAllocations = trieMetrics.postingListMergeQueueAllocations.getCount();
-        long initialCapacity = trieMetrics.totalPostingListMergeQueueCapacity.getCount();
 
         UntypedResultSet result = execute("SELECT pk FROM %s WHERE v LIKE 'prefix_%%' LIMIT 100");
         assertEquals(100, result.size());
 
         long allocations = trieMetrics.postingListMergeQueueAllocations.getCount() - initialAllocations;
-        long totalCapacity = trieMetrics.totalPostingListMergeQueueCapacity.getCount() - initialCapacity;
+        long totalCapacity = trieMetrics.totalPostingListMergeQueueCapacity.getCount();
         long reallocations = trieMetrics.postingListMergeQueueReallocations.getCount();
         long currentOpen = trieMetrics.currentOpenPostingLists.getCount();
 
         assertEquals(numSSTables, allocations);
-        // Each segment expects ~41 rows from SoftLimitUtil (limit 100, fraction ~0.25, confidence 0.9999),
-        // resulting in initCapacity = ~82 per segment (~330 total across 4 SSTables).
-        // Without limit, total capacity would be 4 * (2 * 250) = 2000.
-        assertTrue("Total capacity (" + totalCapacity + ") should be bounded near ~330 and far below 2000",
-                   totalCapacity >= numSSTables * 70 && totalCapacity <= numSSTables * 100);
+        assertEquals(0, totalCapacity);
         assertEquals(0, reallocations);
         assertEquals(0, currentOpen);
         assertEquals(initialOpenPostingLists + 1, allMetrics.openPostingLists.getCount());
         assertEquals(initialMergeQueueHist + 1, allMetrics.maxPostingListMergeQueueSize.getCount());
         assertTrue(allMetrics.openPostingLists.getSnapshot().getMax() > 0);
+
+        // Each segment expects ~41 rows from SoftLimitUtil (limit 100, fraction ~0.25, confidence 0.9999),
+        // resulting in initCapacity = ~82 per segment (~330 total across 4 SSTables).
+        // Without limit, total capacity would be 4 * (2 * 250) = 2000.
         assertTrue(allMetrics.maxPostingListMergeQueueSize.getSnapshot().getMax() >= 70 &&
                    allMetrics.maxPostingListMergeQueueSize.getSnapshot().getMax() <= 100);
     }
