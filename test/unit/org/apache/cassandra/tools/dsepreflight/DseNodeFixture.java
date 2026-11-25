@@ -322,6 +322,12 @@ final class DseNodeFixture
     /** Every file under the node, with its size, modification time and CRC32: equal before and after a read-only run. */
     Map<String, String> fingerprint() throws IOException
     {
+        return fingerprint(root);
+    }
+
+    /** {@link #fingerprint()} of the files under {@code root}; also for the DSE 5.1 node ({@link Dse51NodeFixture}). */
+    static Map<String, String> fingerprint(Path root) throws IOException
+    {
         Map<String, String> files = new TreeMap<>();
         try (Stream<Path> paths = Files.walk(root))
         {
