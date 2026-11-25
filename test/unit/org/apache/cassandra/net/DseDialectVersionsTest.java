@@ -18,7 +18,10 @@ package org.apache.cassandra.net;
 
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -49,11 +52,14 @@ import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.HeartBeatState;
 import org.apache.cassandra.gms.VersionedValue;
+import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.nodes.IPeerInfo;
 import org.apache.cassandra.nodes.Nodes;
 import org.apache.cassandra.nodes.PeerInfo;
 import org.apache.cassandra.service.DsePeersRecord;
+import org.apache.cassandra.service.DseUpgradeMarker;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.CassandraVersion;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.GOSSIP_DISABLE_THREAD_VALIDATION;
@@ -63,10 +69,10 @@ import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * DSE 6 compatibility mode: the saved peers stored with a DSE 6 release are recorded at the pre-4.0 dialect before the
- * first connection, so that they get the pre-4.0 first handshake message and never the 4.0-style probe; a peer taken
- * for a DSE node by mistake (a stale stored release) goes back to the 4.0-style handshake as soon as a 4.0-style
- * handshake it makes gives its version of 4.0 or later; a pre-4.0 handshake from a peer gossiping 4.0
+ * DSE 6 compatibility mode: the saved peers stored with a DSE 6 release are recorded at the pre-4.0 dialect, and
+ * presumed to be DSE nodes, before the first connection, so that they get the pre-4.0 first handshake message and never
+ * the 4.0-style probe; a peer taken for a DSE node by mistake (a stale stored release) goes back to the 4.0-style
+ * handshake as soon as its version of 4.0 or later is known, whichever way; a pre-4.0 handshake from a peer gossiping 4.0
  * or later does not lower its version, unless its first message is one only DSE sends. With the mode off nothing is
  * seeded and no connection corrects its version. The bytes of the first messages, and the retries, are asserted over
  * sockets in {@link DseHandshakeTest}.
@@ -152,8 +158,10 @@ public class DseDialectVersionsTest
         assertThat(versions.knows(upgraded)).isFalse();
         assertThat(versions.knows(hcd)).isFalse();
         assertThat(versions.knows(noRelease)).isFalse();
-        // assumed, not identified: the seeding is no evidence of a DSE node
+        // presumed, not identified: the gossip acks sent to it carry no endpoint state until its gossip settles it
+        assertThat(DsePeers.isPresumed(dse)).isTrue();
         assertThat(DsePeers.isDse(dse)).isFalse();
+        assertThat(DsePeers.isPresumed(dseKnown)).isFalse();
     }
 
     /** The messaging service seeds the saved peers (system.peers) when it starts listening, in DSE_6 mode only. */
@@ -171,6 +179,7 @@ public class DseDialectVersionsTest
             withModeOff.seedDseDialectPeers();
             assertThat(withModeOff.versions.knows(dse)).isFalse();
             assertThat(withModeOff.versions.knows(upgraded)).isFalse();
+            assertThat(DsePeers.isPresumed(dse)).isFalse();
 
             dse6();
             MessagingService withDse6 = new MessagingService(true);
@@ -237,6 +246,99 @@ public class DseDialectVersionsTest
         }
     }
 
+    /**
+     * At startup, after the wait for gossip to settle, a node in DSE_6 mode that knows no DSE 6 peer is told that the
+     * mode can be dropped. Each source of a DSE 6 peer keeps it quiet: a peer at the dialect, a presumed or identified
+     * DSE node, a gossiped DSE NET_VERSION, an entry of the record (an address or not); a node of this software and a
+     * DSE node that left the ring do not. Nothing is logged without the mode.
+     */
+    @Test
+    public void aNodeThatKnowsNoDsePeerAtStartupIsToldTheModeCanBeDropped() throws Exception
+    {
+        File metadataBefore = DatabaseDescriptor.getMetadataDirectory();
+        Path metadata = Files.createTempDirectory("dse-peers-known");
+        DatabaseDescriptor.setMetadataDirectory(new File(metadata));
+        Logger peersLogger = (Logger) LoggerFactory.getLogger(DsePeers.class);
+        ListAppender<ILoggingEvent> appender = new ListAppender<>();
+        appender.start();
+        peersLogger.addAppender(appender);
+        EndpointMessagingVersions versions = MessagingService.instance().versions;
+        InetAddressAndPort dsePeer = InetAddressAndPort.getByName("127.0.0.230:7000");
+        InetAddressAndPort gossipingDse = InetAddressAndPort.getByName("127.0.0.231:7000");
+        InetAddressAndPort upgraded = InetAddressAndPort.getByName("127.0.0.232:7000");
+        InetAddressAndPort left = InetAddressAndPort.getByName("127.0.0.233:7000");
+        try
+        {
+            DsePeersRecord.clear();
+            none();
+            DsePeers.warnIfNoneKnownAtStartup();
+            assertThat(DsePeers.knownAtStartup()).isEmpty();
+            assertThat(appender.list).isEmpty();
+
+            dse6();
+            DsePeers.warnIfNoneKnownAtStartup();
+            assertThat(appender.list).singleElement().satisfies(e -> {
+                assertThat(e.getLevel()).isEqualTo(Level.WARN);
+                assertThat(e.getFormattedMessage()).isEqualTo("No DSE peers found, the mode can be dropped (internode_compatibility_mode DSE_6: " +
+                                                              "no peer speaks the pre-4.0 dialect or gossips a DSE messaging version, and none is " +
+                                                              "known or on record as a DSE 6 node): once every node runs this software, delete " +
+                                                              "the DSE 6 upgrade marker " + DseUpgradeMarker.path() +
+                                                              " and restart the node with internode_compatibility_mode NONE");
+            });
+
+            // a node of this software, and a DSE node identified before it left the ring, are not DSE peers
+            Gossiper.instance.initializeNodeUnsafe(upgraded, UUID.randomUUID(), VERSION_40, 1);
+            versions.set(upgraded, current_version);
+            Gossiper.instance.initializeNodeUnsafe(left, UUID.randomUUID(), 1536, 1);
+            Gossiper.instance.endpointStateMap.get(left)
+                                              .addApplicationState(ApplicationState.STATUS_WITH_PORT,
+                                                                   StorageService.instance.valueFactory.left(Collections.singleton(DatabaseDescriptor.getPartitioner().getRandomToken()),
+                                                                                                             Long.MAX_VALUE));
+            DsePeers.identify(left, "DSE-flagged first handshake message");
+            assertThat(DsePeers.knownAtStartup()).isEmpty();
+
+            // a peer at the dialect, which is also on record
+            versions.set(dsePeer, DSE_DIALECT);
+            assertThat(DsePeers.knownAtStartup()).containsExactly("127.0.0.230:7000");
+            versions.reset(dsePeer);
+            DsePeersRecord.awaitPersisted();
+            assertThat(DsePeers.knownAtStartup()).isEmpty();
+
+            // presumed, then identified
+            DsePeers.presume(dsePeer, "stored release " + DSE_RELEASE);
+            assertThat(DsePeers.knownAtStartup()).containsExactly("127.0.0.230:7000");
+            DsePeers.identify(dsePeer, "DSE-flagged first handshake message");
+            assertThat(DsePeers.knownAtStartup()).containsExactly("127.0.0.230:7000");
+            DsePeers.reset();
+
+            // a gossiped DSE NET_VERSION
+            Gossiper.instance.initializeNodeUnsafe(gossipingDse, UUID.randomUUID(), 1536, 1);
+            assertThat(DsePeers.knownAtStartup()).containsExactly("127.0.0.231:7000");
+            Gossiper.instance.unsafeAnnulEndpoint(gossipingDse);
+
+            // the record of an earlier run, whose entries that are not addresses count too
+            Files.write(DsePeersRecord.path(), List.of("127.0.0.234:7000", "not-an-address"));
+            DsePeersRecord.loadAtStartup();
+            assertThat(DsePeers.knownAtStartup()).containsExactly("127.0.0.234:7000", "not-an-address");
+
+            appender.list.clear();
+            DsePeers.warnIfNoneKnownAtStartup();
+            assertThat(appender.list).noneMatch(e -> e.getLevel() == Level.WARN);
+        }
+        finally
+        {
+            peersLogger.detachAppender(appender);
+            Gossiper.instance.unsafeAnnulEndpoint(upgraded);
+            Gossiper.instance.unsafeAnnulEndpoint(left);
+            Gossiper.instance.unsafeAnnulEndpoint(gossipingDse);
+            versions.reset(upgraded);
+            versions.reset(dsePeer);
+            DsePeersRecord.clear();
+            DatabaseDescriptor.setMetadataDirectory(metadataBefore);
+            new File(metadata).deleteRecursive();
+        }
+    }
+
     @Test
     public void nodesOfThisSoftwareAreTheOnesGossipingVersion40OrLaterButNoDseVersion()
     {
@@ -300,6 +402,55 @@ public class DseDialectVersionsTest
         none();
         assertThat(DsePeers.isDse(peer)).isFalse();
         assertThat(DseDialectVersions.connectionVersion(peer, current_version, another, node)).isEqualTo(current_version);
+    }
+
+    /**
+     * The gossiper calls onRestart with the state from before the restart, after storing the new one: in DSE_6 mode the
+     * NET_VERSION recorded is the new one. A DSE node upgraded to this software keeps the version its new handshake
+     * negotiated (the old 1536 must not lower it, nor the raise that would follow interrupt its connections); a node
+     * rolled back to DSE stays at the dialect and identified (the old 12 must neither raise it nor clear it).
+     */
+    @Test
+    public void aRestartRecordsTheNewNetVersionNotTheOldOne() throws Exception
+    {
+        dse6();
+        InetAddressAndPort upgraded = InetAddressAndPort.getByName("127.0.0.226:7000");
+        InetAddressAndPort rolledBack = InetAddressAndPort.getByName("127.0.0.227:7000");
+        InetAddressAndPort upgradedEarly = InetAddressAndPort.getByName("127.0.0.228:7000");
+        EndpointMessagingVersions versions = MessagingService.instance().versions;
+        try
+        {
+            versions.set(upgraded, current_version);
+            Gossiper.instance.initializeNodeUnsafe(upgraded, UUID.randomUUID(), VERSION_40, 2);
+            StorageService.instance.onRestart(upgraded, stateWithNetVersion("1536"));
+            assertThat(versions.getRaw(upgraded)).isEqualTo(current_version);
+            assertThat(DsePeers.isDse(upgraded)).isFalse();
+
+            versions.set(rolledBack, DSE_DIALECT);
+            DsePeers.identify(rolledBack, "DSE-flagged first handshake message");
+            Gossiper.instance.initializeNodeUnsafe(rolledBack, UUID.randomUUID(), 1536, 2);
+            StorageService.instance.onRestart(rolledBack, stateWithNetVersion(String.valueOf(VERSION_40)));
+            assertThat(versions.getRaw(rolledBack)).isEqualTo(DSE_DIALECT);
+            assertThat(DsePeers.isDse(rolledBack)).isTrue();
+
+            // a DSE node upgraded before any new handshake with it: its new 12 raises it out of the dialect and clears its
+            // identification (the old 1536 would have left both)
+            versions.set(upgradedEarly, DSE_DIALECT);
+            DsePeers.identify(upgradedEarly, "handshake reply with the DSE messaging version 1536");
+            Gossiper.instance.initializeNodeUnsafe(upgradedEarly, UUID.randomUUID(), VERSION_40, 2);
+            StorageService.instance.onRestart(upgradedEarly, stateWithNetVersion("1536"));
+            assertThat(versions.getRaw(upgradedEarly)).isEqualTo(VERSION_40);
+            assertThat(DsePeers.isDse(upgradedEarly)).isFalse();
+        }
+        finally
+        {
+            Gossiper.instance.unsafeAnnulEndpoint(upgraded);
+            Gossiper.instance.unsafeAnnulEndpoint(rolledBack);
+            Gossiper.instance.unsafeAnnulEndpoint(upgradedEarly);
+            versions.reset(upgraded);
+            versions.reset(rolledBack);
+            versions.reset(upgradedEarly);
+        }
     }
 
     @Test
@@ -384,13 +535,16 @@ public class DseDialectVersionsTest
 
     /**
      * A node of this software taken for a DSE node (a stale stored release) is connected to at the dialect, which this
-     * software accepts; its version of 4.0 or later, learnt from a 4.0-style handshake it makes, closes that
-     * connection, and the next one is made with the 4.0-style handshake, at the current version.
+     * software accepts; its version of 4.0 or later, learnt from its gossiped NET_VERSION 12 or from a 4.0-style
+     * handshake it makes, closes that connection, and the next one is made with the 4.0-style handshake, at the current
+     * version.
      */
     @Test
     public void upgradedPeerTakenForADseNodeIsReconnectedAtTheCurrentVersion() throws Throwable
     {
         dse6();
+        // its gossiped NET_VERSION
+        reconnectedAtTheCurrentVersion(endpoint -> StorageService.instance.onRestart(endpoint, stateWithNetVersion(String.valueOf(VERSION_40))));
         // a 4.0-style handshake it makes with this node
         reconnectedAtTheCurrentVersion(endpoint -> DseDialectVersions.recordHandshakeVersion(endpoint, current_version, current_version));
     }

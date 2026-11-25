@@ -61,8 +61,9 @@ public class CompatStatus extends NodeTool.NodeToolCmd
         out.printf("Storage compatibility mode   : %s%n", probe.getStorageCompatibilityMode());
         out.printf("SSTable format written       : %s%n", probe.getSSTableFormatVersion());
 
-        // raw values: a peer recorded below 4.0 speaks the pre-4.0 dialect; a DSE node gossiped by an upgraded peer is
-        // recorded at DSE's own gossip value (256 or more), a node this one cannot talk to
+        // raw values: a peer speaking the pre-4.0 dialect is recorded at its version (11 for a DSE node in DSE_6 mode, by the
+        // handshake and by gossip alike); only a node without the mode records DSE's own gossip value (256 or more) of a
+        // DSE node gossiped by an upgraded peer, a node it cannot talk to
         Map<String, Integer> versions = new TreeMap<>(probe.getEndpointMessagingVersions());
         int dialectPeers = 0;
         int dseInGossipOnly = 0;
@@ -79,7 +80,7 @@ public class CompatStatus extends NodeTool.NodeToolCmd
         {
             int version = e.getValue();
             String note = version < MessagingService.VERSION_40 ? "  (pre-4.0 dialect)"
-                                                                : isDseGossipValue(version) ? "  (DSE 6 node known from gossip only)" : "";
+                                                                : isDseGossipValue(version) ? "  (DSE 6 node known from gossip only; reachable in DSE_6 mode only)" : "";
             out.printf("  %-45s %d%s%n", e.getKey(), version, note);
         }
 
@@ -126,7 +127,7 @@ public class CompatStatus extends NodeTool.NodeToolCmd
             out.printf("  %-45s %d%n", e.getKey(), e.getValue());
     }
 
-    /** DSE's own messaging version as it gossips it (256 or more): a DSE node known from gossip only. */
+    /** DSE's own messaging version as it gossips it (256 or more), which only a node without the mode records. */
     private static boolean isDseGossipValue(int rawVersion)
     {
         return DseCompat.messagingVersionFromGossip(rawVersion) != rawVersion;
