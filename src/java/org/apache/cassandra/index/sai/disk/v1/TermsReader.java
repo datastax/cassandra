@@ -564,16 +564,16 @@ public class TermsReader implements Closeable
 
         /**
          * The offsets of the posting lists of the terms that the term filter, if any, accepts. Checks the query
-         * context for cancellation/timeout every {@link #CHECKPOINT_PERIOD} offsets.
+         * context for cancellation/timeout every {@link #CHECKPOINT_PERIOD} terms read, accepted or not.
          */
         private class PostingsOffsets implements CloseableIterator<Long>
         {
-            /** The number of offsets between two checkpoints. */
+            /** The number of terms read between two checkpoints. */
             private static final int CHECKPOINT_PERIOD = 1024;
 
             private final TrieTermsDictionaryReader reader;
             private long next = -1;
-            private int returned = 0;
+            private int read = 0;
 
             PostingsOffsets(TrieTermsDictionaryReader reader)
             {
@@ -593,8 +593,6 @@ public class TermsReader implements Closeable
             {
                 if (!hasNext())
                     throw new NoSuchElementException();
-                if ((++returned % CHECKPOINT_PERIOD) == 0)
-                    context.checkpoint();
                 long offset = next;
                 next = -1;
                 return offset;
@@ -611,6 +609,9 @@ public class TermsReader implements Closeable
              */
             private long nextPostingsOffset()
             {
+                if ((++read % CHECKPOINT_PERIOD) == 0)
+                    context.checkpoint();
+
                 if (termFilter == null)
                     return reader.nextAsLong();
 

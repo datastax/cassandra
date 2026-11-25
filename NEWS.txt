@@ -109,6 +109,9 @@ Upgrading
       match more rows; use ESCAPE to match them literally.
     - Use LIKE on SAI-indexed columns only once all nodes are upgraded: older replicas don't serve it from the index
       and filter it with the old semantics.
+    - SAI indexes with a non-tokenizing analyzer ('case_sensitive': false, 'normalize', 'ascii') no longer serve
+      LIKE: it matched the analyzed terms (e.g. case-insensitively) instead of the values. Such queries are now
+      rejected, also with ALLOW FILTERING; add an index without analyzer on the column to serve them.
     - Use range and inequality restrictions on SAI-indexed text, ascii, boolean and uuid columns only once all nodes
       are upgraded: older replicas don't serve them from the index.
     - memtable_offheap_space: 0 is now rejected at startup when memtable_allocation_type is

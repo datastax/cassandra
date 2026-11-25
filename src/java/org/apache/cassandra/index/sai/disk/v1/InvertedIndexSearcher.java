@@ -77,7 +77,6 @@ import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
 
-import static com.google.common.base.Preconditions.checkState;
 import static org.apache.cassandra.index.sai.disk.PostingList.END_OF_STREAM;
 import static org.apache.cassandra.index.sai.disk.v1.SegmentMetadata.INVALID_TOTAL_TERM_COUNT;
 
@@ -169,11 +168,12 @@ public class InvertedIndexSearcher extends IndexSearcher
         if (rowLimit == Integer.MAX_VALUE)
             return rowLimit;
 
-        long segmentRowsInRange = RangeUtil.estimateRowsInRange(sstable, metadata, keyRange);
-
+        // no estimate of the rows in the query range (not set by a query controller): no spread of the limit
         long totalRowsInRange = context.estimatedRowsInQueryRange();
-        checkState(totalRowsInRange >= 0, "The query controller must set the estimated rows in the query range before searching");
+        if (totalRowsInRange < 0)
+            return rowLimit;
 
+        long segmentRowsInRange = RangeUtil.estimateRowsInRange(sstable, metadata, keyRange);
         double fraction = Math.min(1.0, (double) segmentRowsInRange / Math.max(1, totalRowsInRange));
         return SoftLimitUtil.expectedSubsetItems(rowLimit, fraction, 0.9999);
     }
