@@ -81,7 +81,8 @@ public class GossipDigestAck
     /** A received ack, read at {@code version}. */
     static GossipDigestAck received(List<GossipDigest> gDigestList, Map<InetAddressAndPort, EndpointState> epStateMap, int version)
     {
-        return new GossipDigestAck(gDigestList, epStateMap, null, DseCompat.isPre40Layout(version));
+        boolean readInDialect = DseCompat.isDse6() && DseCompat.isPre40Layout(version);
+        return new GossipDigestAck(gDigestList, epStateMap, null, readInDialect);
     }
 
     boolean writesDseOrdinals(int version)

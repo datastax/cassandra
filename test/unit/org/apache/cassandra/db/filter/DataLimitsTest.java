@@ -20,6 +20,7 @@ package org.apache.cassandra.db.filter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -34,6 +35,9 @@ import org.apache.cassandra.db.aggregation.AggregationSpecification;
 import org.apache.cassandra.db.marshal.IntegerType;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseCompatRefusals;
+import org.apache.cassandra.net.DseRefusedMessageException;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -175,6 +179,104 @@ public class DataLimitsTest
         .hasMessage("Unknown DataLimits.Kind with ordinal 4 and version " + MessagingService.VERSION_30);
         assertThatThrownBy(() -> deserialize(new byte[]{ 9 }, MessagingService.VERSION_40, metadata))
         .isInstanceOf(ArrayIndexOutOfBoundsException.class);
+    }
+
+    /**
+     * In DSE 5.1 compatibility mode the pre-4.0 layout is Apache Cassandra 3.11's, which DSE 5.1 speaks: every kind is
+     * written and read at 10 and 11 with the ordinal of the enum, GROUP BY at 4 and 5, as from 4.0 on, and each kind
+     * reads back as itself; in DSE 6 compatibility mode the same kinds keep DSE's ordinals.
+     */
+    @Test
+    public void kindOrdinalsBelow40AreApacheOnesInDse51Mode() throws IOException
+    {
+        TableMetadata metadata = SchemaLoader.standardCFMD("ks", "cf", 1, IntegerType.instance, IntegerType.instance,
+                                                           IntegerType.instance).build();
+        DataLimits[] every = { cqlLimits, cqlLimitsForPagingInRows, cqlLimitsForPagingInRowsWithLastRow, groupByLimits,
+                               groupByLimitsForPagingInRows, groupByLimitsForPagingInRowsWithLastRow };
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            for (int version : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_3014 })
+            {
+                DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+                assertThat(serialize(groupByLimits, version, metadata)[0]).isEqualTo((byte) 4);
+                assertThat(serialize(groupByLimitsForPagingInRowsWithLastRow, version, metadata)[0])
+                .isEqualTo((byte) 5);
+                for (DataLimits limits : every)
+                {
+                    DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+                    byte[] dse51 = serialize(limits, version, metadata);
+                    assertThat(dse51[0]).as("%s at %s", limits.kind(), version)
+                                        .isEqualTo((byte) limits.kind().ordinal());
+                    // read back as a DSE 5.1 coordinator sends it: the same kind and limits
+                    assertSameLimits(limits, deserialize(dse51, version, metadata), version);
+                    assertThat(Arrays.copyOfRange(dse51, 1, dse51.length))
+                    .as("%s at %s, after the kind", limits.kind(), version)
+                    .isEqualTo(Arrays.copyOfRange(serialize(limits, MessagingService.VERSION_40, metadata), 1,
+                                                  dse51.length));
+                    DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+                    byte[] dse6 = serialize(limits, version, metadata);
+                    assertThat(dse6[0]).as("%s at %s in DSE_6", limits.kind(), version)
+                                       .isEqualTo((byte) limits.kind().dseCompatibilityOrdinal());
+                    assertSameLimits(limits, deserialize(dse6, version, metadata), version);
+                }
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    /**
+     * In DSE 5.1 compatibility mode the kinds 2 and 3, {@code THRIFT_LIMIT} and {@code SUPER_COLUMN_COUNTING_LIMIT},
+     * which a DSE 5.1 coordinator sends for a Thrift query only, are refused as Thrift traffic and counted, at 10 and
+     * 11; an ordinal no kind has is refused too.
+     */
+    @Test
+    public void thriftKindsAreRefusedInDse51Mode()
+    {
+        TableMetadata metadata = SchemaLoader.standardCFMD("ks", "cf", 1, IntegerType.instance, IntegerType.instance,
+                                                           IntegerType.instance).build();
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try
+        {
+            long refused = DseCompatRefusals.count(DseCompat.REFUSED_DSE51_THRIFT_READ);
+            for (int version : new int[]{ MessagingService.VERSION_30, MessagingService.VERSION_3014 })
+            {
+                for (DataLimits.Kind thrift : new DataLimits.Kind[]{ DataLimits.Kind.THRIFT_LIMIT,
+                                                                     DataLimits.Kind.SUPER_COLUMN_COUNTING_LIMIT })
+                {
+                    byte[] bytes = { (byte) thrift.ordinal(), 1, 1, 0 };
+                    assertThatThrownBy(() -> deserialize(bytes, version, metadata))
+                    .isInstanceOf(DseRefusedMessageException.class)
+                    .hasMessage("Received the Thrift limits " + thrift + " (ordinal " + thrift.ordinal() + ") at " +
+                                "messaging version " + version + ": a DSE 5.1 node forwards a query of a Thrift " +
+                                "client, which this software does not serve; stop the Thrift clients (start_rpc: " +
+                                "false on the DSE 5.1 nodes)");
+                }
+                assertThatThrownBy(() -> deserialize(new byte[]{ 6 }, version, metadata))
+                .isInstanceOf(IOException.class)
+                .hasMessage("Unknown DataLimits.Kind ordinal 6 at messaging version " + version);
+            }
+            assertThat(DseCompatRefusals.count(DseCompat.REFUSED_DSE51_THRIFT_READ)).isEqualTo(refused + 4);
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    /** The kind and the limits of {@code read} are those of {@code written}, at a pre-4.0 {@code version}. */
+    private static void assertSameLimits(DataLimits written, DataLimits read, int version)
+    {
+        String as = written.kind() + " at " + version;
+        assertThat(read.kind()).as(as).isEqualTo(written.kind());
+        assertThat(read.count()).as(as).isEqualTo(written.count());
+        assertThat(read.perPartitionCount()).as(as).isEqualTo(written.perPartitionCount());
+        assertThat(read.isDistinct()).as(as).isEqualTo(written.isDistinct());
+        assertThat(read.toString()).as(as).isEqualTo(written.toString());
     }
 
     private interface Writer

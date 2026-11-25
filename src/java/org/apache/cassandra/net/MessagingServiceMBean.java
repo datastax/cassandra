@@ -167,18 +167,23 @@ public interface MessagingServiceMBean
      * In DSE 6 compatibility mode, the peers whose gossip {@code NET_VERSION} is a DSE messaging version (256 or more),
      * that is the DSE 6 nodes of the cluster, and the peers identified as DSE nodes by a handshake, keyed by address
      * with port; the value names their release version, the gossiped {@code NET_VERSION}, when they gossip one, their
-     * DSE version, and whether gossip with them uses DSE's ordinals. This node and the nodes that left the ring
-     * (decommissioned or removed, {@code DsePeers.hasLeftTheRing}) are not listed. Empty with the mode off.
+     * DSE version, and whether gossip with them uses DSE's ordinals. In DSE 5.1 compatibility mode, the same for the
+     * DSE 5.1 nodes: the peers that gossip a {@code NET_VERSION} of 10 or 11 and those identified by a handshake. This
+     * node and the nodes that left the ring (decommissioned or removed, {@code DsePeers.hasLeftTheRing}) are not
+     * listed. Empty with the mode off.
      */
     public Map<String, String> getDsePeers();
 
-    /** The requests refused because of the DSE 6 compatibility mode, by reason (see {@code DseCompatRefusals}). */
+    /**
+     * The requests refused because of the DSE 6 or DSE 5.1 compatibility mode, by reason (see
+     * {@code DseCompatRefusals}).
+     */
     public Map<String, Long> getDseCompatRefusals();
 
     /**
-     * The peers on record as speaking the pre-4.0 dialect (DSE 6), address with port, as this node also persists them,
-     * then the lines of the persisted record that are not addresses with port, trimmed and sorted; empty outside
-     * {@code DSE_6}.
+     * The peers on record as speaking the pre-4.0 dialect (DSE 6, or DSE 5.1 in {@code DSE_5_1}), address with port, as
+     * this node also persists them, then the lines of the persisted record that are not addresses with port, trimmed
+     * and sorted; empty outside {@code DSE_6} and {@code DSE_5_1}.
      */
     public List<String> getDsePeersOnRecord();
 

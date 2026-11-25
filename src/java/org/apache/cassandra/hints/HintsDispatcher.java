@@ -188,8 +188,7 @@ final class HintsDispatcher implements AutoCloseable
      * In {@code internode_compatibility_mode: DSE_5_1}, for a page sent to a DSE 5.1 node, the WARN names DSE 5.1,
      * which by its source acknowledges the hints it drops too (an unknown table, invalid data, a range it no longer
      * owns, whose hint it sends on to the replicas) and leaves unanswered only a hint whose application fails
-     * ({@link #unacknowledgedHintsWarning}). So far no node in that mode sends a hint to a DSE 5.1 node: there
-     * {@link DseCompat#enabled} is false, and so is {@link DseCompat#isPre40Layout} at every version.
+     * ({@link #unacknowledgedHintsWarning}).
      */
     private void warnUnacknowledgedByDse(long unacknowledged)
     {

@@ -96,6 +96,53 @@ public class CassandraAuthorizerDse6Test extends CQLTester
     }
 
     @Test
+    public void indexMaintainedInDse51ModeWhenDse51HasIt() throws Throwable
+    {
+        checkIndexMaintained(InternodeCompatibilityMode.DSE_5_1, "dse51_indexed");
+    }
+
+    /**
+     * In DSE 5.1 compatibility mode too, {@code system_auth} as a fresh DSE 5.1.51 install defines it, without the
+     * reverse index: GRANT and REVOKE update the permissions only, the hook of a dropped resource finds the role
+     * through them, DROP ROLE deletes them.
+     */
+    @Test
+    public void permissionsOnlyInDse51ModeWhenDse51HasNoIndex() throws Throwable
+    {
+        useSuperUser();
+        String table = createTable("CREATE TABLE %s (k int PRIMARY KEY, v int)");
+        String resource = "data/" + KEYSPACE + '/' + table;
+        String role = "dse51_unindexed";
+        executeNet(format("CREATE ROLE %s WITH login = true AND password = 'secret'", role));
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        TableMetadata index = Schema.instance.getTableMetadata(SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                               AuthKeyspace.RESOURCE_ROLE_INDEX);
+        SchemaTestUtil.announceTableDrop(SchemaConstants.AUTH_KEYSPACE_NAME, AuthKeyspace.RESOURCE_ROLE_INDEX);
+        try
+        {
+            executeNet(format("GRANT SELECT ON %s.%s TO %s", KEYSPACE, table, role));
+            assertThat(permissions(role, resource)).containsExactly("SELECT");
+            executeNet(format("REVOKE SELECT ON %s.%s FROM %s", KEYSPACE, table, role));
+            assertThat(permissions(role, resource)).isEmpty();
+
+            executeNet(format("GRANT SELECT ON %s.%s TO %s", KEYSPACE, table, role));
+            assertThat(DatabaseDescriptor.getAuthorizer().revokeAllOn(DataResource.table(KEYSPACE, table)))
+            .containsExactly(RoleResource.role(role));
+            assertThat(execute(format("SELECT * FROM system_auth.role_permissions WHERE role = '%s'", role))).isEmpty();
+
+            executeNet(format("GRANT SELECT ON %s.%s TO %s", KEYSPACE, table, role));
+            executeNet(format("DROP ROLE %s", role));
+            assertThat(execute(format("SELECT * FROM system_auth.role_permissions WHERE role = '%s'", role))).isEmpty();
+        }
+        finally
+        {
+            SchemaTestUtil.announceNewTable(index);
+        }
+        assertThat(Schema.instance.getTableMetadata(SchemaConstants.AUTH_KEYSPACE_NAME,
+                                                    AuthKeyspace.RESOURCE_ROLE_INDEX)).isNotNull();
+    }
+
+    @Test
     public void indexMaintainedWithNone() throws Throwable
     {
         checkIndexMaintained(InternodeCompatibilityMode.NONE, "none_indexed");

@@ -349,7 +349,7 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
             {
                 if (!DseCompat.enabled())
                     throw new AssertionError("pre-4.0 serialization version " + version);
-                // the pre-4.0 layout, address only: DSE 6 compatibility mode (handshake and 3.0.14-dialect messages)
+                // the pre-4.0 layout, address only: a DSE compatibility mode (handshake and 3.0.14-dialect messages)
                 out.writeByte(address.length);
                 out.write(address);
                 return;
@@ -364,7 +364,7 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
             int size = in.readByte() & 0xFF;
             switch(size)
             {
-                //The original pre-4.0 serialiation of just an address (DSE 6 compatibility mode): accepted whenever the
+                //The original pre-4.0 serialiation of just an address (a DSE compatibility mode): accepted whenever the
                 //mode is on, whatever the version argument, as the size alone tells the layouts apart
                 case 4:
                 case 16:
@@ -399,7 +399,7 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
             int size = buf.get(position++) & 0xFF;
             if ((size == 4 || size == 16) && DseCompat.enabled())
             {
-                // pre-4.0 layout, address only (DSE 6 compatibility mode; the size alone tells the layouts apart)
+                // pre-4.0 layout, address only (a DSE compatibility mode; the size alone tells the layouts apart)
                 byte[] bytes = new byte[size];
                 ByteBufferUtil.copyBytes(buf, position, bytes, 0, size);
                 return getByAddress(bytes);
@@ -425,7 +425,7 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
         {
             if (version < MessagingService.VERSION_40 && !DseCompat.enabled())
                 throw new AssertionError("pre-4.0 serialization version " + version);
-            int portBytes = version >= MessagingService.VERSION_40 ? 2 : 0; // pre-4.0 (DSE 6 compatibility mode): address only
+            int portBytes = version >= MessagingService.VERSION_40 ? 2 : 0; // pre-4.0 (DSE modes): address only
             if (from.getAddress() instanceof Inet4Address)
                 return 1 + 4 + portBytes;
             assert from.getAddress() instanceof Inet6Address;
@@ -435,7 +435,7 @@ public final class InetAddressAndPort extends InetSocketAddress implements Compa
 
     /** Serializer for handling FWD_FRM message parameters.
      *
-     * Below {@link MessagingService#VERSION_40} (the pre-4.0 dialect of the DSE 6 compatibility mode) the value
+     * Below {@link MessagingService#VERSION_40} (the pre-4.0 dialect of the DSE compatibility modes) the value
      * is the raw address, 4 or 16 bytes with no length prefix and no port (the Cassandra 3.0 layout): it can only be
      * read with the length of the param, see {@link #pre40DeserializeWithLength(DataInputPlus, int, int)}.
      */

@@ -55,8 +55,9 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.SyncUtil;
 
 /**
- * The peers this node knows to speak the pre-4.0 dialect (DSE 6 peers), kept in memory and persisted to
- * {@code <metadata_directory>/dse-peers-seen}, one address with port per line.
+ * The peers this node knows to speak the pre-4.0 dialect (DSE 6 peers, or DSE 5.1 peers in the DSE 5.1 compatibility
+ * mode, see below), kept in memory and persisted to {@code <metadata_directory>/dse-peers-seen}, one address with port
+ * per line.
  * <p>
  * The startup checks run before gossip and before any connection, so the messaging versions the node knows at
  * that time are only those it persisted itself: this file is what lets a start with
@@ -79,15 +80,18 @@ import org.apache.cassandra.utils.SyncUtil;
  * <p>
  * The file is rewritten off the calling thread (the version is recorded on event loops and the gossip stage),
  * atomically and synced, and once more, synchronously, when the node drains ({@link #persistAtDrain}). Only maintained
- * while the DSE 6 compatibility mode is on; with {@code NONE} nothing is recorded and nothing is written.
+ * while a DSE compatibility mode is on; with {@code NONE} nothing is recorded and nothing is written.
  * <p>
  * The upgrade from DataStax Enterprise 5.1 has a record of its own, {@code <metadata_directory>/dse51-peers-seen}, with
- * a header naming DSE 5.1 ({@link #path(InternodeCompatibilityMode)}, {@link #content}). Nothing maintains it so far:
- * the record is loaded, written and kept up to date only while {@link DseCompat#enabled()}, which is false in
- * {@code internode_compatibility_mode: DSE_5_1}. Only the check of a start in {@code NONE} reads it
- * ({@code StartupChecks.checkDsePeersWithoutFlag}), which refuses the start while it lists a peer, as for the DSE 6
- * record, which also refuses a start in {@code DSE_5_1}. The methods without a mode are those of the DSE 6 record,
- * whose file and bytes do not depend on the DSE 5.1 one.
+ * a header naming DSE 5.1 ({@link #path(InternodeCompatibilityMode)}, {@link #content}), maintained the same way in
+ * {@code internode_compatibility_mode: DSE_5_1} ({@link DseCompat#enabled()} is true in both modes): a peer enters it
+ * when the node's messaging version map puts it at 10 or 11, which only a DSE 5.1 node speaks in such a cluster (an
+ * inbound handshake, its gossiped {@code NET_VERSION}, an answer in the dialect), the rule by which {@code DsePeers}
+ * identifies a DSE 5.1 node, and leaves it when it is seen at 4.0 or later. It is loaded at a {@code DSE_5_1} start,
+ * and the check of a start in {@code NONE} or {@code DSE_6} reads it ({@code StartupChecks.checkDsePeersWithoutFlag}),
+ * which refuses the start while it lists a peer, as for the DSE 6 record, which also refuses a start in
+ * {@code DSE_5_1}. The methods without a mode are those of the DSE 6 record, whose file and bytes do not depend on the
+ * DSE 5.1 one.
  */
 public final class DsePeersRecord
 {
@@ -131,17 +135,16 @@ public final class DsePeersRecord
 
     /**
      * The upgrade whose record the node maintains: {@code DSE_5_1} in that mode, otherwise {@code DSE_6}, the record of
-     * the DSE 6 compatibility mode, which is the only one maintained so far.
+     * the DSE 6 compatibility mode.
      */
     static InternodeCompatibilityMode source()
     {
-        return DatabaseDescriptor.isDse51CompatibilityMode() ? InternodeCompatibilityMode.DSE_5_1
-                                                             : InternodeCompatibilityMode.DSE_6;
+        return DseCompat.textMode();
     }
 
     /**
-     * Loads the persisted record into memory, once per process; called at a {@code DSE_6} start before any
-     * connection. A no-op with {@code NONE}. A load that fails can be made again.
+     * Loads the persisted record into memory, once per process; called at a {@code DSE_6} or {@code DSE_5_1} start
+     * before any connection. A no-op with {@code NONE}. A load that fails can be made again.
      */
     public static void loadAtStartup() throws IOException
     {
@@ -196,7 +199,7 @@ public final class DsePeersRecord
     }
 
     /**
-     * Called whenever a peer's messaging version is recorded, with the raw value; a no-op unless the DSE 6
+     * Called whenever a peer's messaging version is recorded, with the raw value; a no-op unless the DSE 6 or DSE 5.1
      * compatibility mode is on. Persists the record when the peer enters or leaves it.
      */
     public static void versionRecorded(InetAddressAndPort peer, int version)
@@ -209,7 +212,10 @@ public final class DsePeersRecord
             persistLater();
     }
 
-    /** Called when a peer's messaging version is forgotten (it left the ring); a no-op unless the DSE 6 compatibility mode is on. */
+    /**
+     * Called when a peer's messaging version is forgotten (it left the ring); a no-op unless the DSE 6 or DSE 5.1
+     * compatibility mode is on.
+     */
     public static void versionForgotten(InetAddressAndPort peer)
     {
         if (!DseCompat.enabled())
@@ -226,7 +232,8 @@ public final class DsePeersRecord
 
     /**
      * The lines of the persisted record that are not addresses with port, trimmed and sorted: kept in the file, they
-     * keep a start with {@code NONE} refused until they are removed by hand.
+     * keep a start without the mode of the upgrade ({@code NONE}, or {@code DSE_6} for the DSE 5.1 record) refused
+     * until they are removed by hand.
      */
     public static Set<String> unparsedEntries()
     {
@@ -247,7 +254,8 @@ public final class DsePeersRecord
     {
         Path path = path(mode);
         // Files.exists is false when the check itself fails: only a file known to be absent is an empty record, anything
-        // else is read, and a failure to read it is reported (the NONE check then refuses the start: fail closed)
+        // else is read, and a failure to read it is reported (the check of a start without the mode of the upgrade
+        // then refuses it: fail closed)
         if (Files.notExists(path))
             return Collections.emptyList();
         List<String> peers = new ArrayList<>();
@@ -279,10 +287,10 @@ public final class DsePeersRecord
      * {@code nodetool drain} or the shutdown of the node) once it has stopped gossip and messaging, which record the
      * versions. The drain shuts the non-periodic tasks executor down only at its end, dropping the writes still queued
      * and interrupting a running one; this write makes sure that a change recorded in the last moments before messaging
-     * stopped reaches the file. It first waits, for up to {@link #DRAIN_WAIT_SECONDS} seconds, for an asynchronous write
-     * still pending, so that the end of the drain does not interrupt it halfway (an interrupted write would log a
-     * failure and leave its temporary file). A no-op unless the DSE 6 compatibility mode is on, and when no peer entered
-     * or left the record in this process: the file, if any, then already holds the record.
+     * stopped reaches the file. It first waits, for up to {@link #DRAIN_WAIT_SECONDS} seconds, for an asynchronous
+     * write still pending, so that the end of the drain does not interrupt it halfway (an interrupted write would log a
+     * failure and leave its temporary file). A no-op unless the DSE 6 or DSE 5.1 compatibility mode is on, and when no
+     * peer entered or left the record in this process: the file, if any, then already holds the record.
      */
     public static void persistAtDrain()
     {
@@ -334,8 +342,8 @@ public final class DsePeersRecord
      * Writes the current record, replacing the file atomically and syncing it, or deletes the file when the record
      * is empty. The record is snapshotted at write time, so the last write always reflects the latest state. A failure,
      * including the unchecked ones of the file utilities, is logged at ERROR and does not reach the executor's failure
-     * handling (the disk failure policy is not meant for this metadata file): a start with {@code NONE} would then not
-     * know about the peers.
+     * handling (the disk failure policy is not meant for this metadata file): a start with {@code NONE}, or for the
+     * DSE 5.1 record also with {@code DSE_6}, would then not know about the peers.
      */
     private static synchronized void persist()
     {

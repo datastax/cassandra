@@ -2379,12 +2379,16 @@ storage_compatibility_mode: HCD_1
 # compressed with another compressor than LZ4Compressor, SnappyCompressor or DeflateCompressor (the
 # ones DSE 5.1 reads), and forces uuid_sstable_identifiers_enabled off. At its first start in the
 # mode the node writes the upgrade marker metadata_directory/dse51-upgrade-in-progress, which
-# refuses a later start with NONE while it exists; a start in the mode refuses the files a node in
-# the mode never writes (sstables of the bti format or another format than big, big sstables newer
-# than oa, non-numeric generations, commit log segments above version 7); DSE 5.1's replayed commit
-# log segments are renamed with the suffix .replayed, and transaction logs and sstable statistics
-# are written as DSE 5.1 reads them. The node still writes big sstables of version nb, which
-# DSE 5.1 does not read, and does not connect to DSE 5.1 nodes. Offline tools that read this file
+# refuses a later start with NONE or DSE_6 while it exists; a start in the mode refuses the files a
+# node in the mode never writes (sstables of the bti format or another format than big, big sstables
+# newer than oa, non-numeric generations, commit log segments above version 7); DSE 5.1's replayed
+# commit log segments are renamed with the suffix .replayed, and transaction logs and sstable
+# statistics are written as DSE 5.1 reads them. It connects to DSE 5.1 nodes in their pre-4.0 dialect
+# (messaging version 11), freezes the schema (no DDL unless the system property
+# -Dcassandra.internode_compatibility_mode.allow_ddl=true is set; a CREATE or ALTER with a
+# compressor DSE 5.1 does not read is refused even then), refuses repair and the topology changes,
+# and neither sends its schema to DSE 5.1 nodes nor applies theirs. The node still writes big
+# sstables of version nb, which DSE 5.1 does not read. Offline tools that read this file
 # inherit the checks of the sstable format, the compression selector and flush_compression, the
 # numeric generations and the transaction logs and statistics of the mode (they write big oa
 # sstables, without the storage mode); clients that set the system property below get the big
