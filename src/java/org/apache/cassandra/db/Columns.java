@@ -553,6 +553,17 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
          */
         public Columns deserialize(DataInputPlus in, TableMetadata metadata, boolean dseViewHiddenColumns) throws IOException
         {
+            return deserialize(in, metadata, dseViewHiddenColumns, false);
+        }
+
+        /**
+         * @param dseViewHiddenColumns as {@link #deserialize(DataInputPlus, TableMetadata, boolean)}
+         * @param storedByDse whether the columns are those of a view update DSE 6 stored on the disk of this node, which
+         * may name the hidden column of the view ({@link DseViewWireFormat#translatesStored}); a name that is not a column
+         * of {@code metadata} is then resolved by {@link DseViewWireFormat#resolveStoredHiddenColumn}
+         */
+        public Columns deserialize(DataInputPlus in, TableMetadata metadata, boolean dseViewHiddenColumns, boolean storedByDse) throws IOException
+        {
             try (BTree.FastBuilder<ColumnMetadata> builder = BTree.fastBuilder())
             {
                 long packedCount = in.readUnsignedVInt() ;
@@ -593,6 +604,8 @@ public class Columns extends AbstractCollection<ColumnMetadata> implements Colle
                         column = metadata.getDroppedColumn(name);
                         if (column == null && dseViewHiddenColumns)
                             column = DseViewWireFormat.resolveHiddenColumn(metadata, name);
+                        else if (column == null && storedByDse)
+                            column = DseViewWireFormat.resolveStoredHiddenColumn(metadata, name);
                         if (column == null)
                             throw new RuntimeException("Unknown column " + UTF8Type.instance.getString(name) + " during deserialization of " + metadata.keyspace + '.' + metadata.name);
                     }
