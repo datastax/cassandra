@@ -90,6 +90,7 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.fql.FullQueryLoggerOptions;
 import org.apache.cassandra.gms.IFailureDetector;
+import org.apache.cassandra.hints.Dse51HintsCompression;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.big.BigFormat;
@@ -1757,7 +1758,8 @@ public class DatabaseDescriptor
      * For {@link InternodeCompatibilityMode#DSE_5_1} it checks the same settings, with
      * {@code storage_compatibility_mode: DSE_5_1} in place of {@code HCD_1} (and that storage mode is refused without
      * this internode mode, for the node and for tools alike), the {@code big} sstable format in place of {@code bti}
-     * and no trie version, the checksum type CRC32 of the sstable digests, and no transient replication, and forces
+     * and no trie version, the checksum type CRC32 of the sstable digests, no transient replication and a
+     * {@code hints_compression} DSE 5.1 can build (for the node only: tools write no hints), and forces
      * numeric sstable generations; tools inherit the on-disk checks (the format, the compressors, the checksum type,
      * the generations) and the transaction logs, statistics and sstable version of the mode
      * ({@link #isDseSSTableOutput()}) without the storage mode and paxos checks, and clients, which do not read
@@ -1831,6 +1833,7 @@ public class DatabaseDescriptor
                                                  "5.1 cannot mark an sstable transient; set " +
                                                  "transient_replication_enabled: false in conf/cassandra.yaml, then " +
                                                  "restart the node", false);
+            checkDse51HintsCompression(conf);
             applyDse51SSTableOutput(conf);
         }
 
@@ -1992,6 +1995,56 @@ public class DatabaseDescriptor
         }
         checkDseFlushAndCompactionCompressors(InternodeCompatibilityMode.DSE_5_1, conf);
         forceNumericSSTableGenerations(InternodeCompatibilityMode.DSE_5_1, conf);
+    }
+
+    /**
+     * In {@code internode_compatibility_mode: DSE_5_1}, refuses a {@code hints_compression} whose compressor DSE 5.1
+     * cannot build ({@link Dse51HintsCompression}): the node writes its class and options into the descriptor of each
+     * hints file, and a node rolled back to DSE 5.1 would never deliver such a file. It refuses as well
+     * {@code crc_check_chance}, which DSE 5.1 removes with a warning but which has no use in a hints file, and an
+     * option without a value, which DSE 5.1 takes as its default but with which the node cannot build the compressor.
+     * The writer never encrypts a hints file, so there is nothing else to check.
+     */
+    private static void checkDse51HintsCompression(Config conf)
+    {
+        ParameterizedClass compression = conf == null ? null : conf.hints_compression;
+        if (compression == null)
+            return;
+        boolean noOption = compression.parameters == null || compression.parameters.isEmpty();
+        String setting = compression.class_name + (noOption ? "" : " with " + compression.parameters);
+        String crcCheckChance = Dse51HintsCompression.CRC_CHECK_CHANCE;
+        Map<String, String> options = noOption ? null : new HashMap<>(compression.parameters);
+        if (options != null)
+            options.remove(crcCheckChance);
+        String refusal = Dse51HintsCompression.refusal(compression.class_name, options);
+        if (refusal != null)
+            throw new ConfigurationException(String.format("internode_compatibility_mode DSE_5_1 refuses " +
+                                                           "hints_compression %s: %s, so DSE 5.1 could not build " +
+                                                           "the compressor of the hints files written with it, and a " +
+                                                           "node rolled back to DSE 5.1 would never deliver them; " +
+                                                           "set hints_compression to %s, or remove it, in " +
+                                                           "conf/cassandra.yaml, then restart the node",
+                                                           setting, refusal, Dse51HintsCompression.ACCEPTED), false);
+        if (!noOption && compression.parameters.containsKey(crcCheckChance))
+            throw new ConfigurationException(String.format("internode_compatibility_mode DSE_5_1 refuses " +
+                                                           "hints_compression %s: the option %s has no use in a " +
+                                                           "hints file (DSE 5.1 removes it with a warning); remove " +
+                                                           "it from hints_compression in conf/cassandra.yaml, then " +
+                                                           "restart the node", setting, crcCheckChance), false);
+        // an option DSE 5.1 supports without a value: its default in DSE 5.1, but the node cannot build the compressor
+        String noValue = options == null ? null : options.entrySet().stream()
+                                                         .filter(option -> option.getValue() == null)
+                                                         .map(Map.Entry::getKey)
+                                                         .sorted()
+                                                         .findFirst()
+                                                         .orElse(null);
+        if (noValue != null)
+            throw new ConfigurationException(String.format("internode_compatibility_mode DSE_5_1 refuses " +
+                                                           "hints_compression %s: the option %s has no value, and " +
+                                                           "the node cannot build the compressor of its hints files " +
+                                                           "with it; give the option a value or remove it, in " +
+                                                           "conf/cassandra.yaml, then restart the node",
+                                                           setting, noValue), false);
     }
 
     /**

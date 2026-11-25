@@ -52,9 +52,11 @@ public enum StorageCompatibilityMode
      * is required by (each is refused without the other): sstables are written in the big format at version {@code me},
      * the version DSE 5.1 writes, while the code reads every big version up to {@code oa} (a start in the internode
      * mode refuses those newer than {@code me}, an entire-sstable stream of any version but the big 3.x ones is
-     * refused, and the guards of the mode refuse every import and refresh); the on-disk formats written at a messaging
-     * version ({@link #storageMessagingVersion()}: the commit log, the hints, the batch log) take that of
-     * {@link #HCD_1}, which DSE 5.1 does not read back. Of major 3, so every rule of a storage mode before 5.0 applies
+     * refused, and the guards of the mode refuse every import and refresh); the hints files are written at hints
+     * version 1, their mutations at messaging version 11, the files DSE 5.1 reads
+     * ({@code HintsDescriptor.currentWriteMessagingVersion()}); the other on-disk formats written at a messaging
+     * version ({@link #storageMessagingVersion()}: the commit log, the batch log) take that of {@link #HCD_1}, which
+     * DSE 5.1 does not read back. Of major 3, so every rule of a storage mode before 5.0 applies
      * as it does for {@link #HCD_1}, and a rule of a mode before 4.0, which no other mode is, applies to it alone; the
      * {@code bti} format is refused, as for {@link #CASSANDRA_4} ({@link #validateSstableFormat}).
      */
@@ -107,7 +109,8 @@ public enum StorageCompatibilityMode
     /**
      * Returns the messaging version to use for on-disk storage formats (commit log, hints, batch logs).
      * When a compatibility mode is set (e.g., HCD_1), this ensures that on-disk formats are written
-     * in a way that older versions can read.
+     * in a way that older versions can read. With {@link #DSE_5_1} the hints are written at messaging version 11
+     * instead ({@code HintsDescriptor.currentWriteMessagingVersion()}).
      *
      * @return the messaging version appropriate for storage serialization
      */

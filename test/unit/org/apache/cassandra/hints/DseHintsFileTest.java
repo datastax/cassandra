@@ -52,6 +52,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.StorageCompatibilityMode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -111,8 +112,9 @@ public class DseHintsFileTest
     /**
      * A hints file DSE 5.1 writes (version 1, the Cassandra 3.0 layout, generated here as DSE 5.1.51 writes it by its
      * source) is a hints file of this software: the catalog loads it in every mode, logs nothing about it and leaves it
-     * as it is, and nothing takes it for a DSE 6 file to convert; its hints are read at messaging version 10
-     * ({@code DseHintsContentTest} decodes them).
+     * as it is, and nothing takes it for a DSE 6 file to convert; its hints are read at messaging version 10, and at
+     * 11, the version DSE 5.1 writes them at, in {@code DSE_5_1} mode with its storage mode
+     * ({@code DseHintsContentTest} decodes them at 10, {@code Dse51HintsWriterTest} at 11).
      */
     @Test
     public void dse51HintsFileIsLoadedAsAHintsFileOfThisSoftwareInEveryMode() throws IOException
@@ -131,7 +133,8 @@ public class DseHintsFileTest
             assertThat(HintsCatalog.dseHintsFiles(directory)).isEmpty();
             HintsDescriptor descriptor = HintsDescriptor.readFromFileQuietly(file).orElseThrow();
             assertThat(descriptor.version).isEqualTo(HintsDescriptor.VERSION_30);
-            assertThat(descriptor.messagingVersion()).isEqualTo(MessagingService.VERSION_30);
+            assertThat(messagingVersionIn(mode, descriptor)).isEqualTo(mode.isDse51() ? MessagingService.VERSION_3014
+                                                                                      : MessagingService.VERSION_30);
             assertThat(descriptor.hostId).isEqualTo(hostId);
             assertThat(descriptor.parameters).isEmpty();
             // the statistics companion, read: the number of hints
@@ -193,7 +196,8 @@ public class DseHintsFileTest
             assertThat(HintsCatalog.dseHintsFiles(directory)).isEmpty();
             HintsDescriptor descriptor = HintsDescriptor.readFromFileQuietly(file).orElseThrow();
             assertThat(descriptor.version).isEqualTo(Dse51Fixtures.HINTS_VERSION);
-            assertThat(descriptor.messagingVersion()).isEqualTo(MessagingService.VERSION_30);
+            assertThat(messagingVersionIn(mode, descriptor)).isEqualTo(mode.isDse51() ? MessagingService.VERSION_3014
+                                                                                      : MessagingService.VERSION_30);
             assertThat(descriptor.hostId).isEqualTo(hostId);
             assertThat(descriptor.timestamp).isEqualTo(timestamp);
             assertThat(descriptor.parameters).isEmpty();
@@ -400,6 +404,25 @@ public class DseHintsFileTest
                      .filter(event -> event.getLevel() == level)
                      .map(ILoggingEvent::getFormattedMessage)
                      .collect(Collectors.toList());
+    }
+
+    /**
+     * The messaging version the hints of {@code descriptor} are read at in {@code mode} with the storage mode it
+     * requires: {@code DSE_5_1}'s for {@code DSE_5_1}, the configured one otherwise.
+     */
+    private static int messagingVersionIn(InternodeCompatibilityMode mode, HintsDescriptor descriptor)
+    {
+        StorageCompatibilityMode previous = DatabaseDescriptor.getStorageCompatibilityMode();
+        try
+        {
+            if (mode.isDse51())
+                DatabaseDescriptor.setStorageCompatibilityMode(StorageCompatibilityMode.DSE_5_1);
+            return descriptor.messagingVersion();
+        }
+        finally
+        {
+            DatabaseDescriptor.setStorageCompatibilityMode(previous);
+        }
     }
 
     /** Loads the catalog in the given mode, asserts the number of stores it found, returns what it logged. */

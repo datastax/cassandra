@@ -151,12 +151,32 @@ final class HintsDescriptor
      * Returns the hints version to use for new hints files, respecting storage compatibility mode.
      * When compatibility mode is set (e.g., HCD_1), this ensures hints are written in a format
      * that older versions can read.
+     * <p>
+     * With {@code storage_compatibility_mode: DSE_5_1} it is {@link #VERSION_30}, the only version DSE 5.1 reads, for
+     * every target, so that a node rolled back to DSE 5.1 delivers the hints it stored in the mode; the commit log, the
+     * batchlog and the Paxos rows keep {@link StorageCompatibilityMode#storageMessagingVersion()}.
      *
      * @return the hints version appropriate for the current storage compatibility mode
      */
     static int currentStorageVersion()
     {
-        return hintsVersionFromMessagingVersion(StorageCompatibilityMode.current().storageMessagingVersion());
+        StorageCompatibilityMode mode = StorageCompatibilityMode.current();
+        if (mode == StorageCompatibilityMode.DSE_5_1)
+            return VERSION_30;
+        return hintsVersionFromMessagingVersion(mode.storageMessagingVersion());
+    }
+
+    /**
+     * The messaging version of the hints this node writes, in its hints buffers and in the files of
+     * {@link #currentStorageVersion()}: {@link StorageCompatibilityMode#storageMessagingVersion()}, but
+     * {@link MessagingService#VERSION_3014} with {@code storage_compatibility_mode: DSE_5_1}, the version DSE 5.1 reads
+     * the mutations of a hints file of version 1 at ({@link #messagingVersion(int)}).
+     */
+    static int currentWriteMessagingVersion()
+    {
+        StorageCompatibilityMode mode = StorageCompatibilityMode.current();
+        return mode == StorageCompatibilityMode.DSE_5_1 ? MessagingService.VERSION_3014
+                                                        : mode.storageMessagingVersion();
     }
 
     /**
@@ -343,12 +363,21 @@ final class HintsDescriptor
         return messagingVersion(version);
     }
 
+    /**
+     * The messaging version the hints of a file of the given hints version are serialized at. For
+     * {@link #VERSION_30}, {@link MessagingService#VERSION_30}, but {@link MessagingService#VERSION_3014} with
+     * {@code storage_compatibility_mode: DSE_5_1}: DSE 5.1 writes and reads the mutations of such a file at 11, and in
+     * that mode this node writes its own at 11 too ({@link #currentWriteMessagingVersion()}). A mutation has the same
+     * bytes at 10 and 11, so the files of either reader decode alike.
+     */
     static int messagingVersion(int hintsVersion)
     {
         switch (hintsVersion)
         {
             case VERSION_30:
-                return MessagingService.VERSION_30;
+                return StorageCompatibilityMode.current() == StorageCompatibilityMode.DSE_5_1
+                       ? MessagingService.VERSION_3014
+                       : MessagingService.VERSION_30;
             case VERSION_40:
                 return MessagingService.Version.VERSION_40.value;
             case VERSION_50:

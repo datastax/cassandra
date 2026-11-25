@@ -961,6 +961,11 @@ public class BatchlogManager implements BatchlogManagerMBean
                 mutations.add(mutation);
         }
 
+        /**
+         * A hint the DSE 5.1 mode's hints files cannot hold is refused, counted and logged by the write, with the
+         * advice to repair its tables, and the batch is deleted all the same: it would be refused again at each
+         * replay, which would only apply the batch's delivered mutations again.
+         */
         private void writeHintsForUndeliveredEndpoints(int startFrom)
         {
             int gcgs = gcgs(mutations);
@@ -1040,6 +1045,7 @@ public class BatchlogManager implements BatchlogManagerMBean
                 UUID hostId = StorageService.instance.getHostIdForEndpoint(replica.endpoint());
                 if (null != hostId)
                 {
+                    // a hint the DSE 5.1 mode's hints files cannot hold is refused, counted and logged by the write
                     HintsService.instance.write(hostId, Hint.create(mutation, writtenAt));
                     hintedNodes.add(hostId);
                 }

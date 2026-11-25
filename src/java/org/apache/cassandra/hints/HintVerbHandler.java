@@ -91,7 +91,8 @@ public final class HintVerbHandler implements IVerbHandler<HintMessage>
         if (!hostId.equals(StorageService.instance.getLocalHostUUID()))
         {
             // the node is not the final destination of the hint (must have gotten it from a decommissioning node),
-            // so just store it locally, to be delivered later.
+            // so just store it locally, to be delivered later. A hint the DSE 5.1 mode's hints files cannot hold is
+            // refused, counted and logged by the write, and acknowledged all the same: the sender could not do better.
             HintsService.instance.write(hostId, hint);
             respond(message);
         }
