@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.Collections;
 import java.util.Random;
 
 import org.junit.Before;
@@ -27,11 +28,16 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.Int32Type;
+import org.apache.cassandra.db.marshal.ListType;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.SingletonUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -42,6 +48,9 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotSame;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
@@ -64,6 +73,69 @@ public class ReadResponseTest
                                 .addRegularColumn("v", Int32Type.instance)
                                 .partitioner(Murmur3Partitioner.instance)
                                 .build();
+    }
+
+    /**
+     * In DSE 6 compatibility mode the data of a local response is serialized again for a pre-4.0 peer, once for its
+     * size and its write: for a row with a LIVE complex deletion (an assigned and an appended list) the same bytes at
+     * 10 and 11, which differ from the data as built; without the mode it is never serialized again.
+     */
+    @Test
+    public void pre40DataIsSerializedOncePerVersion() throws IOException
+    {
+        TableMetadata lists = TableMetadata.builder("ks", "lists")
+                                           .addPartitionKeyColumn("p", Int32Type.instance)
+                                           .addRegularColumn("l1", ListType.getInstance(Int32Type.instance, true))
+                                           .addRegularColumn("l2", ListType.getInstance(Int32Type.instance, true))
+                                           .partitioner(Murmur3Partitioner.instance)
+                                           .build();
+        PartitionUpdate.SimpleBuilder builder = PartitionUpdate.simpleBuilder(lists, 1).timestamp(1000);
+        builder.row()
+               .add("l1", Collections.singletonList(1))
+               .appendAll("l2", Collections.singletonList(2));
+        PartitionUpdate update = builder.build();
+        ReadCommand command = SinglePartitionReadCommand.fullPartitionRead(lists, FBUtilities.nowInSeconds(),
+                                                                           update.partitionKey());
+        ByteBuffer asBuilt;
+        try (DataOutputBuffer out = new DataOutputBuffer();
+             UnfilteredPartitionIterator partitions =
+                 new SingletonUnfilteredPartitionIterator(update.unfilteredIterator()))
+        {
+            UnfilteredPartitionIterators.serializerForIntraNode().serialize(partitions, command.columnFilter(), out,
+                                                                           MessagingService.current_version);
+            asBuilt = out.asNewBuffer();
+        }
+
+        InternodeCompatibilityMode previous = DatabaseDescriptor.getInternodeCompatibilityMode();
+        try
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_6);
+            ReadResponse.DataResponse response = dataResponse(command, update);
+            ByteBuffer at11 = response.pre40Data(MessagingService.VERSION_3014);
+            assertSame(at11, response.pre40Data(MessagingService.VERSION_3014));
+            ByteBuffer at10 = response.pre40Data(MessagingService.VERSION_30);
+            assertNotSame(at11, at10);
+            assertEquals(at11, at10);
+            assertSame(at10, response.pre40Data(MessagingService.VERSION_30));
+            assertNotEquals(asBuilt, at11);
+
+            DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.NONE);
+            ReadResponse.DataResponse withoutMode = dataResponse(command, update);
+            assertEquals(asBuilt, withoutMode.pre40Data(MessagingService.VERSION_3014));
+            assertSame(withoutMode.pre40Data(MessagingService.VERSION_3014),
+                       withoutMode.pre40Data(MessagingService.VERSION_30));
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(previous);
+        }
+    }
+
+    private static ReadResponse.DataResponse dataResponse(ReadCommand command, PartitionUpdate update)
+    {
+        UnfilteredPartitionIterator partitions = new SingletonUnfilteredPartitionIterator(update.unfilteredIterator());
+        ReadResponse response = command.createResponse(partitions, RepairedDataInfo.NO_OP_REPAIRED_DATA_INFO);
+        return (ReadResponse.DataResponse) response;
     }
 
     @Test

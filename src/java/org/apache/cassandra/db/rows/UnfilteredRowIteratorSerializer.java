@@ -34,6 +34,7 @@ import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.io.sstable.format.big.BigFormatPartitionWriter;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.DseCompat;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -140,7 +141,11 @@ public class UnfilteredRowIteratorSerializer
         SerializationHelper helper = new SerializationHelper(header);
 
         if (!partitionDeletion.isLive())
-            header.writeDeletionTime(partitionDeletion, out);
+        {
+            if (DseCompat.isPre40Layout(version))
+                UnfilteredSerializer.checkPre40DeletionTime(partitionDeletion.localDeletionTime(), version);
+            header.writeDeletionTime(partitionDeletion, out, version);
+        }
 
         if (hasStatic)
             UnfilteredSerializer.serializer.serialize(staticRow, helper, out, version);
@@ -179,7 +184,7 @@ public class UnfilteredRowIteratorSerializer
         size += SerializationHeader.serializer.serializedSizeForMessaging(header, selection, hasStatic);
 
         if (!partitionDeletion.isLive())
-            size += header.deletionTimeSerializedSize(partitionDeletion);
+            size += header.deletionTimeSerializedSize(partitionDeletion, version);
 
         if (hasStatic)
             size += UnfilteredSerializer.serializer.serializedSize(staticRow, helper, version);
