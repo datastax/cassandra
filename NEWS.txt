@@ -112,6 +112,8 @@ Upgrading
     - SAI indexes with a non-tokenizing analyzer ('case_sensitive': false, 'normalize', 'ascii') no longer serve
       LIKE: it matched the analyzed terms (e.g. case-insensitively) instead of the values. Such queries are now
       rejected, also with ALLOW FILTERING; add an index without analyzer on the column to serve them.
+    - SAI indexes with an analyzer no longer serve != and NOT IN, which excluded the rows with the analyzed term
+      (e.g. case-insensitively). These restrictions now need ALLOW FILTERING and exclude only the equal values.
     - Use range and inequality restrictions on SAI-indexed text, ascii, boolean and uuid columns only once all nodes
       are upgraded: older replicas don't serve them from the index.
     - memtable_offheap_space: 0 is now rejected at startup when memtable_allocation_type is

@@ -786,6 +786,32 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
     }
 
     /**
+     * An analyzed index doesn't serve != and NOT IN: with ALLOW FILTERING they exclude only the equal values, not
+     * the rows with the same analyzed term. An = on the column can't be combined with them, as on any analyzed index.
+     */
+    @Test
+    public void testAnalyzedIndexInequalities()
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : 'false' }");
+        execute("INSERT INTO %s (pk, v) VALUES (1, 'Paris')");
+        execute("INSERT INTO %s (pk, v) VALUES (2, 'paris')");
+        execute("INSERT INTO %s (pk, v) VALUES (3, 'PARIS')");
+        execute("INSERT INTO %s (pk, v) VALUES (4, 'rome')");
+
+        for (int i = 0; i < 3; i++)
+        {
+            assertEquals(List.of(1, 2, 3), keys(execute("SELECT pk FROM %s WHERE v = 'paris'")));
+            assertEquals(List.of(2, 3, 4), keys(execute("SELECT pk FROM %s WHERE v != 'Paris' ALLOW FILTERING")));
+            assertEquals(List.of(2, 3), keys(execute("SELECT pk FROM %s WHERE v != 'Paris' AND v != 'rome' ALLOW FILTERING")));
+            assertEquals(List.of(1, 3), keys(execute("SELECT pk FROM %s WHERE v NOT IN ('paris', 'rome') ALLOW FILTERING")));
+            assertInvalidMessage("cannot be restricted by other operators if it includes analyzer match",
+                                 "SELECT pk FROM %s WHERE v = 'paris' AND v != 'Paris' ALLOW FILTERING");
+            flushOrCompact(i);
+        }
+    }
+
+    /**
      * The clustering restrictions of a single-partition query are clustering slices on the raw values, also with an
      * analyzed index on the column, which doesn't serve the ranges.
      */
