@@ -25,6 +25,8 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.After;
 import org.junit.Before;
@@ -40,6 +42,10 @@ import ch.qos.logback.core.joran.spi.JoranException;
 import ch.qos.logback.core.rolling.RollingFileAppender;
 import ch.qos.logback.core.status.Status;
 
+import org.apache.cassandra.distributed.shared.WithProperties;
+
+import static org.apache.cassandra.Util.spinAssertEquals;
+import static org.apache.cassandra.config.CassandraRelevantProperties.LOG_DIR;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
@@ -66,15 +72,14 @@ public class LogbackConfigTest
     private PrintStream originalOut;
     private ByteArrayOutputStream capturedOut;
     private Path logDir;
-    private String originalLogDir;
+    private WithProperties properties;
     private LoggerContext ctx;
 
     @Before
     public void setUp() throws IOException
     {
         logDir = Files.createTempDirectory("logback-config-test-");
-        originalLogDir = System.getProperty("cassandra.logdir");
-        System.setProperty("cassandra.logdir", logDir.toString());
+        properties = new WithProperties().set(LOG_DIR, logDir.toString());
 
         originalOut = System.out;
         capturedOut = new ByteArrayOutputStream();
@@ -88,11 +93,7 @@ public class LogbackConfigTest
             ctx.stop();
 
         System.setOut(originalOut);
-
-        if (originalLogDir == null)
-            System.clearProperty("cassandra.logdir");
-        else
-            System.setProperty("cassandra.logdir", originalLogDir);
+        properties.close();
     }
 
     @Test
@@ -164,13 +165,41 @@ public class LogbackConfigTest
                      ctx.getLogger("org.apache.cassandra").getLevel());
     }
 
+    @Test
+    public void configurationChangesAreDetected() throws Exception
+    {
+        // Work on a copy of the shipped config with a short scan period, so the test doesn't wait 60 seconds
+        String shipped = new String(Files.readAllBytes(new File(CONFIG_FILE).toPath()), StandardCharsets.UTF_8);
+        String original = shipped.replaceFirst("scanPeriod=\"[^\"]*\"", "scanPeriod=\"1 seconds\"");
+        Path watched = logDir.resolve("logback-scan-test.xml");
+        Files.write(watched, original.getBytes(StandardCharsets.UTF_8));
+        ctx = loadConfig(watched.toFile());
+
+        // File systems may have coarse timestamps and logback detects a change by comparing them,
+        // so move the modification time into the future
+        String changed = original.replace("<logger name=\"org.apache.cassandra\" level=\"DEBUG\"/>",
+                                          "<logger name=\"org.apache.cassandra\" level=\"ERROR\"/>");
+        Files.write(watched, changed.getBytes(StandardCharsets.UTF_8));
+        Files.setLastModifiedTime(watched, FileTime.fromMillis(System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(5)));
+
+        // logback checks the file on its own scheduler thread, so the new level is applied asynchronously
+        spinAssertEquals("logback should detect the changed config file",
+                         ch.qos.logback.classic.Level.ERROR,
+                         () -> ctx.getLogger("org.apache.cassandra").getLevel(),
+                         10, TimeUnit.SECONDS);
+    }
+
     private static LoggerContext loadConfig() throws JoranException
     {
-        File config = new File(CONFIG_FILE);
+        return loadConfig(new File(CONFIG_FILE));
+    }
+
+    private static LoggerContext loadConfig(File config) throws JoranException
+    {
         assertTrue("Cannot find " + config.getAbsolutePath(), config.exists());
 
-        // Fresh, detached context. The MDC adapter has to be set and the context started
-        // before configuring, otherwise appenders of a new context may refuse to start with logback 1.6.x.
+        // Fresh, detached context. A LoggerContext created by hand has no MDC adapter (the slf4j service
+        // provider sets one on the real context), and without it every appender fails and nothing is logged.
         LoggerContext context = new LoggerContext();
         context.setName("LogbackConfigTest");
         context.setMDCAdapter(new LogbackMDCAdapter());

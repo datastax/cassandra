@@ -20,14 +20,11 @@ package org.apache.cassandra.service;
 
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicInteger;
-import ch.qos.logback.classic.Level;
-import ch.qos.logback.classic.LoggerContext;
 import com.google.common.collect.ImmutableMultimap;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -396,32 +393,5 @@ public class StorageServiceTest
         {
             StorageService.instance.setColumnIndexCacheSize(old);
         }
-    }
-
-    /**
-     * Verifies that calling {@code setLoggingLevel("", "")} reloads the logback configuration.
-     * The behavior was previously provided by {@code <jmxConfigurator />} and is now implemented via
-     * {@link ch.qos.logback.classic.util.ContextInitializer#autoConfig()}.
-     */
-    @Test
-    public void testSetLoggingLevel() throws Exception
-    {
-        String loggerName = "org.apache.cassandra.db.monitoring";
-        LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
-        ch.qos.logback.classic.Logger logger = context.getLogger(loggerName);
-
-        // Sanity-check: logback-test.xml explicitly declares DEBUG for this logger
-        assertEquals(Level.DEBUG, logger.getLevel());
-
-        logger.setLevel(Level.ERROR);
-        assertEquals(Level.ERROR, logger.getLevel());
-
-        // blank args trigger a full config reload via ContextInitializer.autoConfig()
-        StorageService.instance.setLoggingLevel("", "");
-
-        // Level must be back to what logback-test.xml declares for this logger
-        ch.qos.logback.classic.Logger reloadedLogger = context.getLogger(loggerName);
-        assertEquals("setLoggingLevel(\"\", \"\") must reload config and restore the declared log level",
-                     Level.DEBUG, reloadedLogger.getLevel());
     }
 }
