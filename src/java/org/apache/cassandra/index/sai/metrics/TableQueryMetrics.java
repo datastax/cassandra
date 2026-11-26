@@ -373,10 +373,10 @@ public class TableQueryMetrics
         public final Histogram postingsDecodes;
 
         /** Number of trie posting lists opened during the query. */
-        public final Histogram openPostingLists;
+        public final Histogram postingListsOpened;
 
         /** Maximum capacity of the lazy merge posting list queue observed during the query. */
-        public final Histogram maxPostingListMergeQueueSize;
+        public final Histogram maxPostingListMergeQueueCapacity;
 
         /** Number of BKD (numeric) merged posting lists visited by the query. */
         public final Histogram kdTreePostingsNumPostings;
@@ -427,8 +427,8 @@ public class TableQueryMetrics
 
             postingsSkips = Metrics.histogram(createMetricName("PostingsSkips"), true);
             postingsDecodes = Metrics.histogram(createMetricName("PostingsDecodes"), false);
-            openPostingLists = Metrics.histogram(createMetricName("OpenPostingLists"), false);
-            maxPostingListMergeQueueSize = Metrics.histogram(createMetricName("MaxPostingListMergeQueueSize"), false);
+            postingListsOpened = Metrics.histogram(createMetricName("PostingListsOpened"), false);
+            maxPostingListMergeQueueCapacity = Metrics.histogram(createMetricName("MaxPostingListMergeQueueCapacity"), false);
 
             kdTreePostingsSkips = Metrics.histogram(createMetricName("KDTreePostingsSkips"), true);
             kdTreePostingsNumPostings = Metrics.histogram(createMetricName("KDTreePostingsNumPostings"), false);
@@ -462,8 +462,8 @@ public class TableQueryMetrics
             {
                 postingsSkips.update(snapshot.triePostingsSkips);
                 postingsDecodes.update(snapshot.triePostingsDecodes);
-                openPostingLists.update(snapshot.totalPostingListsOpen);
-                maxPostingListMergeQueueSize.update(snapshot.maxPostingListMergeQueueCapacity);
+                postingListsOpened.update(snapshot.triePostingListsOpened);
+                maxPostingListMergeQueueCapacity.update(snapshot.maxPostingListMergeQueueCapacity);
             }
 
             // Record numeric index cache metrics.

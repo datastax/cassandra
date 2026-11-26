@@ -876,8 +876,8 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
 
         StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore());
         TableQueryMetrics.PerQuery allMetrics = group.queryMetrics().perQueryMetrics.get(TableQueryMetrics.QueryKind.ALL);
-        long initialOpenPostingLists = allMetrics.openPostingLists.getCount();
-        long initialMergeQueueHist = allMetrics.maxPostingListMergeQueueSize.getCount();
+        long initialOpenPostingLists = allMetrics.postingListsOpened.getCount();
+        long initialMergeQueueHist = allMetrics.maxPostingListMergeQueueCapacity.getCount();
 
         StorageAttachedIndex saiIndex = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.listIndexes().iterator().next();
         ColumnQueryMetrics.TrieIndexMetrics trieMetrics = (ColumnQueryMetrics.TrieIndexMetrics) saiIndex.getIndexContext().getColumnQueryMetrics();
@@ -888,23 +888,23 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
         assertEquals(100, result.size());
 
         long allocations = trieMetrics.postingListMergeQueueAllocations.getCount() - initialAllocations;
-        long totalCapacity = trieMetrics.totalPostingListMergeQueueCapacity.getCount();
+        long currentCapacity = trieMetrics.currentPostingListMergeQueueCapacity.getCount();
         long reallocations = trieMetrics.postingListMergeQueueReallocations.getCount();
         long currentOpen = trieMetrics.currentOpenPostingLists.getCount();
 
         assertEquals(numSSTables, allocations);
-        assertEquals(0, totalCapacity);
+        assertEquals(0, currentCapacity);
         assertEquals(0, reallocations);
         assertEquals(0, currentOpen);
-        assertEquals(initialOpenPostingLists + 1, allMetrics.openPostingLists.getCount());
-        assertEquals(initialMergeQueueHist + 1, allMetrics.maxPostingListMergeQueueSize.getCount());
-        assertTrue(allMetrics.openPostingLists.getSnapshot().getMax() > 0);
+        assertEquals(initialOpenPostingLists + 1, allMetrics.postingListsOpened.getCount());
+        assertEquals(initialMergeQueueHist + 1, allMetrics.maxPostingListMergeQueueCapacity.getCount());
+        assertTrue(allMetrics.postingListsOpened.getSnapshot().getMax() > 0);
 
         // Each segment expects ~41 rows from SoftLimitUtil (limit 100, fraction ~0.25, confidence 0.9999),
         // resulting in initCapacity = ~82 per segment (~330 total across 4 SSTables).
         // Without limit, total capacity would be 4 * (2 * 250) = 2000.
-        assertTrue(allMetrics.maxPostingListMergeQueueSize.getSnapshot().getMax() >= 70 &&
-                   allMetrics.maxPostingListMergeQueueSize.getSnapshot().getMax() <= 100);
+        assertTrue(allMetrics.maxPostingListMergeQueueCapacity.getSnapshot().getMax() >= 70 &&
+                   allMetrics.maxPostingListMergeQueueCapacity.getSnapshot().getMax() <= 100);
     }
 
     private void insertRandomRows(Map<Integer, String> rows, int from, int to)

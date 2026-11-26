@@ -48,7 +48,7 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
 
         public final Counter postingListMergeQueueAllocations;
         public final Counter postingListMergeQueueReallocations;
-        public final Counter totalPostingListMergeQueueCapacity;
+        public final Counter currentPostingListMergeQueueCapacity;
         public final Counter currentOpenPostingLists;
 
         public final QueryEventListener.PostingListEventListener postingsListener;
@@ -65,7 +65,7 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
 
             postingListMergeQueueAllocations = Metrics.counter(createMetricName("PostingListMergeQueueAllocations", TRIE_POSTINGS_TYPE));
             postingListMergeQueueReallocations = Metrics.counter(createMetricName("PostingListMergeQueueReallocations", TRIE_POSTINGS_TYPE));
-            totalPostingListMergeQueueCapacity = Metrics.counter(createMetricName("PostingListMergeQueueCapacity", TRIE_POSTINGS_TYPE));
+            currentPostingListMergeQueueCapacity = Metrics.counter(createMetricName("CurrentPostingListMergeQueueCapacity", TRIE_POSTINGS_TYPE));
             currentOpenPostingLists = Metrics.counter(createMetricName("CurrentOpenPostingLists", TRIE_POSTINGS_TYPE));
 
             postingsListener = new PostingListEventsMetrics(postingDecodes, currentOpenPostingLists);
@@ -87,7 +87,7 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
                 postingListMergeQueueAllocations.inc();
             else if (newCapacity > 0)
                 postingListMergeQueueReallocations.inc();
-            totalPostingListMergeQueueCapacity.inc((long) newCapacity - oldCapacity);
+            currentPostingListMergeQueueCapacity.inc((long) newCapacity - oldCapacity);
         }
 
         @Override

@@ -149,14 +149,13 @@ public final class MulticastQueryEventListeners
         @Override
         public void onPostingListOpen()
         {
-            ctx.onPostingListOpen();
+            // the per-query counters are for the trie posting lists only
             listener.onPostingListOpen();
         }
 
         @Override
         public void onPostingListClose()
         {
-            ctx.onPostingListClose();
             listener.onPostingListClose();
         }
     }
@@ -189,14 +188,14 @@ public final class MulticastQueryEventListeners
         @Override
         public void onPostingListOpen()
         {
-            ctx.onPostingListOpen();
+            ctx.onTriePostingListOpen();
             listener.onPostingListOpen();
         }
 
         @Override
         public void onPostingListClose()
         {
-            ctx.onPostingListClose();
+            ctx.onTriePostingListClose();
             listener.onPostingListClose();
         }
     }
