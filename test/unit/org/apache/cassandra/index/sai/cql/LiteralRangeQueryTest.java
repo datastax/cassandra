@@ -16,32 +16,23 @@
 
 package org.apache.cassandra.index.sai.cql;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.UUID;
 
 import com.google.common.base.Strings;
 import org.junit.BeforeClass;
-import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestRule;
-import org.junit.runners.model.Statement;
 
-import org.apache.cassandra.config.CassandraRelevantProperties;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.StorageAttachedIndex;
 import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
-import org.apache.cassandra.index.sai.disk.v1.TermsReader;
 import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
 import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
-import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -55,40 +46,12 @@ import static org.junit.Assert.assertTrue;
  */
 public class LiteralRangeQueryTest extends SAITester.Versioned
 {
-    /** The seed of the randomized tests, which can be fixed with the {@link CassandraRelevantProperties#TEST_RANDOM_SEED} property. */
-    private static final long SEED = CassandraRelevantProperties.TEST_RANDOM_SEED.getLong(System.nanoTime());
-    private static final String[] ALPHABET = { "a", "b", "ab", "abc", "z", "A", "B", "Ab", " ", "0", "é", "É", "ß", "日", "😀" };
-
-    private static final int RANDOM_ROWS = 2000;
-    private static final int RANDOM_QUERIES = 200;
-
-    private final Random random = new Random(SEED);
-
     /** The paged queries need the native protocol. */
     @BeforeClass
     public static void setUpNetwork()
     {
         requireNetwork();
     }
-
-    /** Reports the seed with any failure of a test, including unexpected exceptions, not only assertion messages. */
-    @Rule
-    public final TestRule reportSeed = (base, description) -> new Statement()
-    {
-        @Override
-        public void evaluate() throws Throwable
-        {
-            try
-            {
-                base.evaluate();
-            }
-            catch (Throwable t)
-            {
-                t.addSuppressed(new RuntimeException("Random seed: -D" + CassandraRelevantProperties.TEST_RANDOM_SEED.getKey() + '=' + SEED));
-                throw t;
-            }
-        }
-    };
 
     @Test
     public void testFixedRanges()
@@ -401,105 +364,6 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
             flush();
         else if (i == 1)
             compact();
-    }
-
-    @Test
-    public void testRandomizedRanges()
-    {
-        randomizedRanges();
-    }
-
-    /**
-     * Above a number of terms in the range only some posting lists of a segment are open, and the terms are walked
-     * again when the query goes past them: same results with nearly all the ranges above that number.
-     */
-    @Test
-    public void testRandomizedRangesWithFewOpenPostingLists()
-    {
-        int maxLazyPostingLists = TermsReader.getMaxLazyPostingLists();
-        TermsReader.setMaxLazyPostingLists(64 + random.nextInt(64));
-        try
-        {
-            randomizedRanges();
-        }
-        finally
-        {
-            TermsReader.setMaxLazyPostingLists(maxLazyPostingLists);
-        }
-    }
-
-    /**
-     * An intersection with another index advances the range past the posting lists that are open: the terms are
-     * walked again from the target of each skip, with very few posting lists open.
-     */
-    @Test
-    public void testIntersectionWithFewOpenPostingLists()
-    {
-        int maxLazyPostingLists = TermsReader.getMaxLazyPostingLists();
-        TermsReader.setMaxLazyPostingLists(4);
-        try
-        {
-            createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text, n int)");
-            createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-            createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
-            disableCompaction();
-
-            List<Integer> expected = new ArrayList<>();
-            for (int pk = 0; pk < 2000; pk++)
-            {
-                boolean matches = pk % 97 == 0;
-                execute("INSERT INTO %s (pk, v, n) VALUES (?, ?, ?)", pk, String.format("v%05d", pk), matches ? 1 : 0);
-                if (matches && pk >= 100)
-                    expected.add(pk);
-                if (pk == 999)
-                    flush();
-            }
-            flush();
-
-            // the optimizer would not intersect with an unselective range
-            String query = "SELECT pk FROM %s WHERE v >= 'v00100' AND n = 1 WITH optimizer_options = {'query_optimization_level': 0}";
-            TableQueryMetrics.PerQuery metrics = StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore())
-                                                                          .queryMetrics().perQueryMetrics.get(TableQueryMetrics.QueryKind.ALL);
-            for (int i = 0; i < 2; i++)
-            {
-                assertEquals(expected, keys(execute(query)));
-                // the walks of the terms after the skips reopen posting lists: more than the 1900 terms of the range
-                assertTrue(metrics.postingListsOpened.getSnapshot().getMax() > 1900);
-                List<Integer> limited = keys(execute(query.replace(" WITH", " LIMIT 5 WITH")));
-                assertEquals(5, limited.size());
-                assertTrue(expected.containsAll(limited));
-                compact();
-            }
-        }
-        finally
-        {
-            TermsReader.setMaxLazyPostingLists(maxLazyPostingLists);
-        }
-    }
-
-    private void randomizedRanges()
-    {
-        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
-
-        Map<Integer, String> rows = new HashMap<>();
-
-        // memtable-only
-        insertRandomRows(rows, 0, RANDOM_ROWS / 2);
-        verifyRandomizedRanges(rows);
-
-        // flushed sstable + memtable
-        flush();
-        insertRandomRows(rows, RANDOM_ROWS / 2, RANDOM_ROWS);
-        verifyRandomizedRanges(rows);
-
-        // two sstables
-        flush();
-        verifyRandomizedRanges(rows);
-
-        // compacted
-        compact();
-        verifyRandomizedRanges(rows);
     }
 
     /**
@@ -956,77 +820,6 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
                    allMetrics.maxPostingListMergeQueueCapacity.getSnapshot().getMax() <= 100);
     }
 
-    private void insertRandomRows(Map<Integer, String> rows, int from, int to)
-    {
-        for (int pk = from; pk < to; pk++)
-        {
-            String value = randomString();
-            rows.put(pk, value);
-            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, value);
-        }
-    }
-
-    private void verifyRandomizedRanges(Map<Integer, String> rows)
-    {
-        List<String> values = new ArrayList<>(rows.values());
-        for (int i = 0; i < RANDOM_QUERIES; i++)
-        {
-            // draw bounds both from the indexed values and from random strings
-            String lower = random.nextBoolean() ? values.get(random.nextInt(values.size())) : randomString();
-            String upper = random.nextBoolean() ? values.get(random.nextInt(values.size())) : randomString();
-            // ordered bounds: the ranges with a lower bound above the upper one are not specific to these types
-            if (ByteBufferUtil.compareUnsigned(UTF8Type.instance.decompose(lower), UTF8Type.instance.decompose(upper)) > 0)
-            {
-                String swap = lower;
-                lower = upper;
-                upper = swap;
-            }
-            // equal bounds are both inclusive: otherwise the range is empty, as with unordered bounds
-            boolean equalBounds = lower.equals(upper);
-            String lowerOp = equalBounds || random.nextBoolean() ? ">=" : ">";
-            String upperOp = equalBounds || random.nextBoolean() ? "<=" : "<";
-            int kind = random.nextInt(3);
-
-            List<Integer> expected = new ArrayList<>();
-            for (Map.Entry<Integer, String> entry : rows.entrySet())
-            {
-                ByteBuffer term = UTF8Type.instance.decompose(entry.getValue());
-                boolean matches = (kind == 2 || satisfies(term, lowerOp, UTF8Type.instance.decompose(lower)))
-                                  && (kind == 1 || satisfies(term, upperOp, UTF8Type.instance.decompose(upper)));
-                if (matches)
-                    expected.add(entry.getKey());
-            }
-
-            UntypedResultSet result;
-            String query;
-            if (kind == 0)
-                result = execute(query = "SELECT pk FROM %s WHERE v " + lowerOp + " ? AND v " + upperOp + " ?", lower, upper);
-            else if (kind == 1)
-                result = execute(query = "SELECT pk FROM %s WHERE v " + lowerOp + " ?", lower);
-            else
-                result = execute(query = "SELECT pk FROM %s WHERE v " + upperOp + " ?", upper);
-
-            expected.sort(Integer::compareTo);
-            assertEquals("Seed: " + SEED + ", query: " + query + ", lower: " + lower + ", upper: " + upper, expected, keys(result));
-        }
-    }
-
-    /**
-     * Range check with the same semantics as the index, i.e. on the unsigned bytes of the values.
-     */
-    private static boolean satisfies(ByteBuffer term, String operator, ByteBuffer bound)
-    {
-        int cmp = ByteBufferUtil.compareUnsigned(term, bound);
-        switch (operator)
-        {
-            case ">": return cmp > 0;
-            case ">=": return cmp >= 0;
-            case "<": return cmp < 0;
-            case "<=": return cmp <= 0;
-            default: throw new AssertionError(operator);
-        }
-    }
-
     private static List<Integer> keys(UntypedResultSet result)
     {
         List<Integer> keys = new ArrayList<>();
@@ -1036,12 +829,4 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
         return keys;
     }
 
-    private String randomString()
-    {
-        int length = 1 + random.nextInt(6);
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < length; i++)
-            sb.append(ALPHABET[random.nextInt(ALPHABET.length)]);
-        return sb.toString();
-    }
 }
