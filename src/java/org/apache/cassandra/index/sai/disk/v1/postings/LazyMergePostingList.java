@@ -210,7 +210,7 @@ public final class LazyMergePostingList implements PostingList
             for (; i < retained.size(); i++)
                 offer(retained.get(i));
         }
-        catch (Exception e)
+        catch (Throwable e)
         {
             FileUtils.closeQuietly(queue.candidates());
             // The candidate at index i was already handed to offer; the ones after it were not.
@@ -246,7 +246,7 @@ public final class LazyMergePostingList implements PostingList
                     size += candidate.size();
             }
         }
-        catch (Exception e)
+        catch (Throwable e)
         {
             FileUtils.closeQuietly(queue.candidates());
             FileUtils.closeQuietly(source);
@@ -319,7 +319,7 @@ public final class LazyMergePostingList implements PostingList
             {
                 this.head = postings.nextPosting();
             }
-            catch (Exception e)
+            catch (Throwable e)
             {
                 FileUtils.closeQuietly(postings);
                 throw e;
@@ -332,7 +332,7 @@ public final class LazyMergePostingList implements PostingList
             {
                 head = postings.nextPosting();
             }
-            catch (Exception e)
+            catch (Throwable e)
             {
                 FileUtils.closeQuietly(postings);
                 throw e;
@@ -346,7 +346,7 @@ public final class LazyMergePostingList implements PostingList
                 if (head < from)
                     head = postings.advance(from);
             }
-            catch (Exception e)
+            catch (Throwable e)
             {
                 FileUtils.closeQuietly(postings);
                 throw e;
