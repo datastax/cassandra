@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Function;
+import java.util.function.IntSupplier;
 import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
@@ -192,7 +193,7 @@ public class InvertedIndexSearcher extends IndexSearcher
             return reader.exactMatch(term, listener, context);
         }
 
-        int expectedRows = expectedRows(keyRange, context);
+        IntSupplier expectedRows = () -> expectedRows(keyRange, context);
         if (exp.isLiteralTermRange())
         {
             QueryEventListener.TrieIndexEventListener listener = MulticastQueryEventListeners.of(context, perColumnEventListener);
@@ -237,7 +238,7 @@ public class InvertedIndexSearcher extends IndexSearcher
      * Returns the union of the posting lists of all terms in this segment matching the automaton (consistent with
      * what {@code searchPosting} returns for {@code Expression.Op.RANGE}).
      */
-    private PostingList searchAutomatonPostings(CompiledAutomaton automaton, byte[] commonPrefix, QueryContext context, int expectedRows)
+    private PostingList searchAutomatonPostings(CompiledAutomaton automaton, byte[] commonPrefix, QueryContext context, IntSupplier expectedRows)
     {
         // Automaton intersection runs directly over the stored term bytes, which only line up with the raw value
         // bytes for non-composite literal types (see OnDiskFormat#encodeForTrie).

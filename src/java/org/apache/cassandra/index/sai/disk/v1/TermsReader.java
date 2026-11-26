@@ -25,6 +25,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.IntSupplier;
 import java.util.function.Predicate;
 import javax.annotation.Nullable;
 
@@ -228,16 +229,17 @@ public class TermsReader implements Closeable
      */
     public PostingList rangeMatch(Expression exp, ByteComparable lower, ByteComparable upper, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
     {
-        return rangeMatch(exp, lower, upper, perQueryEventListener, context, context.rowLimit());
+        return rangeMatch(exp, lower, upper, perQueryEventListener, context, context::rowLimit);
     }
 
     /**
      * Same as {@link #rangeMatch(Expression, ByteComparable, ByteComparable, QueryEventListener.TrieIndexEventListener, QueryContext)},
      * with an explicit {@code expectedRows} hint used to size the initial capacity of the lazy merge posting list.
      *
-     * @param expectedRows the estimated number of rows this segment is expected to produce (e.g. segment-adjusted query limit)
+     * @param expectedRows the estimated number of rows this segment is expected to produce (e.g. segment-adjusted query limit),
+     *                     evaluated only if the range has terms
      */
-    public PostingList rangeMatch(Expression exp, ByteComparable lower, ByteComparable upper, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context, int expectedRows)
+    public PostingList rangeMatch(Expression exp, ByteComparable lower, ByteComparable upper, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context, IntSupplier expectedRows)
     {
         perQueryEventListener.onSegmentHit();
         Predicate<byte[]> termFilter = exp == null ? null : term -> exp.isSatisfiedBy(ByteBuffer.wrap(term));
@@ -257,16 +259,17 @@ public class TermsReader implements Closeable
      */
     public PostingList rangeMatch(ByteComparable lower, ByteComparable upper, boolean upperInclusive, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context)
     {
-        return rangeMatch(lower, upper, upperInclusive, perQueryEventListener, context, context.rowLimit());
+        return rangeMatch(lower, upper, upperInclusive, perQueryEventListener, context, context::rowLimit);
     }
 
     /**
      * Same as {@link #rangeMatch(ByteComparable, ByteComparable, boolean, QueryEventListener.TrieIndexEventListener, QueryContext)},
      * with an explicit {@code expectedRows} hint used to size the initial capacity of the lazy merge posting list.
      *
-     * @param expectedRows the estimated number of rows this segment is expected to produce (e.g. segment-adjusted query limit)
+     * @param expectedRows the estimated number of rows this segment is expected to produce (e.g. segment-adjusted query limit),
+     *                     evaluated only if the range has terms
      */
-    public PostingList rangeMatch(ByteComparable lower, ByteComparable upper, boolean upperInclusive, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context, int expectedRows)
+    public PostingList rangeMatch(ByteComparable lower, ByteComparable upper, boolean upperInclusive, QueryEventListener.TrieIndexEventListener perQueryEventListener, QueryContext context, IntSupplier expectedRows)
     {
         perQueryEventListener.onSegmentHit();
         return new RangeQuery(null, lower, upper, upperInclusive, perQueryEventListener, context, expectedRows).execute();
@@ -295,7 +298,7 @@ public class TermsReader implements Closeable
                                  QueryEventListener.TrieIndexEventListener perQueryEventListener,
                                  QueryContext context)
     {
-        return intersect(automaton, AutomatonQueries.commonPrefixBytes(automaton), perQueryEventListener, context, context.rowLimit());
+        return intersect(automaton, AutomatonQueries.commonPrefixBytes(automaton), perQueryEventListener, context, context::rowLimit);
     }
 
     /**
@@ -308,20 +311,21 @@ public class TermsReader implements Closeable
                                  QueryEventListener.TrieIndexEventListener perQueryEventListener,
                                  QueryContext context)
     {
-        return intersect(automaton, commonPrefix, perQueryEventListener, context, context.rowLimit());
+        return intersect(automaton, commonPrefix, perQueryEventListener, context, context::rowLimit);
     }
 
     /**
      * Same as {@link #intersect(CompiledAutomaton, byte[], QueryEventListener.TrieIndexEventListener, QueryContext)},
      * with an explicit {@code expectedRows} hint used to size the initial capacity of the lazy merge posting list.
      *
-     * @param expectedRows the estimated number of rows this segment is expected to produce (e.g. segment-adjusted query limit)
+     * @param expectedRows the estimated number of rows this segment is expected to produce (e.g. segment-adjusted query limit),
+     *                     evaluated only if the range has terms
      */
     public PostingList intersect(CompiledAutomaton automaton,
                                  byte[] commonPrefix,
                                  QueryEventListener.TrieIndexEventListener perQueryEventListener,
                                  QueryContext context,
-                                 int expectedRows)
+                                 IntSupplier expectedRows)
     {
         perQueryEventListener.onSegmentHit();
         ByteComparable lower = commonPrefix.length == 0
@@ -428,7 +432,7 @@ public class TermsReader implements Closeable
         private final QueryEventListener.TrieIndexEventListener listener;
         private final long lookupStartTime;
         private final QueryContext context;
-        private final int expectedRows;
+        private final IntSupplier expectedRows;
 
         @Nullable
         private final Predicate<byte[]> termFilter;
@@ -437,7 +441,7 @@ public class TermsReader implements Closeable
         private final boolean upperInclusive;
 
         // When the term filter is not null, only the terms it accepts are read
-        RangeQuery(@Nullable Predicate<byte[]> termFilter, ByteComparable lower, ByteComparable upper, boolean upperInclusive, QueryEventListener.TrieIndexEventListener listener, QueryContext context, int expectedRows)
+        RangeQuery(@Nullable Predicate<byte[]> termFilter, ByteComparable lower, ByteComparable upper, boolean upperInclusive, QueryEventListener.TrieIndexEventListener listener, QueryContext context, IntSupplier expectedRows)
         {
             this.listener = listener;
             this.termFilter = termFilter;
@@ -506,7 +510,7 @@ public class TermsReader implements Closeable
                 postingsSummaryInput = IndexFileUtils.instance().openInput(postingsFile);
                 int minLazyPostingLists = Math.min(16, maxLazyPostingLists);
                 // Twice the expected rows, because some of the rows may be dropped after the index
-                int initCapacity = (int) Math.min(Math.max(2L * expectedRows, minLazyPostingLists), maxLazyPostingLists);
+                int initCapacity = (int) Math.min(Math.max(2L * expectedRows.getAsInt(), minLazyPostingLists), maxLazyPostingLists);
                 return new LazyMergePostingList(new RangePostingLists(postingsInput, postingsSummaryInput),
                                                 initCapacity,
                                                 maxLazyPostingLists,
