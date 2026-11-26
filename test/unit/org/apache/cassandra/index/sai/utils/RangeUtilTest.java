@@ -28,6 +28,7 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Bounds;
 import org.apache.cassandra.dht.ByteOrderedPartitioner;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Murmur3Partitioner.LongToken;
 import org.apache.cassandra.dht.Range;
@@ -55,6 +56,20 @@ public class RangeUtilTest
         DatabaseDescriptor.setPartitionerUnsafe(Murmur3Partitioner.instance);
     }
 
+    /**
+     * Estimates how many of the given rows in the given number of partitions, spread uniformly over the whole ring,
+     * fall into the key range.
+     */
+    private static long estimateRowsInRange(long rows, long partitions, AbstractBounds<PartitionPosition> keyRange)
+    {
+        IPartitioner partitioner = keyRange.left.getPartitioner();
+        return RangeUtil.estimateRowsInRange(rows,
+                                             RangeUtil.avgRowsPerPartition(rows, partitions),
+                                             partitioner.getMinimumToken(),
+                                             partitioner.getMaximumToken(),
+                                             keyRange);
+    }
+
     private static AbstractBounds<PartitionPosition> range(Token left, Token right)
     {
         return new Range<>(left.minKeyBound(), right.maxKeyBound());
@@ -74,20 +89,20 @@ public class RangeUtilTest
     public void fullRing()
     {
         Token min = Murmur3Partitioner.instance.getMinimumToken();
-        assertEquals(1000, RangeUtil.estimateRowsInRange(1000, PARTITIONS, range(min, min)));
+        assertEquals(1000, estimateRowsInRange(1000, PARTITIONS, range(min, min)));
     }
 
     @Test
     public void halfOfRing()
     {
-        assertEquals(500, RangeUtil.estimateRowsInRange(1000, PARTITIONS, range(token(0), Murmur3Partitioner.instance.getMaximumToken())));
-        assertEquals(500, RangeUtil.estimateRowsInRange(1000, PARTITIONS, range(Murmur3Partitioner.instance.getMinimumToken(), token(-1))));
+        assertEquals(500, estimateRowsInRange(1000, PARTITIONS, range(token(0), Murmur3Partitioner.instance.getMaximumToken())));
+        assertEquals(500, estimateRowsInRange(1000, PARTITIONS, range(Murmur3Partitioner.instance.getMinimumToken(), token(-1))));
     }
 
     @Test
     public void quarterOfRing()
     {
-        assertEquals(250, RangeUtil.estimateRowsInRange(1000, PARTITIONS, range(token(0), token(Long.MAX_VALUE / 2))));
+        assertEquals(250, estimateRowsInRange(1000, PARTITIONS, range(token(0), token(Long.MAX_VALUE / 2))));
     }
 
     @Test
@@ -96,7 +111,7 @@ public class RangeUtilTest
         // from 3/4 of the ring to 1/4 of the ring: half of the ring in total
         long left = Long.MAX_VALUE / 2;
         long right = Long.MIN_VALUE / 2;
-        assertEquals(500, RangeUtil.estimateRowsInRange(1000, PARTITIONS, range(token(left), token(right))));
+        assertEquals(500, estimateRowsInRange(1000, PARTITIONS, range(token(left), token(right))));
     }
 
     @Test
@@ -104,13 +119,13 @@ public class RangeUtilTest
     {
         Token min = Murmur3Partitioner.instance.getMinimumToken();
         AbstractBounds<PartitionPosition> toTheEnd = new Range<>(token(0).minKeyBound(), min.minKeyBound());
-        assertEquals(500, RangeUtil.estimateRowsInRange(1000, PARTITIONS, toTheEnd));
+        assertEquals(500, estimateRowsInRange(1000, PARTITIONS, toTheEnd));
     }
 
     @Test
     public void emptyRange()
     {
-        assertEquals(0, RangeUtil.estimateRowsInRange(0, PARTITIONS, range(token(0), token(100))));
+        assertEquals(0, estimateRowsInRange(0, PARTITIONS, range(token(0), token(100))));
     }
 
     @Test
@@ -118,20 +133,20 @@ public class RangeUtilTest
     {
         // the ring fraction of one token is ~2^-64, which rounds to 0 rows; at least one partition must be assumed
         AbstractBounds<PartitionPosition> onePartition = new Bounds<>(token(42).minKeyBound(), token(42).maxKeyBound());
-        assertEquals(PARTITION_SIZE, RangeUtil.estimateRowsInRange(ROWS, PARTITIONS, onePartition));
-        assertEquals(1, RangeUtil.estimateRowsInRange(1_000_000, 1_000_000, onePartition));
-        assertEquals(1_000, RangeUtil.estimateRowsInRange(1_000_000, 1_000, onePartition));
+        assertEquals(PARTITION_SIZE, estimateRowsInRange(ROWS, PARTITIONS, onePartition));
+        assertEquals(1, estimateRowsInRange(1_000_000, 1_000_000, onePartition));
+        assertEquals(1_000, estimateRowsInRange(1_000_000, 1_000, onePartition));
     }
 
     @Test
     public void estimateIsNeverBelowAveragePartitionSizeNorAboveRowCount()
     {
         // a tiny range is clamped up to the average partition size
-        assertEquals(PARTITION_SIZE, RangeUtil.estimateRowsInRange(ROWS, PARTITIONS, range(token(0), token(1000))));
+        assertEquals(PARTITION_SIZE, estimateRowsInRange(ROWS, PARTITIONS, range(token(0), token(1000))));
         // unknown partition count means one row per partition
-        assertEquals(1, RangeUtil.estimateRowsInRange(1000, 0, range(token(0), token(1000))));
+        assertEquals(1, estimateRowsInRange(1000, 0, range(token(0), token(1000))));
         // a partition can't have more rows than the total
-        assertEquals(3, RangeUtil.estimateRowsInRange(3, 1, range(token(0), token(1000))));
+        assertEquals(3, estimateRowsInRange(3, 1, range(token(0), token(1000))));
     }
 
     private static Memtable memtable(long rows, long partitions)

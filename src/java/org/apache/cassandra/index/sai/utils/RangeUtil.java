@@ -24,7 +24,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
@@ -78,33 +77,15 @@ public class RangeUtil
      * Returns the average number of rows per partition, never less than one.
      * If the counts are unknown (not positive), it assumes one row per partition.
      */
-    private static double avgRowsPerPartition(long rows, long partitions)
+    @VisibleForTesting
+    static double avgRowsPerPartition(long rows, long partitions)
     {
         return rows > 0 && partitions > 0 ? Math.max(1.0, (double) rows / partitions) : 1.0;
     }
 
     /**
-     * Estimates how many of the given {@code rows} in the given number of {@code partitions}, assumed to be spread
-     * uniformly over the whole ring, fall into the {@code keyRange}. Does no I/O, it only uses ring arithmetic.
-     * <p>
-     * A key range that selects a single partition covers a negligible fraction of the ring, so the ring-based
-     * estimate would round down to zero. We assume that any key range matches at least one partition,
-     * therefore the estimate is never lower than the average number of rows per partition.
-     *
-     * @throws UnsupportedOperationException if the partitioner doesn't support token arithmetic
-     */
-    @VisibleForTesting
-    static long estimateRowsInRange(long rows, long partitions, AbstractBounds<PartitionPosition> keyRange)
-    {
-        IPartitioner partitioner = keyRange.left.getPartitioner();
-        Token minToken = partitioner.getMinimumToken();
-        Token maxToken = partitioner.getMaximumToken();
-        return estimateRowsInRange(rows, avgRowsPerPartition(rows, partitions), minToken, maxToken, keyRange);
-    }
-
-    /**
      * Estimates how many rows of the given memtable fall into the {@code keyRange}, assuming the rows are spread
-     * uniformly over the whole ring.
+     * uniformly over the tokens between the min and the max partition key of the memtable.
      * Does no I/O, it only uses ring arithmetic.
      * The estimate is never lower than the average partition size.
      */
@@ -168,11 +149,12 @@ public class RangeUtil
      * If the partitioner does not support token arithmetic, returns {@code rows} if
      * the key range overlaps with the token span and 0 otherwise.
      */
-    private static long estimateRowsInRange(long rows,
-                                            double avgRowsPerPartition,
-                                            Token minToken,
-                                            Token maxToken,
-                                            AbstractBounds<PartitionPosition> keyRange)
+    @VisibleForTesting
+    static long estimateRowsInRange(long rows,
+                                    double avgRowsPerPartition,
+                                    Token minToken,
+                                    Token maxToken,
+                                    AbstractBounds<PartitionPosition> keyRange)
     {
         if (rows <= 0)
             return 0;

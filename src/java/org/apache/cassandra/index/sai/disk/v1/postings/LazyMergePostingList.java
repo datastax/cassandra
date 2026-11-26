@@ -43,7 +43,7 @@ import static com.google.common.base.Preconditions.checkState;
  * {@code LIMIT}. This class makes memory proportional to a configured capacity. It opens more lists only if the
  * consumer reads far enough to need them. A query that stops early pays only for the lists that it touched.
  * <p>
- * <b>How it works.</b> The class walks the posting lists of the {@link Source} once. It keeps open only the
+ * <b>How it works.</b> The class walks the posting lists of the {@link Source}. It keeps open only the
  * {@code capacity} lists whose first postings are the smallest, in a {@link CandidateQueue}. The smallest first
  * posting among the lists that the class left out is the {@code bound}. All postings that are less than the
  * {@code bound} are in the kept lists. Thus, the merge of the kept lists is exact up to the {@code bound} (exclusive).
@@ -192,8 +192,8 @@ public final class LazyMergePostingList implements PostingList
     /**
      * Replaces the queue with a new queue of the given capacity. The new queue is in selection mode. It takes over
      * the open posting lists of the old queue as they are. The method does not open them again. The new capacity
-     * must not be less than the old capacity, so that the new queue does not displace any posting list.
-     * If the new capacity is not lower than the old capacity, the set of open posting list ids stays the same.
+     * must not be less than the old capacity, so that the new queue does not displace any posting list, and the set
+     * of open posting list ids stays the same.
      */
     private void resize(int newCapacity) throws IOException
     {
@@ -279,7 +279,7 @@ public final class LazyMergePostingList implements PostingList
     {
         // Optional optimization - if we are at the capacity, adding an exhausted posting list to the queue
         // would fail anyway and such candidate would be immediately displaced; so we just close it here.
-        // However, if we have space in the queue, it is beneficial to rememeber it to avoid reopening that posting list
+        // However, if we have space in the queue, it is beneficial to remember it to avoid reopening that posting list
         // again during refill.
         if (candidate.head == END_OF_STREAM && queue.size() == capacity)
         {
@@ -493,9 +493,8 @@ public final class LazyMergePostingList implements PostingList
     /**
      * The posting lists of a range of terms, each identified by an id, as {@link LazyMergePostingList} reads them.
      * <p>
-     * The ids are opaque to the reader of the source. The reader only compares them for equality. An id must not be
-     * {@link Long#MIN_VALUE}. The posting lists that a source opens can share resources. Close them before you close
-     * the source.
+     * The ids are opaque to the reader of the source. The reader only compares them for equality. The posting lists
+     * that a source opens can share resources. Close them before you close the source.
      */
     public interface Source extends Closeable
     {

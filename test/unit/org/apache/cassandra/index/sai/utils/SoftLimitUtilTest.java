@@ -187,15 +187,13 @@ public class SoftLimitUtilTest
     @Test
     public void expectedSubsetItemsValues()
     {
-        // For N=2 (p=0.5) and L=100, mean is 50, with 99.9% confidence it should be between 60 and 70
-        int n2 = expectedSubsetItems(100, 0.5, 0.999);
-        assertTrue("Expected between 60 and 70, got " + n2, n2 >= 60 && n2 <= 70);
+        // the quantiles of the binomial distribution: the mean is 50, 200 and 10
+        assertEquals(65, expectedSubsetItems(100, 0.5, 0.999));
+        assertEquals(68, expectedSubsetItems(100, 0.5, 0.9999));
+        assertEquals(240, expectedSubsetItems(1000, 0.2, 0.999));
+        assertEquals(24, expectedSubsetItems(1000, 0.01, 0.9999));
 
-        // For N=5 (p=0.2) and L=1000, mean is 200, with 99.9% confidence it should be between 230 and 260
-        int n5 = expectedSubsetItems(1000, 0.2, 0.999);
-        assertTrue("Expected between 230 and 260, got " + n5, n5 >= 230 && n5 <= 260);
-
-        // Result should never exceed totalItems
+        // never more than totalItems
         assertEquals(10, expectedSubsetItems(10, 0.9, 0.999));
     }
 }

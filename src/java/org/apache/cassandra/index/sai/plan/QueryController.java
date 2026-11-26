@@ -1090,8 +1090,8 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     /**
      * Estimates the number of rows in all memtables and sstables that fall into any of the given ranges.
      * <p>
-     * It does no I/O, it only uses ring arithmetic: rows are assumed to be uniformly distributed over the whole
-     * ring in memtables, and over the tokens between the first and the last token in sstables. Therefore, for each
+     * It does no I/O, it only uses ring arithmetic: rows are assumed to be uniformly distributed over the tokens
+     * between the min and the max partition key of each memtable and sstable. Therefore, for each
      * range only the fraction of rows corresponding to the fraction of the token span covered by the range is counted.
      * A range is assumed to match at least one partition in each memtable and each intersecting sstable.
      */
