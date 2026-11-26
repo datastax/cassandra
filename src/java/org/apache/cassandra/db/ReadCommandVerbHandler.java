@@ -25,6 +25,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.exceptions.QueryCancelledException;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
@@ -74,6 +75,16 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
              UnfilteredPartitionIterator iterator = command.executeLocally(controller))
         {
             response = command.createResponse(iterator, controller.getRepairedDataInfo());
+        }
+        catch (AssertionError t)
+        {
+            throw new AssertionError(String.format("Caught an error while trying to process the command: %s", command.toCQLString()), t);
+        }
+        catch (QueryCancelledException e)
+        {
+            logger.debug("Query cancelled (timeout): {}", e);
+            response = null;
+            assert !command.isCompleted() : "Read marked as completed despite being aborted by timeout to table " + command.metadata();
         }
 
         if (!command.complete())
