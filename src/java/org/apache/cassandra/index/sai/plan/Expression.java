@@ -61,6 +61,9 @@ public class Expression
 {
     private static final Logger logger = LoggerFactory.getLogger(Expression.class);
 
+    /** The largest boolean value byte, which is true like any non-zero byte. */
+    private static final ByteBuffer LARGEST_BOOLEAN = ByteBuffer.wrap(new byte[]{ (byte) 0xFF });
+
     public enum Op
     {
         EQ, MATCH, PREFIX, NOT_EQ, RANGE,
@@ -229,6 +232,11 @@ public class Expression
         return operation == Op.RANGE && TypeUtil.isLiteral(validator) && !TypeUtil.isComposite(validator);
     }
 
+    private static boolean isTrue(ByteBuffer value)
+    {
+        return value.hasRemaining() && value.get(value.position()) != 0;
+    }
+
     /**
      * Returns the lower bound of a {@link #isLiteralTermRange() literal term range} as the inclusive start of a scan
      * of the on-disk terms, or {@code null} if the range has no lower bound.
@@ -257,6 +265,15 @@ public class Expression
 
     public Expression add(Operator op, ByteBuffer value)
     {
+        // A boolean is true for any non-zero byte, which the index stores as it is: an inclusive upper bound true
+        // covers all the non-zero bytes, and = true is the range of the non-zero bytes.
+        if (TypeUtil.isBoolean(validator) && (op == Operator.EQ || op == Operator.LTE) && isTrue(value))
+        {
+            if (op == Operator.EQ)
+                return add(Operator.GTE, value).add(Operator.LTE, value);
+            value = LARGEST_BOOLEAN.duplicate();
+        }
+
         boolean lowerInclusive, upperInclusive;
         // If the type supports rounding then we need to make sure that index
         // range search is always inclusive, otherwise we run the risk of

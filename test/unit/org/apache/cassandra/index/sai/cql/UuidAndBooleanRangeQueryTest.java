@@ -127,6 +127,42 @@ public class UuidAndBooleanRangeQueryTest extends SAITester.Versioned
     }
 
     /**
+     * A boolean is true for any non-zero byte: the index finds the non-canonical true values as the filtering does.
+     */
+    @Test
+    public void testNonCanonicalBooleanValues()
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, b boolean)");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (pk, b) VALUES (?, ?)", 1, false);
+        execute("INSERT INTO %s (pk, b) VALUES (?, ?)", 2, true);
+        execute("INSERT INTO %s (pk, b) VALUES (3, blobAsBoolean(0x02))");
+        execute("INSERT INTO %s (pk, b) VALUES (4, blobAsBoolean(0xff))");
+
+        for (int i = 0; i < 3; i++)
+        {
+            assertEquals(List.of(2, 3, 4), keys(execute("SELECT pk FROM %s WHERE b = true")));
+            assertEquals(List.of(1), keys(execute("SELECT pk FROM %s WHERE b = false")));
+            assertEquals(List.of(1, 2, 3, 4), keys(execute("SELECT pk FROM %s WHERE b <= true")));
+            assertEquals(List.of(2, 3, 4), keys(execute("SELECT pk FROM %s WHERE b >= true")));
+            assertEquals(List.of(2, 3, 4), keys(execute("SELECT pk FROM %s WHERE b > false")));
+            assertEquals(List.of(1), keys(execute("SELECT pk FROM %s WHERE b < true")));
+            assertEquals(List.of(), keys(execute("SELECT pk FROM %s WHERE b > true")));
+            assertEquals(List.of(1, 2, 3, 4), keys(execute("SELECT pk FROM %s WHERE b >= false AND b <= true")));
+            assertEquals(List.of(1), keys(execute("SELECT pk FROM %s WHERE b != true")));
+            assertEquals(List.of(2, 3, 4), keys(execute("SELECT pk FROM %s WHERE b != false")));
+            assertEquals(List.of(1), keys(execute("SELECT pk FROM %s WHERE b NOT IN (true)")));
+            assertEquals(List.of(1, 2, 3, 4), keys(execute("SELECT pk FROM %s WHERE b IN (true, false)")));
+
+            if (i == 0)
+                flush();
+            else if (i == 1)
+                compact();
+        }
+    }
+
+    /**
      * The terms of a DESC clustering column: the raw bytes for a boolean, the reversed order for a uuid.
      */
     @Test
