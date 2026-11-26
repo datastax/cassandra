@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.util.function.LongSupplier;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -147,9 +149,13 @@ public class QueryContext
     private FilterSortOrder filterSortOrder = null;
 
     /**
-     * Estimated number of rows (in all sstables and memtables) within the key range of the query,
-     * or -1 if not known. Set by the query controller before the indexes are searched.
+     * Estimates the number of rows (in all sstables and memtables) within the key range of the query, null if not
+     * known. Set by the query controller before the indexes are searched, evaluated on first use only.
      */
+    @Nullable
+    private LongSupplier estimatedRowsInQueryRangeSupplier;
+
+    /** The value of {@link #estimatedRowsInQueryRangeSupplier}, or -1 if not evaluated yet. */
     private long estimatedRowsInQueryRange = -1;
 
     /** Metrics about the query plan. */
@@ -182,12 +188,19 @@ public class QueryContext
      */
     public long estimatedRowsInQueryRange()
     {
-        return estimatedRowsInQueryRange;
+        long rows = estimatedRowsInQueryRange;
+        if (rows < 0 && estimatedRowsInQueryRangeSupplier != null)
+        {
+            rows = estimatedRowsInQueryRangeSupplier.getAsLong();
+            estimatedRowsInQueryRange = rows;
+        }
+        return rows;
     }
 
-    public void setEstimatedRowsInQueryRange(long rows)
+    public void setEstimatedRowsInQueryRange(LongSupplier rows)
     {
-        this.estimatedRowsInQueryRange = rows;
+        this.estimatedRowsInQueryRangeSupplier = rows;
+        this.estimatedRowsInQueryRange = -1;
     }
 
     public long totalQueryTimeNs()

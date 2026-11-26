@@ -199,7 +199,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
         this.nextClusterings = new InsertionOrderedNavigableSet<>(cfs.metadata().comparator);
-        queryContext.setEstimatedRowsInQueryRange(estimateTotalRows(ranges));
+        queryContext.setEstimatedRowsInQueryRange(() -> estimateTotalRows(ranges));
         var tableMetrics = new Plan.TableMetrics(estimateTotalAvailableRows(ranges),
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
