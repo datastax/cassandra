@@ -305,7 +305,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
                     public void onMergedPartitionLevelDeletion(DeletionTime mergedDeletion, DeletionTime[] versions) {}
 
                     @Override
-                    public void onMergedRows(Row merged, Row[] versions)
+                    public Row onMergedRows(Row merged, Row[] versions)
                     {
                         int numVersions = 0;
                         for (Row v : versions)
@@ -324,6 +324,7 @@ public class CompactionIterator implements UnfilteredPartitionIterator
                             indexTransaction.commit();
                         }
 
+                        return merged;
                     }
 
                     @Override
