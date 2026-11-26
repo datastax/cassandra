@@ -428,6 +428,55 @@ public class LiteralRangeQueryTest extends SAITester.Versioned
         }
     }
 
+    /**
+     * An intersection with another index advances the range past the posting lists that are open: the terms are
+     * walked again from the target of each skip, with very few posting lists open.
+     */
+    @Test
+    public void testIntersectionWithFewOpenPostingLists()
+    {
+        int maxLazyPostingLists = TermsReader.getMaxLazyPostingLists();
+        TermsReader.setMaxLazyPostingLists(4);
+        try
+        {
+            createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text, n int)");
+            createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+            createIndex("CREATE CUSTOM INDEX ON %s(n) USING 'StorageAttachedIndex'");
+            disableCompaction();
+
+            List<Integer> expected = new ArrayList<>();
+            for (int pk = 0; pk < 2000; pk++)
+            {
+                boolean matches = pk % 97 == 0;
+                execute("INSERT INTO %s (pk, v, n) VALUES (?, ?, ?)", pk, String.format("v%05d", pk), matches ? 1 : 0);
+                if (matches && pk >= 100)
+                    expected.add(pk);
+                if (pk == 999)
+                    flush();
+            }
+            flush();
+
+            // the optimizer would not intersect with an unselective range
+            String query = "SELECT pk FROM %s WHERE v >= 'v00100' AND n = 1 WITH optimizer_options = {'query_optimization_level': 0}";
+            TableQueryMetrics.PerQuery metrics = StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore())
+                                                                          .queryMetrics().perQueryMetrics.get(TableQueryMetrics.QueryKind.ALL);
+            for (int i = 0; i < 2; i++)
+            {
+                assertEquals(expected, keys(execute(query)));
+                // the walks of the terms after the skips reopen posting lists: more than the 1900 terms of the range
+                assertTrue(metrics.postingListsOpened.getSnapshot().getMax() > 1900);
+                List<Integer> limited = keys(execute(query.replace(" WITH", " LIMIT 5 WITH")));
+                assertEquals(5, limited.size());
+                assertTrue(expected.containsAll(limited));
+                compact();
+            }
+        }
+        finally
+        {
+            TermsReader.setMaxLazyPostingLists(maxLazyPostingLists);
+        }
+    }
+
     private void randomizedRanges()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");

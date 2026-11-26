@@ -96,6 +96,84 @@ public class UuidAndBooleanRangeQueryTest extends SAITester.Versioned
         }
     }
 
+    /**
+     * An empty boolean value sorts before false, for the index as for the filtering of the values.
+     */
+    @Test
+    public void testEmptyBooleanValues()
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, b boolean)");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+
+        execute("INSERT INTO %s (pk, b) VALUES (?, ?)", 1, false);
+        execute("INSERT INTO %s (pk, b) VALUES (?, ?)", 2, true);
+        execute("INSERT INTO %s (pk, b) VALUES (3, blobAsBoolean(0x))");
+
+        for (int i = 0; i < 3; i++)
+        {
+            assertEquals(List.of(3), keys(execute("SELECT pk FROM %s WHERE b < false")));
+            assertEquals(List.of(1, 3), keys(execute("SELECT pk FROM %s WHERE b < true")));
+            assertEquals(List.of(1, 2, 3), keys(execute("SELECT pk FROM %s WHERE b <= true")));
+            assertEquals(List.of(1, 2), keys(execute("SELECT pk FROM %s WHERE b >= false")));
+            assertEquals(List.of(2), keys(execute("SELECT pk FROM %s WHERE b > false")));
+            assertEquals(List.of(2, 3), keys(execute("SELECT pk FROM %s WHERE b != false")));
+            assertEquals(List.of(1, 3), keys(execute("SELECT pk FROM %s WHERE b != true")));
+
+            if (i == 0)
+                flush();
+            else if (i == 1)
+                compact();
+        }
+    }
+
+    /**
+     * The terms of a DESC clustering column: the raw bytes for a boolean, the reversed order for a uuid.
+     */
+    @Test
+    public void testReversedClusteringColumns()
+    {
+        createTable("CREATE TABLE %s (pk int, b boolean, v int, PRIMARY KEY (pk, b)) WITH CLUSTERING ORDER BY (b DESC)");
+        createIndex("CREATE CUSTOM INDEX ON %s(b) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s (pk, b, v) VALUES (?, ?, ?)", 1, false, 1);
+        execute("INSERT INTO %s (pk, b, v) VALUES (?, ?, ?)", 1, true, 2);
+        execute("INSERT INTO %s (pk, b, v) VALUES (?, ?, ?)", 2, true, 3);
+
+        for (int i = 0; i < 3; i++)
+        {
+            assertEquals(List.of(2, 3), values(execute("SELECT v FROM %s WHERE b > false")));
+            assertEquals(List.of(1), values(execute("SELECT v FROM %s WHERE b < true")));
+            assertEquals(List.of(1, 2, 3), values(execute("SELECT v FROM %s WHERE b >= false AND b <= true")));
+            assertEquals(List.of(1), values(execute("SELECT v FROM %s WHERE b != true")));
+
+            if (i == 0)
+                flush();
+            else if (i == 1)
+                compact();
+        }
+
+        UUID u1 = UUID.fromString("00000000-0000-4000-8000-000000000001");
+        UUID u2 = UUID.fromString("00000000-0000-4000-8000-000000000002");
+        UUID u3 = UUID.fromString("10000000-0000-4000-8000-000000000000");
+        createTable("CREATE TABLE %s (pk int, u uuid, v int, PRIMARY KEY (pk, u)) WITH CLUSTERING ORDER BY (u DESC)");
+        createIndex("CREATE CUSTOM INDEX ON %s(u) USING 'StorageAttachedIndex'");
+        execute("INSERT INTO %s (pk, u, v) VALUES (?, ?, ?)", 1, u1, 1);
+        execute("INSERT INTO %s (pk, u, v) VALUES (?, ?, ?)", 1, u2, 2);
+        execute("INSERT INTO %s (pk, u, v) VALUES (?, ?, ?)", 2, u3, 3);
+
+        for (int i = 0; i < 3; i++)
+        {
+            assertEquals(List.of(2, 3), values(execute("SELECT v FROM %s WHERE u > ?", u1)));
+            assertEquals(List.of(1, 2), values(execute("SELECT v FROM %s WHERE u <= ?", u2)));
+            assertEquals(List.of(2), values(execute("SELECT v FROM %s WHERE u > ? AND u < ?", u1, u3)));
+            assertEquals(List.of(1, 3), values(execute("SELECT v FROM %s WHERE u != ?", u2)));
+
+            if (i == 0)
+                flush();
+            else if (i == 1)
+                compact();
+        }
+    }
+
     @Test
     public void testFixedUuidRanges()
     {
@@ -232,6 +310,15 @@ public class UuidAndBooleanRangeQueryTest extends SAITester.Versioned
             return TimeUUID.Generator.atUnixMillis(random.nextInt(1_000_000), random.nextInt(10)).asUUID();
         return new UUID(random.nextLong() & 0xffffffffffff0fffL | 0x0000000000004000L,
                         random.nextLong() & 0x3fffffffffffffffL | 0x8000000000000000L);
+    }
+
+    private static List<Integer> values(UntypedResultSet result)
+    {
+        List<Integer> values = new ArrayList<>();
+        for (UntypedResultSet.Row row : result)
+            values.add(row.getInt("v"));
+        values.sort(Integer::compareTo);
+        return values;
     }
 
     private static List<Integer> keys(UntypedResultSet result)
