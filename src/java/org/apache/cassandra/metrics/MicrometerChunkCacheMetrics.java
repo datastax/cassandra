@@ -51,6 +51,8 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     private volatile Counter blockedOnPoolAllocation;
     private volatile Counter poolWaitSuccesses;
     private volatile Timer reclaimLatency;
+    private volatile Counter reserveGrows;
+    private volatile Counter reserveShrinks;
     private final ConcurrentHashMap<RemovalCause, Counter> evitictionByRemovalCause = new ConcurrentHashMap<>();
 
     public MicrometerChunkCacheMetrics(CacheSize cache, String metricsPrefix)
@@ -74,6 +76,8 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
         this.blockedOnPoolAllocation = counter(metricsPrefix + "_blocked_on_pool_allocation");
         this.poolWaitSuccesses = counter(metricsPrefix + "_pool_wait_successes");
         this.reclaimLatency = timer(metricsPrefix + "_reclaim_latency_seconds");
+        this.reserveGrows = counter(metricsPrefix + "_reserve_grows");
+        this.reserveShrinks = counter(metricsPrefix + "_reserve_shrinks");
 
         for (RemovalCause cause : RemovalCause.values())
         {
@@ -267,6 +271,30 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
     }
 
     @Override
+    public void recordReserveGrow()
+    {
+        reserveGrows.increment();
+    }
+
+    @Override
+    public void recordReserveShrink()
+    {
+        reserveShrinks.increment();
+    }
+
+    @Override
+    public long reserveGrows()
+    {
+        return (long) reserveGrows.count();
+    }
+
+    @Override
+    public long reserveShrinks()
+    {
+        return (long) reserveShrinks.count();
+    }
+
+    @Override
     @VisibleForTesting
     public void reset()
     {
@@ -303,7 +331,9 @@ public class MicrometerChunkCacheMetrics extends MicrometerMetrics implements Ch
                "Sync reclaims: " + syncReclaims() + System.lineSeparator() +
                "Blocked on pool: " + blockedOnPoolAllocation() + System.lineSeparator() +
                "Pool wait successes: " + poolWaitSuccesses() + System.lineSeparator() +
-               "Pool exhausted: " + poolExhausted();
+               "Pool exhausted: " + poolExhausted() + System.lineSeparator() +
+               "Reserve grows: " + reserveGrows() + System.lineSeparator() +
+               "Reserve shrinks: " + reserveShrinks();
     }
 
     public Map<RemovalCause, Double> getEvictionCountByRemovalCause()

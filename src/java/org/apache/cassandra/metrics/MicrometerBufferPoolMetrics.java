@@ -30,6 +30,7 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
     public static final String TOTAL_SIZE_BYTES = METRICS_PREFIX + "_total_size_bytes";
     public static final String USED_SIZE_BYTES = METRICS_PREFIX + "_used_size_bytes";
     public static final String OVERFLOW_SIZE_BYTES = METRICS_PREFIX + "_overflow_size_bytes";
+    public static final String STRANDED_SIZE_BYTES = METRICS_PREFIX + "_stranded_size_bytes";
     public static final String OVERFLOW_ALLOCATIONS = METRICS_PREFIX + "_overflow_allocations";
     public static final String POOL_ALLOCATIONS = METRICS_PREFIX + "_pool_allocations";
     public static final String NAME_TAG = "pool_name";
@@ -61,6 +62,7 @@ public class MicrometerBufferPoolMetrics extends MicrometerMetrics implements Bu
         gauge(TOTAL_SIZE_BYTES, bufferPool, BufferPool::sizeInBytes);
         gauge(USED_SIZE_BYTES, bufferPool, BufferPool::usedSizeInBytes);
         gauge(OVERFLOW_SIZE_BYTES, bufferPool, BufferPool::overflowMemoryInBytes);
+        gauge(STRANDED_SIZE_BYTES, bufferPool, BufferPool::strandedSizeInBytes);
         gauge(OVERFLOW_ALLOCATIONS, misses, Meter::getMeanRate);
         gauge(POOL_ALLOCATIONS, hits, Meter::getMeanRate);
     }

@@ -170,27 +170,29 @@ public enum CassandraRelevantProperties
     CHUNKCACHE_CLEANER_THREADS("dse.chunk.cache.cleaner.threads","1"),
     CHUNKCACHE_INITIAL_CAPACITY("cassandra.chunkcache_initialcapacity", "16"),
     /**
+     * How long a compaction thread may wait for pool pages freed by other readers. On timeout the compaction fails with BufferPoolExhaustedException.
+     */
+    CHUNK_CACHE_COMPACTION_POOL_WAIT_TIMEOUT_MS("cassandra.chunk_cache_compaction_pool_wait_timeout_ms", "2000"),
+    /**
      * After tryGet + sync reclaim + tryGet still fails, how long a miss loader may wait for pool
      * pages freed by other readers. On timeout the read fails with BufferPoolExhaustedException.
      */
-    CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS("cassandra.chunk_cache_pool_wait_timeout_ms", "10"),
+    CHUNK_CACHE_POOL_WAIT_TIMEOUT_MS("cassandra.chunk_cache_pool_wait_timeout_ms", "100"),
     /**
      * This property allows configuring the maximum time that CachingRebufferer.rebuffer will wait when waiting for a
      * CompletableFuture fetched from the cache to complete. This is part of a migitation for DBPE-13261.
      */
     CHUNK_CACHE_REBUFFER_WAIT_TIMEOUT_MS("cassandra.chunk_cache_rebuffer_wait_timeout_ms", "30000"),
     /**
-     * MiB withheld from Caffeine {@code maximumWeight} but still part of the chunk-cache buffer pool.
-     * Headroom for in-flight cache loads under eviction pressure (not a separate allocator).
-     * The default value -1 means that it will be calculated during initialization.
+     * Decay factor in (0, 1) applied every {@link #CHUNK_CACHE_RESERVE_SHRINK_INTERVAL_MS} to the watermark used to
+     * decide the chunk-cache reserve shrink target. Smaller values shrink more aggressively.
      */
-    CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB("cassandra.chunk_cache_reserved_pool_space_in_mb", "-1"),
+    CHUNK_CACHE_RESERVE_SHRINK_FACTOR("cassandra.chunk_cache_reserve_shrink_factor", "0.5"),
     /**
-     * MB added to the automatically calculated chunk-cache reserved pool space for every thread that reads through
-     * the cache (concurrent reads, compactors and index builders). Ignored when
-     * {@link #CHUNK_CACHE_RESERVED_POOL_SPACE_IN_MB} is set explicitly. Negative values are treated as 0.
+     * Interval between scheduled checks that may shrink the chunk-cache reserved pool space back down (by at most
+     * half per tick) toward its fixed floor ({@code ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB}).
      */
-    CHUNK_CACHE_RESERVED_POOL_SPACE_THREAD_FACTOR("cassandra.chunk_cache_reserved_pool_space_thread_factor", "1.0"),
+    CHUNK_CACHE_RESERVE_SHRINK_INTERVAL_MS("cassandra.chunk_cache_reserve_shrink_interval_ms", "30000"),
     CLOCK_GLOBAL("cassandra.clock"),
     CLOCK_MONOTONIC_APPROX("cassandra.monotonic_clock.approx"),
     CLOCK_MONOTONIC_PRECISE("cassandra.monotonic_clock.precise"),

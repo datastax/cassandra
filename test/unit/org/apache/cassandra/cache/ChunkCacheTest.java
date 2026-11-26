@@ -722,7 +722,7 @@ public class ChunkCacheTest
         when(pool.usedSizeInBytes()).thenReturn(0L);
         when(pool.overflowMemoryInBytes()).thenReturn(0L);
 
-        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
+        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
         long retryBefore = chunkCache.metrics.reclaimRetrySuccesses();
         long reclaimBefore = chunkCache.metrics.syncReclaims();
         long blockedBefore = chunkCache.metrics.blockedOnPoolAllocation();
@@ -755,10 +755,13 @@ public class ChunkCacheTest
     @Test
     public void testExhaustedPoolDoesNotOverflow() throws Exception
     {
-        final long poolBytes = 64L * BufferPool.NORMAL_CHUNK_SIZE;
+        final int reservedMb = ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB;
+        // cacheSizeMb = 2x the fixed reserve: reservedMb <= 3/4 of totalPoolBytes always holds here (no constructor
+        // trim), so the initial reserve stays exactly reservedMb and the real pool (2x that, below) has plenty of
+        // headroom above the initial Caffeine weight for pins to exceed it well before the pool itself is gone.
+        final int cacheSizeMb = reservedMb * 2;
+        final long poolBytes = 1024L * 1024L * cacheSizeMb;
         BufferPool pool = new BufferPool("chunk_cache_lifecycle", poolBytes, true);
-        // 1MiB Caffeine weight after reserve — residents hit weight long before the 8MiB pool is gone.
-        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MB + 1;
         ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
         assertTrue(chunkCache.capacity() > 0);
 
@@ -799,12 +802,26 @@ public class ChunkCacheTest
                        pool.usedSizeInBytes() > weightCap);
             assertTrue(held.size() > 0);
             assertEquals(0L, pool.overflowMemoryInBytes());
-            assertEquals(1, chunkCache.metrics.syncReclaims());
+            // The final (failing) allocation does: reclaimSync() in allocateForCache(), then, since everything is
+            // pinned and nothing was reclaimed, tryGrowReserve() grows the reserve and performs its own internal
+            // reclaimSync() to converge before giving up and parking/throwing — i.e. 2 sync reclaims for that one
+            // exhaustion event.
+            assertEquals(2, chunkCache.metrics.syncReclaims());
+            // Doubling the reserve (reservedMb -> 2*reservedMb) overshoots the 3/4-of-pool cap (1.5*reservedMb),
+            // so it saturates at the cap: capacity() settles at exactly 1/4 of totalPoolBytes, never 0.
+            assertEquals(poolBytes / 4, chunkCache.capacity());
+            // Exactly one successful grow for this single exhaustion event.
+            assertEquals(1, chunkCache.metrics.reserveGrows());
 
             // Partial free on this thread → same-thread rebuffer succeeds (no overflow / no further exhaust).
+            // Free from the FRONT (oldest) of held, not the tail: with a non-zero (capped) cache capacity now,
+            // the most-recently-pinned chunks at the tail are still legitimately Caffeine-resident (LRU keeps
+            // them), so releasing our holder only drops our own ref — Caffeine's internal ref keeps the page
+            // allocated. The oldest chunks, pinned well past the weight cap, were already evicted from Caffeine's
+            // map (our holder is the sole owner), so releasing those reliably returns pages to the pool.
             int toFree = Math.max(4, held.size() / 4);
             for (int i = 0; i < toFree; i++)
-                held.remove(held.size() - 1).release();
+                held.remove(0).release();
 
             long exhaustedBeforeRecover = chunkCache.metrics.poolExhausted();
             long recoverPos = pos < fileSize ? pos : (fileSize - chunkSize);
@@ -844,6 +861,210 @@ public class ChunkCacheTest
         }
     }
 
+    /**
+     * Drives {@link ChunkCache#shrinkReserveTick()} directly (bypassing the real
+     * {@code SHRINK_TICK_INTERVAL_MS} scheduler cadence) to verify the slow-shrink half of the dynamic reserve:
+     * after the reserve has been grown to the 3/4-of-pool cap under exhaustion and pressure has subsided,
+     * repeated ticks must decay it back down to, and never below, {@link ChunkCache#FIXED_RESERVED_POOL_SPACE_IN_MB},
+     * with capacity() only ever moving up (reserve only ever moving down) along the way.
+     */
+    @Test
+    public void testShrinkReserveTickShrinksBackToFloor() throws Exception
+    {
+        final int reservedMb = ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB;
+        final int cacheSizeMb = reservedMb * 2;
+        final long poolBytes = 1024L * 1024L * cacheSizeMb;
+        final long floorBytes = 1024L * 1024L * ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB;
+        BufferPool pool = new BufferPool("chunk_cache_shrink_test", poolBytes, true);
+        ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
+        try
+        {
+            final int chunkSize = PAGE_SIZE;
+            final int fileSize = ((int) (poolBytes / chunkSize) + 64) * chunkSize;
+            File file = FileUtils.createTempFile("shrink", null);
+            file.deleteOnExit();
+            writeBytes(file, new byte[fileSize]);
+
+            ArrayList<Rebufferer.BufferHolder> held = new ArrayList<>();
+            FileHandle.Builder builder = new FileHandle.Builder(file)
+                                                            .withChunkCache(chunkCache)
+                                                            .bufferSize(chunkSize);
+            try (FileHandle handle = builder.complete();
+                 Rebufferer rebufferer = handle.rebuffererFactory().instantiateRebufferer(false))
+            {
+                // Pin until pool exhaust, same pattern as testExhaustedPoolDoesNotOverflow, so tryGrowReserve()
+                // grows the reserve all the way to the 3/4-of-pool cap.
+                int pos = 0;
+                BufferPoolExhaustedException exhausted = null;
+                while (pos < fileSize)
+                {
+                    try
+                    {
+                        held.add(rebufferer.rebuffer(pos));
+                        pos += chunkSize;
+                    }
+                    catch (BufferPoolExhaustedException e)
+                    {
+                        exhausted = e;
+                        break;
+                    }
+                }
+                assertNotNull("expected BufferPoolExhaustedException while growing the reserve", exhausted);
+            }
+            finally
+            {
+                for (Rebufferer.BufferHolder h : held)
+                    h.release();
+                held.clear();
+            }
+            chunkCache.invalidateFileNow(file);
+            chunkCache.reclaimSync();
+
+            long grownCapacity = chunkCache.capacity();
+            assertEquals("reserve should have grown to the 3/4-of-pool cap", poolBytes / 4, grownCapacity);
+
+            // Each tick halves the DecayingMax watermark (default SHRINK_DECAY_FACTOR 0.5); after enough ticks
+            // it must drop below the fixed floor and the reserve settles there permanently.
+            long previousCapacity = grownCapacity;
+            boolean shrunk = false;
+            long reserveShrinksBefore = chunkCache.metrics.reserveShrinks();
+            for (int i = 0; i < 64; i++)
+            {
+                chunkCache.shrinkReserveTick();
+                long capacity = chunkCache.capacity();
+                assertTrue("capacity must never decrease (reserve must never grow) on a shrink tick",
+                           capacity >= previousCapacity);
+                if (capacity > previousCapacity)
+                    shrunk = true;
+                previousCapacity = capacity;
+            }
+            assertTrue("shrinkReserveTick should eventually lower the reserve back down", shrunk);
+            assertEquals("reserve must settle exactly at the fixed floor, never below it",
+                         poolBytes - floorBytes, chunkCache.capacity());
+            // Every tick that actually lowered the reserve must have recorded a reserveShrinks() increment.
+            assertTrue("reserveShrinks() must be incremented for each successful shrink",
+                       chunkCache.metrics.reserveShrinks() > reserveShrinksBefore);
+
+            // Further ticks must be no-ops once the floor is reached, including for the metric.
+            long reserveShrinksAtFloor = chunkCache.metrics.reserveShrinks();
+            chunkCache.shrinkReserveTick();
+            assertEquals(poolBytes - floorBytes, chunkCache.capacity());
+            assertEquals(reserveShrinksAtFloor, chunkCache.metrics.reserveShrinks());
+        }
+        finally
+        {
+            chunkCache.close();
+        }
+    }
+
+    /**
+     * Verifies that we don't shrink reserved pool while reserved pressure is high.
+     * This is to avoid sawtooth behavior.
+     * Only once that non-cache usage is released does the reserve decay back down.
+     */
+    @Test
+    public void testShrinkReserveTickDoesNotShrinkUnderSustainedPressure() throws Exception
+    {
+        final int reservedMb = ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB;
+        final int cacheSizeMb = reservedMb * 2;
+        final long poolBytes = 1024L * 1024L * cacheSizeMb;
+        BufferPool pool = new BufferPool("chunk_cache_pressure_test", poolBytes, true);
+        ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
+        try
+        {
+            final int chunkSize = PAGE_SIZE;
+            final int fileSize = ((int) (poolBytes / chunkSize) + 64) * chunkSize;
+            File file = FileUtils.createTempFile("pressure", null);
+            file.deleteOnExit();
+            writeBytes(file, new byte[fileSize]);
+
+            ArrayList<Rebufferer.BufferHolder> held = new ArrayList<>();
+            FileHandle.Builder builder = new FileHandle.Builder(file)
+                                                            .withChunkCache(chunkCache)
+                                                            .bufferSize(chunkSize);
+            try (FileHandle handle = builder.complete();
+                 Rebufferer rebufferer = handle.rebuffererFactory().instantiateRebufferer(false))
+            {
+                int pos = 0;
+                BufferPoolExhaustedException exhausted = null;
+                while (pos < fileSize)
+                {
+                    try
+                    {
+                        held.add(rebufferer.rebuffer(pos));
+                        pos += chunkSize;
+                    }
+                    catch (BufferPoolExhaustedException e)
+                    {
+                        exhausted = e;
+                        break;
+                    }
+                }
+                assertNotNull("expected BufferPoolExhaustedException while growing the reserve", exhausted);
+            }
+            finally
+            {
+                for (Rebufferer.BufferHolder h : held)
+                    h.release();
+                held.clear();
+            }
+            chunkCache.invalidateFileNow(file);
+            chunkCache.reclaimSync();
+
+            long grownCapacity = chunkCache.capacity();
+            assertEquals("reserve should have grown to the 3/4-of-pool cap", poolBytes / 4, grownCapacity);
+
+            // Simulate a non-cache consumer (e.g. compaction/flush) holding buffers directly from the pool,
+            // independent of the chunk cache's own entries, so the cache is otherwise empty (weightedSize() ~ 0)
+            // but the pool itself remains under real pressure.
+            // BufferPool.tryGet() only services requests up to NORMAL_CHUNK_SIZE (128 KiB) in one call, so pin
+            // the reserve's worth of pressure as many smaller buffers instead of one big one.
+            long reservedBytes = poolBytes - grownCapacity;
+            int pinChunkSize = BufferPool.NORMAL_CHUNK_SIZE;
+            ArrayList<ByteBuffer> pressureBuffers = new ArrayList<>();
+            for (long pinned = 0; pinned < reservedBytes; pinned += pinChunkSize)
+            {
+                ByteBuffer buf = chunkCache.bufferPool().tryGet(pinChunkSize);
+                assertNotNull("expected to be able to pin memory matching the reserve to simulate pressure", buf);
+                pressureBuffers.add(buf);
+            }
+            try
+            {
+                long capacityBeforeTicks = chunkCache.capacity();
+                for (int i = 0; i < 16; i++)
+                {
+                    chunkCache.shrinkReserveTick();
+                    assertEquals("reserve must not shrink while non-cache pressure persists",
+                                 capacityBeforeTicks, chunkCache.capacity());
+                }
+            }
+            finally
+            {
+                for (ByteBuffer buf : pressureBuffers)
+                    chunkCache.bufferPool().put(buf);
+            }
+
+            // Pressure released: subsequent ticks must now be able to decay the reserve back down.
+            boolean shrunkAfterRelease = false;
+            long previousCapacity = chunkCache.capacity();
+            for (int i = 0; i < 64; i++)
+            {
+                chunkCache.shrinkReserveTick();
+                long capacity = chunkCache.capacity();
+                assertTrue("capacity must never decrease (reserve must never grow) on a shrink tick",
+                           capacity >= previousCapacity);
+                if (capacity > previousCapacity)
+                    shrunkAfterRelease = true;
+                previousCapacity = capacity;
+            }
+            assertTrue("shrinkReserveTick should lower the reserve once pressure subsides", shrunkAfterRelease);
+        }
+        finally
+        {
+            chunkCache.close();
+        }
+    }
+
     @Test
     public void testReleaseWithoutWaitersDoesNotRecycleLocalChunks()
     {
@@ -867,7 +1088,7 @@ public class ChunkCacheTest
             return null;
         }).when(pool).put(any(ByteBuffer.class));
 
-        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
+        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
         ChunkCache.Chunk chunk = chunkCache.allocateChunk(PAGE_SIZE, 0);
         assertNotNull(chunk);
         // newChunk succeeded on first tryGet — no reclaim, so no recycle yet
@@ -886,11 +1107,13 @@ public class ChunkCacheTest
     @Test
     public void testPoolWaitSucceedsAfterRelease() throws Exception
     {
-        // One macro chunk from GlobalPool (= 8MiB).
-        final long poolBytes = 64L * BufferPool.NORMAL_CHUNK_SIZE;
+        final int reservedMb = ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB;
+        // cacheSizeMb = 2x the fixed reserve: reservedMb <= 3/4 of totalPoolBytes always holds here (no constructor
+        // trim), so the initial reserve stays exactly reservedMb and the real pool (2x that, below) has plenty of
+        // headroom above the initial Caffeine weight for pins to exceed it well before the pool itself is gone.
+        final int cacheSizeMb = reservedMb * 2;
+        final long poolBytes = 1024L * 1024L * cacheSizeMb;
         BufferPool pool = new BufferPool("chunk_cache_wait_after_release", poolBytes, true);
-        // Small Caffeine weight so pool fills while pinning more pages than weight alone would hold.
-        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MB + 1;
         ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
         // Extend wait so free+signal can run after the waiter parks.
         chunkCache.poolWaitTimeoutMsOverride = 10000;
@@ -931,7 +1154,14 @@ public class ChunkCacheTest
             assertNotNull("expected pool exhaust after pinning pages", firstExhaust);
             assertTrue(held.size() > 0);
             assertEquals(0L, pool.overflowMemoryInBytes());
-            assertEquals(1, chunkCache.metrics.syncReclaims());
+            // The final (failing) allocation does: reclaimSync() in allocateForCache(), then, since everything is
+            // pinned and nothing was reclaimed, tryGrowReserve() grows the reserve and performs its own internal
+            // reclaimSync() to converge before giving up and parking/throwing — i.e. 2 sync reclaims for that one
+            // exhaustion event.
+            assertEquals(2, chunkCache.metrics.syncReclaims());
+            // Doubling the reserve (reservedMb -> 2*reservedMb) overshoots the 3/4-of-pool cap (1.5*reservedMb),
+            // so it saturates at the cap: capacity() settles at exactly 1/4 of totalPoolBytes, never 0.
+            assertEquals(poolBytes / 4, chunkCache.capacity());
 
             long blockedBefore = chunkCache.metrics.blockedOnPoolAllocation();
             assertEquals(1, blockedBefore);
@@ -994,7 +1224,7 @@ public class ChunkCacheTest
     public void testPoolWaitTimeoutExhaustedThrowsWithoutOverflow() throws Exception
     {
         BufferPool pool = new BufferPool("pool_wait_exhausted", 0, true);
-        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
+        ChunkCache chunkCache = new ChunkCache(pool, ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB + 64, ChunkCacheMetrics::create);
         assertEquals(0, pool.overflowMemoryInBytes());
 
         long exhaustedBefore = chunkCache.metrics.poolExhausted();
@@ -1032,8 +1262,8 @@ public class ChunkCacheTest
     @Test
     public void testSmallChunkCacheEvictionReleasesFullPage() throws IOException
     {
-        // Cache large enough that RESERVED_POOL_SPACE_IN_MB still leaves room for a few pages of weight.
-        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MB + 64;
+        // Cache large enough that FIXED_RESERVED_POOL_SPACE_IN_MB still leaves room for a few pages of weight.
+        final int cacheSizeMb = ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB + 64;
         BufferPool pool = new BufferPool("small_chunk_eviction_test", 8 * 1024 * 1024, true);
         ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
 
@@ -1101,8 +1331,8 @@ public class ChunkCacheTest
 
     public void testLastChunkLimit(int chunkSize) throws IOException
     {
-        // Cache large enough that RESERVED_POOL_SPACE_IN_MB still leaves room for a few pages of weight.
-        final int cacheSizeMb = ChunkCache.RESERVED_POOL_SPACE_IN_MB + 32;
+        // Cache large enough that FIXED_RESERVED_POOL_SPACE_IN_MB still leaves room for a few pages of weight.
+        final int cacheSizeMb = ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB + 32;
         BufferPool pool = new BufferPool("last_chunk_limit_test", 8 * 1024 * 1024, true);
         ChunkCache chunkCache = new ChunkCache(pool, cacheSizeMb, ChunkCacheMetrics::create);
 
@@ -1159,49 +1389,4 @@ public class ChunkCacheTest
         assertEquals(overflowBefore, pool.overflowMemoryInBytes());
     }
 
-    @Test
-    public void testCalculateReservedPoolSpaceGrowsLinearlyWithThreads()
-    {
-        // threads = reads + compactors + index builders; reserved = 32 + ceil(0.3 * threads)
-        assertEquals(37, ChunkCache.calculateReservedPoolSpace(16, 0, 0, 0.3));
-        assertEquals(42, ChunkCache.calculateReservedPoolSpace(32, 0, 0, 0.3));
-        assertEquals(52, ChunkCache.calculateReservedPoolSpace(64, 0, 0, 0.3));
-        assertEquals(71, ChunkCache.calculateReservedPoolSpace(128, 0, 0, 0.3));
-        assertEquals(109, ChunkCache.calculateReservedPoolSpace(256, 0, 0, 0.3));
-        assertEquals(186, ChunkCache.calculateReservedPoolSpace(512, 0, 0, 0.3));
-    }
-
-    @Test
-    public void testCalculateReservedPoolSpaceDefaultThreadFactor()
-    {
-        assertEquals("0.3", CassandraRelevantProperties.CHUNK_CACHE_RESERVED_POOL_SPACE_THREAD_FACTOR.getDefaultValue());
-        // nodes with ~16 concurrent reads must not lose a large part of the cache to the reserve
-        assertTrue(ChunkCache.calculateReservedPoolSpace(16, 0, 0) < 40);
-        // 512 concurrent reads needed more than 160 MiB in stress runs, also with compactors and index builders
-        assertTrue(ChunkCache.calculateReservedPoolSpace(512, 0, 0) > 160);
-        assertTrue(ChunkCache.calculateReservedPoolSpace(512, 4, 4) > 160);
-    }
-
-    @Test
-    public void testCalculateReservedPoolSpaceThreadFactorIsConfigurable()
-    {
-        assertEquals(32 + 16, ChunkCache.calculateReservedPoolSpace(32, 0, 0, 0.5));
-        assertEquals(32 + 8, ChunkCache.calculateReservedPoolSpace(32, 0, 0, 0.25));
-        assertEquals(32 + 32, ChunkCache.calculateReservedPoolSpace(32, 0, 0, 1.0));
-        assertEquals(ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB, ChunkCache.calculateReservedPoolSpace(512, 0, 0, 0.0));
-        // negative factor is treated as 0
-        assertEquals(ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB, ChunkCache.calculateReservedPoolSpace(512, 0, 0, -1.0));
-    }
-
-    @Test
-    public void testCalculateReservedPoolSpaceHasFixedPart()
-    {
-        int fixed = ChunkCache.FIXED_RESERVED_POOL_SPACE_IN_MB;
-        assertEquals(32, fixed);
-        assertEquals(fixed, ChunkCache.calculateReservedPoolSpace(0, 0, 0, 0.3));
-        // partial MiB are rounded up
-        assertEquals(fixed + 1, ChunkCache.calculateReservedPoolSpace(1, 0, 0, 0.3));
-        assertEquals(fixed + 2, ChunkCache.calculateReservedPoolSpace(2, 1, 1, 0.3));
-        assertEquals(fixed + 6, ChunkCache.calculateReservedPoolSpace(17, 0, 0, 0.3));
-    }
 }

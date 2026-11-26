@@ -149,6 +149,22 @@ public class MicrometerChunkCacheMetricsTest
     }
 
     @Test
+    public void testReserveGrowAndShrinkMetrics()
+    {
+        assertEquals(0, chunkCacheMetrics.reserveGrows());
+        assertEquals(0, chunkCacheMetrics.reserveShrinks());
+
+        chunkCacheMetrics.recordReserveGrow();
+        chunkCacheMetrics.recordReserveGrow();
+        assertEquals(2, chunkCacheMetrics.reserveGrows());
+        assertEquals(0, chunkCacheMetrics.reserveShrinks());
+
+        chunkCacheMetrics.recordReserveShrink();
+        assertEquals(2, chunkCacheMetrics.reserveGrows());
+        assertEquals(1, chunkCacheMetrics.reserveShrinks());
+    }
+
+    @Test
     public void testRegister()
     {
         ((MicrometerChunkCacheMetrics) chunkCacheMetrics).register(new SimpleMeterRegistry(), Tags.of("tagKey", "tagValue"));

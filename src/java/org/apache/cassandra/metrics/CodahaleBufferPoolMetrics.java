@@ -45,6 +45,9 @@ class CodahaleBufferPoolMetrics implements BufferPoolMetrics
      */
     private final Gauge<Long> overflowSize;
 
+    /** Free bytes inside slabs owned by thread-local pools (allocated, not used, only reachable by the owner) */
+    private final Gauge<Long> strandedSize;
+
     public CodahaleBufferPoolMetrics(String scope, BufferPool bufferPool)
     {
         MetricNameFactory factory = new DefaultNameFactory("BufferPool", scope);
@@ -58,6 +61,8 @@ class CodahaleBufferPoolMetrics implements BufferPoolMetrics
         usedSize = Metrics.register(factory.createMetricName("UsedSize"), bufferPool::usedSizeInBytes);
 
         size = Metrics.register(factory.createMetricName("Size"), bufferPool::sizeInBytes);
+
+        strandedSize = Metrics.register(factory.createMetricName("StrandedSize"), bufferPool::strandedSizeInBytes);
     }
 
     @Override

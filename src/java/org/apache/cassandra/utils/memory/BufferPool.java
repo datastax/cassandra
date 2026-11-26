@@ -380,6 +380,19 @@ public class BufferPool
     }
 
     /**
+     * Free bytes inside slabs currently owned by thread-local pools. They are allocated, not counted in
+     * {@link #usedSizeInBytes()}, and can only be handed out by the owning thread. Racy gauge: owners mutate
+     * their queues concurrently, so the value can be momentarily stale.
+     */
+    public long strandedSizeInBytes()
+    {
+        long total = 0;
+        for (LocalPoolRef ref : localPoolReferences)
+            total += ref.chunks.freeBytes();
+        return total;
+    }
+
+    /**
      * @return unpooled buffer size being allocated outside of buffer pool.
      */
     public long overflowMemoryInBytes()
@@ -756,6 +769,17 @@ public class BufferPool
         private void forEach(Consumer<Chunk> consumer)
         {
             forEach(consumer, count, chunk0, chunk1, chunk2);
+        }
+
+        /** Gauge only: plain reads of fields the owner thread mutates; worst case is a stale value. */
+        private long freeBytes()
+        {
+            long total = 0;
+            Chunk c0 = chunk0, c1 = chunk1, c2 = chunk2;
+            if (c0 != null) total += c0.free();
+            if (c1 != null) total += c1.free();
+            if (c2 != null) total += c2.free();
+            return total;
         }
 
         private void clearForEach(Consumer<Chunk> consumer)

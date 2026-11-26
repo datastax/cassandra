@@ -46,6 +46,8 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
     private final Meter blockedOnPoolAllocation;
     private final Meter poolWaitSuccesses;
     private final Timer reclaimLatency;
+    private final Meter reserveGrows;
+    private final Meter reserveShrinks;
 
     /**
      * Create metrics for the provided chunk cache.
@@ -62,6 +64,8 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
         blockedOnPoolAllocation = metrics.registerMeter("BlockedOnPoolAllocation");
         poolWaitSuccesses = metrics.registerMeter("PoolWaitSuccesses");
         reclaimLatency = metrics.registerTimer("ReclaimLatency");
+        reserveGrows = metrics.registerMeter("ReserveGrows");
+        reserveShrinks = metrics.registerMeter("ReserveShrinks");
     }
 
     @Override
@@ -237,6 +241,30 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
         return poolWaitSuccesses.getCount();
     }
 
+    @Override
+    public void recordReserveGrow()
+    {
+        reserveGrows.mark();
+    }
+
+    @Override
+    public void recordReserveShrink()
+    {
+        reserveShrinks.mark();
+    }
+
+    @Override
+    public long reserveGrows()
+    {
+        return reserveGrows.getCount();
+    }
+
+    @Override
+    public long reserveShrinks()
+    {
+        return reserveShrinks.getCount();
+    }
+
     @Nonnull
     @Override
     public CacheStats snapshot()
@@ -273,6 +301,8 @@ public class CodahaleChunkCacheMetrics implements ChunkCacheMetrics
                "Sync reclaims: " + syncReclaims() + System.lineSeparator() +
                "Blocked on pool: " + blockedOnPoolAllocation() + System.lineSeparator() +
                "Pool wait successes: " + poolWaitSuccesses() + System.lineSeparator() +
-               "Pool exhausted: " + poolExhausted();
+               "Pool exhausted: " + poolExhausted() + System.lineSeparator() +
+               "Reserve grows: " + reserveGrows() + System.lineSeparator() +
+               "Reserve shrinks: " + reserveShrinks();
     }
 }

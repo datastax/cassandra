@@ -85,6 +85,12 @@ public interface ChunkCacheMetrics extends StatsCounter, CacheMetrics
     /** Miss loader obtained pages after waiting on the pool. */
     void recordPoolWaitSuccess();
 
+    /** Called when {@code tryGrowReserve()} successfully doubles the reserved pool space. */
+    void recordReserveGrow();
+
+    /** Called when {@code shrinkReserveTick()} successfully lowers the reserved pool space. */
+    void recordReserveShrink();
+
     long syncReclaims();
 
     long reclaimRetrySuccesses();
@@ -94,6 +100,10 @@ public interface ChunkCacheMetrics extends StatsCounter, CacheMetrics
     long blockedOnPoolAllocation();
 
     long poolWaitSuccesses();
+
+    long reserveGrows();
+
+    long reserveShrinks();
 
     @Nonnull
     @Override
