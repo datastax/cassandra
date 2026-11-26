@@ -42,6 +42,8 @@ import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
+import org.apache.cassandra.schema.SchemaTestUtil;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
@@ -848,5 +850,25 @@ public class ColumnFamilyStoreTest
             {
             }
         };
+    }
+
+    /**
+     * Ensures `getIfExists` returns `null` (and does not throw) after a keyspace is dropped.
+     */
+    @Test
+    public void testGetIfExistsAfterKeyspaceDrop()
+    {
+        String testKS = "getIfExistsAfterKeyspaceDrop";
+        String testTable = "test_table";
+        SchemaLoader.createKeyspace(testKS,
+                                    KeyspaceParams.simple(1),
+                                    SchemaLoader.standardCFMD(testKS, testTable));
+
+        TableMetadata metadata = ColumnFamilyStore.getIfExists(testKS, testTable).metadata.get();
+
+        SchemaTestUtil.announceKeyspaceDrop(testKS);
+
+        assertNull(ColumnFamilyStore.getIfExists(metadata.id));
+        assertNull(ColumnFamilyStore.getIfExists(testKS, testTable));
     }
 }
