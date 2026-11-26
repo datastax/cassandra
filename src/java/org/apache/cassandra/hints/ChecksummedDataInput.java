@@ -191,10 +191,10 @@ public class ChecksummedDataInput extends RebufferingInputStream
     }
 
     @Override
-    public void readFully(byte[] b) throws IOException
+    public void readFully(byte[] b, int off, int len) throws IOException
     {
-        checkLimit(b.length);
-        super.readFully(b);
+        checkLimit(len);
+        super.readFully(b, off, len);
     }
 
     @Override
@@ -207,7 +207,7 @@ public class ChecksummedDataInput extends RebufferingInputStream
     @Override
     protected void reBuffer()
     {
-        Preconditions.checkState(buffer.remaining() == 0);
+        Preconditions.checkState(!buffer.hasRemaining(), "Current buffer not exhausted, remaining bytes: %s", buffer.remaining());
         updateCrc();
         bufferOffset += buffer.limit();
 
@@ -219,6 +219,7 @@ public class ChecksummedDataInput extends RebufferingInputStream
     protected void readBuffer()
     {
         buffer.clear();
+        //noinspection StatementWithEmptyBody
         while ((channel.read(buffer, bufferOffset)) == 0) {}
         buffer.flip();
     }

@@ -29,8 +29,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.net.ChunkedInputPlus;
-import org.apache.cassandra.net.ShareableBytes;
 
 import static org.junit.Assert.*;
 
@@ -147,6 +145,28 @@ public class ChunkedInputPlusTest
             assertTrue(chunks.get(0).isReleased());
             assertTrue(chunks.get(1).isReleased());
             assertTrue(chunks.get(2).isReleased()); // should be released by remainder()
+        }
+    }
+
+    @Test
+    public void testSkipEmptyBuffers() throws IOException
+    {
+        List<ShareableBytes> chunks = Lists.newArrayList(
+            chunk(0, 0), chunk(2, 2), chunk(0, 0), chunk(3, 3), chunk(0, 0)
+        );
+
+        try (ChunkedInputPlus input = ChunkedInputPlus.of(chunks))
+        {
+            byte[] readBytes = new byte[5];
+            input.readFully(readBytes);
+            assertArrayEquals(new byte[] { 2, 2, 3, 3, 3 }, readBytes);
+
+            assertEquals(0, input.remainder());
+            for (ShareableBytes chunk : chunks)
+            {
+                assertTrue(chunk.isReleased());
+                assertFalse(chunk.hasRemaining());
+            }
         }
     }
 
