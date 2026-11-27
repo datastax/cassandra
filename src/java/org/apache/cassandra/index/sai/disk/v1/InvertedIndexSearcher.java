@@ -315,7 +315,10 @@ public class InvertedIndexSearcher extends IndexSearcher
         var queryTerms = orderer.getQueryTerms();
         var analyzer = indexContext.getAnalyzerFactory().create();
         var it = keys.stream()
-                     .map(pk -> EagerDocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms))
+                     .map(pk -> {
+                         queryContext.checkpoint();
+                         return EagerDocTF.createFromDocument(pk, readColumn(sstable, pk), analyzer, queryTerms);
+                     })
                      .filter(Objects::nonNull)
                      .iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),

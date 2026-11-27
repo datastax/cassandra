@@ -126,6 +126,8 @@ public abstract class IndexSearcher implements Closeable, SegmentOrdering
             keys,
             key ->
             {
+                // one sstable read per key: make sure a query past its deadline stops here
+                context.checkpoint();
                 var slices = Slices.with(indexContext.comparator(), Slice.make(key.clustering()));
                 // TODO if we end up needing to read the row still, is it better to store offset and use reader.unfilteredAt?
                 try (var iter = reader.rowIterator(key.partitionKey(), slices, columnFilter, false, SSTableReadsListener.NOOP_LISTENER))

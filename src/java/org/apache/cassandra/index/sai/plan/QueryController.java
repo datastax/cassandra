@@ -118,6 +118,9 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
     public static final String INDEX_VERSION_DOES_NOT_SUPPORT_BM25 = "%s does not support BM25 scoring until it is rebuilt";
     private static final Logger logger = LoggerFactory.getLogger(QueryController.class);
 
+    /** How often the query timeout is checked while materializing the keys to sort. Must be a power of two. */
+    private static final int KEYS_PER_CHECKPOINT = 1024;
+
     private final ColumnFamilyStore cfs;
     private final ReadCommand command;
     private final Orderer orderer;
@@ -751,6 +754,11 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         try
         {
             var primaryKeys = materializeKeys(source);
+            if (primaryKeys == null)
+            {
+                FileUtils.closeQuietly(source);
+                return switchToSortThenFilter(softLimit);
+            }
             if (primaryKeys.isEmpty())
             {
                 FileUtils.closeQuietly(source);
@@ -773,8 +781,10 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
      * Materialize the keys from the given source iterator. If there is a meaningful {@link #mergeRange}, the keys
      * are filtered to only include those within the range. Note: does not close the source iterator.
      * @param source The source iterator to materialize keys from.
-     * @return The list of materialized keys within the {@link #mergeRange}.
+     * @return The list of materialized keys within the {@link #mergeRange}, or null if there are more than
+     * {@link CassandraRelevantProperties#SAI_MAX_FILTER_THEN_SORT_KEYS} of them.
      */
+    @Nullable
     private List<PrimaryKey> materializeKeys(KeyRangeIterator source)
     {
         // Skip to the first key (which is really just a token) in the range if it is not the minimum token
@@ -786,15 +796,32 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
 
         var maxToken = primaryKeyFactory().createTokenOnly(mergeRange.right.getToken());
         var hasLimitingMaxToken = !maxToken.token().isMinimum() && maxToken.compareTo(source.getMaximum()) < 0;
+        int maxKeys = CassandraRelevantProperties.SAI_MAX_FILTER_THEN_SORT_KEYS.getInt();
         List<PrimaryKey> primaryKeys = new ArrayList<>();
         while (source.hasNext())
         {
             var next = source.next();
             if (hasLimitingMaxToken && next.compareTo(maxToken) > 0)
                 break;
+            if (maxKeys > 0 && primaryKeys.size() >= maxKeys)
+                return null;
             primaryKeys.add(next);
+            if ((primaryKeys.size() & (KEYS_PER_CHECKPOINT - 1)) == 0)
+                queryContext.checkpoint();
         }
         return primaryKeys;
+    }
+
+    /**
+     * Run the ordered scan of the ordering index instead of sorting the keys produced by the WHERE clause, when
+     * these are too many to be kept in memory. The rows are post-filtered with the whole WHERE clause in either case,
+     * so the results are the same.
+     */
+    private CloseableIterator<PrimaryKeyWithSortKey> switchToSortThenFilter(int softLimit)
+    {
+        Tracing.logAndTrace(logger, "SAI predicates produced more than {} keys, switching to sort-then-filter",
+                            CassandraRelevantProperties.SAI_MAX_FILTER_THEN_SORT_KEYS.getInt());
+        return getTopKRows((Expression) null, softLimit);
     }
 
     private CloseableIterator<PrimaryKeyWithSortKey> getTopKRows(List<PrimaryKey> sourceKeys, int softLimit)
