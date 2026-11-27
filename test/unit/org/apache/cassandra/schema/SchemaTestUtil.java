@@ -52,6 +52,15 @@ public class SchemaTestUtil
         Schema.instance.transform(schema -> schema.withAddedOrUpdated(ksm));
     }
 
+    /**
+     * The schema mutation that creates the table, as a node that has the table sends it to a peer. Unlike the
+     * announce methods, it does not validate the table.
+     */
+    public static Mutation createTableMutation(KeyspaceMetadata keyspace, TableMetadata table, long timestamp)
+    {
+        return SchemaKeyspace.makeCreateTableMutation(keyspace, table, timestamp).build();
+    }
+
     public static void announceNewTable(TableMetadata cfm)
     {
         announceNewTable(cfm, true);

@@ -345,7 +345,7 @@ public class SerializationHeader
 
             try
             {
-                type.validateForColumn(columnName, isPrimaryKeyColumn, metadata.isCounter(), dropped, isForOfflineTool);
+                type.validateForColumn(columnName, isPrimaryKeyColumn, metadata.isCounter(), isForOfflineTool, true);
                 return type;
             }
             catch (InvalidColumnTypeException e)
@@ -410,7 +410,7 @@ public class SerializationHeader
                 try
                 {
                     // Make doubly sure the fixed type is valid before returning it.
-                    fixed.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isDroppedColumn, isForOfflineTool);
+                    fixed.validateForColumn(name, isPrimaryKeyColumn, isCounterTable, isForOfflineTool, true);
                     return fixed;
                 }
                 catch (InvalidColumnTypeException e2)
