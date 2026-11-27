@@ -19,7 +19,6 @@ package org.apache.cassandra.index.sai.disk.v1.trie;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.Iterator;
 import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.io.tries.SerializationNode;
@@ -37,7 +36,7 @@ import org.apache.cassandra.utils.bytecomparable.ByteSource;
  * Page-aware random access reader for a trie terms dictionary written by {@link TrieTermsDictionaryWriter}.
  */
 @NotThreadSafe
-public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionaryReader> implements Iterator<Pair<ByteComparable, Long>>
+public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionaryReader> implements TermsDictionaryIterator
 {
     public static final long NOT_FOUND = -1;
 

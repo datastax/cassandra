@@ -43,17 +43,15 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.FloatType;
+import org.apache.cassandra.db.tries.TriePattern;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.analyzer.AbstractAnalyzer;
 import org.apache.cassandra.index.sai.disk.format.Version;
-import org.apache.cassandra.index.sai.utils.AutomatonQueries;
 import org.apache.cassandra.index.sai.utils.GeoUtil;
 import org.apache.cassandra.index.sai.utils.TypeUtil;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
 import org.apache.cassandra.utils.bytecomparable.ByteSource;
 import org.apache.lucene.util.SloppyMath;
-import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 public class Expression
 {
@@ -61,10 +59,10 @@ public class Expression
 
     public enum Op
     {
-        EQ, MATCH, PREFIX, NOT_EQ, RANGE,
+        EQ, MATCH, NOT_EQ, RANGE,
         CONTAINS_KEY, CONTAINS_VALUE,
         NOT_CONTAINS_VALUE, NOT_CONTAINS_KEY,
-        IN, ORDER_BY, BOUNDED_ANN, AUTOMATON;
+        IN, ORDER_BY, BOUNDED_ANN, PATTERN;
 
         public static Op valueOf(Operator operator)
         {
@@ -94,17 +92,14 @@ public class Expression
                 case GTE:
                     return RANGE;
 
+                // Pattern matching: the expression carries the value of the operator (see Expression#add), from
+                // which it builds the pattern (see Expression#getTriePattern) that the indexes match against their
+                // terms while walking their terms tries.
                 case LIKE_PREFIX:
-                    return PREFIX;
-
-                // Automaton-served pattern matching: the expression carries the raw pattern (see Expression#add)
-                // and lazily compiles it into a Lucene CompiledAutomaton (see Expression#getAutomaton)
-                // intersected with the terms dictionaries. LIKE_PREFIX stays on its dedicated bounded-range
-                // PREFIX path above.
                 case LIKE_SUFFIX:
                 case LIKE_CONTAINS:
                 case LIKE_MATCHES:
-                    return AUTOMATON;
+                    return PATTERN;
 
                 case ANALYZER_MATCHES:
                     return MATCH;
@@ -161,27 +156,24 @@ public class Expression
     public Bound lower, upper;
 
     /**
-     * For {@link Op#AUTOMATON} expressions, the pattern operator ({@link Operator#LIKE_SUFFIX},
-     * {@link Operator#LIKE_CONTAINS} or {@link Operator#LIKE_MATCHES} with wildcards) the pattern in {@link #lower}
-     * came from; it defines the pattern syntax. {@code null} for all other operations.
+     * For {@link Op#PATTERN} expressions, the pattern operator ({@link Operator#LIKE_PREFIX},
+     * {@link Operator#LIKE_SUFFIX}, {@link Operator#LIKE_CONTAINS} or {@link Operator#LIKE_MATCHES} with wildcards)
+     * the value in {@link #lower} came from; it defines the pattern. {@code null} for all other operations.
      */
     private Operator patternOperator;
 
     /**
-     * The lazily compiled automaton of an {@link Op#AUTOMATON} expression. Plan expressions are not serialized
-     * (only the {@code RowFilter} expression carrying the raw pattern is), so the automaton is compiled here,
-     * at most once per query per index, and shared by all the segments/memtable shards the expression is
-     * intersected with. The searches of a query run on the thread owning its query context, so no synchronization
-     * is needed; the field is volatile only for safe publication, and compilation is idempotent, so a race would
-     * only cost a recompile.
+     * The pattern of a {@link Op#PATTERN} expression, built on first use (see {@link #getTriePattern()}) and shared by
+     * all the segments/memtable shards the expression is searched in, and its estimates. The searches of a query run
+     * on the thread owning its query context, so no synchronization is needed; the field is volatile only for safe
+     * publication, and building the pattern is idempotent, so a race would only cost a rebuild.
      */
-    private volatile CompiledAutomaton automaton;
+    private volatile TriePattern triePattern;
 
     /**
-     * The byte prefix shared by all the terms accepted by {@link #automaton}, computed together with it (see
-     * {@link #getAutomatonCommonPrefix()}) so that it isn't recomputed for every segment, memtable shard and estimate.
+     * The literal prefix of {@link #triePattern}, computed on first use (see {@link #getPatternLiteralPrefix()}).
      */
-    private volatile byte[] automatonCommonPrefix;
+    private volatile byte[] patternLiteralPrefix;
 
     private float boundedAnnEuclideanDistanceThreshold = 0;
     private float searchRadiusMeters = 0;
@@ -227,7 +219,7 @@ public class Expression
             case NOT_CONTAINS_KEY:
                 // A wildcard-free LIKE '<term>' (LIKE_MATCHES without any wildcard) matches the single term equal
                 // to its unescaped literal, so the index serves it exactly like an equality (term lookup, no
-                // ordering scan): the automaton path is for the patterns with wildcards. The CQL operator stays
+                // ordering scan): the pattern path is for the patterns with wildcards. The CQL operator stays
                 // LIKE_MATCHES, which is what index selection and post-filtering are about.
                 if (op == Operator.LIKE_MATCHES && !LikePatterns.hasWildcard(value))
                 {
@@ -240,9 +232,9 @@ public class Expression
                 }
                 lower = new Bound(value, validator, true);
                 upper = lower;
-                // Automaton-served pattern expressions remember which operator the pattern came from, because
-                // it defines the pattern syntax (see #getAutomaton()).
-                if (operation == Op.AUTOMATON)
+                // Pattern expressions remember which operator the value came from, because it defines the pattern
+                // (see #getTriePattern()).
+                if (operation == Op.PATTERN)
                     patternOperator = op;
                 break;
 
@@ -436,61 +428,42 @@ public class Expression
     }
 
     /**
-     * For a {@link Op#PREFIX} expression, returns the smallest {@link ByteComparable} that sorts after every term
-     * starting with the prefix, encoded for the trie of the given version, or {@code null} if no such bound exists
-     * (i.e. the prefix is empty or consists solely of {@code 0xFF} bytes). Together with the prefix itself as an
-     * inclusive lower bound, {@code [prefix, nextOf(prefix))} delimits exactly the terms starting with the prefix.
-     * <p>
-     * This is only valid for non-composite literal types, for which
-     * {@link org.apache.cassandra.index.sai.disk.format.OnDiskFormat#encodeForTrie} preserves the raw byte order
-     * of the terms.
-     *
-     * @param version the version of the index
-     * @return the exclusive upper bound of the prefix range, or {@code null} if it is unbounded
-     */
-    public ByteComparable getPrefixUpperBoundByteComparable(Version version)
-    {
-        assert operation == Op.PREFIX : "Prefix upper bound requested for operation " + operation;
-        byte[] upperBytes = AutomatonQueries.prefixUpperBound(ByteBufferUtil.getArray(lower.value.encoded));
-        return upperBytes == null ? null : version.onDiskFormat().encodeForTrie(ByteBuffer.wrap(upperBytes), validator);
-    }
-
-    /**
-     * For {@link Op#AUTOMATON} expressions, returns the pattern operator the expression was built from.
+     * For {@link Op#PATTERN} expressions, returns the pattern operator the expression was built from.
      */
     public Operator getPatternOperator()
     {
-        assert operation == Op.AUTOMATON : "Pattern operator requested for operation " + operation;
+        assert operation == Op.PATTERN : "Pattern operator requested for operation " + operation;
         return patternOperator;
     }
 
     /**
-     * For {@link Op#AUTOMATON} expressions, returns the compiled byte-level automaton of the pattern carried by
-     * this expression, compiling it on first use. The pattern value in {@link #lower} is the (possibly
-     * normalized, e.g. lowercased) pattern produced by the analysis in {@code Operation#analyzeGroup}, matching
-     * how the stored terms are normalized.
+     * For {@link Op#PATTERN} expressions, returns the {@link TriePattern} of the value carried by this expression (see
+     * {@link LikePatterns#forPatternOperator}), building it on first use. The value in {@link #lower} is the (possibly
+     * normalized, e.g. lowercased) value produced by the analysis in {@code Operation#analyzeGroup}, matching how the
+     * stored terms are normalized.
      *
-     * @throws org.apache.cassandra.exceptions.InvalidPatternException if the pattern is invalid or too complex
+     * @throws org.apache.cassandra.exceptions.InvalidPatternException if the pattern is not in valid internal form
      */
-    public CompiledAutomaton getAutomaton()
+    public TriePattern getTriePattern()
     {
-        assert operation == Op.AUTOMATON : "Automaton requested for operation " + operation;
-        CompiledAutomaton compiled = automaton;
-        if (compiled == null)
-            automaton = compiled = LikePatterns.forPatternOperator(patternOperator, lower.value.raw, context.getColumnName());
-        return compiled;
+        assert operation == Op.PATTERN : "Trie pattern requested for operation " + operation;
+        TriePattern pattern = triePattern;
+        if (pattern == null)
+            triePattern = pattern = LikePatterns.forPatternOperator(patternOperator, lower.value.raw, context.getColumnName());
+        return pattern;
     }
 
     /**
-     * For {@link Op#AUTOMATON} expressions, returns the byte prefix shared by all the terms accepted by
-     * {@link #getAutomaton()} (see {@link AutomatonQueries#commonPrefixBytes}), computed on first use. The returned
-     * array is shared and must not be modified.
+     * For {@link Op#PATTERN} expressions, returns the literal bytes at the start of the pattern (see
+     * {@link TriePattern#literalPrefix()}), computed on first use: the matching terms are the terms starting with it
+     * that the pattern matches. Estimates and the selection of the indexes to search use the range of the terms
+     * starting with it. The returned array is shared and must not be modified.
      */
-    public byte[] getAutomatonCommonPrefix()
+    public byte[] getPatternLiteralPrefix()
     {
-        byte[] prefix = automatonCommonPrefix;
+        byte[] prefix = patternLiteralPrefix;
         if (prefix == null)
-            automatonCommonPrefix = prefix = AutomatonQueries.commonPrefixBytes(getAutomaton());
+            patternLiteralPrefix = prefix = getTriePattern().literalPrefix();
         return prefix;
     }
 
@@ -591,14 +564,10 @@ public class Expression
                         isMatch = isLowerSatisfiedBy(term) && isUpperSatisfiedBy(term);
                         break;
 
-                    case PREFIX:
-                        isMatch = ByteBufferUtil.startsWith(term, requestedValue);
-                        break;
-
-                    case AUTOMATON:
-                        // pattern matching over the (possibly normalized) term, with the exact same automaton
-                        // used by the index searchers
-                        isMatch = LikePatterns.accepts(getAutomaton(), term);
+                    case PATTERN:
+                        // pattern matching over the (possibly normalized) term, with the same pattern used by the
+                        // index searchers
+                        isMatch = getTriePattern().matches(term);
                         break;
                 }
 

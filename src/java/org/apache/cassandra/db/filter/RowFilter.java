@@ -1436,7 +1436,7 @@ public class RowFilter
             }
             catch (InvalidPatternException e)
             {
-                // a LIKE pattern that can't be compiled; the operator evaluating it doesn't know the column
+                // a LIKE pattern not in valid internal form; the operator evaluating it doesn't know the column
                 throw e.withColumn(column.name);
             }
         }

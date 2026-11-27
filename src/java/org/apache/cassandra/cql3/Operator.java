@@ -235,8 +235,8 @@ public enum Operator
         {
             // The value is a literal or a whole LIKE pattern, in the internal form of LikePatterns#ESCAPE (see
             // LikeRestriction#makeSpecific). The column isn't known here: an InvalidPatternException for a
-            // pattern that can't be compiled is completed with it by the caller (RowFilter).
-            return LikePatterns.accepts(LikePatterns.forPatternOperator(this, rightOperand, null), leftOperand);
+            // pattern that is not in valid internal form is completed with it by the caller (RowFilter).
+            return LikePatterns.matches(this, rightOperand, leftOperand);
         }
     },
     LIKE(14)

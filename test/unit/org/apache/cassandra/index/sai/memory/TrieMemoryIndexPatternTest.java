@@ -16,7 +16,6 @@
 package org.apache.cassandra.index.sai.memory;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
@@ -27,6 +26,7 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.cql3.LikePatterns;
+import org.apache.cassandra.cql3.LikeReference;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.Clustering;
@@ -49,18 +49,18 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.MockSchema;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 /**
- * Memtable-level tests for the automaton term-matching engine ({@link TrieMemoryIndex#automatonMatch}): mirrors
- * the disk-level {@code AutomatonIntersectionTest} property-based comparison against a brute-force reference that
- * runs the same automaton over every indexed value.
+ * Memtable-level tests for the LIKE pattern matching of the memtable index, which selects the matching terms while
+ * walking its terms trie with the pattern ({@link Expression#getTriePattern}). Mirrors the disk-level
+ * {@code TermsReaderPatternTest} property-based comparison against a brute-force reference, which evaluates the
+ * pattern on every indexed value with {@link LikeReference}.
  */
-public class TrieMemoryIndexAutomatonTest
+public class TrieMemoryIndexPatternTest
 {
     private static final String KEYSPACE = "test_keyspace";
     private static final String TABLE = "test_table";
@@ -81,51 +81,52 @@ public class TrieMemoryIndexAutomatonTest
     {
         TrieMemoryIndex index = newIndex(UTF8Type.instance);
         Map<Integer, String> rows = indexRows(index, "ab", "abc", "abcd", "aabc", "b", "ba", "bab",
-                                              "xabx", "cab", "a", "ax", "axxb", "zab", "a%b", "a_c");
+                                              "xabx", "cab", "a", "ax", "axxb", "zab", "a%b", "a_c",
+                                              "aéc", "a€c", "a😀c", "aééc", "a*c", "a?c", "a\\c", "é", "");
 
         for (String pattern : new String[]{ "abc%", "%abc", "%abc%", "a%c", "%", "abc", "a_c", "a%b",
-                                            "ab%", "%ab", "%ab%", "a%b%c", "nomatch%" })
-            assertMatchesBruteForce(index, rows, LikePatterns.patternAutomaton(pattern), "LIKE " + pattern);
+                                            "ab%", "%ab", "%ab%", "a%b%c", "nomatch%",
+                                            // single-character wildcards over multi-byte characters
+                                            "_", "__", "_%", "%_", "a__c", "a_%c", "a%_c", "%_c", "a_%_c",
+                                            // escapes, and characters that are wildcards in other syntaxes
+                                            "a\\_c", "a\\%b", "a\\\\c", "%\\_%", "a*c", "a?c", "a*%", "%?%" })
+            assertMatchesBruteForce(index, rows, Operator.LIKE_MATCHES, pattern);
 
-        for (String suffix : new String[]{ "ab", "b", "a%b", "nomatch" })
-            assertMatchesBruteForce(index, rows, LikePatterns.suffixAutomaton(suffix), "suffix " + suffix);
+        for (String prefix : new String[]{ "ab", "a", "a%", "a_", "é", "nomatch" })
+            assertMatchesBruteForce(index, rows, Operator.LIKE_PREFIX, prefix);
 
-        for (String substring : new String[]{ "ab", "a%b", "x", "nomatch" })
-            assertMatchesBruteForce(index, rows, LikePatterns.containsAutomaton(substring), "contains " + substring);
+        for (String suffix : new String[]{ "ab", "b", "a%b", "a_c", "é", "nomatch" })
+            assertMatchesBruteForce(index, rows, Operator.LIKE_SUFFIX, suffix);
+
+        for (String substring : new String[]{ "ab", "a%b", "x", "_", "é", "nomatch" })
+            assertMatchesBruteForce(index, rows, Operator.LIKE_CONTAINS, substring);
     }
 
     @Test
-    public void shouldBoundScanByCommonPrefix()
+    public void shouldMatchPatternsWithLiteralPrefix()
     {
         TrieMemoryIndex index = newIndex(UTF8Type.instance);
         Map<Integer, String> rows = indexRows(index, "aa", "aa￿", "ab", "ab ", "ab￿￿", "abz", "ac", "aca", "b");
 
-        CompiledAutomaton automaton = LikePatterns.patternAutomaton("ab%");
-        TreeSet<Integer> results = search(index, automaton);
-        assertEquals(keysOf(rows, "ab", "ab ", "ab￿￿", "abz"), results);
+        assertEquals(keysOf(rows, "ab", "ab ", "ab￿￿", "abz"), search(index, Operator.LIKE_MATCHES, "ab%"));
+        assertEquals(keysOf(rows, "ab ", "abz"), search(index, Operator.LIKE_MATCHES, "ab_"));
+        assertEquals(keysOf(rows, "ab ", "ab￿￿", "abz"), search(index, Operator.LIKE_MATCHES, "ab_%"));
     }
 
     @Test
-    public void shouldServeSingleAndNoneAutomatons()
+    public void shouldServeWildcardFreeAndMatchAllPatterns()
     {
         TrieMemoryIndex index = newIndex(UTF8Type.instance);
         Map<Integer, String> rows = indexRows(index, "alpha", "beta", "gamma");
 
-        // a pattern without wildcards simplifies to a SINGLE automaton served by an exact lookup
-        CompiledAutomaton single = LikePatterns.patternAutomaton("beta");
-        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.SINGLE, single.type);
-        assertEquals(keysOf(rows, "beta"), search(index, single));
-        assertEquals(new TreeSet<>(), search(index, LikePatterns.patternAutomaton("delta")));
+        // a pattern without wildcards is served by an exact lookup
+        assertEquals(Expression.Op.EQ, expression(Operator.LIKE_MATCHES, "beta").getOp());
+        assertEquals(keysOf(rows, "beta"), search(index, Operator.LIKE_MATCHES, "beta"));
+        assertEquals(new TreeSet<>(), search(index, Operator.LIKE_MATCHES, "delta"));
 
-        // the empty language matches nothing
-        CompiledAutomaton none = LikePatterns.compile(org.apache.lucene.util.automaton.Automata.makeEmpty());
-        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.NONE, none.type);
-        assertEquals(new TreeSet<>(), search(index, none));
-
-        // an all-wildcard pattern simplifies to a match-all (ALL) automaton accepting every term
-        CompiledAutomaton all = LikePatterns.patternAutomaton("%");
-        assertEquals(CompiledAutomaton.AUTOMATON_TYPE.ALL, all.type);
-        assertEquals(rows.keySet(), search(index, all));
+        // an all-wildcard pattern accepts every term
+        assertEquals(rows.keySet(), search(index, Operator.LIKE_MATCHES, "%"));
+        assertEquals(rows.keySet(), search(index, Operator.LIKE_MATCHES, "%%"));
     }
 
     @Test
@@ -133,8 +134,9 @@ public class TrieMemoryIndexAutomatonTest
     {
         TrieMemoryIndex index = newIndex(Int32Type.instance);
         index.add(makeKey(table, "0"), Clustering.EMPTY, Int32Type.instance.decompose(42), b -> {}, b -> {});
+        Expression expression = expression(Operator.LIKE_MATCHES, "4%");
         assertThrows(IllegalStateException.class,
-                     () -> search(index, LikePatterns.patternAutomaton("4%")));
+                     () -> index.search(expression, AbstractBounds.unbounded(Murmur3Partitioner.instance)));
     }
 
     @Test
@@ -148,32 +150,36 @@ public class TrieMemoryIndexAutomatonTest
             values[i] = randomTerm(random);
         Map<Integer, String> rows = indexRows(index, values);
 
-        for (int i = 0; i < 30; i++)
+        for (int i = 0; i < 100; i++)
         {
             String seed = values[random.nextInt(values.length)];
-            CompiledAutomaton automaton = randomAutomaton(random, seed);
-            assertMatchesBruteForce(index, rows, automaton, "randomized " + i);
+            Pair<Operator, String> pattern = randomPattern(random, seed);
+            assertMatchesBruteForce(index, rows, pattern.left, pattern.right);
         }
     }
 
-    private void assertMatchesBruteForce(TrieMemoryIndex index, Map<Integer, String> rows, CompiledAutomaton automaton, String description)
+    private void assertMatchesBruteForce(TrieMemoryIndex index, Map<Integer, String> rows, Operator operator, String value)
     {
         TreeSet<Integer> expected = new TreeSet<>();
         for (Map.Entry<Integer, String> row : rows.entrySet())
-            if (LikePatterns.accepts(automaton, row.getValue().getBytes(StandardCharsets.UTF_8)))
+            if (LikeReference.matches(operator, value, row.getValue()))
                 expected.add(row.getKey());
 
-        assertEquals("engine and brute-force results differ for " + description,
+        // make sure the patterns with wildcards go through the pattern matching path
+        if (operator != Operator.LIKE_MATCHES || LikePatterns.hasWildcard(UTF8Type.instance.decompose(value)))
+            assertEquals(Expression.Op.PATTERN, expression(operator, value).getOp());
+
+        assertEquals("index and brute-force results differ for " + operator + " '" + value + "'",
                      expected,
-                     search(index, automaton));
+                     search(index, operator, value));
     }
 
-    /** Runs the engine and collects the partition key values of the matching rows. */
-    private TreeSet<Integer> search(TrieMemoryIndex index, CompiledAutomaton automaton)
+    /** Searches the index and collects the partition key values of the matching rows. */
+    private TreeSet<Integer> search(TrieMemoryIndex index, Operator operator, String value)
     {
         AbstractBounds<PartitionPosition> keyRange = AbstractBounds.unbounded(Murmur3Partitioner.instance);
         TreeSet<Integer> results = new TreeSet<>();
-        KeyRangeIterator iterator = index.automatonMatch(automaton, keyRange);
+        KeyRangeIterator iterator = index.search(expression(operator, value), keyRange);
         while (iterator.hasNext())
             results.add(Int32Type.instance.compose(iterator.next().partitionKey().getKey()));
         return results;
@@ -270,28 +276,51 @@ public class TrieMemoryIndexAutomatonTest
         return sb.toString();
     }
 
-    private static CompiledAutomaton randomAutomaton(Random random, String seed)
+    /**
+     * A random LIKE pattern built from a substring of the seed: prefix, contains and suffix patterns, generic patterns
+     * where some characters of the seed are replaced by single-character or any-string wildcards, and the dedicated
+     * suffix and contains operators.
+     */
+    private static Pair<Operator, String> randomPattern(Random random, String seed)
     {
-        switch (random.nextInt(4))
+        int cpCount = seed.codePointCount(0, seed.length());
+        int fromCp = random.nextInt(cpCount);
+        int toCp = fromCp + 1 + random.nextInt(cpCount - fromCp);
+        String substring = seed.substring(seed.offsetByCodePoints(0, fromCp), seed.offsetByCodePoints(0, toCp));
+        String suffix = seed.substring(seed.offsetByCodePoints(0, fromCp));
+        switch (random.nextInt(6))
         {
             case 0:
             {
-                int cpCount = seed.codePointCount(0, seed.length());
-                int prefixCp = 1 + random.nextInt(Math.max(1, cpCount - 1));
-                return LikePatterns.patternAutomaton(seed.substring(0, seed.offsetByCodePoints(0, prefixCp)) + '%');
+                String prefix = seed.substring(0, seed.offsetByCodePoints(0, toCp));
+                return random.nextBoolean() ? Pair.create(Operator.LIKE_MATCHES, LikePatterns.escape(prefix) + '%')
+                                            : Pair.create(Operator.LIKE_PREFIX, prefix);
             }
             case 1:
-            {
-                int cpCount = seed.codePointCount(0, seed.length());
-                int fromCp = random.nextInt(cpCount);
-                int toCp = fromCp + 1 + random.nextInt(cpCount - fromCp);
-                String substring = seed.substring(seed.offsetByCodePoints(0, fromCp), seed.offsetByCodePoints(0, toCp));
-                return LikePatterns.patternAutomaton('%' + substring + '%');
-            }
+                return Pair.create(Operator.LIKE_MATCHES, '%' + LikePatterns.escape(substring) + '%');
             case 2:
-                return LikePatterns.suffixAutomaton(seed.substring(seed.offsetByCodePoints(0, random.nextInt(seed.codePointCount(0, seed.length())))));
+                return Pair.create(Operator.LIKE_SUFFIX, suffix);
+            case 3:
+                return Pair.create(Operator.LIKE_CONTAINS, substring);
             default:
-                return LikePatterns.patternAutomaton('%' + seed.substring(seed.offsetByCodePoints(0, random.nextInt(seed.codePointCount(0, seed.length())))));
+            {
+                StringBuilder pattern = new StringBuilder();
+                if (random.nextBoolean())
+                    pattern.append('%');
+                for (int i = 0; i < seed.length(); i = seed.offsetByCodePoints(i, 1))
+                {
+                    int r = random.nextInt(10);
+                    if (r < 3)
+                        pattern.append('_');
+                    else if (r < 4)
+                        pattern.append('%');
+                    else
+                        pattern.append(LikePatterns.escape(new String(Character.toChars(seed.codePointAt(i)))));
+                }
+                if (random.nextBoolean())
+                    pattern.append('%');
+                return Pair.create(Operator.LIKE_MATCHES, pattern.toString());
+            }
         }
     }
 

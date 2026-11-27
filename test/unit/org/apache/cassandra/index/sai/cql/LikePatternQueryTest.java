@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.TreeSet;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
@@ -38,23 +39,22 @@ import org.apache.cassandra.cql3.UntypedResultSet;
 import org.apache.cassandra.cql3.restrictions.SingleColumnRestriction;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.sai.IndexContext;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.utils.Pair;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 
 /**
- * Tests the automaton-served SAI text query surface: the non-prefix {@code LIKE} variants
- * ({@code LIKE '%x'}, {@code LIKE '%x%'}, {@code LIKE 'a%b'}) on non-analyzed literal SAI indexes, across the
+ * Tests the SAI {@code LIKE} query surface, served by walking the terms tries with the pattern: the {@code LIKE}
+ * variants ({@code LIKE 'x%'}, {@code LIKE '%x'}, {@code LIKE '%x%'}, {@code LIKE 'a%b'}, {@code LIKE 'a_b'}) on
+ * non-analyzed literal SAI indexes, across the
  * memtable-only / flushed / multi-sstable / compacted matrix, against client-side brute force, and pins the
  * exact agreement between the index path and the {@link Operator} post-filters used by filtering and replica
  * filtering protection.
  */
-public class AutomatonQueryTest extends SAITester
+public class LikePatternQueryTest extends SAITester
 {
     /** The seed of the randomized tests, which can be fixed with the {@link CassandraRelevantProperties#TEST_RANDOM_SEED} property. */
     private static final long SEED = CassandraRelevantProperties.TEST_RANDOM_SEED.getLong(System.nanoTime());
@@ -178,32 +178,29 @@ public class AutomatonQueryTest extends SAITester
         }
     }
 
+    /**
+     * A generic LIKE pattern alternating many literals and wildcards ('a%a%a%...a'), whose automaton used to be too
+     * complex to determinize, is served through the index and through post-filtering.
+     */
     @Test
-    public void testLikeComplexityGuard()
+    public void testPatternsWithManyWildcards() throws Throwable
     {
         createTableWithIndex();
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "abc");
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 2, "ab".repeat(1000) + 'a');
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 3, "a".repeat(1000));
 
-        // A generic LIKE pattern ('a%a%a%...a', LIKE_MATCHES) whose NFA-to-DFA determinization exceeds the
-        // Lucene work limit must fail at the coordinator with a clear invalid-request "Invalid pattern" error
-        // from the eager compile in LikeRestriction#addToRowFilter. Without that eager compile the first compile
-        // happens on the replicas, mid-read, and surfaces as a generic read failure with an UNKNOWN failure reason.
-        StringBuilder pattern = new StringBuilder();
-        for (int i = 0; i < 1000; i++)
-            pattern.append("a%");
-        pattern.append('a');
-        assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE ?", pattern.toString()))
-            .isInstanceOf(InvalidRequestException.class)
-            .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
-
-        // ... while reasonable generic patterns keep working
-        assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'a%%c'"), row(1));
+        String pattern = "a%".repeat(1000) + 'a';
+        beforeAndAfterFlush(() -> {
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE ?", pattern), row(2));
+            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'a%%c'"), row(1));
+        });
     }
 
     /**
-     * Patterns like {@code '%a____b%'} have a DFA exponential in the number of {@code '_'}: after each {@code 'a'} the
-     * automaton must remember which of the following characters were {@code 'a'} too. Determinization stops at
-     * Lucene's work limit, so such a pattern is either served or rejected as an invalid request, quickly either way.
+     * Patterns like {@code '%a____b%'} have an automaton exponential in the number of {@code '_'}: after each
+     * {@code 'a'} it must remember which of the following characters were {@code 'a'} too. Such patterns used to be
+     * rejected past a dozen {@code '_'}; matching doesn't need such an automaton, and they are served.
      */
     @Test
     public void testExplodingPatterns()
@@ -214,28 +211,22 @@ public class AutomatonQueryTest extends SAITester
         for (int pk = 0; pk < 500; pk++)
         {
             StringBuilder value = new StringBuilder();
-            int length = 8 + random.nextInt(10);
+            int length = 8 + random.nextInt(60);
             for (int i = 0; i < length; i++)
                 value.append(alphabet[random.nextInt(alphabet.length)]);
             rows.put(pk, value.toString());
             execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, value.toString());
         }
 
-        // the largest number of '_' that still compiles: the DFA has about 80k states
-        String served = "%a" + "_".repeat(10) + "b%";
-        Pattern regex = Pattern.compile(".*a.{10}b.*", Pattern.DOTALL);
-        Set<Integer> expected = expected(rows, value -> regex.matcher(value).matches());
-        assertFalse(expected.isEmpty());
         for (int i = 0; i < 3; i++)
         {
-            assertEquals(expected, keysOf(execute("SELECT pk FROM %s WHERE v LIKE ?", served)));
-
-            for (int underscores : new int[]{ 12, 50 })
+            for (int underscores : new int[]{ 10, 12, 50 })
             {
-                String exploding = "%a" + "_".repeat(underscores) + "b%";
-                assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE ?", exploding))
-                    .isInstanceOf(InvalidRequestException.class)
-                    .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
+                String pattern = "%a" + "_".repeat(underscores) + "b%";
+                Pattern regex = Pattern.compile(".*a.{" + underscores + "}b.*", Pattern.DOTALL);
+                Set<Integer> expected = expected(rows, value -> regex.matcher(value).matches());
+                assertFalse(expected.isEmpty());
+                assertEquals(pattern, expected, keysOf(execute("SELECT pk FROM %s WHERE v LIKE ?", pattern)));
             }
 
             if (i == 0)
@@ -246,30 +237,27 @@ public class AutomatonQueryTest extends SAITester
     }
 
     /**
-     * The selected index validates the pattern when the restriction is bound, even when the query ends up with no
-     * index query plan: a disjunction with an unindexed sibling can't be served by the index, so the LIKE is
-     * post-filtered on the replicas, where an invalid pattern would otherwise surface as a read failure.
+     * When the query ends up with no index query plan, e.g. in a disjunction with an unindexed sibling, the LIKE is
+     * post-filtered on the replicas, including the patterns whose automaton used to be too complex to determinize.
      */
     @Test
-    public void testLikeValidationWithoutQueryPlan()
+    public void testLikeWithoutQueryPlan()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text, w int)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
         execute("INSERT INTO %s (pk, v, w) VALUES (?, ?, ?)", 1, "abc", 7);
+        execute("INSERT INTO %s (pk, v, w) VALUES (?, ?, ?)", 2, "a".repeat(1001), 0);
+        execute("INSERT INTO %s (pk, v, w) VALUES (?, ?, ?)", 3, "a".repeat(1000), 0);
 
         String pattern = "a%".repeat(1000) + 'a';
-        assertThatThrownBy(() -> execute("SELECT pk FROM %s WHERE v LIKE ? OR w = 7 ALLOW FILTERING", pattern))
-            .isInstanceOf(InvalidRequestException.class)
-            .hasMessageStartingWith("Invalid pattern for LIKE '<term>' restriction on column v: ");
+        assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE ? OR w = 7 ALLOW FILTERING", pattern), row(1), row(2));
         assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'a%%c' OR w = 8 ALLOW FILTERING"), row(1));
     }
 
     /**
      * LIKE values larger than the maximum size of the indexed terms are not rejected: the maximum is a system
      * property that may have been larger when some of the terms were indexed, so such a value may still match
-     * indexed terms. Here it doesn't, and the query simply returns no row. (Long literals behind a wildcard are a
-     * different matter: whether their automaton can be determinized within Lucene's work limit depends on the
-     * literal, not on the maximum term size, so this doesn't test them.)
+     * indexed terms. Here it doesn't, and the query simply returns no row.
      */
     @Test
     public void testLikeValuesLargerThanMaxTermSize()
@@ -614,10 +602,40 @@ public class AutomatonQueryTest extends SAITester
                              "SELECT pk FROM %s WHERE v LIKE '%%a' ALLOW FILTERING");
     }
 
+    /**
+     * The index of an sstable keeps listing a row under the value the row had when the sstable was written. When the
+     * row is overwritten with a value that doesn't match, the index still returns its key, and the replica drops the
+     * row when it checks the row's current value against the pattern. The queries are also run locally, because
+     * through the coordinator replica filtering protection would check the rows again.
+     */
+    @Test
+    public void testOverwrittenValues()
+    {
+        createTableWithIndex();
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "abc");
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 2, "abd");
+        flush();
+        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "xyz");
+
+        // sstable and memtable, then two sstables
+        for (int i = 0; i < 2; i++)
+        {
+            for (boolean local : new boolean[]{ false, true })
+            {
+                Function<String, UntypedResultSet> query = local ? this::executeInternal : this::execute;
+                assertRows(query.apply("SELECT pk FROM %s WHERE v LIKE 'ab%%'"), row(2));
+                assertRows(query.apply("SELECT pk FROM %s WHERE v LIKE '%%c'"));
+                assertRows(query.apply("SELECT pk FROM %s WHERE v LIKE '%%b%%'"), row(2));
+                assertRows(query.apply("SELECT pk FROM %s WHERE v LIKE '%%y%%'"), row(1));
+            }
+            flush();
+        }
+    }
+
     // ---------------------------------------------------------------------------------------------------------
     // Randomized comparison against client-side brute force AND the Operator post-filters, over the
     // memtable-only / flushed+memtable / two-sstable / compacted matrix. The post-filter comparison is the
-    // "automaton == post-filter" property test: the rows returned through the index must be exactly the rows the
+    // "index == post-filter" property test: the rows returned through the index must be exactly the rows the
     // RowFilter/RFP post-filter would keep.
     // ---------------------------------------------------------------------------------------------------------
 
@@ -642,7 +660,7 @@ public class AutomatonQueryTest extends SAITester
         verifyRandomizedPatterns(rows);
 
         // Overwrites and deletes: memtable entries shadowing flushed values (the index still lists the old terms
-        // in the sstable segments, so the automaton engine must agree with post-filtering under shadowed
+        // in the sstable segments, so the index must agree with post-filtering under shadowed
         // postings), verified again after flushing the shadows and after compacting them away.
         overwriteAndDeleteRandomRows(rows);
         verifyRandomizedPatterns(rows);

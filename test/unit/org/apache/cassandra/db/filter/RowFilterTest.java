@@ -172,8 +172,8 @@ public class RowFilterTest
     }
 
     /**
-     * A LIKE pattern that can't be compiled into an automaton fails the filtering with an invalid pattern error naming
-     * the restricted column, which the operator evaluating the pattern doesn't know.
+     * A LIKE pattern that is not in valid internal form fails the filtering with an invalid pattern error naming the
+     * restricted column, which the operator evaluating the pattern doesn't know.
      */
     @Test
     public void testInvalidLikePatternNamesColumn()
@@ -184,11 +184,8 @@ public class RowFilterTest
                                               .build();
         ColumnMetadata v = metadata.getColumn(new ColumnIdentifier("v", true));
 
-        // a generic pattern too complex to determinize
-        StringBuilder pattern = new StringBuilder();
-        for (int i = 0; i < 1000; i++)
-            pattern.append("a%");
-        pattern.append('a');
+        // a pattern ending with a lone escape, which the coordinators never send
+        StringBuilder pattern = new StringBuilder("a%\\");
 
         RowFilter.Builder builder = RowFilter.builder(false);
         builder.add(v, Operator.LIKE_MATCHES, UTF8Type.instance.decompose(pattern.toString()));
