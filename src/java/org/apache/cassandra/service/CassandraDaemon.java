@@ -265,6 +265,8 @@ public class CassandraDaemon
 
         INativeLibrary.instance.tryMlockall();
 
+        runStartupChecksBeforeCommitLogStart();
+
         CommitLog.instance.start();
 
         runStartupChecks();
@@ -471,6 +473,27 @@ public class CassandraDaemon
         PaxosState.startAutoRepairs();
 
         completeSetup();
+    }
+
+    /**
+     * Runs {@link StartupChecks#verifyBeforeCommitLogStart}; a refusal exits, or throws when the daemon runs managed,
+     * as with {@link #runStartupChecks}.
+     * <p>
+     * DSE compatibility: the refusal of a start while DSE peers may remain comes before the commit log starts and
+     * creates its first segments, which, written with {@code storage_compatibility_mode} {@code NONE} or
+     * {@code UPGRADING}, the start in the mode of the DSE upgrade would then refuse
+     * ({@link StartupChecks#verifyBeforeCommitLogStart}).
+     */
+    public void runStartupChecksBeforeCommitLogStart()
+    {
+        try
+        {
+            StartupChecks.verifyBeforeCommitLogStart(DatabaseDescriptor.getStartupChecksOptions());
+        }
+        catch (StartupException e)
+        {
+            exitOrFail(e.returnCode, e.getMessage(), e.getCause());
+        }
     }
 
     public void runStartupChecks()

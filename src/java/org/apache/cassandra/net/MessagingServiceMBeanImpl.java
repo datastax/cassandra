@@ -18,15 +18,20 @@
 package org.apache.cassandra.net;
 
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.security.SSLFactory;
+import org.apache.cassandra.service.DsePeersRecord;
 import org.apache.cassandra.utils.MBeanWrapper;
 
 public class MessagingServiceMBeanImpl implements MessagingServiceMBean
@@ -288,5 +293,50 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     public int getVersion(String address) throws UnknownHostException
     {
         return versions.get(address);
+    }
+
+    @Override
+    public String getInternodeCompatibilityMode()
+    {
+        return DatabaseDescriptor.getInternodeCompatibilityMode().name();
+    }
+
+    @Override
+    public String getStorageCompatibilityMode()
+    {
+        return DatabaseDescriptor.getStorageCompatibilityMode().name();
+    }
+
+    @Override
+    public String getSSTableFormatVersion()
+    {
+        SSTableFormat<?, ?> format = DatabaseDescriptor.getSelectedSSTableFormat();
+        return format.name() + '-' + format.getLatestVersion().version;
+    }
+
+    @Override
+    public Map<String, Integer> getEndpointMessagingVersions()
+    {
+        Map<String, Integer> result = new HashMap<>();
+        for (Map.Entry<InetAddressAndPort, Integer> e : versions.snapshot().entrySet())
+            result.put(e.getKey().getHostAddressAndPort(), e.getValue());
+        return result;
+    }
+
+    @Override
+    public Map<String, Long> getDseCompatRefusals()
+    {
+        return DseCompatRefusals.snapshot();
+    }
+
+    @Override
+    public List<String> getDsePeersOnRecord()
+    {
+        List<String> result = new ArrayList<>();
+        for (InetAddressAndPort peer : DsePeersRecord.peers())
+            result.add(peer.getHostAddressAndPort());
+        // the lines of the persisted record that are not addresses with port refuse a start with NONE too
+        result.addAll(DsePeersRecord.unparsedEntries());
+        return result;
     }
 }

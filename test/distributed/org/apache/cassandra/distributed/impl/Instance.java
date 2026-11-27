@@ -637,6 +637,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 FileUtils.setFSErrorHandler(new DefaultFSErrorHandler());
                 CassandraDaemon.getInstanceForTesting().migrateSystemDataIfNeeded();
                 CassandraDaemon.logSystemInfo(inInstancelogger);
+                CassandraDaemon.getInstanceForTesting().runStartupChecksBeforeCommitLogStart();
                 CommitLog.instance.start();
 
                 // MessagingService setup needs to be configured before any interaction with Schema because Schema
