@@ -306,11 +306,11 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
             // of cached rows we have had during the query.
             if (!hitFailureThreshold && maxRowsCached > cachedRowsWarnThreshold)
             {
-                String unredactedMessage = cachedRowsWarnMessage(Redaction.NONE);
+                String sensitiveMessage = cachedRowsWarnMessage(Redaction.NONE);
                 String redactedMessage = cachedRowsWarnMessage(Redaction.REDACT);
-                ClientWarn.instance.warn(unredactedMessage);
+                ClientWarn.instance.warn(sensitiveMessage);
                 oneMinuteLogger.warn(redactedMessage);
-                Tracing.trace(unredactedMessage);
+                Tracing.traceSensitive("{}", sensitiveMessage, redactedMessage);
             }
         }
 
@@ -358,11 +358,11 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
         if (currentRowsCached == cachedRowsFailThreshold + 1)
         {
             hitFailureThreshold = true;
-            String unredactedMessage = cachedRowsFailMessage(Redaction.NONE);
+            String sensitiveMessage = cachedRowsFailMessage(Redaction.NONE);
             String redactedMessage = cachedRowsFailMessage(Redaction.REDACT);
 
             logger.error(redactedMessage);
-            Tracing.trace(unredactedMessage);
+            Tracing.traceSensitive("{}", sensitiveMessage, redactedMessage);
             throw new OverloadedException(redactedMessage);
         }
     }

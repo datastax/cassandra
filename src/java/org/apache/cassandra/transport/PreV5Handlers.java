@@ -35,6 +35,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import io.netty.handler.codec.MessageToMessageEncoder;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.net.ResourceLimits;
@@ -239,7 +240,7 @@ public class PreV5Handlers
             logger.trace("Discarded request of size {} with {} bytes in flight on channel. {} " + 
                          "Global rate limiter: {} Request: {}",
                          requestSize, channelPayloadBytesInFlight, endpointPayloadTracker,
-                         GLOBAL_REQUEST_LIMITER, request);
+                         GLOBAL_REQUEST_LIMITER, request.toString(Redaction.REDACT));
 
             OverloadedException exception = CQLMessageHandler.buildOverloadedException(endpointPayloadTracker::toString,
                                                                                        GLOBAL_REQUEST_LIMITER,

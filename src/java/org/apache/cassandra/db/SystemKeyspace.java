@@ -66,6 +66,7 @@ import org.apache.cassandra.db.compaction.CompactionHistoryTabularData;
 import org.apache.cassandra.db.marshal.ByteBufferAccessor;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.RedactionUtil;
 import org.apache.cassandra.db.marshal.TimeUUIDType;
 import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -1796,20 +1797,30 @@ public final class SystemKeyspace
 
     public static void writePreparedStatement(String loggedKeyspace, MD5Digest key, String cql, long timestamp)
     {
-        if (PERSIST_PREPARED_STATEMENTS.getBoolean())
+        boolean persist = PERSIST_PREPARED_STATEMENTS.getBoolean();
+
+        if (persist)
         {
             executeInternal(format("INSERT INTO %s (logged_keyspace, prepared_id, query_string) VALUES (?, ?, ?) USING TIMESTAMP ?",
-                                   PreparedStatements.toString()),
+                                   PreparedStatements),
                             loggedKeyspace, key.byteBuffer(), cql, timestamp);
-            logger.debug("stored prepared statement for logged keyspace '{}': '{}'", loggedKeyspace, cql);
         }
-        else
-            logger.debug("not persisting prepared statement for logged keyspace '{}': '{}'", loggedKeyspace, cql);
+
+        if (logger.isDebugEnabled())
+        {
+            // we don't want to directly output the CQL query to logs because it might contain user data
+            String redactedCQL = RedactionUtil.redactUnparsedCQL(cql);
+
+            if (persist)
+                logger.debug("stored prepared statement for logged keyspace '{}': {}", loggedKeyspace, redactedCQL);
+            else
+                logger.debug("not persisting prepared statement for logged keyspace '{}': {}", loggedKeyspace, redactedCQL);
+        }
     }
 
     public static void removePreparedStatement(MD5Digest key)
     {
-        executeInternal(format("DELETE FROM %s WHERE prepared_id = ?", PreparedStatements.toString()),
+        executeInternal(format("DELETE FROM %s WHERE prepared_id = ?", PreparedStatements),
                         key.byteBuffer());
     }
 

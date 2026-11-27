@@ -30,6 +30,8 @@ import org.apache.cassandra.cql3.CQLStatement;
 import org.apache.cassandra.cql3.QueryEvents;
 import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
+import org.apache.cassandra.db.marshal.Redaction;
+import org.apache.cassandra.db.marshal.RedactionUtil;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -226,9 +228,10 @@ public class QueryMessage extends Message.Request
     }
 
     @Override
-    public String toString()
+    public String toString(Redaction redaction)
     {
         return String.format("QUERY %s [pageSize = %s] at consistency %s",
-                             query, options.getPageSize(), options.getConsistency());
+                             redaction == Redaction.REDACT ? RedactionUtil.redactUnparsedCQL(query) : query,
+                             options.getPageSize(), options.getConsistency());
     }
 }

@@ -37,6 +37,7 @@ import org.apache.cassandra.concurrent.ExecutorPlus;
 import org.apache.cassandra.concurrent.LocalAwareExecutorPlus;
 import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.metrics.ClientMetrics;
 import org.apache.cassandra.net.FrameEncoder;
@@ -334,7 +335,7 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
         public String toString()
         {
             return "RequestProcessor{" +
-                   "request=" + request +
+                   "request=" + request.toString(Redaction.REDACT) +
                    ", approxStartTimeNanos=" + startTimeNanos +
                    '}';
         }
@@ -365,7 +366,7 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
                     if (ex == null)
                     {
                         toFlush = forFlusher.toFlushItem(channel, request, response);
-                        Message.logger.trace("Responding: {}, v={}", response, connection.getVersion());
+                        Message.logger.trace("Responding: {}, v={}", response.toString(Redaction.REDACT), connection.getVersion());
                     }
                     else
                     {
@@ -447,7 +448,7 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
 
         QueryState qstate = connection.validateNewMessage(request.type, connection.getVersion());
 
-        Message.logger.trace("Received: {}, v={}", request, connection.getVersion());
+        Message.logger.trace("Received: {}, v={}", request.toString(Redaction.REDACT), connection.getVersion());
         connection.requests.inc();
         ExecutorLocals executorLocals = ExecutorLocals.current();
         try
@@ -491,7 +492,7 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
 
         QueryState qstate = connection.validateNewMessage(request.type, connection.getVersion());
 
-        Message.logger.trace("Received: {}, v={}", request, connection.getVersion());
+        Message.logger.trace("Received: {}, v={}", request.toString(Redaction.REDACT), connection.getVersion());
         connection.requests.inc();
 
         // Capture ExecutorLocals containing thread-local state (TraceState, ClientWarn, RequestSensors,

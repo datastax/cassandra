@@ -35,6 +35,7 @@ import org.apache.cassandra.cql3.QueryHandler;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.ResultSet;
 import org.apache.cassandra.cql3.statements.BatchStatement;
+import org.apache.cassandra.db.marshal.Redaction;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
 import org.apache.cassandra.metrics.ClientMetrics;
@@ -314,7 +315,7 @@ public class ExecuteMessage extends Message.Request
     }
 
     @Override
-    public String toString()
+    public String toString(Redaction redaction)
     {
         return String.format("EXECUTE %s with %d values at consistency %s", statementId, options.getValues().size(), options.getConsistency());
     }

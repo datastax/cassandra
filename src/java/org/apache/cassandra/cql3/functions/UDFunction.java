@@ -48,6 +48,7 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.CqlBuilder;
 import org.apache.cassandra.cql3.functions.types.TypeCodec;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.RedactionUtil;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.FunctionExecutionException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -449,7 +450,7 @@ public abstract class UDFunction extends UserFunction implements ScalarFunction
         }
         catch (Throwable t)
         {
-            logger.trace("Invocation of user-defined function '{}' failed", this, t);
+            logger.trace("Invocation of user-defined function '{}' failed with {}", this, RedactionUtil.redact(t));
             if (t instanceof VirtualMachineError)
                 throw (VirtualMachineError) t;
             throw FunctionExecutionException.create(this, t);
@@ -480,7 +481,7 @@ public abstract class UDFunction extends UserFunction implements ScalarFunction
         }
         catch (Throwable t)
         {
-            logger.debug("Invocation of user-defined function '{}' failed", this, t);
+            logger.debug("Invocation of user-defined function '{}' failed with {}", this, RedactionUtil.redact(t));
             if (t instanceof VirtualMachineError)
                 throw (VirtualMachineError) t;
             throw FunctionExecutionException.create(this, t);

@@ -111,9 +111,12 @@ public class QueriesTableTest extends TestBaseImpl
             String task = row.get("task").toString();
 
             readVisible |= threadId.contains("Read") && task.contains("SELECT");
-            coordinatorReadVisible |= threadId.contains("Native-Transport-Requests") && task.contains("SELECT");
+            // the queries on the coordinator are not redacted, since this table is meant for authorized users
+            coordinatorReadVisible |= threadId.contains("Native-Transport-Requests")
+                                      && task.contains("SELECT * FROM " + KEYSPACE + ".tbl WHERE k = 0");
             writeVisible |= threadId.contains("Mutation") && task.contains("Mutation");
-            coordinatorWriteVisible |= threadId.contains("Native-Transport-Requests") && task.contains("INSERT");
+            coordinatorWriteVisible |= threadId.contains("Native-Transport-Requests")
+                                       && task.contains("INSERT INTO " + KEYSPACE + ".tbl (k, v) VALUES (0, 0)");
         }
 
         // Issue another read and write to unblock the original queries in progress:

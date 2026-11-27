@@ -27,6 +27,8 @@ import org.slf4j.LoggerFactory;
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.cql3.QueryEvents;
 import org.apache.cassandra.cql3.QueryHandler;
+import org.apache.cassandra.db.marshal.Redaction;
+import org.apache.cassandra.db.marshal.RedactionUtil;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.tracing.Tracing;
@@ -145,8 +147,8 @@ public class PrepareMessage extends Message.Request
     }
 
     @Override
-    public String toString()
+    public String toString(Redaction redaction)
     {
-        return "PREPARE " + query;
+        return "PREPARE " + (redaction == Redaction.REDACT ? RedactionUtil.redactUnparsedCQL(query) : query);
     }
 }

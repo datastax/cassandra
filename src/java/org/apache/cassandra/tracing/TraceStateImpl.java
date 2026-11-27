@@ -65,12 +65,18 @@ public class TraceStateImpl extends TraceState
 
     protected void traceImpl(String message)
     {
+        traceImpl(message, message);
+    }
+
+    @Override
+    protected void traceImpl(String sensitiveMessage, String redactedMessage)
+    {
         final String threadName = Thread.currentThread().getName();
         final int elapsed = elapsed();
 
-        executeMutation(TraceKeyspace.makeEventMutation(sessionIdBytes, message, elapsed, threadName, ttl));
+        executeMutation(TraceKeyspace.makeEventMutation(sessionIdBytes, sensitiveMessage, elapsed, threadName, ttl));
         if (logger.isTraceEnabled())
-            logger.trace("Adding <{}> to trace events", message);
+            logger.trace("Adding <{}> to trace events", redactedMessage);
     }
 
     /**

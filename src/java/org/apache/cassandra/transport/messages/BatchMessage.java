@@ -38,6 +38,8 @@ import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.VariableSpecifications;
 import org.apache.cassandra.cql3.statements.BatchStatement;
 import org.apache.cassandra.cql3.statements.ModificationStatement;
+import org.apache.cassandra.db.marshal.Redaction;
+import org.apache.cassandra.db.marshal.RedactionUtil;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.OverloadedException;
 import org.apache.cassandra.exceptions.PreparedQueryNotFoundException;
@@ -319,14 +321,18 @@ public class BatchMessage extends Message.Request
     }
 
     @Override
-    public String toString()
+    public String toString(Redaction redaction)
     {
         StringBuilder sb = new StringBuilder();
         sb.append("BATCH of [");
         for (int i = 0; i < queryOrIdList.size(); i++)
         {
             if (i > 0) sb.append(", ");
-            sb.append(queryOrIdList.get(i)).append(" with ").append(values.get(i).size()).append(" values");
+            Object queryOrId = queryOrIdList.get(i);
+            sb.append(queryOrId instanceof String && redaction == Redaction.REDACT
+                      ? RedactionUtil.redactUnparsedCQL((String) queryOrId)
+                      : queryOrId)
+              .append(" with ").append(values.get(i).size()).append(" values");
         }
         sb.append("] at consistency ").append(options.getConsistency());
         return sb.toString();
