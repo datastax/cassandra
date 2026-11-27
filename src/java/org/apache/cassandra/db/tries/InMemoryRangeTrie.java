@@ -70,6 +70,13 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
         return new InMemoryRangeCursor<>(this, direction, root);
     }
 
+    /// Range tries can have boundaries that apply after a branch.
+    @Override
+    protected boolean allowsContentAfterBranch()
+    {
+        return true;
+    }
+
     protected long emptySizeOnHeap()
     {
         return bufferManager.bufferType() == BufferType.ON_HEAP ? EMPTY_SIZE_ON_HEAP : EMPTY_SIZE_OFF_HEAP;
@@ -322,6 +329,76 @@ public class InMemoryRangeTrie<S extends RangeState<S>> extends InMemoryBaseTrie
             assert shouldPresentOnTheReturnPath(contentId);
             return trie.getContent(contentId);
         }
+    }
+
+    /// Map-like put method. It walks the key bytes with an on-heap stack, so keys of any length can be used. When the
+    /// correct position in the trie has been reached, the value will be resolved with the given function before being
+    /// placed in the trie (even if there's no pre-existing content in this trie). The value goes in the slot for
+    /// content presented before the node's branch.
+    ///
+    /// Unlike [#apply], this method does not apply the inserted data to any existing position other than the specified
+    /// singleton. The caller is responsible for making sure that the range state requirements are satisfied (e.g. that
+    /// all opened ranges are properly closed) after performing a sequence of puts.
+    ///
+    /// @param key The trie path/key for the given value.
+    /// @param value The value being put in the memtable trie. Note that it can be of type different than the element
+    /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
+    /// the memtable trie. If it is `null`, the trie is not changed and the transformer is not called.
+    /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
+    /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
+    /// even if there's no pre-existing value in the memtable trie.
+    public <R> void putSingleton(ByteComparable key, R value, final UpsertTransformer<S, R> transformer)
+    throws TrieSpaceExhaustedException
+    {
+        putSingleton(applyState, key, value, null, transformer);
+    }
+
+    /// Map-like put method. It walks the key bytes with an on-heap stack, so keys of any length can be used. When the
+    /// correct position in the trie has been reached, the value will be resolved with the given function before being
+    /// placed in the trie (even if there's no pre-existing content in this trie).
+    ///
+    /// Unlike [#apply], this method does not apply the inserted data to any existing position other than the specified
+    /// singleton. The caller is responsible for making sure that the range state requirements are satisfied (e.g. that
+    /// all opened ranges are properly closed) after performing a sequence of puts.
+    ///
+    /// @param key The trie path/key for the given value.
+    /// @param value The value being put in the memtable trie. Note that it can be of type different than the element
+    /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
+    /// the memtable trie. If it is `null`, the trie is not changed and the transformer is not called.
+    /// @param contentAfterBranch Whether the content should be placed after descendants in forward iteration order.
+    /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
+    /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
+    /// even if there's no pre-existing value in the memtable trie.
+    public <R> void putSingleton(ByteComparable key, R value, boolean contentAfterBranch, final UpsertTransformer<S, R> transformer)
+    throws TrieSpaceExhaustedException
+    {
+        putSingleton(applyState, key, contentAfterBranch ? null : value, contentAfterBranch ? value : null, transformer);
+    }
+
+    /// Map-like put method for both content slots of a node, e.g. the start and the end of a range that covers the
+    /// node's branch. It walks the key bytes once and with an on-heap stack, so keys of any length can be used. When the
+    /// correct position in the trie has been reached, each value will be resolved with the given function, together
+    /// with the existing content of its slot, before being placed in the trie (even if there's no pre-existing content
+    /// in this trie). The slot before the branch is processed first.
+    ///
+    /// Unlike [#apply], this method does not apply the inserted data to any existing position other than the specified
+    /// singleton. The caller is responsible for making sure that the range state requirements are satisfied (e.g. that
+    /// all opened ranges are properly closed) after performing a sequence of puts.
+    ///
+    /// @param key The trie path/key for the given values.
+    /// @param contentBeforeBranch The value being put in the memtable trie in the slot for content presented before
+    /// the node's branch in forward iteration order. Note that it can be of type different than the element type for
+    /// this memtable trie. It's up to the `transformer` to return the final value that will stay in the memtable trie.
+    /// If it is `null`, the slot is not changed and the transformer is not called for it.
+    /// @param contentAfterBranch The value being put in the memtable trie in the slot for content presented after the
+    /// node's branch in forward iteration order. Processed by `transformer` as above.
+    /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
+    /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
+    /// even if there's no pre-existing value in the memtable trie.
+    public <R> void putSingleton(ByteComparable key, R contentBeforeBranch, R contentAfterBranch, final UpsertTransformer<S, R> transformer)
+    throws TrieSpaceExhaustedException
+    {
+        putSingleton(applyState, key, contentBeforeBranch, contentAfterBranch, transformer);
     }
 
     /// Reused storage for the state of application of mutations. This stores the backtracking path, including changes

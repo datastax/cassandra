@@ -93,14 +93,12 @@ public class TrieColumnFilter
             applyColumnFilter(filter, isStatic, rowLivenessTimestamp);
 
             // Add row-level before and after markers to preserve row-level liveness and deletion.
-            trie.putRecursive(ByteComparable.EMPTY, MARKER, false, TrieColumnFilter::addNew);
-            trie.putRecursive(ByteComparable.EMPTY, MARKER, true, TrieColumnFilter::addNew);
+            trie.putSingleton(ByteComparable.EMPTY, MARKER, MARKER, TrieColumnFilter::addNew);
         }
         else
         {
             // Include the whole source trie.
-            trie.putRecursive(ByteComparable.EMPTY, INCLUDED_START, false, TrieColumnFilter::addNew);
-            trie.putRecursive(ByteComparable.EMPTY, INCLUDED_END, true, TrieColumnFilter::addNew);
+            trie.putSingleton(ByteComparable.EMPTY, INCLUDED_START, INCLUDED_END, TrieColumnFilter::addNew);
         }
     }
 
@@ -118,18 +116,16 @@ public class TrieColumnFilter
                 continue;
             ByteComparable columnKey = TrieBackedRow.encodeUnsignedInt(id);
 
-            trie.putRecursive(columnKey, INCLUDED_START, false, TrieColumnFilter::addNew);
-            trie.putRecursive(columnKey, INCLUDED_END, true, TrieColumnFilter::addNew);
+            trie.putSingleton(columnKey, INCLUDED_START, INCLUDED_END, TrieColumnFilter::addNew);
         }
 
         // Add row-level before and after markers to preserve row-level deletion and row markers.
-        trie.putRecursive(ByteComparable.EMPTY, MARKER, false, TrieColumnFilter::addNew);
-        trie.putRecursive(ByteComparable.EMPTY, MARKER, true, TrieColumnFilter::addNew);
+        trie.putSingleton(ByteComparable.EMPTY, MARKER, MARKER, TrieColumnFilter::addNew);
     }
 
     private void applyColumnFilter(ColumnFilter filter, boolean isStatic, long rowLivenessTimestamp) throws TrieSpaceExhaustedException
     {
-        // Note: this method uses `putRecursive`, assuming the trie starts empty and that no range presented covers
+        // Note: this method uses `putSingleton`, assuming the trie starts empty and that no range presented covers
         // another. It must be called before any deletion (dropped column or active deletion).
         Columns columns = filter.fetchedColumns().columns(isStatic);
         Predicate<ColumnMetadata> queriedByUserTester = filter.queriedColumns().columns(isStatic).inOrderInclusionTester();
@@ -154,27 +150,31 @@ public class TrieColumnFilter
                     // include only the subselection
                     for (ColumnSubselection ss : subselection)
                     {
-                        trie.putRecursive(TrieBackedRow.cellKey(id, column, ss.startInclusive()), INCLUDED_START, false, TrieColumnFilter::addNew);
-                        trie.putRecursive(TrieBackedRow.cellKey(id, column, ss.endInclusive()), INCLUDED_END, true, TrieColumnFilter::addNew);
+                        CellPath start = ss.startInclusive();
+                        CellPath end = ss.endInclusive();
+                        if (start != end)
+                        {
+                            trie.putSingleton(TrieBackedRow.cellKey(id, column, start), INCLUDED_START, false, TrieColumnFilter::addNew);
+                            trie.putSingleton(TrieBackedRow.cellKey(id, column, end), INCLUDED_END, true, TrieColumnFilter::addNew);
+                        }
+                        else
+                            trie.putSingleton(TrieBackedRow.cellKey(id, column, start), INCLUDED_START, INCLUDED_END, TrieColumnFilter::addNew);
                     }
 
                     // preserve column marker and deletion
-                    trie.putRecursive(columnKey, MARKER, false, TrieColumnFilter::addNew);
-                    trie.putRecursive(columnKey, MARKER, true, TrieColumnFilter::addNew);
+                    trie.putSingleton(columnKey, MARKER, MARKER, TrieColumnFilter::addNew);
                 }
                 else
                 {
                     // include the column with all cells and complex deletion
-                    trie.putRecursive(columnKey, INCLUDED_START, false, TrieColumnFilter::addNew);
-                    trie.putRecursive(columnKey, INCLUDED_END, true, TrieColumnFilter::addNew);
+                    trie.putSingleton(columnKey, INCLUDED_START, INCLUDED_END, TrieColumnFilter::addNew);
                 }
             }
             else
             {
                 // cover the column with all cells and complex deletion, but skip the cells older than the row's
                 // liveness and drop the cell values of the others
-                trie.putRecursive(columnKey, dropValueStart, false, TrieColumnFilter::addNew);
-                trie.putRecursive(columnKey, dropValueEnd, true, TrieColumnFilter::addNew);
+                trie.putSingleton(columnKey, dropValueStart, dropValueEnd, TrieColumnFilter::addNew);
             }
         }
     }

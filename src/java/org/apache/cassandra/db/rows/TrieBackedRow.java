@@ -103,8 +103,6 @@ public class TrieBackedRow extends AbstractRow
     // A column with this ID cannot exist. Used to make sure we don't find anything when we are passed an unknown column definition.
     public static final ByteComparable MISSING_COLUMN_KEY = encodeUnsignedInt(Long.MAX_VALUE);
 
-    public static final int MAX_RECURSIVE_LENGTH = 128;
-
     /// The row's clustering key.
     private final Clustering<?> clustering;
 
@@ -1393,7 +1391,7 @@ public class TrieBackedRow extends AbstractRow
 
             try
             {
-                data.putRecursive(ByteComparable.EMPTY, (info), (x, y) -> y);
+                data.putSingleton(ByteComparable.EMPTY, (info), (x, y) -> y);
             }
             catch (TrieSpaceExhaustedException e)
             {
@@ -1432,21 +1430,16 @@ public class TrieBackedRow extends AbstractRow
 
             try
             {
-                if (path == null || path.dataSize() <= MAX_RECURSIVE_LENGTH)
-                {
-                    DeletionTime cellDeletion =  TrieTombstoneMarker.applicableDeletion(data, true, key);
-                    if (cellDeletion != null && cellDeletion.deletes(cell))
-                        return;
+                DeletionTime cellDeletion =  TrieTombstoneMarker.applicableDeletion(data, true, key);
+                if (cellDeletion != null && cellDeletion.deletes(cell))
+                    return;
 
-                    data.putRecursive(key, cell, (x, y) -> Cells.reconcile((Cell<?>) x, y));
-                }
-                else // long path, avoid stack overflow by using the apply path; this will also take into account any existing deletion
-                    mutator.apply(DeletionAwareTrie.singleton(key, BYTE_COMPARABLE_VERSION, cell));
+                data.putSingleton(key, cell, (x, y) -> Cells.reconcile((Cell<?>) x, y));
 
                 if (path != null)
-                    data.putRecursive(columnKey(columnIds, cell.column), COMPLEX_COLUMN_MARKER, Builder::addIfNotPresent);
+                    data.putSingleton(columnKey(columnIds, cell.column), COMPLEX_COLUMN_MARKER, Builder::addIfNotPresent);
 
-                data.putRecursive(ByteComparable.EMPTY, LivenessInfo.EMPTY, Builder::addIfNotPresent);
+                data.putSingleton(ByteComparable.EMPTY, LivenessInfo.EMPTY, Builder::addIfNotPresent);
             }
             catch (TrieSpaceExhaustedException e)
             {

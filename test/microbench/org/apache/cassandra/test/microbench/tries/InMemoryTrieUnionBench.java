@@ -75,7 +75,7 @@ public class InMemoryTrieUnionBench
             {
                 long l = rand.nextLong();
                 InMemoryTrie<Byte> tt = tries.get(Math.min((int) (((l >> 48) + 32768) / sz), sources - 1));
-                tt.putRecursive(ByteComparable.of(l), (byte) (l >> 56), resolver);
+                tt.putSingleton(ByteComparable.of(l), (byte) (l >> 56), resolver);
             }
 
         }
@@ -90,7 +90,7 @@ public class InMemoryTrieUnionBench
                 for (; current < currMax; ++current)
                 {
                     long l = rand.nextLong();
-                    trie.putRecursive(ByteComparable.of(l), (byte) (l >> 56), resolver);
+                    trie.putSingleton(ByteComparable.of(l), (byte) (l >> 56), resolver);
                 }
                 tries.add(trie);
             }

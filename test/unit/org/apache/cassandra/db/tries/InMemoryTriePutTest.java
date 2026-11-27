@@ -40,7 +40,7 @@ public class InMemoryTriePutTest extends InMemoryTrieTestBase
     }
 
     @Test
-    public void testLongKey_StackOverflow() throws TrieSpaceExhaustedException
+    public void testLongKey() throws TrieSpaceExhaustedException
     {
         InMemoryTrie<String> trie = strategy.create();
         Random rand = new Random(1);
@@ -48,17 +48,7 @@ public class InMemoryTriePutTest extends InMemoryTrieTestBase
         rand.nextBytes(key);
         ByteBuffer buf = ByteBuffer.wrap(key);
 
-        try
-        {
-            trie.putRecursive(ByteComparable.preencoded(VERSION, buf), "value", (x, y) -> y);
-            Assert.fail("StackOverflowError expected with a recursive put for very long keys!");
-        }
-        catch (StackOverflowError soe)
-        {
-            // Expected.
-        }
-        // Using non-recursive put should work.
-        putSimpleResolve(trie, ByteComparable.preencoded(VERSION, buf), "value", (x, y) -> y, false);
+        trie.putSingleton(ByteComparable.preencoded(VERSION, buf), "value", (x, y) -> y);
     }
 
     /// This tests that trie space allocation works correctly close to the 2G limit. It is normally disabled because
@@ -76,13 +66,13 @@ public class InMemoryTriePutTest extends InMemoryTrieTestBase
         String t1 = "test1";
         String t2 = "testing2";
         String t3 = "onemoretest3";
-        trie.putRecursive(TrieUtil.comparable(t1), t1, (x, y) -> y);
+        trie.putSingleton(TrieUtil.comparable(t1), t1, (x, y) -> y);
         Assert.assertEquals(t1, trie.get(TrieUtil.comparable(t1)));
         Assert.assertNull(trie.get(TrieUtil.comparable(t2)));
         Assert.assertFalse(trie.reachedAllocatedSizeThreshold());
 
         mgr.advanceAllocatedPos(BufferManagerMultibuf.ALLOCATED_SIZE_THRESHOLD + 0x1000);
-        trie.putRecursive(TrieUtil.comparable(t2), t2, (x, y) -> y);
+        trie.putSingleton(TrieUtil.comparable(t2), t2, (x, y) -> y);
         Assert.assertEquals(t1, trie.get(TrieUtil.comparable(t1)));
         Assert.assertEquals(t2, trie.get(TrieUtil.comparable(t2)));
         Assert.assertNull(trie.get(TrieUtil.comparable(t3)));
@@ -96,7 +86,7 @@ public class InMemoryTriePutTest extends InMemoryTrieTestBase
 
         try
         {
-            trie.putRecursive(TrieUtil.comparable(t3), t3, (x, y) -> y);  // should put it over the edge
+            trie.putSingleton(TrieUtil.comparable(t3), t3, (x, y) -> y);  // should put it over the edge
             fail("InMemoryTrie.SpaceExhaustedError was expected");
         }
         catch (TrieSpaceExhaustedException e)

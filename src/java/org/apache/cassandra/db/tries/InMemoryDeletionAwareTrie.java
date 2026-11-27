@@ -343,7 +343,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
                 else
                     position = mutationCursor.advance();
 
-                assert !Cursor.isOnReturnPath(position) : "Return path in forward direction can only be used in range tries.";
+                rejectReturnPath(position);
                 depth = Cursor.depth(position);
                 if (!state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth))
                     break;
@@ -401,7 +401,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
             // The first forcedCopyDepth and applyContent are already called.
             long position = mutationCursor.advance();
             int depth = Cursor.depth(position);
-            assert !Cursor.isOnReturnPath(position) : "Return path in forward direction can only be used in range tries.";
+            rejectReturnPath(position);
 
             // Below is the same as the main loop in `apply`, slightly rearranged and ignoring deletion branches.
             while (state.advanceTo(depth, Cursor.incomingTransition(position), forcedCopyDepth, initialDepth))
@@ -413,6 +413,7 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
 
                 applyContent((position & Cursor.MAY_HAVE_CONTENT_BIT) != 0 ? mutationCursor.content() : null);
                 position = mutationCursor.advance();
+                rejectReturnPath(position);
                 depth = Cursor.depth(position);
             }
             assert state.currentDepth == initialDepth;
@@ -741,6 +742,22 @@ extends InMemoryBaseTrie<T> implements DeletionAwareTrie<T, D>
                 deletionsAtFixedPoints,
                 needsForcedCopy)
         .apply(mutation);
+    }
+
+    /// Map-like put method. It walks the key bytes with an on-heap stack, so keys of any length can be used. When the
+    /// correct position in the trie has been reached, the value will be resolved with the given function before being
+    /// placed in the trie (even if there's no pre-existing content in this trie).
+    /// @param key The trie path/key for the given value.
+    /// @param value The value being put in the memtable trie. Note that it can be of type different than the element
+    /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
+    /// the memtable trie. If it is `null`, the trie is not changed and the transformer is not called.
+    /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
+    /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
+    /// even if there's no pre-existing value in the memtable trie.
+    public <R> void putSingleton(ByteComparable key, R value, final UpsertTransformer<T, R> transformer)
+    throws TrieSpaceExhaustedException
+    {
+        putSingleton(applyState, key, value, null, transformer);
     }
 
     private class DumpCursor extends InMemoryReadTrie<T>.DumpCursor<DeletionAwareInMemoryCursor<T, D>> implements DeletionAwareCursor<String, D>

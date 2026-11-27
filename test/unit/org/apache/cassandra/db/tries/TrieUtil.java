@@ -396,7 +396,7 @@ public class TrieUtil
     {
         InMemoryTrie<String> trie = InMemoryTrie.shortLived(VERSION);
         for (String s : points)
-            trie.putRecursive(directComparable(s), s, (ex, n) -> n);
+            trie.putSingleton(directComparable(s), s, (ex, n) -> n);
         return trie;
     }
 

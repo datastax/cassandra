@@ -342,7 +342,7 @@ public class ComparisonReadBench
         {
             try
             {
-                trie.putRecursive(type.longToByteComparable(v), b, resolver);
+                trie.putSingleton(type.longToByteComparable(v), b, resolver);
             }
             catch (TrieSpaceExhaustedException e)
             {

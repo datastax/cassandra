@@ -30,7 +30,7 @@ public class TrieToMermaidTest
         String s = "a allow an and any are as node of on the this to trie types with without";
         s = s.toLowerCase();
         for (String word : s.split("[^a-z]+"))
-            trie.putRecursive(TrieUtil.directComparable(word), word, (x, y) -> y);
+            trie.putSingleton(TrieUtil.directComparable(word), word, (x, y) -> y);
 
         System.out.println(trie.process(Direction.FORWARD,
                                         new TrieToMermaid(Object::toString,

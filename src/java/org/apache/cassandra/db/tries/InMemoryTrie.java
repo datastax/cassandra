@@ -20,8 +20,6 @@ package org.apache.cassandra.db.tries;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 
-import com.google.common.base.Predicates;
-
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.bytecomparable.ByteComparable;
@@ -47,14 +45,9 @@ import org.apache.cassandra.utils.concurrent.OpOrder;
 ///
 ///
 ///     Additionally, the class provides several simpler write methods for efficiency and convenience:
-///   -  [#putRecursive(ByteComparable,Object,UpsertTransformer)] inserts a single value using a recursive walk.
-///     It cannot provide consistency (single-path writes are always atomic). This is more efficient as it stores the
-///     walk state in the stack rather than on the heap but can cause a `StackOverflowException`.
-///   -  [#putSingleton(ByteComparable,Object,UpsertTransformer)] is a non-recursive version of the above, using
-///     the `apply` machinery.
-///   -  [#putSingleton(ByteComparable,Object,UpsertTransformer,boolean)] uses the fourth argument to choose
-///     between the two methods above, where some external property can be used to decide if the keys are short enough
-///     to permit recursive execution.
+///   -  [#putSingleton(ByteComparable,Object,UpsertTransformer)] inserts a single value using a recursive walk with an
+///     on-heap stack. It cannot provide consistency (single-path writes are always atomic). The recursion state is not
+///     kept in the CPU stack, so it can process keys of any length.
 ///
 ///     Because it uses 32-bit pointers in byte buffers, this trie has a fixed size limit of 2GB.
 public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
@@ -220,18 +213,6 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
                 abortMutation();
                 throw t;
             }
-        }
-
-        /// Map-like put method, using the apply machinery above which cannot run into stack overflow. When the correct
-        /// position in the trie has been reached, the value will be resolved with the given function before being placed in
-        /// the trie (even if there's no pre-existing content in this trie).
-        /// @param key the trie path/key for the given value.
-        /// @param value the value being put in the memtable trie. Note that it can be of type different than the element
-        /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
-        /// the memtable trie.
-        public void putSingleton(ByteComparable key, U value) throws TrieSpaceExhaustedException
-        {
-            apply(Trie.singleton(key, byteComparableVersion, value));
         }
     }
 
@@ -480,32 +461,19 @@ public class InMemoryTrie<T> extends InMemoryBaseTrie<T> implements Trie<T>
         deleter(null).apply(set);
     }
 
-    /// Map-like put method, using the apply machinery above which cannot run into stack overflow. When the correct
-    /// position in the trie has been reached, the value will be resolved with the given function before being placed in
-    /// the trie (even if there's no pre-existing content in this trie).
-    /// @param key the trie path/key for the given value.
-    /// @param value the value being put in the memtable trie. Note that it can be of type different than the element
+    /// Map-like put method. It walks the key bytes with an on-heap stack, so keys of any length can be used. When the
+    /// correct position in the trie has been reached, the value will be resolved with the given function before being
+    /// placed in the trie (even if there's no pre-existing content in this trie).
+    /// @param key The trie path/key for the given value.
+    /// @param value The value being put in the memtable trie. Note that it can be of type different than the element
     /// type for this memtable trie. It's up to the `transformer` to return the final value that will stay in
-    /// the memtable trie.
-    /// @param transformer a function applied to the potentially pre-existing value for the given key, and the new
+    /// the memtable trie. If it is `null`, the trie is not changed and the transformer is not called.
+    /// @param transformer A function applied to the potentially pre-existing value for the given key, and the new
     /// value (of a potentially different type), returning the final value that will stay in the memtable trie. Applied
     /// even if there's no pre-existing value in the memtable trie.
-    public <R> void putSingleton(ByteComparable key,
-                                 R value,
-                                 UpsertTransformer<T, ? super R> transformer) throws TrieSpaceExhaustedException
+    public <R> void putSingleton(ByteComparable key, R value, final UpsertTransformer<T, R> transformer)
+    throws TrieSpaceExhaustedException
     {
-        mutator(transformer, Predicates.alwaysFalse()).apply(Trie.singleton(key, byteComparableVersion, value));
-    }
-
-    /// A version of putSingleton which uses recursive put if the last argument is true.
-    public <R> void putSingleton(ByteComparable key,
-                                 R value,
-                                 UpsertTransformer<T, ? super R> transformer,
-                                 boolean useRecursive) throws TrieSpaceExhaustedException
-    {
-        if (useRecursive)
-            putRecursive(key, value, transformer);
-        else
-            putSingleton(key, value, transformer);
+        putSingleton(applyState, key, value, null, transformer);
     }
 }

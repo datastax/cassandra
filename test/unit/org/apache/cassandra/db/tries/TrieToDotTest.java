@@ -30,7 +30,7 @@ public class TrieToDotTest
                    " they are on disk without any serialization, and to enable the creation of such files.";
         s = s.toLowerCase();
         for (String word : s.split("[^a-z]+"))
-            trie.putRecursive(TrieUtil.directComparable(word), word, (x, y) -> y);
+            trie.putSingleton(TrieUtil.directComparable(word), word, (x, y) -> y);
 
         System.out.println(trie.process(Direction.FORWARD,
                                         new TrieToDot(Object::toString,

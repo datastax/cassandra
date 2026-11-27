@@ -158,7 +158,7 @@ public class InMemoryRangeTrieTest
     @Test
     public void testApplyUpdate() throws TrieSpaceExhaustedException
     {
-        // Ranges in pairs. They may touch but not overlap (putRecursive can't handle covering ranges).
+        // Ranges in pairs. They may touch but not overlap (putSingleton can't handle covering ranges).
         String[] bounds = new String[]{ "<aaa", ">aaa", "<touch", ">touchAfter", ">touchAfter", "<touchBefore", "<touchBefore", "<touchTwice", "<touchTwice", ">touchTwice", ">touchTwice", ">touch" };
         String[] tests = Arrays.stream(bounds).map(x -> x.substring(1)).toArray(String[]::new);
         Boolean[] after = Arrays.stream(bounds).map(x -> x.charAt(0) == '>').toArray(Boolean[]::new);
@@ -186,9 +186,9 @@ public class InMemoryRangeTrieTest
     }
 
     @Test
-    public void testPutRecursiveUpdate() throws TrieSpaceExhaustedException
+    public void testPutSingletonUpdate() throws TrieSpaceExhaustedException
     {
-        // Ranges in pairs. They may touch but not overlap (putRecursive can't handle covering ranges).
+        // Ranges in pairs. They may touch but not overlap (putSingleton can't handle covering ranges).
         String[] bounds = new String[]{ "<aaa", ">aaa", "<touch", ">touchAfter", ">touchAfter", "<touchBefore", "<touchBefore", "<touchTwice", "<touchTwice", ">touchTwice", ">touchTwice", ">touch" };
         String[] tests = Arrays.stream(bounds).map(x -> x.substring(1)).toArray(String[]::new);
         Boolean[] after = Arrays.stream(bounds).map(x -> x.charAt(0) == '>').toArray(Boolean[]::new);
@@ -196,11 +196,11 @@ public class InMemoryRangeTrieTest
         for (int i = 0; i < tests.length; i += 2)
         {
             System.out.println("Adding " + bounds[i] + "-" + bounds[i + 1]);
-            trie.putRecursive(bound(tests[i], after[i]),
+            trie.putSingleton(bound(tests[i], after[i]),
                               toMarker(bounds[i], i).asBoundary(Direction.FORWARD),
                               after[i],
                               InMemoryRangeTrieTest::addMarkerStrings);
-            trie.putRecursive(bound(tests[i + 1], after[i + 1]),
+            trie.putSingleton(bound(tests[i + 1], after[i + 1]),
                               toMarker(bounds[i + 1], i).asBoundary(Direction.REVERSE),
                               after[i + 1],
                               InMemoryRangeTrieTest::addMarkerStrings);
@@ -367,7 +367,7 @@ public class InMemoryRangeTrieTest
         String[] keys = new String[]{ "4014", "4033", "405d", "405f", "40b0", "40de", "40ff", "4108", "4120" };
         InMemoryTrie<Integer> trie = InMemoryTrie.shortLived(VERSION);
         for (String k : keys)
-            trie.putRecursive(key(hexBc(k)), 1, (x, y) -> y);
+            trie.putSingleton(key(hexBc(k)), 1, (x, y) -> y);
 
         // Delete everything with timestamp lower than the deletion time.
         trie.rangeMutator((Integer existing, TestRangeState deletion) -> existing > Math.max(deletion.leftSide, deletion.rightSide) ? existing : null,
@@ -388,7 +388,7 @@ public class InMemoryRangeTrieTest
         String[] keys = new String[]{ "4014", "4033", "405d", "405f", "40b0", "40de", "40ff", "4108", "4120" };
         InMemoryTrie<Integer> trie = InMemoryTrie.shortLived(VERSION);
         for (String k : keys)
-            trie.putRecursive(key(hexBc(k)), 20, (x, y) -> y);
+            trie.putSingleton(key(hexBc(k)), 20, (x, y) -> y);
 
         trie.rangeMutator((Integer existing, TestRangeState deletion) -> existing > Math.max(deletion.leftSide, deletion.rightSide) ? existing : null,
                           x -> forceCopy)

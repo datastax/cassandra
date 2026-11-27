@@ -873,7 +873,7 @@ public class TrieBackedPartitionStage3 implements Partition
         public ContentBuilder complete() throws TrieSpaceExhaustedException
         {
             assert openMarker == null;
-            trie.putRecursive(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());    // will throw if called more than once
+            trie.putSingleton(ByteComparable.EMPTY, PARTITION_MARKER, noConflictInData());    // will throw if called more than once
             return this;
         }
 

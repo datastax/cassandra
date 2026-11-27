@@ -765,10 +765,12 @@ public abstract class InMemoryTrieTestBase
     {
         try
         {
-            trie.putSingleton(key,
-                              value,
-                              (existing, update) -> existing != null ? resolver.resolve(existing, update) : update,
-                              usePut);
+            InMemoryBaseTrie.UpsertTransformer<T, T> transformer = (existing, update) -> existing != null ? resolver.resolve(existing, update) : update;
+            if (usePut)
+                trie.putSingleton(key, value, transformer);
+            else
+                trie.mutator(transformer, Predicates.alwaysFalse())
+                    .apply(Trie.singleton((ByteComparable) key, trie.byteComparableVersion, value));
         }
         catch (TrieSpaceExhaustedException e)
         {
@@ -786,10 +788,12 @@ public abstract class InMemoryTrieTestBase
     {
         try
         {
-            trie.putSingleton(key,
-                              Boolean.TRUE,
-                              (existing, update) -> update ? null : existing,
-                              usePut);
+            InMemoryBaseTrie.UpsertTransformer<T, Boolean> transformer = (existing, update) -> update ? null : existing;
+            if (usePut)
+                trie.putSingleton(key, Boolean.TRUE, transformer);
+            else
+                trie.mutator(transformer, Predicates.alwaysFalse())
+                    .apply(Trie.singleton(key, trie.byteComparableVersion, Boolean.TRUE));
         }
         catch (TrieSpaceExhaustedException e)
         {

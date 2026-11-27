@@ -93,6 +93,61 @@ public class InMemoryDeletionAwareTrieHoistingTest
         DeletionAwareTestBase.assertDeletionAwareEqual("hoisted", expected, trie);
     }
 
+    /// `putSingleton` at the node where a deletion branch is rooted adds, changes and removes the node's live content
+    /// and leaves the deletion branch in place.
+    @Test
+    public void testPutSingletonAtDeletionBranchRoot() throws TrieSpaceExhaustedException
+    {
+        for (String at : new String[]{ "", "40", "4050" })
+        {
+            InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> trie = InMemoryDeletionAwareTrie.shortLived(VERSION);
+            var mutator = trie.mutator(DataPoint::combineLive,
+                                       DataPoint::combineDeletion,
+                                       DataPoint::deleteLive,
+                                       DataPoint::deleteLive,
+                                       false,
+                                       v -> false);
+            mutator.apply(DeletionAwareTrie.deletedRange(hex(at), hex("10"), hex("20"), VERSION, new DeletionMarker(hex(at + "10"), 5, 5)));
+            mutator.apply(DeletionAwareTrie.singleton(hex(at + "30"), VERSION, new LivePoint(hex(at + "30"), 1)));
+
+            List<DataPoint> rest = List.of(new DeletionMarker(hex(at + "10"), -1, 5),
+                                           new DeletionMarker(hex(at + "20"), 5, -1),
+                                           new LivePoint(hex(at + "30"), 1));
+            assertPoints("before put at " + at, rest, trie);
+
+            trie.putSingleton(hex(at), new LivePoint(hex(at), 2), (e, u) -> u);
+            List<DataPoint> withContent = new ArrayList<>();
+            withContent.add(new LivePoint(hex(at), 2));
+            withContent.addAll(rest);
+            assertPoints("put at " + at, withContent, trie);
+
+            trie.putSingleton(hex(at), new LivePoint(hex(at), 3), (e, u) -> u);
+            withContent.set(0, new LivePoint(hex(at), 3));
+            assertPoints("update at " + at, withContent, trie);
+
+            trie.putSingleton(hex(at), new LivePoint(hex(at), 4), (e, u) -> null);
+            assertPoints("removal at " + at, rest, trie);
+
+            // Remove the child too; the node keeps the deletion branch.
+            trie.putSingleton(hex(at + "30"), new LivePoint(hex(at + "30"), 1), (e, u) -> null);
+            assertPoints("removal of child of " + at, rest.subList(0, 2), trie);
+            trie.putSingleton(hex(at), new LivePoint(hex(at), 5), (e, u) -> u);
+            withContent = new ArrayList<>();
+            withContent.add(new LivePoint(hex(at), 5));
+            withContent.addAll(rest.subList(0, 2));
+            assertPoints("put at childless " + at, withContent, trie);
+        }
+    }
+
+    private static void assertPoints(String msg, List<DataPoint> expected, InMemoryDeletionAwareTrie<LivePoint, DeletionMarker> trie)
+    {
+        String what = msg + '\n' + trie.dump();
+        List<DataPoint> actual = toList(trie);
+        assertEquals(what, expected, actual);
+        assertEquals(what, expected.toString(), actual.toString()); // marker equality does not check positions
+        DeletionAwareTestBase.assertDeletionAwareEqual(what, expected, trie);
+    }
+
     private static DataPoint livePointInside(ByteComparable position, int timestamp, int covering)
     {
         return new CombinedDataPoint(new LivePoint(position, timestamp), new DeletionMarker(position, covering, covering));

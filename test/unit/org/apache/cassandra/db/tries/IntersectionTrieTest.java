@@ -163,7 +163,7 @@ public class IntersectionTrieTest
         InMemoryTrie<Integer> trie = InMemoryTrie.shortLivedOrdered(VERSION);
         for (int i : list)
         {
-            trie.putRecursive(of(i), i, (ex, n) -> n);
+            trie.putSingleton(of(i), i, (ex, n) -> n);
         }
         return trie;
     }

@@ -292,8 +292,8 @@ public class ComplexQueryTest extends SAITester
         createTable("CREATE TABLE %s (pk int, ck int, val text, PRIMARY KEY(pk, ck))");
         createIndex("CREATE CUSTOM INDEX ON %s(val) USING 'StorageAttachedIndex'");
 
-        // Only use values greater than MAX_RECURSIVE_KEY_LENGTH, and make sure they share a prefix (otherwise we
-        // don't hit the error on flush)
+        // Only use long values (longer than the 128 bytes up to which the memory index used to put terms recursively),
+        // and make sure they share a prefix (otherwise we don't hit the error on flush)
         var aa = "a".repeat(1000);
         var ab = "a".repeat(999) + 'b';
         execute("INSERT INTO %s (pk, ck, val) VALUES (?, ?, ?)", 0, 1, aa);
