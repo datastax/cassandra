@@ -205,7 +205,8 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
         final EncodingStats stats;
         final boolean[] silentRowAt;
         final boolean[] silentColumnAt;
-        
+        private boolean populated = false;
+
         PartitionMergeListerner(DecoratedKey partitionKey, List<UnfilteredRowIterator> versions)
         {
             key = partitionKey;
@@ -228,7 +229,7 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
         }
 
         @Override
-        public void onMergedRows(Row merged, Row[] versions)
+        public Row onMergedRows(Row merged, Row[] versions)
         {
             // Cache the row versions to be able to regenerate the original row iterator:
             for (int i = 0; i < versions.length; i++)
@@ -236,7 +237,7 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
 
             // If all versions are empty, there's no divergence to resolve:
             if (merged.isEmpty())
-                return;
+                return merged;
 
             Arrays.fill(silentRowAt, false);
 
@@ -268,9 +269,24 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
                     silentRowAt[i] |= silentColumnAt[i] && !allSilent;
             }
 
+            boolean isPotentiallyOutdated = false;
             for (int i = 0; i < silentRowAt.length; i++)
+            {
                 if (silentRowAt[i])
+                {
+                    isPotentiallyOutdated = true;
                     builders.get(i).addToFetch(merged);
+                }
+            }
+
+            // If the row is potentially outdated (because some replica didn't send anything, or some column, and so it
+            // _may_ be an outdated result that is only present because other replicas have filtered the up-to-date
+            // result out), then we skip the row. In other words, the results of the initial merging of results by this
+            // protection assume the worst case scenario where every row that might be outdated actually is.
+            // This ensures that during this first phase (collecting additional rows to fetch) we are guaranteed
+            // to look at enough data to ultimately fulfill the query limit, without needing spurious short read
+            // protection requests when there is no divergence between replicas.
+            return isPotentiallyOutdated ? null : merged;
         }
 
         @Override
@@ -282,10 +298,19 @@ public class ReplicaFilteringProtection<E extends Endpoints<E>>
         }
 
         @Override
-        public void close() {}
+        public void close()
+        {
+            // Rows skipped by this listener can lead to the first phase discarding the partition as empty, so we
+            // need to make sure the builders are populated even if the partition is never returned by the iterator.
+            populate();
+        }
 
         public void populate()
         {
+            if (populated)
+                return;
+
+            populated = true;
             for (int i = 0; i < sources.size(); i++)
                 originalPartitions.get(i).add(builders.get(i));
         }

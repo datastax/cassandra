@@ -191,6 +191,7 @@ public class StrictFilteringTest extends TestBaseImpl
     }
 
     @Test
+    @Ignore("CNDB-9331: Address CC rebase conflicts with CASSANDRA-19018")
     public void testNoShortReadAtLimit()
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.no_srp_at_limit (k int, c int, a int, PRIMARY KEY (k, c)) WITH read_repair = 'NONE'"));
@@ -211,6 +212,7 @@ public class StrictFilteringTest extends TestBaseImpl
     }
 
     @Test
+    @Ignore("CNDB-9331: Address CC rebase conflicts with CASSANDRA-19018")
     public void testNecessaryShortRead()
     {
         CLUSTER.schemaChange(withKeyspace("CREATE TABLE %s.necessary_short_read (k int, c int, a int, PRIMARY KEY (k, c)) WITH read_repair = 'NONE'"));
