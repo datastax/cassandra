@@ -390,7 +390,7 @@ public class TrieMemoryIndex extends MemoryIndex
 
     /**
      * Filters trie entries by an automaton. Only valid for non-composite literal types, whose trie keys are the
-     * raw (already analyzed) term bytes.
+     * raw term bytes.
      */
     private static Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> acceptedEntries(Iterator<Map.Entry<ByteComparable.Preencoded, PrimaryKeys>> entries,
                                                                                                CompiledAutomaton automaton)
@@ -897,12 +897,8 @@ public class TrieMemoryIndex extends MemoryIndex
         if (isEmptyRange(queryLower, !lowerExclusive, queryUpper, !upperExclusive))
             return 0;
 
-        Trie<PrimaryKeys> subtrie = queryLower == null && queryUpper == null
-                                    ? data
-                                    : data.slice(queryLower == null ? ByteComparable.EMPTY : queryLower,
-                                                 queryLower != null && !lowerExclusive,
-                                                 queryUpper,
-                                                 queryUpper != null && !upperExclusive);
+        // a null bound is unbounded
+        Trie<PrimaryKeys> subtrie = data.slice(queryLower, !lowerExclusive, queryUpper, !upperExclusive);
         long countedRows = 0;
         int countedTerms = 0;
         boolean complete = true;
@@ -1023,34 +1019,16 @@ public class TrieMemoryIndex extends MemoryIndex
         if (expression.getOp() == Expression.Op.AUTOMATON)
             return prefixSubtrie(expression.getAutomatonCommonPrefix());
 
-        ByteComparable lowerBound, upperBound;
-        boolean lowerInclusive, upperInclusive;
-        if (expression.lower != null)
-        {
-            lowerBound = expression.getEncodedLowerBoundByteComparable(version);
-            lowerInclusive = expression.lower.inclusive;
-        }
-        else
-        {
-            lowerBound = ByteComparable.EMPTY;
-            lowerInclusive = false;
-        }
+        ByteComparable lower = expression.lower == null ? null : expression.getEncodedLowerBoundByteComparable(version);
+        boolean lowerInclusive = expression.lower != null && expression.lower.inclusive;
+        ByteComparable upper = expression.upper == null ? null : expression.getEncodedUpperBoundByteComparable(version);
+        boolean upperInclusive = expression.upper != null && expression.upper.inclusive;
 
-        if (expression.upper != null)
-        {
-            upperBound = expression.getEncodedUpperBoundByteComparable(version);
-            upperInclusive = expression.upper.inclusive;
-        }
-        else
-        {
-            upperBound = null;
-            upperInclusive = false;
-        }
-
-        if (isEmptyRange(lowerBound, lowerInclusive, upperBound, upperInclusive))
+        if (isEmptyRange(lower, lowerInclusive, upper, upperInclusive))
             return Trie.empty(data.byteComparableVersion());
 
-        return data.slice(lowerBound, lowerInclusive, upperBound, upperInclusive);
+        // A null bound is unbounded: a range without lower bound includes the empty term of an empty string value.
+        return data.slice(lower, lowerInclusive, upper, upperInclusive);
     }
 
     /**

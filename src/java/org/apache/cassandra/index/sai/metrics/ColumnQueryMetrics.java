@@ -46,6 +46,11 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         @SuppressWarnings("OptionalUsedAsFieldOrParameterType")
         public final Optional<Timer> termsTraversalTotalTime;
 
+        public final Counter postingListMergeQueueAllocations;
+        public final Counter postingListMergeQueueReallocations;
+        public final Counter currentPostingListMergeQueueCapacity;
+        public final Counter currentOpenPostingLists;
+
         public final QueryEventListener.PostingListEventListener postingsListener;
 
         public TrieIndexMetrics(String keyspace, String table, String indexName)
@@ -58,7 +63,12 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
 
             Meter postingDecodes = Metrics.meter(createMetricName("PostingDecodes", TRIE_POSTINGS_TYPE));
 
-            postingsListener = new PostingListEventsMetrics(postingDecodes);
+            postingListMergeQueueAllocations = Metrics.counter(createMetricName("PostingListMergeQueueAllocations", TRIE_POSTINGS_TYPE));
+            postingListMergeQueueReallocations = Metrics.counter(createMetricName("PostingListMergeQueueReallocations", TRIE_POSTINGS_TYPE));
+            currentPostingListMergeQueueCapacity = Metrics.counter(createMetricName("CurrentPostingListMergeQueueCapacity", TRIE_POSTINGS_TYPE));
+            currentOpenPostingLists = Metrics.counter(createMetricName("CurrentOpenPostingLists", TRIE_POSTINGS_TYPE));
+
+            postingsListener = new PostingListEventsMetrics(postingDecodes, currentOpenPostingLists);
         }
 
         @Override
@@ -68,6 +78,16 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         public void onTraversalComplete(long traversalTotalTime, TimeUnit unit)
         {
             termsTraversalTotalTime.ifPresent(timer -> timer.update(traversalTotalTime, unit));
+        }
+
+        @Override
+        public void onPostingListMergeQueueCapacityChange(int oldCapacity, int newCapacity)
+        {
+            if (oldCapacity == 0)
+                postingListMergeQueueAllocations.inc();
+            else if (newCapacity > 0)
+                postingListMergeQueueReallocations.inc();
+            currentPostingListMergeQueueCapacity.inc((long) newCapacity - oldCapacity);
         }
 
         @Override
@@ -88,6 +108,7 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         public final Optional<Timer> intersectionLatency;
         public final Meter postingsNumPostings;
         public final Meter intersectionEarlyExits;
+        public final Counter currentOpenPostingLists;
 
         private final QueryEventListener.PostingListEventListener postingsListener;
 
@@ -103,8 +124,9 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
             postingsNumPostings = Metrics.meter(createMetricName("NumPostings", BKD_POSTINGS_TYPE));
 
             Meter postingDecodes = Metrics.meter(createMetricName("PostingDecodes", BKD_POSTINGS_TYPE));
+            currentOpenPostingLists = Metrics.counter(createMetricName("CurrentOpenPostingLists", BKD_POSTINGS_TYPE));
 
-            postingsListener = new PostingListEventsMetrics(postingDecodes);
+            postingsListener = new PostingListEventsMetrics(postingDecodes, currentOpenPostingLists);
         }
 
         @Override
@@ -138,10 +160,17 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
     private static class PostingListEventsMetrics implements QueryEventListener.PostingListEventListener
     {
         private final Meter postingDecodes;
+        private final Counter currentOpen;
 
         private PostingListEventsMetrics(Meter postingDecodes)
         {
+            this(postingDecodes, null);
+        }
+
+        private PostingListEventsMetrics(Meter postingDecodes, Counter currentOpen)
+        {
             this.postingDecodes = postingDecodes;
+            this.currentOpen = currentOpen;
         }
 
         @Override
@@ -151,6 +180,20 @@ public abstract class ColumnQueryMetrics extends AbstractMetrics
         public void postingDecoded(long postingsDecoded)
         {
             postingDecodes.mark(postingsDecoded);
+        }
+
+        @Override
+        public void onPostingListOpen()
+        {
+            if (currentOpen != null)
+                currentOpen.inc();
+        }
+
+        @Override
+        public void onPostingListClose()
+        {
+            if (currentOpen != null)
+                currentOpen.dec();
         }
     }
 

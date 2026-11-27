@@ -60,6 +60,7 @@ public class PostingsReader implements OrdinalPostingList
 
     // TODO: Expose more things through the summary, now that it's an actual field?
     private final BlocksSummary summary;
+    private boolean closed = true;
 
     private int postingsBlockIdx;
     private int blockIdx; // position in block
@@ -123,6 +124,8 @@ public class PostingsReader implements OrdinalPostingList
         this.runOnClose = runOnClose;
 
         reBuffer();
+        listener.onPostingListOpen();
+        this.closed = false;
     }
 
     @Override
@@ -237,6 +240,10 @@ public class PostingsReader implements OrdinalPostingList
     @Override
     public void close() throws IOException
     {
+        if (closed)
+            return;
+        closed = true;
+        listener.onPostingListClose();
         listener.postingDecoded(postingsDecoded);
         runOnClose.close();
     }

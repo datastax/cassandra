@@ -57,7 +57,30 @@ public class TrieTermsDictionaryReader extends ValueIterator<TrieTermsDictionary
                                      boolean collecting,
                                      ByteComparable.Version version)
     {
-        super(source, root, start, end, inclStart ? LeftBoundTreatment.ADMIT_EXACT : LeftBoundTreatment.GREATER, collecting, version);
+        this(source, root, start, end, inclStart, true, collecting, version);
+    }
+
+    /**
+     * Creates a reader for a trie terms dictionary range, whose bounds are both inclusive or exclusive as requested.
+     * See {@link ValueIterator} for details.
+     */
+    public TrieTermsDictionaryReader(Rebufferer source,
+                                     long root,
+                                     ByteComparable start,
+                                     ByteComparable end,
+                                     boolean inclStart,
+                                     boolean inclEnd,
+                                     boolean collecting,
+                                     ByteComparable.Version version)
+    {
+        super(source,
+              root,
+              start,
+              end,
+              inclStart ? LeftBoundTreatment.ADMIT_EXACT : LeftBoundTreatment.GREATER,
+              inclEnd ? RightBoundTreatment.ADMIT_EXACT : RightBoundTreatment.LESS,
+              collecting,
+              version);
     }
 
     public static final TrieSerializer<Long, DataOutputPlus> trieSerializer = new TrieSerializer<>()

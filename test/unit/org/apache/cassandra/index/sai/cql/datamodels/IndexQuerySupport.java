@@ -20,6 +20,7 @@ package org.apache.cassandra.index.sai.cql.datamodels;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
@@ -573,6 +574,23 @@ public class IndexQuerySupport
             query(tester, model, DataModel.ASCII_COLUMN, Operator.EQ, "MA");
             query(tester, model, DataModel.ASCII_COLUMN, Operator.EQ, "LA");
             query(tester, model, DataModel.ASCII_COLUMN, Operator.EQ, "XX");
+            // bounds that are and that aren't values of the column
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.LT, "MA");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.LTE, "MA");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.GT, "MA");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.GTE, "MA");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.LT, "M");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.GTE, "M");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.LT, "A");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.GT, "X");
+
+            // a value of the column and one that isn't
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.NEQ, "MA");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.NEQ, "XX");
+            query(tester, model, DataModel.ASCII_COLUMN, Operator.NOT_IN, list("MA", "LA", "XX"));
+
+            rangeQuery(tester, model, DataModel.ASCII_COLUMN, "AL", "TX");
+            rangeQuery(tester, model, DataModel.ASCII_COLUMN, "B", "N");
 
             query(tester, model, DataModel.BIGINT_COLUMN, Operator.EQ, 4800000000L);
             query(tester, model, DataModel.BIGINT_COLUMN, Operator.EQ, 5000000000L);
@@ -703,6 +721,46 @@ public class IndexQuerySupport
             query(tester, model, DataModel.TEXT_COLUMN, Operator.EQ, "Michigan");
             query(tester, model, DataModel.TEXT_COLUMN, Operator.EQ, "Louisiana");
             query(tester, model, DataModel.TEXT_COLUMN, Operator.EQ, "Massachusetts");
+            // bounds that are and that aren't values of the column, and that are a prefix of some of them
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.LT, "Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.LTE, "Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.GT, "Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.GTE, "Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.LT, "M");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.GT, "M");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.GTE, "State");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.LTE, "Al");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.LT, "");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.GTE, "");
+
+            // values of the column, a prefix of some of them, one that isn't a value and the empty one
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NEQ, "Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NEQ, "State of Michigan");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NEQ, "M");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NEQ, "Nowhere");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NEQ, "");
+            query(tester, model, DataModel.TEXT_COLUMN, Operator.NOT_IN, list("Alaska", "Wyoming", "Nowhere"));
+
+            rangeQuery(tester, model, DataModel.TEXT_COLUMN, "Alabama", "Texas");
+            rangeQuery(tester, model, DataModel.TEXT_COLUMN, "M", "N");
+
+            // prefix, suffix, contains and generic patterns, a pattern without wildcards and patterns matching
+            // every non-empty value and none
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "M%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "Mi%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "State of%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "%a");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "%ss%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "A%a");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "%i_a%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "_____");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "Te_as");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "Texas");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "_%");
+            likeQuery(tester, model, DataModel.TEXT_COLUMN, "Z%");
+            likeQuery(tester, model, DataModel.ASCII_COLUMN, "M%");
+            likeQuery(tester, model, DataModel.ASCII_COLUMN, "%A");
+            likeQuery(tester, model, DataModel.ASCII_COLUMN, "_A");
 
             query(tester, model, DataModel.TIME_COLUMN, Operator.EQ, TimeType.instance.fromString("00:43:07"));
             query(tester, model, DataModel.TIME_COLUMN, Operator.NEQ, TimeType.instance.fromString("00:43:07"));
@@ -746,6 +804,21 @@ public class IndexQuerySupport
             query(tester, model, DataModel.UUID_COLUMN, Operator.EQ, UUIDType.instance.fromString("ac0aa734-d17f-11e8-a8d5-f2801f1b9fd1"));
             query(tester, model, DataModel.UUID_COLUMN, Operator.EQ, UUIDType.instance.fromString("c6eec0b0-0eef-40e8-ac38-3a82110443e4"));
             query(tester, model, DataModel.UUID_COLUMN, Operator.EQ, UUIDType.instance.fromString("e37394dc-d17b-11e8-a8d5-f2801f1b9fd1"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.LT, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.LTE, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.GT, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.GTE, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+
+            query(tester, model, DataModel.UUID_COLUMN, Operator.NEQ, UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.NEQ, UUIDType.instance.fromString("00000000-0000-4000-8000-000000000000"));
+            query(tester, model, DataModel.UUID_COLUMN, Operator.NOT_IN, list(UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"),
+                                                                             UUIDType.instance.fromString("e37394dc-d17b-11e8-a8d5-f2801f1b9fd1")));
+
+            // the uuid type orders by version first: the time-based (version 1) lower bound is before the random
+            // (version 4) upper bound
+            rangeQuery(tester, model, DataModel.UUID_COLUMN,
+                       UUIDType.instance.fromString("e37394dc-d17b-11e8-a8d5-f2801f1b9fd1"),
+                       UUIDType.instance.fromString("752355f8-405b-4d94-88f3-9992cda30f1e"));
 
             query(tester, model, DataModel.TIMEUUID_COLUMN, Operator.EQ, UUIDType.instance.fromString("ee6136d2-d17c-11e8-a8d5-f2801f1b9fd1"));
             query(tester, model, DataModel.TIMEUUID_COLUMN, Operator.NEQ, UUIDType.instance.fromString("ee6136d2-d17c-11e8-a8d5-f2801f1b9fd1"));
@@ -777,6 +850,26 @@ public class IndexQuerySupport
                      DataModel.TIMESTAMP_COLUMN, Operator.NEQ, TimestampType.instance.fromString("2018-06-20T00:00:00"),
                      DataModel.TEXT_COLUMN, Operator.EQ, "Texas",
                      false);
+
+            andQuery(tester, model,
+                     DataModel.TEXT_COLUMN, Operator.GTE, "M",
+                     DataModel.BIGINT_COLUMN, Operator.LT, 7000000000L,
+                     false);
+
+            andQuery(tester, model,
+                     DataModel.TEXT_COLUMN, Operator.LT, "N",
+                     DataModel.ASCII_COLUMN, Operator.GT, "KY",
+                     false);
+
+            andQuery(tester, model,
+                     DataModel.TEXT_COLUMN, Operator.GT, "Alaska",
+                     DataModel.TEXT_COLUMN, Operator.LTE, "Wyoming",
+                     false);
+
+            andQuery(tester, model,
+                     DataModel.ASCII_COLUMN, Operator.LTE, "MS",
+                     DataModel.NON_INDEXED_COLUMN, Operator.GT, 0,
+                     true);
 
             andQuery(tester, model,
                      DataModel.SMALLINT_COLUMN, Operator.LTE, (short) 126,
@@ -916,6 +1009,55 @@ public class IndexQuerySupport
             String query = String.format(template, DataModel.ASCII_COLUMN, column, column);
             String queryValidator = String.format(templateWithFiltering, DataModel.ASCII_COLUMN, column, column);
             validate(tester, model, query, queryValidator, value1, value2, limit);
+        }
+
+        /**
+         * Validates a LIKE query. LIKE needs an index even with ALLOW FILTERING, so the expected rows are not those
+         * of the same query on the table without indexes: they are the rows of that table, which come in the same
+         * order, filtered here with the equivalent regular expression.
+         */
+        void likeQuery(DataModel.Executor tester, DataModel model, String column, String pattern) throws Throwable
+        {
+            String query = String.format("SELECT %s FROM %%s WHERE %s LIKE ? LIMIT ?", column, column);
+            try
+            {
+                tester.counterReset();
+                List<Object> actual = model.executeIndexed(tester, query, fetchSize, pattern, limit);
+                assertThat("Expected calls to " + StorageAttachedIndexSearcher.class, tester.getCounter(), Matchers.greaterThanOrEqualTo(1L));
+
+                Pattern regex = likeRegex(pattern);
+                List<Object> expected = model.executeNonIndexed(tester, String.format("SELECT %s FROM %%s", column), fetchSize)
+                                             .stream()
+                                             .filter(value -> value != null && regex.matcher((String) value).matches())
+                                             .limit(limit)
+                                             .collect(Collectors.toList());
+                assertEquals("Invalid query results for query " + query + " with pattern " + pattern, expected, actual);
+            }
+            catch (Throwable ex)
+            {
+                ex.printStackTrace();
+                throw ex;
+            }
+        }
+
+        /**
+         * The regular expression equivalent to a LIKE pattern without escapes: {@code %} matches any sequence of
+         * characters and {@code _} any single character.
+         */
+        private static Pattern likeRegex(String pattern)
+        {
+            StringBuilder regex = new StringBuilder();
+            for (int i = 0; i < pattern.length(); i++)
+            {
+                char c = pattern.charAt(i);
+                if (c == '%')
+                    regex.append(".*");
+                else if (c == '_')
+                    regex.append('.');
+                else
+                    regex.append(Pattern.quote(String.valueOf(c)));
+            }
+            return Pattern.compile(regex.toString(), Pattern.DOTALL);
         }
 
         private List<Object> validate(DataModel.Executor tester, DataModel model, String query, String validator, Object... values) throws Throwable

@@ -76,41 +76,6 @@ public class LikeEscapeTest extends SAITester
     }
 
     @Test
-    public void testEscapesOnNormalizedIndex() throws Throwable
-    {
-        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : false }");
-        execute("INSERT INTO %s (pk, v) VALUES (1, 'A_C')");
-        execute("INSERT INTO %s (pk, v) VALUES (2, 'ABC')");
-
-        beforeAndAfterFlush(() -> {
-            assertRowsMatchedByLike("v LIKE 'a_c'", "A_C", "ABC");
-            assertRowsMatchedByLike("v LIKE 'a!_c' ESCAPE '!'", "A_C");
-            assertRowsMatchedByLike("v LIKE 'a!_%' ESCAPE '!'", "A_C");
-        });
-    }
-
-    @Test
-    public void testFullWidthWildcardsOnAsciiFoldingIndex() throws Throwable
-    {
-        // ASCII folding turns the full-width '＿', '％' and '＼' into '_', '%' and '\': in a pattern, they stay
-        // literals
-        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
-        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'ascii' : true }");
-        String[] values = { "a＿c", "a_c", "abc", "a％c", "xy＼", "xy\\" };
-        for (int pk = 0; pk < values.length; pk++)
-            execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, values[pk]);
-
-        beforeAndAfterFlush(() -> {
-            assertRowsMatchedByLike("v LIKE 'a＿c'", "a＿c", "a_c");
-            assertRowsMatchedByLike("v LIKE 'a％c'", "a％c");
-            assertRowsMatchedByLike("v LIKE 'a_c'", "a＿c", "a_c", "abc", "a％c");
-            assertRowsMatchedByLike("v LIKE 'x_＼'", "xy＼", "xy\\");
-            assertRowsMatchedByLike("v LIKE '%＼'", "xy＼", "xy\\");
-        });
-    }
-
-    @Test
     public void testWildcardsAsEscapeCharacter() throws Throwable
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");

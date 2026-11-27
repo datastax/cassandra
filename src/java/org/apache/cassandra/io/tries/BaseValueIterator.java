@@ -97,6 +97,18 @@ public abstract class BaseValueIterator<CONCRETE extends BaseValueIterator<CONCR
         GREATER
     }
 
+    /**
+     * The treatment of the entry exactly equal to the right bound (the greater one, at either direction of the
+     * iteration). The entries the right bound is a prefix of are greater than it, and never admitted.
+     */
+    protected enum RightBoundTreatment
+    {
+        /** The entry equal to the right bound is included. */
+        ADMIT_EXACT,
+        /** The entry equal to the right bound is excluded. */
+        LESS
+    }
+
     protected static class IterationPosition
     {
         final long node;

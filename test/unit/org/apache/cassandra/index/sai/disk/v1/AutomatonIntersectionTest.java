@@ -37,6 +37,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.LikePatterns;
 import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.ReadCommand;
+import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.sai.IndexContext;
@@ -172,6 +173,7 @@ public class AutomatonIntersectionTest extends SaiRandomizedTest
 
         ReadCommand abortedCommand = mock(ReadCommand.class);
         when(abortedCommand.isAborted()).thenReturn(true);
+        when(abortedCommand.limits()).thenReturn(DataLimits.NONE);
 
         withIndex(dictionary, fixture ->
         {

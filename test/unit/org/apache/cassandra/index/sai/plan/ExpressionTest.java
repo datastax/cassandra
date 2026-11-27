@@ -23,11 +23,14 @@ import java.nio.ByteBuffer;
 import org.junit.Test;
 
 import org.apache.cassandra.cql3.Operator;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.SAITester;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertTrue;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class ExpressionTest
@@ -115,6 +118,68 @@ public class ExpressionTest
         assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_SUFFIX, "abc").getOp());
         assertEquals(Expression.Op.AUTOMATON, makeExpression(Operator.LIKE_CONTAINS, "abc").getOp());
         assertEquals(Expression.Op.PREFIX, makeExpression(Operator.LIKE_PREFIX, "abc").getOp());
+    }
+
+    @Test
+    public void testExclusions()
+    {
+        // the NEQ after the first one, and those after a range, are exclusions: on literal and non-literal types
+        Expression text = new Expression(SAITester.createIndexContext("col", UTF8Type.instance));
+        text.add(Operator.NEQ, UTF8Type.instance.decompose("a")).add(Operator.NEQ, UTF8Type.instance.decompose("b"));
+        assertFalse(text.isSatisfiedBy(UTF8Type.instance.decompose("a")));
+        assertFalse(text.isSatisfiedBy(UTF8Type.instance.decompose("b")));
+        assertTrue(text.isSatisfiedBy(UTF8Type.instance.decompose("c")));
+
+        Expression number = new Expression(SAITester.createIndexContext("col", Int32Type.instance));
+        number.add(Operator.NEQ, Int32Type.instance.decompose(1)).add(Operator.NEQ, Int32Type.instance.decompose(2));
+        assertFalse(number.isSatisfiedBy(Int32Type.instance.decompose(1)));
+        assertFalse(number.isSatisfiedBy(Int32Type.instance.decompose(2)));
+        assertTrue(number.isSatisfiedBy(Int32Type.instance.decompose(3)));
+
+        Expression range = range("a", true, "d", false);
+        range.add(Operator.NEQ, UTF8Type.instance.decompose("b")).add(Operator.NEQ, UTF8Type.instance.decompose("c"));
+        assertTrue(range.isSatisfiedBy(UTF8Type.instance.decompose("a")));
+        assertFalse(range.isSatisfiedBy(UTF8Type.instance.decompose("b")));
+        assertFalse(range.isSatisfiedBy(UTF8Type.instance.decompose("c")));
+        assertTrue(range.isSatisfiedBy(UTF8Type.instance.decompose("cc")));
+        assertFalse(range.isSatisfiedBy(UTF8Type.instance.decompose("d")));
+    }
+
+    @Test
+    public void testLiteralTermRanges()
+    {
+        Expression range = range("ab", true, "b", false);
+        assertTrue(range.isLiteralTermRange());
+        assertTrue(range.isSatisfiedBy(UTF8Type.instance.decompose("ab")));
+        assertTrue(range.isSatisfiedBy(UTF8Type.instance.decompose("abc")));
+        assertFalse(range.isSatisfiedBy(UTF8Type.instance.decompose("b")));
+        assertFalse(range.isSatisfiedBy(UTF8Type.instance.decompose("a")));
+        // the order is the unsigned byte order of the UTF-8 values, i.e. the code point order
+        assertFalse(range.isSatisfiedBy(UTF8Type.instance.decompose("AB")));
+        assertTrue(range("z", false, null, false).isSatisfiedBy(UTF8Type.instance.decompose("é")));
+        assertFalse(range(null, false, "é", false).isSatisfiedBy(UTF8Type.instance.decompose("😀")));
+
+        // open-ended ranges
+        assertTrue(range("b", false, null, false).isSatisfiedBy(UTF8Type.instance.decompose("ba")));
+        assertFalse(range("b", false, null, false).isSatisfiedBy(UTF8Type.instance.decompose("b")));
+        assertTrue(range(null, false, "b", true).isSatisfiedBy(UTF8Type.instance.decompose("b")));
+        assertTrue(range(null, false, "b", true).isSatisfiedBy(UTF8Type.instance.decompose("")));
+
+        // equalities and non-literal ranges are not literal term ranges
+        assertFalse(makeExpression(Operator.EQ, "a").isLiteralTermRange());
+        Expression numeric = new Expression(SAITester.createIndexContext("col", Int32Type.instance));
+        numeric.add(Operator.GT, Int32Type.instance.decompose(1));
+        assertFalse(numeric.isLiteralTermRange());
+    }
+
+    private static Expression range(String lower, boolean lowerInclusive, String upper, boolean upperInclusive)
+    {
+        Expression expression = new Expression(SAITester.createIndexContext("col", UTF8Type.instance));
+        if (lower != null)
+            expression.add(lowerInclusive ? Operator.GTE : Operator.GT, UTF8Type.instance.decompose(lower));
+        if (upper != null)
+            expression.add(upperInclusive ? Operator.LTE : Operator.LT, UTF8Type.instance.decompose(upper));
+        return expression;
     }
 
     private static Expression makeExpression(Operator op)

@@ -18,14 +18,15 @@
 
 package org.apache.cassandra.index.sai.utils;
 
-import java.util.List;
+import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.PartitionPosition;
+import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.index.sai.disk.v1.SegmentMetadata;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 
 public class RangeUtil
@@ -72,24 +73,129 @@ public class RangeUtil
     }
 
 
-    public static double getRingFraction(AbstractBounds<PartitionPosition> keyRange)
+    /**
+     * Returns the average number of rows per partition, never less than one.
+     * If the counts are unknown (not positive), it assumes one row per partition.
+     */
+    @VisibleForTesting
+    static double avgRowsPerPartition(long rows, long partitions)
     {
-        return keyRange.left.getToken().size(keyRange.right.getToken().nextValidToken());
+        return rows > 0 && partitions > 0 ? Math.max(1.0, (double) rows / partitions) : 1.0;
     }
 
-    public static double getRingFraction(DataRange dataRange)
+    /**
+     * Estimates how many rows of the given memtable fall into the {@code keyRange}, assuming the rows are spread
+     * uniformly over the tokens between the min and the max partition key of the memtable.
+     * Does no I/O, it only uses ring arithmetic.
+     * The estimate is never lower than the average partition size.
+     */
+    public static long estimateRowsInRange(Memtable memtable, AbstractBounds<PartitionPosition> keyRange)
     {
-        return getRingFraction(dataRange.keyRange());
+        if (memtable.isClean())
+            return 0;
+
+        long rows = Memtable.estimateRowCount(memtable);
+        long partitions = memtable.partitionCount();
+        return estimateRowsInRange(rows,
+                                   avgRowsPerPartition(rows, partitions),
+                                   memtable.minPartitionKey().getToken(),
+                                   memtable.maxPartitionKey().getToken(),
+                                   keyRange);
     }
 
-    public static double getRingFraction(List<DataRange> dataRanges)
+    /**
+     * Estimates how many rows of the given index segment fall into the {@code keyRange}, assuming the rows are spread
+     * uniformly over the tokens between the min and the max key of the segment.
+     * Does no I/O, it only uses ring arithmetic.
+     * The estimate for a key range that overlaps the segment is never lower than the average partition size
+     * in the sstable the segment belongs to.
+     *
+     * @param sstable the sstable the segment belongs to
+     * @param segment the index segment of the sstable
+     */
+    public static long estimateRowsInRange(SSTableReader sstable, SegmentMetadata segment, AbstractBounds<PartitionPosition> keyRange)
     {
-        double fraction = 0.0;
-        for (DataRange range : dataRanges)
+        long segmentRows = 1 + segment.maxSSTableRowId - segment.minSSTableRowId;
+        return estimateRowsInRange(segmentRows,
+                                   avgRowsPerPartition(sstable.getTotalRows(), sstable.estimatedKeys()),
+                                   segment.minKey.token(),
+                                   segment.maxKey.token(),
+                                   keyRange);
+    }
+
+    /**
+     * Estimates how many rows of the given sstable fall into the {@code keyRange}, assuming the rows are spread
+     * uniformly over the tokens between the first and the last token of the sstable.
+     * Does no I/O, it only uses ring arithmetic.
+     * The estimate for a key range that overlaps the sstable is never lower than the average partition size.
+     */
+    public static long estimateRowsInRange(SSTableReader sstable, AbstractBounds<PartitionPosition> keyRange)
+    {
+        return estimateRowsInRange(sstable.getTotalRows(),
+                                   avgRowsPerPartition(sstable.getTotalRows(), sstable.estimatedKeys()),
+                                   sstable.first.getToken(),
+                                   sstable.last.getToken(),
+                                   keyRange);
+    }
+
+    /**
+     * Estimates how many of the given {@code rows}, assumed to be spread uniformly over tokens between
+     * {@code minToken} and {@code maxToken} (both inclusive), fall into the {@code keyRange}.
+     * Does no I/O, it only uses ring arithmetic.
+     * <p>
+     * If the key range overlaps with the token span, at least one partition is assumed to match, so the estimate
+     * is never lower than {@code avgRowsPerPartition}.
+     * <p>
+     * If the partitioner does not support token arithmetic, returns {@code rows} if
+     * the key range overlaps with the token span and 0 otherwise.
+     */
+    @VisibleForTesting
+    static long estimateRowsInRange(long rows,
+                                    double avgRowsPerPartition,
+                                    Token minToken,
+                                    Token maxToken,
+                                    AbstractBounds<PartitionPosition> keyRange)
+    {
+        if (rows <= 0)
+            return 0;
+        if (coversFullRing(keyRange))
+            return rows;
+
+        if (keyRange instanceof Range && ((Range<PartitionPosition>) keyRange).isTrulyWrapAround())
         {
-            fraction += getRingFraction(range);
+            long sum = 0;
+            for (Range<PartitionPosition> unwrapped : ((Range<PartitionPosition>) keyRange).unwrap())
+                sum += estimateRowsInRange(rows, avgRowsPerPartition, minToken, maxToken, unwrapped);
+            return Math.min(rows, sum);
         }
-        fraction = Math.min(1.0, fraction);  // rounding errors could cause exceeding 1.0
-        return fraction;
+
+        Token lo = keyRange.left.getToken();
+        if (lo.compareTo(minToken) < 0)
+            lo = minToken;
+        // a minimum right bound denotes the end of the ring
+        Token hi = keyRange.right.isMinimum() ? maxToken : keyRange.right.getToken();
+        if (hi.compareTo(maxToken) > 0)
+            hi = maxToken;
+        if (lo.compareTo(hi) > 0)
+            return 0;
+
+        try
+        {
+            double spanFraction = minToken.size(maxToken.nextValidToken());
+            double overlapFraction = lo.size(hi.nextValidToken());
+            return clampToPartition(rows, avgRowsPerPartition, rows * Math.min(1.0, overlapFraction / spanFraction));
+        }
+        catch (UnsupportedOperationException e)
+        {
+            // partitioners like ByteOrderedPartitioner, OrderPreservingPartitioner and LocalPartitioner
+            // don't support token arithmetic
+            return rows;
+        }
+    }
+
+    /** Rounds the estimate, but never goes below the size of one average partition nor above the total row count. */
+    private static long clampToPartition(long rows, double avgRowsPerPartition, double estimate)
+    {
+        return Math.min(rows, Math.round(Math.max(avgRowsPerPartition, estimate)));
     }
 }

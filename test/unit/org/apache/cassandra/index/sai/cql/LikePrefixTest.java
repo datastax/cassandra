@@ -33,10 +33,15 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.index.sai.SAITester;
 import org.apache.cassandra.index.sai.SAIUtil;
+import org.apache.cassandra.index.sai.StorageAttachedIndex;
+import org.apache.cassandra.index.sai.StorageAttachedIndexGroup;
 import org.apache.cassandra.index.sai.disk.format.Version;
+import org.apache.cassandra.index.sai.metrics.ColumnQueryMetrics;
+import org.apache.cassandra.index.sai.metrics.TableQueryMetrics;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 /**
  * Tests {@code LIKE '<prefix>%'} queries on string columns with a non-analyzed SAI index across the
@@ -185,27 +190,16 @@ public class LikePrefixTest extends SAITester
     }
 
     @Test
-    public void testCaseInsensitivePrefix()
+    public void testCaseInsensitiveIndexRejectsPrefix()
     {
         createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
         createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex' WITH OPTIONS = { 'case_sensitive' : 'false' }");
 
         execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 1, "Apple");
-        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 2, "apricot");
-        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 3, "APPLE PIE");
-        execute("INSERT INTO %s (pk, v) VALUES (?, ?)", 4, "banana");
 
-        for (int i = 0; i < 2; i++)
-        {
-            // both the indexed terms and the prefix are lowercased
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'AP%%'"), row(1), row(2), row(3));
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'apple%%'"), row(1), row(3));
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'Apple P%%'"), row(3));
-            assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE v LIKE 'B%%'"), row(4));
-
-            if (i == 0)
-                flush();
-        }
+        // the terms of the index are not the values: see AutomatonQueryTest#testNormalizedIndexesRejectLike
+        assertInvalidMessage(String.format(StatementRestrictions.INDEX_DOES_NOT_SUPPORT_LIKE_MESSAGE, 'v'),
+                             "SELECT pk FROM %s WHERE v LIKE 'AP%%'");
     }
 
     @Test
@@ -340,6 +334,58 @@ public class LikePrefixTest extends SAITester
                              "SELECT pk FROM %s WHERE l LIKE 'a%%'");
         // collections keep working with their supported operators
         assertRowsIgnoringOrder(execute("SELECT pk FROM %s WHERE l CONTAINS 'abc'"), row(1));
+    }
+
+    @Test
+    public void testOpenPostingListsBoundedByLimit()
+    {
+        createTable("CREATE TABLE %s (pk int PRIMARY KEY, v text)");
+        createIndex("CREATE CUSTOM INDEX ON %s(v) USING 'StorageAttachedIndex'");
+        disableCompaction();
+
+        int numSSTables = 4;
+        int rowsPerSSTable = 250;
+        for (int sstable = 0; sstable < numSSTables; sstable++)
+        {
+            for (int i = 0; i < rowsPerSSTable; i++)
+            {
+                int pk = sstable * rowsPerSSTable + i;
+                execute("INSERT INTO %s (pk, v) VALUES (?, ?)", pk, String.format("prefix_%05d", pk));
+            }
+            flush();
+        }
+
+        StorageAttachedIndexGroup group = StorageAttachedIndexGroup.getIndexGroup(getCurrentColumnFamilyStore());
+        TableQueryMetrics.PerQuery allMetrics = group.queryMetrics().perQueryMetrics.get(TableQueryMetrics.QueryKind.ALL);
+        long initialOpenPostingLists = allMetrics.postingListsOpened.getCount();
+        long initialMergeQueueHist = allMetrics.maxPostingListMergeQueueCapacity.getCount();
+
+        StorageAttachedIndex saiIndex = (StorageAttachedIndex) getCurrentColumnFamilyStore().indexManager.listIndexes().iterator().next();
+        ColumnQueryMetrics.TrieIndexMetrics trieMetrics = (ColumnQueryMetrics.TrieIndexMetrics) saiIndex.getIndexContext().getColumnQueryMetrics();
+
+        long initialAllocations = trieMetrics.postingListMergeQueueAllocations.getCount();
+
+        UntypedResultSet result = execute("SELECT pk FROM %s WHERE v LIKE 'prefix_%%' LIMIT 100");
+        assertEquals(100, result.size());
+
+        long allocations = trieMetrics.postingListMergeQueueAllocations.getCount() - initialAllocations;
+        long currentCapacity = trieMetrics.currentPostingListMergeQueueCapacity.getCount();
+        long reallocations = trieMetrics.postingListMergeQueueReallocations.getCount();
+        long currentOpen = trieMetrics.currentOpenPostingLists.getCount();
+
+        assertEquals(numSSTables, allocations);
+        assertEquals(0, currentCapacity);
+        assertEquals(0, reallocations);
+        assertEquals(0, currentOpen);
+        assertEquals(initialOpenPostingLists + 1, allMetrics.postingListsOpened.getCount());
+        assertEquals(initialMergeQueueHist + 1, allMetrics.maxPostingListMergeQueueCapacity.getCount());
+        assertTrue(allMetrics.postingListsOpened.getSnapshot().getMax() > 0);
+
+        // Each segment expects ~41 rows from SoftLimitUtil (limit 100, fraction ~0.25, confidence 0.9999),
+        // resulting in initCapacity = ~82 per segment (~330 total across 4 SSTables).
+        // Without limit, total capacity would be 4 * (2 * 250) = 2000.
+        assertTrue(allMetrics.maxPostingListMergeQueueCapacity.getSnapshot().getMax() >= 70 &&
+                   allMetrics.maxPostingListMergeQueueCapacity.getSnapshot().getMax() <= 100);
     }
 
     private void insertRandomRows(Map<Integer, String> rows, int from, int to)

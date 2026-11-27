@@ -16,7 +16,9 @@
 
 package org.apache.cassandra.index.sai.view;
 
+import java.nio.ByteBuffer;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -29,6 +31,7 @@ import org.apache.cassandra.cql3.statements.schema.IndexTarget;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.ReversedType;
+import org.apache.cassandra.db.marshal.TupleType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.index.TargetParser;
@@ -50,7 +53,8 @@ import static org.mockito.Mockito.when;
 
 /**
  * The term tree prunes the sstable indexes of prefix and pattern expressions by the range of the terms starting
- * with the prefix (the common prefix of the automaton for a pattern).
+ * with the prefix (the common prefix of the automaton for a pattern), and the ones of literal range expressions by
+ * the range of their raw bounds.
  */
 public class RangeTermTreePatternTest
 {
@@ -95,6 +99,72 @@ public class RangeTermTreePatternTest
         assertEquals(Set.of(), tree.search(expression(context, Operator.LIKE_PREFIX, "x")));
     }
 
+    @Test
+    public void shouldPruneLiteralRanges()
+    {
+        IndexContext context = indexContext(UTF8Type.instance);
+        SSTableIndex a = index(context, "aaa", "abz");
+        SSTableIndex b = index(context, "b00", "b99");
+        SSTableIndex c = index(context, "c", "d");
+        TermTree tree = tree(context, a, b, c);
+
+        assertEquals(Set.of(a), tree.search(range(context, Operator.GTE, "aa", Operator.LT, "ac")));
+        assertEquals(Set.of(b, c), tree.search(range(context, Operator.GT, "b", null, null)));
+        assertEquals(Set.of(a, b), tree.search(range(context, null, null, Operator.LTE, "b00")));
+        assertEquals(Set.of(), tree.search(range(context, Operator.GT, "e", null, null)));
+        assertEquals(Set.of(b), tree.search(range(context, Operator.GTE, "b5", Operator.LTE, "b6")));
+    }
+
+    @Test
+    public void shouldPruneLiteralRangesOfReversedColumns()
+    {
+        // the min/max terms of a DESC clustering column are in the reversed order of the column type, but the
+        // bounds of a literal range are in the order of the raw values
+        IndexContext context = indexContext(ReversedType.getInstance(UTF8Type.instance));
+        SSTableIndex a = index(context, "abz", "aaa");
+        SSTableIndex b = index(context, "b99", "b00");
+        SSTableIndex c = index(context, "d", "c");
+        TermTree tree = tree(context, a, b, c);
+
+        assertEquals(Set.of(a), tree.search(range(context, Operator.GTE, "aa", Operator.LT, "ac")));
+        assertEquals(Set.of(b, c), tree.search(range(context, Operator.GT, "b", null, null)));
+        assertEquals(Set.of(a, b), tree.search(range(context, null, null, Operator.LTE, "b00")));
+        assertEquals(Set.of(), tree.search(range(context, Operator.GT, "e", null, null)));
+        assertEquals(Set.of(b), tree.search(range(context, Operator.GTE, "b5", Operator.LTE, "b6")));
+    }
+
+    @Test
+    public void shouldPruneLiteralRangesOfReversedFrozenColumns()
+    {
+        // the terms of the frozen types are compared as unsigned bytes, also for a DESC clustering column
+        TupleType tupleType = new TupleType(List.of(Int32Type.instance, UTF8Type.instance));
+        IndexContext context = indexContext(ReversedType.getInstance(tupleType));
+        SSTableIndex a = index(context, tuple(tupleType, 1, "a"), tuple(tupleType, 2, "b"));
+        SSTableIndex b = index(context, tuple(tupleType, 5, "m"), tuple(tupleType, 5, "m"));
+        SSTableIndex c = index(context, tuple(tupleType, 8, "x"), tuple(tupleType, 9, "y"));
+        TermTree tree = tree(context, a, b, c);
+
+        // the halves of ck != (5, 'm'); the search is inclusive
+        assertEquals(Set.of(a, b), tree.search(new Expression(context).add(Operator.LT, tuple(tupleType, 5, "m"))));
+        assertEquals(Set.of(b, c), tree.search(new Expression(context).add(Operator.GT, tuple(tupleType, 5, "m"))));
+        assertEquals(Set.of(a), tree.search(new Expression(context).add(Operator.LT, tuple(tupleType, 3, "a"))));
+    }
+
+    private static ByteBuffer tuple(TupleType type, int i, String s)
+    {
+        return TupleType.buildValue(Int32Type.instance.decompose(i), UTF8Type.instance.decompose(s));
+    }
+
+    private static Expression range(IndexContext context, Operator lowerOperator, String lower, Operator upperOperator, String upper)
+    {
+        Expression expression = new Expression(context);
+        if (lower != null)
+            expression.add(lowerOperator, UTF8Type.instance.decompose(lower));
+        if (upper != null)
+            expression.add(upperOperator, UTF8Type.instance.decompose(upper));
+        return expression;
+    }
+
     private static TermTree tree(IndexContext context, SSTableIndex... indexes)
     {
         TermTree.Builder builder = new RangeTermTree.Builder(context.getValidator());
@@ -105,9 +175,14 @@ public class RangeTermTreePatternTest
 
     private static SSTableIndex index(IndexContext context, String minTerm, String maxTerm)
     {
+        return index(context, UTF8Type.instance.decompose(minTerm), UTF8Type.instance.decompose(maxTerm));
+    }
+
+    private static SSTableIndex index(IndexContext context, ByteBuffer minTerm, ByteBuffer maxTerm)
+    {
         SSTableIndex index = mock(SSTableIndex.class);
-        when(index.minTerm()).thenReturn(UTF8Type.instance.decompose(minTerm));
-        when(index.maxTerm()).thenReturn(UTF8Type.instance.decompose(maxTerm));
+        when(index.minTerm()).thenReturn(minTerm);
+        when(index.maxTerm()).thenReturn(maxTerm);
         when(index.getVersion()).thenReturn(Version.LATEST);
         when(index.getIndexContext()).thenReturn(context);
         // read by the trace logging of RangeTermTree.Builder#addIndex (CI runs the tests with TRACE on)

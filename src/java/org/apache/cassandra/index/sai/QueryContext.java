@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.index.sai;
 
+import java.util.function.LongSupplier;
+
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.NotThreadSafe;
@@ -98,6 +100,30 @@ public class QueryContext
     /** Number of times the query has advanced into a trie (literal or key) posting list. */
     private long triePostingsDecodes = 0;
 
+    /** Total capacity of all LazyMergePostingLists allocated during the query across all trie segments. */
+    private long totalPostingListMergeQueueCapacity = 0;
+
+    /** Maximum capacity of a LazyMergePostingList candidate queue observed during the query across all trie segments. */
+    private long maxPostingListMergeQueueCapacity = 0;
+
+    /** Number of merge queue allocations. */
+    private long postingListMergeQueueAllocations = 0;
+
+    /** Number of merge queue reallocations (resizes). */
+    private long postingListMergeQueueReallocations = 0;
+
+    /** Number of trie posting lists opened during the query. */
+    private long triePostingListsOpened = 0;
+
+    /** Number of trie posting lists closed during the query. */
+    private long triePostingListsClosed = 0;
+
+    /** Number of trie posting lists open now. */
+    private long openTriePostingLists = 0;
+
+    /** Maximum number of trie posting lists open at the same time during the query. */
+    private long maxOpenTriePostingLists = 0;
+
     /** Number of BKD (numeric) segments visited by the query. */
     private long bkdSegmentsHit = 0;
 
@@ -122,6 +148,16 @@ public class QueryContext
     // Null means the query execution order hasn't been decided yet.
     private FilterSortOrder filterSortOrder = null;
 
+    /**
+     * Estimates the number of rows (in all sstables and memtables) within the key range of the query, null if not
+     * known. Set by the query controller before the indexes are searched, evaluated on first use only.
+     */
+    @Nullable
+    private LongSupplier estimatedRowsInQueryRangeSupplier;
+
+    /** The value of {@link #estimatedRowsInQueryRangeSupplier}, or -1 if not evaluated yet. */
+    private long estimatedRowsInQueryRange = -1;
+
     /** Metrics about the query plan. */
     private PlanInfo queryPlanInfo;
 
@@ -135,6 +171,36 @@ public class QueryContext
     {
         this.command = command;
         this.queryStartTimeNanos = MonotonicClock.Global.approxTime.now();
+    }
+
+    /**
+     * @return the maximum number of results the read command returns, {@code Integer.MAX_VALUE} if it is unlimited
+     * or if there is no command
+     */
+    public int rowLimit()
+    {
+        return command == null ? Integer.MAX_VALUE : command.limits().count();
+    }
+
+    /**
+     * @return estimated number of rows (in all sstables and memtables) within the key range of the query,
+     * or -1 if not known
+     */
+    public long estimatedRowsInQueryRange()
+    {
+        long rows = estimatedRowsInQueryRange;
+        if (rows < 0 && estimatedRowsInQueryRangeSupplier != null)
+        {
+            rows = estimatedRowsInQueryRangeSupplier.getAsLong();
+            estimatedRowsInQueryRange = rows;
+        }
+        return rows;
+    }
+
+    public void setEstimatedRowsInQueryRange(LongSupplier rows)
+    {
+        this.estimatedRowsInQueryRangeSupplier = rows;
+        this.estimatedRowsInQueryRange = -1;
     }
 
     public long totalQueryTimeNs()
@@ -225,6 +291,73 @@ public class QueryContext
     {
         checkThreadOwnership();
         triePostingsDecodes += val;
+    }
+
+    public void onPostingListMergeQueueCapacityChange(int oldCapacity, int newCapacity)
+    {
+        checkThreadOwnership();
+        if (oldCapacity == 0)
+            postingListMergeQueueAllocations++;
+        else if (newCapacity > 0)
+            postingListMergeQueueReallocations++;
+
+        if (newCapacity > oldCapacity)
+            totalPostingListMergeQueueCapacity += (newCapacity - oldCapacity);
+
+        if (newCapacity > maxPostingListMergeQueueCapacity)
+            maxPostingListMergeQueueCapacity = newCapacity;
+    }
+
+    public long maxPostingListMergeQueueCapacity()
+    {
+        return maxPostingListMergeQueueCapacity;
+    }
+
+    public void onTriePostingListOpen()
+    {
+        checkThreadOwnership();
+        triePostingListsOpened++;
+        openTriePostingLists++;
+        if (openTriePostingLists > maxOpenTriePostingLists)
+            maxOpenTriePostingLists = openTriePostingLists;
+    }
+
+    public void onTriePostingListClose()
+    {
+        checkThreadOwnership();
+        triePostingListsClosed++;
+        assert openTriePostingLists > 0 : "Open posting lists counter underflow";
+        openTriePostingLists--;
+    }
+
+    public long totalPostingListMergeQueueCapacity()
+    {
+        return totalPostingListMergeQueueCapacity;
+    }
+
+    public long postingListMergeQueueAllocations()
+    {
+        return postingListMergeQueueAllocations;
+    }
+
+    public long postingListMergeQueueReallocations()
+    {
+        return postingListMergeQueueReallocations;
+    }
+
+    public long triePostingListsOpened()
+    {
+        return triePostingListsOpened;
+    }
+
+    public long triePostingListsClosed()
+    {
+        return triePostingListsClosed;
+    }
+
+    public long maxOpenTriePostingLists()
+    {
+        return maxOpenTriePostingLists;
     }
 
     public void addBkdSegmentsHit(long val)
@@ -365,6 +498,13 @@ public class QueryContext
         public final long trieSegmentsHit;
         public final long triePostingsSkips;
         public final long triePostingsDecodes;
+        public final long totalPostingListMergeQueueCapacity;
+        public final long maxPostingListMergeQueueCapacity;
+        public final long postingListMergeQueueAllocations;
+        public final long postingListMergeQueueReallocations;
+        public final long triePostingListsOpened;
+        public final long triePostingListsClosed;
+        public final long maxOpenTriePostingLists;
         public final long bkdSegmentsHit;
         public final long bkdPostingListsHit;
         public final long bkdPostingsSkips;
@@ -399,6 +539,13 @@ public class QueryContext
             trieSegmentsHit = context.trieSegmentsHit;
             triePostingsSkips = context.triePostingsSkips;
             triePostingsDecodes = context.triePostingsDecodes;
+            totalPostingListMergeQueueCapacity = context.totalPostingListMergeQueueCapacity;
+            maxPostingListMergeQueueCapacity = context.maxPostingListMergeQueueCapacity;
+            postingListMergeQueueAllocations = context.postingListMergeQueueAllocations;
+            postingListMergeQueueReallocations = context.postingListMergeQueueReallocations;
+            triePostingListsOpened = context.triePostingListsOpened;
+            triePostingListsClosed = context.triePostingListsClosed;
+            maxOpenTriePostingLists = context.maxOpenTriePostingLists;
             bkdSegmentsHit = context.bkdSegmentsHit;
             bkdPostingListsHit = context.bkdPostingListsHit;
             bkdPostingsSkips = context.bkdPostingsSkips;
@@ -432,6 +579,13 @@ public class QueryContext
             appendMetric(sb, indent, "trieSegmentsHit", trieSegmentsHit);
             appendMetric(sb, indent, "triePostingsSkips", triePostingsSkips);
             appendMetric(sb, indent, "triePostingsDecodes", triePostingsDecodes);
+            appendMetric(sb, indent, "totalPostingListMergeQueueCapacity", totalPostingListMergeQueueCapacity);
+            appendMetric(sb, indent, "maxPostingListMergeQueueCapacity", maxPostingListMergeQueueCapacity);
+            appendMetric(sb, indent, "postingListMergeQueueAllocations", postingListMergeQueueAllocations);
+            appendMetric(sb, indent, "postingListMergeQueueReallocations", postingListMergeQueueReallocations);
+            appendMetric(sb, indent, "triePostingListsOpened", triePostingListsOpened);
+            appendMetric(sb, indent, "triePostingListsClosed", triePostingListsClosed);
+            appendMetric(sb, indent, "maxOpenTriePostingLists", maxOpenTriePostingLists);
             appendMetric(sb, indent, "bkdSegmentsHit", bkdSegmentsHit);
             appendMetric(sb, indent, "bkdPostingListsHit", bkdPostingListsHit);
             appendMetric(sb, indent, "bkdPostingsSkips", bkdPostingsSkips);

@@ -938,6 +938,13 @@ public enum CassandraRelevantProperties
      */
     SAI_QUERY_PLAN_METRICS_ENABLED("cassandra.sai.metrics.query_plan.enabled", "true"),
 
+    /**
+     * The largest number of posting lists that a range, prefix or pattern query on a literal index keeps open in a
+     * segment. Increasing this reduces the likelihood of a query rescanning the matching terms range multiple times,
+     * at the expense of more heap memory kept during the query runtime.
+     */
+    SAI_RANGE_QUERY_MAX_LAZY_POSTING_LISTS("cassandra.sai.range_query.max_lazy_posting_lists", "8192"),
+
     SAI_REDUCE_TOPK_ACROSS_SSTABLES("cassandra.sai.reduce_topk_across_sstables", "true"),
 
     /**

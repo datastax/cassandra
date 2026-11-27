@@ -199,6 +199,7 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
         this.keyFactory = PrimaryKey.factory(cfs.metadata().comparator, indexFeatureSet);
         this.firstPrimaryKey = keyFactory.createTokenOnly(mergeRange.left.getToken());
         this.nextClusterings = new InsertionOrderedNavigableSet<>(cfs.metadata().comparator);
+        queryContext.setEstimatedRowsInQueryRange(() -> estimateTotalRows(ranges));
         var tableMetrics = new Plan.TableMetrics(estimateTotalAvailableRows(ranges),
                                                  avgCellsPerRow(),
                                                  avgRowSizeInBytes(),
@@ -1083,6 +1084,29 @@ public class QueryController implements Plan.Executor, Plan.CostEstimator
                 if (RangeUtil.intersects(sstable, range.keyRange()))
                     rows += sstable.getTotalRows();
 
+        return rows;
+    }
+
+    /**
+     * Estimates the number of rows in all memtables and sstables that fall into any of the given ranges.
+     * <p>
+     * It does no I/O, it only uses ring arithmetic: rows are assumed to be uniformly distributed over the tokens
+     * between the min and the max partition key of each memtable and sstable. Therefore, for each
+     * range only the fraction of rows corresponding to the fraction of the token span covered by the range is counted.
+     * A range is assumed to match at least one partition in each memtable and each intersecting sstable.
+     */
+    private long estimateTotalRows(List<DataRange> ranges)
+    {
+        long rows = 0;
+        for (DataRange range : ranges)
+        {
+            for (Memtable memtable : cfs.getAllMemtables())
+                rows += RangeUtil.estimateRowsInRange(memtable, range.keyRange());
+
+            for (SSTableReader sstable : cfs.getLiveSSTables())
+                if (RangeUtil.intersects(sstable, range.keyRange()))
+                    rows += RangeUtil.estimateRowsInRange(sstable, range.keyRange());
+        }
         return rows;
     }
 

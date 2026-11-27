@@ -37,6 +37,8 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
     static final int NOT_AT_LIMIT = Integer.MIN_VALUE;
     private LeftBoundTreatment reportingPrefixes;
     private boolean popOnAdvance = true;
+    /** The node of the entry equal to an exclusive end ({@link RightBoundTreatment#LESS}), which is not reported. */
+    private long excludedEndNode = NONE;
 
     protected ReverseValueIterator(Rebufferer source, long root, ByteComparable.Version version)
     {
@@ -63,9 +65,14 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         this(source, root, start, end, admitPrefix, false, version);
     }
 
+    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting, ByteComparable.Version version)
+    {
+        this(source, root, start, end, admitPrefix, RightBoundTreatment.ADMIT_EXACT, collecting, version);
+    }
+
     /**
-     * Constrained iterator. The end position is always treated as inclusive, and we have two possible treatments for
-     * the start:
+     * Constrained iterator. The entry equal to the end position is included unless endTreatment is {@code LESS}, and
+     * we have two possible treatments for the start:
      * <ul>
      *   <li> When {@code admitPrefix=false}, exact matches and any prefixes of the start are excluded.
      *   <li> When {@code admitPrefix=true}, the longest prefix of the start present in the trie is also included,
@@ -74,14 +81,14 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
      * </ul>
      * This behaviour is shared with the forward counterpart {@link ValueIterator}.
      */
-    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, boolean collecting, ByteComparable.Version version)
+    protected ReverseValueIterator(Rebufferer source, long root, ByteComparable start, ByteComparable end, LeftBoundTreatment admitPrefix, RightBoundTreatment endTreatment, boolean collecting, ByteComparable.Version version)
     {
         super(source, root, start != null ? start.asComparableBytes(version) : null, collecting, version);
 
         try
         {
             if (end != null)
-                initializeWithRightBound(root, end.asComparableBytes(version), admitPrefix, limit != null);
+                initializeWithRightBound(root, end.asComparableBytes(version), admitPrefix, endTreatment, limit != null);
             else
                 initializeNoRightBound(root, limit != null ? limit.next() : NOT_AT_LIMIT, admitPrefix);
         }
@@ -93,19 +100,20 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
         }
     }
 
-    void initializeWithRightBound(long root, ByteSource endStream, LeftBoundTreatment admitPrefix, boolean hasLimit)
+    void initializeWithRightBound(long root, ByteSource endStream, LeftBoundTreatment admitPrefix, RightBoundTreatment endTreatment, boolean hasLimit)
     {
         IterationPosition prev = null;
         boolean atLimit = hasLimit;
         int childIndex;
         int limitByte;
+        int s;
         reportingPrefixes = admitPrefix;
 
         // Follow end position while we still have a prefix, stacking path.
         go(root);
         while (true)
         {
-            int s = endStream.next();
+            s = endStream.next();
             childIndex = search(s);
 
             limitByte = NOT_AT_LIMIT;
@@ -123,6 +131,10 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
                 collector.add(s);
             go(transition(childIndex)); // childIndex is positive, this transition must exist
         }
+
+        // The end was followed to its last byte: this node is the entry equal to it, if it has a payload.
+        if (endTreatment == RightBoundTreatment.LESS && s == ByteSource.END_OF_STREAM)
+            excludedEndNode = position;
 
         // Advancing now gives us first match.
         childIndex = -1 - childIndex;
@@ -186,8 +198,8 @@ public class ReverseValueIterator<Concrete extends ReverseValueIterator<Concrete
                 stack = stack.prev;
 
                 // Report payloads on the way up
-                // unless we are at limit and there has been a smaller child
-                if (payloadFlags() != 0)
+                // unless we are at limit and there has been a smaller child, or this is the excluded end
+                if (payloadFlags() != 0 && stackTop.node != excludedEndNode)
                 {
                     // If we are fully inside the covered space, report.
                     // Note that on the exact match of the limit, stackTop.limit would be END_OF_STREAM.
