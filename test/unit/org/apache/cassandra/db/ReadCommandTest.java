@@ -36,6 +36,8 @@ import org.junit.Test;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.Util;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.InternodeCompatibilityMode;
+import org.apache.cassandra.cql3.Operator;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -69,6 +71,9 @@ import org.apache.cassandra.io.util.WrappedDataOutputStreamPlus;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.ReplicaUtils;
+import org.apache.cassandra.net.DseCompat;
+import org.apache.cassandra.net.DseCompatRefusals;
+import org.apache.cassandra.net.DseRefusedMessageException;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.metrics.ClearableHistogram;
 import org.apache.cassandra.net.MessagingService;
@@ -91,6 +96,7 @@ import org.apache.cassandra.utils.TimeUUID;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.EMPTY_BYTE_BUFFER;
 import static org.apache.cassandra.utils.TimeUUID.Generator.nextTimeUUID;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
@@ -1380,4 +1386,107 @@ public class ReadCommandTest
         return digests.iterator().next();
     }
 
+    /**
+     * In DSE 5.1 compatibility mode a read a DSE 5.1 coordinator forwards for a Thrift client is refused when its
+     * message is read, and counted: a command with Apache Cassandra 3.x's Thrift flag (0x02), with Apache's existing
+     * refusal and the remedy for DSE 5.1, and a row filter with Thrift's dynamic column expression (kind 2). The
+     * inbound handler answers such a refusal with a failure response ({@code Dse51RepairMessageTest}). With
+     * {@code NONE} and in {@code DSE_6} both
+     * fail as before: the flag with Apache's {@link IllegalStateException}, the kind 2 on the switch of the kinds;
+     * neither is counted.
+     */
+    @Test
+    public void thriftReadsOfADse51CoordinatorAreRefusedAndCounted() throws Exception
+    {
+        ColumnFamilyStore cfs = Keyspace.open(KEYSPACE).getColumnFamilyStore(CF2);
+        InternodeCompatibilityMode before = DatabaseDescriptor.getInternodeCompatibilityMode();
+        DatabaseDescriptor.setInternodeCompatibilityMode(InternodeCompatibilityMode.DSE_5_1);
+        try
+        {
+            byte[] thrift = thriftFlagged(Util.cmd(cfs, Util.dk("key")).build());
+            byte[] expression = thriftExpression(cfs);
+            long refused = DseCompatRefusals.count(DseCompat.REFUSED_DSE51_THRIFT_READ);
+            assertThatThrownBy(() -> deserializeRead(thrift))
+            .isInstanceOf(DseRefusedMessageException.class)
+            .hasMessage(THRIFT_FLAG_REFUSAL + ": a DSE 5.1 node forwards a query of a Thrift client, which this " +
+                        "software does not serve; stop the Thrift clients (start_rpc: false on the DSE 5.1 nodes)");
+            assertEquals(refused + 1, DseCompatRefusals.count(DseCompat.REFUSED_DSE51_THRIFT_READ));
+            assertThatThrownBy(() -> deserializeRowFilter(expression, cfs))
+            .isInstanceOf(DseRefusedMessageException.class)
+            .hasMessage("Received a row filter with the Thrift dynamic column expression (kind 2) at messaging " +
+                        "version 11: a DSE 5.1 node forwards a query of a Thrift client, which this software does " +
+                        "not serve; stop the Thrift clients (start_rpc: false on the DSE 5.1 nodes)");
+            assertEquals(refused + 2, DseCompatRefusals.count(DseCompat.REFUSED_DSE51_THRIFT_READ));
+
+            for (InternodeCompatibilityMode mode : new InternodeCompatibilityMode[]{ InternodeCompatibilityMode.NONE,
+                                                                                     InternodeCompatibilityMode.DSE_6 })
+            {
+                DatabaseDescriptor.setInternodeCompatibilityMode(mode);
+                assertThatThrownBy(() -> deserializeRead(thrift)).as(mode.name())
+                .isExactlyInstanceOf(IllegalStateException.class)
+                .hasMessage(THRIFT_FLAG_REFUSAL);
+                assertThatThrownBy(() -> deserializeRowFilter(expression, cfs)).as(mode.name())
+                .isExactlyInstanceOf(AssertionError.class);
+                assertEquals(refused + 2, DseCompatRefusals.count(DseCompat.REFUSED_DSE51_THRIFT_READ));
+            }
+        }
+        finally
+        {
+            DatabaseDescriptor.setInternodeCompatibilityMode(before);
+        }
+    }
+
+    private static final String THRIFT_FLAG_REFUSAL = "Received a command with the thrift flag set. This means " +
+                                                      "thrift is in use in a mixed 3.0/3.X and 4.0+ cluster, which " +
+                                                      "is unsupported. Make sure to stop using thrift before " +
+                                                      "upgrading to 4.0";
+
+    /** {@code read} at version 11 with Apache Cassandra 3.x's Thrift flag (0x02) set. */
+    private static byte[] thriftFlagged(ReadCommand read) throws IOException
+    {
+        byte[] bytes;
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            ReadCommand.serializer.serialize(read, out, MessagingService.VERSION_3014);
+            bytes = out.toByteArray();
+        }
+        // the kind, then the flags
+        bytes[1] |= 0x02;
+        return bytes;
+    }
+
+    /** A row filter at version 11 whose one expression is of kind 2, Thrift's dynamic column expression. */
+    private static byte[] thriftExpression(ColumnFamilyStore cfs) throws IOException
+    {
+        RowFilter.Builder filter = RowFilter.builder(false);
+        filter.add(cfs.metadata().getColumn(ByteBufferUtil.bytes("a")), Operator.EQ, ByteBufferUtil.bytes("x"));
+        byte[] expression;
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            RowFilter.serializer.serialize(filter.build(), out, MessagingService.VERSION_3014);
+            expression = out.toByteArray();
+        }
+        // the unused Thrift boolean, one expression, its kind: SIMPLE (0), made Thrift's dynamic column expression (2)
+        assertEquals(0, expression[0]);
+        assertEquals(1, expression[1]);
+        assertEquals(0, expression[2]);
+        expression[2] = 2;
+        return expression;
+    }
+
+    private static void deserializeRead(byte[] bytes) throws IOException
+    {
+        try (DataInputBuffer in = new DataInputBuffer(bytes))
+        {
+            ReadCommand.serializer.deserialize(in, MessagingService.VERSION_3014);
+        }
+    }
+
+    private static void deserializeRowFilter(byte[] bytes, ColumnFamilyStore cfs) throws IOException
+    {
+        try (DataInputBuffer in = new DataInputBuffer(bytes))
+        {
+            RowFilter.serializer.deserialize(in, MessagingService.VERSION_3014, cfs.metadata(), false);
+        }
+    }
 }

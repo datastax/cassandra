@@ -26,6 +26,8 @@ import org.junit.Test;
 import org.apache.cassandra.db.marshal.DoubleType;
 import org.apache.cassandra.db.marshal.Int32Type;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 
 public class ResourcesTest
@@ -90,5 +92,20 @@ public class ResourcesTest
                 Resources.fromName("mbean/org.apache.cassandra.auth:type=*"));
         assertEquals("mbean/org.apache.cassandra.auth:type=*",
                 JMXResource.mbean("org.apache.cassandra.auth:type=*").getName());
+    }
+
+    @Test
+    public void unknownResourceTypesAreNullNotErrors()
+    {
+        // DataStax Enterprise's resource types, left in role_permissions by an in-place upgrade
+        assertThat(Resources.tryFromName("rows/top_secret/data/ks/t")).isNull();
+        assertThat(Resources.tryFromName("search/ks.t")).isNull();
+        assertThat(Resources.tryFromName("data/ks/t")).isEqualTo(DataResource.table("ks", "t"));
+        assertThat(Resources.tryFromName("roles/r")).isEqualTo(RoleResource.role("r"));
+        // a known type with a name that does not parse still throws, and fromName still throws for an unknown type
+        assertThatThrownBy(() -> Resources.tryFromName("functions/ks/f")).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Resources.fromName("rows/top_secret/data/ks/t"))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("Name rows/top_secret/data/ks/t is not valid for any resource type");
     }
 }

@@ -34,7 +34,6 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.StorageCompatibilityMode;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 
 import static org.apache.cassandra.utils.FBUtilities.updateChecksum;
@@ -245,7 +244,7 @@ final class HintsBuffer
                 updateChecksumInt(crc, hintSize);
                 dop.writeInt((int) crc.getValue());
 
-                Hint.serializer.serialize(hint, dop, StorageCompatibilityMode.current().storageMessagingVersion());
+                Hint.serializer.serialize(hint, dop, HintsDescriptor.currentWriteMessagingVersion());
                 updateChecksum(crc, buffer, buffer.position() - hintSize, hintSize);
                 dop.writeInt((int) crc.getValue());
             }
