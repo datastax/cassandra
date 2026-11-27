@@ -86,7 +86,6 @@ Specify the format of the message. Part of the rolling policy.
 [source,XML]
 ----
 <configuration scan="true" scanPeriod="60 seconds">
-  <jmxConfigurator />
 
   <!-- No shutdown hook; we run it ourselves in StorageService after shutdown -->
 
