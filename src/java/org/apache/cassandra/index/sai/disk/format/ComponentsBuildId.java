@@ -50,10 +50,10 @@ public class ComponentsBuildId implements Comparable<ComponentsBuildId>
         return ComponentsBuildId.of(version, 0);
     }
 
-    public static ComponentsBuildId forNewBuild(Version version, @Nullable ComponentsBuildId previousBuild, Predicate<ComponentsBuildId> newBuildIsUsablePredicate)
+    public static ComponentsBuildId forNewBuild(String keyspace, Version version, @Nullable ComponentsBuildId previousBuild, Predicate<ComponentsBuildId> newBuildIsUsablePredicate)
     {
         // If we're not using immutable components, we always use generation 0, and we're fine if that overrides existing files
-        if (!version.useImmutableComponentFiles())
+        if (!version.useImmutableComponentFiles(keyspace))
             return new ComponentsBuildId(version, 0);
 
         // Otherwise, if there is no previous build or the new build is for a new version, then we can "tentatively"
