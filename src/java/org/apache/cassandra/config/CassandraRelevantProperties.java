@@ -876,6 +876,13 @@ public enum CassandraRelevantProperties
     SAI_LATEST_VERSION("cassandra.sai.latest_version", "dc"),
 
     SAI_MAX_ANALYZED_SIZE("cassandra.sai.max_analyzed_size_kb", "8"),
+    /**
+     * The maximum number of primary keys that the WHERE clause of an ORDER BY query may materialize in memory when
+     * the query is executed as filter-then-sort. A query that matches more keys is executed as sort-then-filter
+     * instead (ordered index scan with post-filtering), whose memory is bounded by the LIMIT. Each materialized key
+     * takes a few hundred bytes of heap, for every concurrent query. Zero or a negative value removes the cap.
+     */
+    SAI_MAX_FILTER_THEN_SORT_KEYS("cassandra.sai.max_filter_then_sort_keys", "100000"),
     SAI_MAX_FROZEN_TERM_SIZE("cassandra.sai.max_frozen_term_size_kb", "8"),
     SAI_MAX_STRING_TERM_SIZE("cassandra.sai.max_string_term_size_kb", "8"),
     SAI_MAX_VECTOR_TERM_SIZE("cassandra.sai.max_vector_term_size_kb", "16"),

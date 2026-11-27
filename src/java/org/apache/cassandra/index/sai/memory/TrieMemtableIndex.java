@@ -360,7 +360,7 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             }
             KeyRangeIterator intersectedIterator = KeyRangeIntersectionIterator.builder(termIterators).build();
 
-            return List.of(orderByBM25(Streams.stream(intersectedIterator), orderer));
+            return List.of(orderByBM25(queryContext, Streams.stream(intersectedIterator), orderer));
         }
         else
         {
@@ -432,13 +432,14 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             return CloseableIterator.emptyIterator();
 
         if (orderer.isBM25())
-            return orderByBM25(keys.stream(), orderer);
+            return orderByBM25(queryContext, keys.stream(), orderer);
         else
             return SortingIterator.createCloseable(
                 orderer.getComparator(),
                 keys,
                 key ->
                 {
+                    queryContext.checkpoint();
                     var cell = getCellForKey(key);
                     if (cell == null)
                         return null;
@@ -452,13 +453,16 @@ public class TrieMemtableIndex extends AbstractMemtableIndex
             );
     }
 
-    private CloseableIterator<PrimaryKeyWithSortKey> orderByBM25(Stream<PrimaryKey> stream, Orderer orderer)
+    private CloseableIterator<PrimaryKeyWithSortKey> orderByBM25(QueryContext queryContext, Stream<PrimaryKey> stream, Orderer orderer)
     {
         assert orderer.isBM25();
         List<ByteBuffer> queryTerms = orderer.getQueryTerms();
         AbstractAnalyzer analyzer = indexContext.getAnalyzerFactory().create();
         Iterator<BM25Utils.DocTF> it = stream
-                                       .map(pk -> BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms))
+                                       .map(pk -> {
+                                           queryContext.checkpoint();
+                                           return BM25Utils.EagerDocTF.createFromDocument(pk, getCellForKey(pk), analyzer, queryTerms);
+                                       })
                                        .filter(Objects::nonNull)
                                        .iterator();
         return BM25Utils.computeScores(CloseableIterator.wrap(it),
