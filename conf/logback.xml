@@ -22,7 +22,7 @@ In order to disable debug.log, comment-out the ASYNCDEBUGLOG
 appender reference in the root level section below.
 -->
 
-<configuration scan="true" scanPeriod="60 seconds">
+<configuration debug="true" scan="true" scanPeriod="60 seconds">
 
   <!-- No shutdown hook; we run it ourselves in StorageService after shutdown -->
 
