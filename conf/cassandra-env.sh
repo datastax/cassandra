@@ -190,9 +190,11 @@ fi
 # provides hints to the JIT compiler
 JVM_OPTS="$JVM_OPTS -XX:CompileCommandFile=$CASSANDRA_CONF/hotspot_compiler"
 
+# workaround for CVE0-2026-114938
+JVM_OPTS="$JVM_OPTS -XX:-UseBASE64Intrinsics"
+
 # add the jamm javaagent
 JVM_OPTS="$JVM_OPTS -javaagent:$CASSANDRA_HOME/lib/jamm-0.4.0.jar"
-
 
 if [ "x$CASSANDRA_HEAPDUMP_DIR" = "x" ]; then
     CASSANDRA_HEAPDUMP_DIR="$CASSANDRA_LOG_DIR"
