@@ -2638,7 +2638,7 @@ public class DatabaseDescriptor
 
     public static int getConcurrentCompactors()
     {
-        return conf.concurrent_compactors;
+        return conf.concurrent_compactors != null ? conf.concurrent_compactors : 0;
     }
 
     public static void setConcurrentCompactors(int value)

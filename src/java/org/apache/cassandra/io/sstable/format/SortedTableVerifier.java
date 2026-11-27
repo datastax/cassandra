@@ -67,6 +67,7 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.IFilter;
 import org.apache.cassandra.utils.OutputHandler;
 import org.apache.cassandra.utils.TimeUUID;
+import org.apache.cassandra.utils.memory.BufferPoolExhaustedException;
 
 public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> implements IVerifier
 {
@@ -129,6 +130,10 @@ public abstract class SortedTableVerifier<R extends SSTableReaderWithFilter> imp
 
     protected void markAndThrow(Throwable cause, boolean mutateRepaired)
     {
+        if (cause instanceof BufferPoolExhaustedException)
+            // Abort the verification if we run out of buffer pool memory and don't treat it as a corrupt sstable.
+            throw (BufferPoolExhaustedException) cause;
+
         if (mutateRepaired && options.mutateRepairStatus) // if we are able to mutate repaired flag, an incremental repair should be enough
         {
             try
